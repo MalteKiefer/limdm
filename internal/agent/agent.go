@@ -139,7 +139,8 @@ func newCSR() (keyPEM []byte, csrPEM string, err error) {
 // the fingerprint shown in the admin UI. The insecure connection is used for
 // this single request; the fingerprint is what authenticates the server.
 func fetchPinnedCA(server, fingerprint string) ([]byte, error) {
-	c := newClient(&tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true}) //nolint:gosec // authenticated by the pinned fingerprint below
+	want := strings.ToLower(strings.ReplaceAll(fingerprint, ":", ""))
+	c := newClient(verifyByFingerprint(want))
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server+"/api/v1/ca", nil)
@@ -160,11 +161,41 @@ func fetchPinnedCA(server, fingerprint string) ([]byte, error) {
 		return nil, errors.New("server sent no CA certificate")
 	}
 	sum := sha256.Sum256(blk.Bytes)
-	want := strings.ToLower(strings.ReplaceAll(fingerprint, ":", ""))
 	if hex.EncodeToString(sum[:]) != want {
 		return nil, fmt.Errorf("CA fingerprint mismatch: got %x, refusing to enroll", sum)
 	}
 	return b, nil
+}
+
+// verifyByFingerprint replaces the system trust store for the very first
+// connection: the handshake only succeeds if the server presents a CA
+// certificate with the pinned SHA-256 fingerprint and a server certificate that
+// chains to it for the requested host. Nothing is read from an unauthenticated peer.
+func verifyByFingerprint(fingerprint string) *tls.Config {
+	tc := &tls.Config{MinVersion: tls.VersionTLS13}
+	// Standard verification would consult system roots, which must not be trusted here;
+	// VerifyConnection below performs the full chain verification against the pinned CA.
+	tc.InsecureSkipVerify = true
+	tc.VerifyConnection = func(cs tls.ConnectionState) error {
+		if len(cs.PeerCertificates) == 0 {
+			return errors.New("server sent no certificate")
+		}
+		roots := x509.NewCertPool()
+		for _, c := range cs.PeerCertificates[1:] {
+			sum := sha256.Sum256(c.Raw)
+			if c.IsCA && hex.EncodeToString(sum[:]) == fingerprint {
+				roots.AddCert(c)
+			}
+		}
+		_, err := cs.PeerCertificates[0].Verify(x509.VerifyOptions{
+			Roots: roots, DNSName: cs.ServerName, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		})
+		if err != nil {
+			return fmt.Errorf("server certificate does not chain to the pinned CA %s: %w", fingerprint, err)
+		}
+		return nil
+	}
+	return tc
 }
 
 // Enroll registers the device: the key is created locally and never leaves

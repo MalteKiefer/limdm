@@ -137,4 +137,5 @@ jobs:
           fail-on-severity: moderate
           comment-summary-in-pr: on-failure
           # MIT is this project's license; the rest are the permissive set Go modules use.
-          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0
+          # LicenseRef-scancode-google-patent-license-golang is the PATENTS grant of golang.org/x modules.
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, LicenseRef-scancode-google-patent-license-golang
