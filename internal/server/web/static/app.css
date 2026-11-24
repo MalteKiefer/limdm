@@ -31,3 +31,5 @@ button.danger { background:var(--bad); }
 .error { color:var(--bad); font-weight:600; }
 .notice { border:1px solid var(--accent); padding:8px 12px; border-radius:4px; }
 label.check { margin:4px 0; }
+.login { max-width: 360px; margin: 48px auto; }
+a.button { display:inline-block; padding:6px 12px; background:var(--accent); color:#fff; border-radius:4px; }

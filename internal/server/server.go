@@ -43,6 +43,7 @@ type Config struct {
 	AgentListen   string // agent API, mTLS terminated here, never by a proxy
 	AgentURL      string // URL agents use, its host goes into the server certificate
 	CADir         string
+	LocalLogin    bool // local admin accounts with password and TOTP
 	OIDCIssuer    string
 	OIDCClientID  string
 	OIDCSecret    string
@@ -79,6 +80,7 @@ func ConfigFromEnv() (Config, error) {
 		Admins:        split(os.Getenv("LIMDM_ADMINS")),
 		Auditors:      split(os.Getenv("LIMDM_AUDITORS")),
 		ReleaseDir:    os.Getenv("LIMDM_RELEASE_DIR"),
+		LocalLogin:    os.Getenv("LIMDM_LOCAL_LOGIN") == "true",
 	}
 	c.Listen = os.Getenv("LIMDM_LISTEN")
 	if c.Listen == "" {
@@ -93,10 +95,13 @@ func ConfigFromEnv() (Config, error) {
 	}
 	c.StaleAfter = time.Duration(hours) * time.Hour
 	var missing []string
-	for k, v := range map[string]string{
+	required := map[string]string{
 		"LIMDM_DATABASE_URL": c.DatabaseURL, "LIMDM_PUBLIC_URL": c.PublicURL, "LIMDM_AGENT_URL": c.AgentURL,
-		"LIMDM_OIDC_ISSUER": c.OIDCIssuer, "LIMDM_OIDC_CLIENT_ID": c.OIDCClientID,
-	} {
+	}
+	if c.OIDCIssuer != "" {
+		required["LIMDM_OIDC_CLIENT_ID"] = c.OIDCClientID
+	}
+	for k, v := range required {
 		if v == "" {
 			missing = append(missing, k)
 		}
@@ -108,7 +113,10 @@ func ConfigFromEnv() (Config, error) {
 	if err != nil || len(c.SessionKey) < 32 {
 		return c, errors.New("LIMDM_SESSION_KEY must be at least 32 bytes hex (openssl rand -hex 32)")
 	}
-	if len(c.Admins) == 0 {
+	if c.OIDCIssuer == "" && !c.LocalLogin {
+		return c, errors.New("enable at least one login method: LIMDM_OIDC_ISSUER or LIMDM_LOCAL_LOGIN=true")
+	}
+	if c.OIDCIssuer != "" && len(c.Admins) == 0 {
 		return c, errors.New("LIMDM_ADMINS must name at least one admin email")
 	}
 	if !strings.HasPrefix(c.PublicURL, "https://") {
@@ -158,22 +166,32 @@ func requireDBTLS(pc *pgxpool.Config) error {
 }
 
 type Server struct {
-	cfg  Config
-	db   *pgxpool.Pool
-	auth *oidcAuth
-	ca   *deviceCA
-	log  *slog.Logger
+	cfg   Config
+	db    *pgxpool.Pool
+	auth  *oidcAuth // nil when OIDC is not configured
+	ca    *deviceCA
+	log   *slog.Logger
+	limit limiter
 }
 
-func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
-	pc, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
+	pc, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, err
 	}
-	if err := requireDBTLS(pc); err != nil {
+	return pc, requireDBTLS(pc)
+}
+
+func newPool(ctx context.Context, pc *pgxpool.Config) (*pgxpool.Pool, error) {
+	return pgxpool.NewWithConfig(ctx, pc)
+}
+
+func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
+	pc, err := pgxPoolConfig(cfg.DatabaseURL)
+	if err != nil {
 		return nil, err
 	}
-	db, err := pgxpool.NewWithConfig(ctx, pc)
+	db, err := newPool(ctx, pc)
 	if err != nil {
 		return nil, err
 	}
@@ -184,9 +202,11 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("device CA: %w", err)
 	}
-	auth, err := newOIDCAuth(ctx, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("oidc: %w", err)
+	var auth *oidcAuth
+	if cfg.OIDCIssuer != "" {
+		if auth, err = newOIDCAuth(ctx, cfg); err != nil {
+			return nil, fmt.Errorf("oidc: %w", err)
+		}
 	}
 	log.Info("device CA ready", "fingerprint", ca.Fingerprint())
 	return &Server{cfg: cfg, db: db, auth: auth, ca: ca, log: log}, nil
@@ -215,7 +235,9 @@ func (s *Server) AdminHandler() http.Handler {
 		}
 		w.Write([]byte("ok"))
 	})
-	mux.HandleFunc("GET /login", s.login)
+	mux.HandleFunc("GET /login", s.loginPage)
+	mux.HandleFunc("GET /login/oidc", s.login)
+	mux.HandleFunc("POST /login/local", s.localLogin)
 	mux.HandleFunc("GET /auth/callback", s.callback)
 	mux.HandleFunc("POST /logout", s.logout)
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))

@@ -89,6 +89,10 @@ func (s *Server) setCookie(w http.ResponseWriter, name, val string, maxAge time.
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	if s.auth == nil {
+		http.NotFound(w, r)
+		return
+	}
 	f := flow{State: randToken(24), Nonce: randToken(24), Verifier: oauth2.GenerateVerifier(), Exp: time.Now().Add(10 * time.Minute)}
 	s.setCookie(w, flowCookie, s.seal(f), 10*time.Minute)
 	opts := []oauth2.AuthCodeOption{oauth2.S256ChallengeOption(f.Verifier), oidc.Nonce(f.Nonce)}
@@ -99,6 +103,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
+	if s.auth == nil {
+		http.NotFound(w, r)
+		return
+	}
 	ctx := r.Context()
 	var f flow
 	c, err := r.Cookie(flowCookie)
@@ -184,8 +192,16 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) (session, bool)
 	if now.Sub(sess.Last) > idleTimeout || now.Sub(sess.IAT) > maxSession {
 		return sess, false
 	}
-	// Role is re-evaluated so removing someone from LIMDM_ADMINS takes effect on restart.
+	// Role is re-evaluated on every request: removing someone from LIMDM_ADMINS
+	// takes effect on restart, disabling a local admin immediately.
 	switch {
+	case strings.HasPrefix(sess.Email, localPrefix):
+		if !s.cfg.LocalLogin {
+			return sess, false
+		}
+		if sess.Role = s.localRole(r.Context(), strings.TrimPrefix(sess.Email, localPrefix)); sess.Role == "" {
+			return sess, false
+		}
 	case slices.Contains(s.cfg.Admins, sess.Email):
 		sess.Role = "admin"
 	case slices.Contains(s.cfg.Auditors, sess.Email):

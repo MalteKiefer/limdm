@@ -66,6 +66,8 @@ before applying them.
   handshake, so this exception applies to the renewal endpoint alone.
 * **Admin UI** over HTTPS only (without its own certificate it binds to loopback only,
   behind a local TLS proxy). OIDC with PKCE, nonce, `email_verified` and domain checks.
+  Optional local admins as fallback (`LIMDM_LOCAL_LOGIN=true`): generated password
+  (argon2id) plus TOTP, single use codes, lockout after 5 failures, per IP rate limit.
   Roles `admin` and `auditor` (read only). HMAC signed sessions, 30 min idle and 8 h
   absolute timeout, CSRF tokens, strict CSP, HSTS, no JavaScript.
 * **Database** connections outside loopback must use `sslmode=verify-full`, otherwise
@@ -127,6 +129,14 @@ requirements (policies, roles, risk analysis, training) stay with the ISMS.
    `/etc/limdm-server/server.env` (mode 0600) and fill it in.
 4. `systemctl enable --now limdm-server`. Expose port 8444 directly (no TLS terminating
    proxy) and 8443 for the admin UI.
+5. Without OIDC, or as break glass access, create a local admin. The credentials
+   (password and an `otpauth://` URI for an authenticator app) go to a new 0600 file:
+
+   ```sh
+   sudo sh -c 'umask 077; sudo -u limdm limdm-server local-admin -env /etc/limdm-server/server.env add alice > /root/limdm-alice.txt'
+   ```
+
+   `reset`, `disable`, `enable` and `list` manage existing accounts.
 
 ### Release key and builds
 

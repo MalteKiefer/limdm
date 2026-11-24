@@ -41,8 +41,11 @@ func main() {
 		err = keygen(os.Args[2:])
 	case "release":
 		err = release(os.Args[2:])
+	case "local-admin":
+		err = localAdmin(os.Args[2:])
 	default:
-		err = errors.New("usage: limdm-server [serve | keygen -out FILE | release -key FILE -version V -dir DIR ARCH=BINARY...]")
+		err = errors.New(`usage: limdm-server [serve | keygen -out FILE | release -key FILE -version V -dir DIR ARCH=BINARY...
+                     | local-admin [-env FILE] [-role admin|auditor] [-out FILE] add|reset|disable|enable|list [NAME]]`)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -99,6 +102,66 @@ func serve(log *slog.Logger) error {
 		return nil
 	}
 	return err
+}
+
+// localAdmin manages fallback admin accounts. Generated credentials go to
+// stdout or, with -out, to a new 0600 file so they do not end up in logs.
+func localAdmin(args []string) error {
+	fs := flag.NewFlagSet("local-admin", flag.ExitOnError)
+	envFile := fs.String("env", "", "read LIMDM_* settings from this env file (e.g. /etc/limdm-server/server.env)")
+	role := fs.String("role", "admin", "admin or auditor")
+	out := fs.String("out", "", "write generated credentials to this new file (mode 0600)")
+	fs.Parse(args)
+	if fs.NArg() < 1 {
+		return errors.New("need an operation: add, reset, disable, enable or list")
+	}
+	if *envFile != "" {
+		if err := loadEnvFile(*envFile); err != nil {
+			return err
+		}
+	}
+	dsn := os.Getenv("LIMDM_DATABASE_URL")
+	if dsn == "" {
+		return errors.New("LIMDM_DATABASE_URL not set (use -env)")
+	}
+	res, err := server.LocalAdmin(context.Background(), dsn, fs.Arg(0), fs.Arg(1), *role)
+	if err != nil || res == "" {
+		return err
+	}
+	if *out == "" {
+		fmt.Print(res)
+		return nil
+	}
+	f, err := os.OpenFile(*out, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(res); err != nil {
+		f.Close()
+		return err
+	}
+	fmt.Println("credentials written to", *out)
+	return f.Close()
+}
+
+// loadEnvFile applies KEY=VALUE lines (systemd EnvironmentFile syntax subset).
+func loadEnvFile(path string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if k, v, ok := strings.Cut(line, "="); ok {
+			if err := os.Setenv(strings.TrimSpace(k), strings.Trim(strings.TrimSpace(v), `"'`)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // keygen writes the private release key (keep it offline) and prints the public

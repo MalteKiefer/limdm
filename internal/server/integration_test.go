@@ -58,7 +58,7 @@ func TestIntegration(t *testing.T) {
 	}
 	s := &Server{db: db, ca: ca, log: slog.New(slog.NewTextHandler(io.Discard, nil)), cfg: Config{
 		PublicURL: "https://mdm.test", AgentURL: "https://127.0.0.1:8444", StaleAfter: 24 * time.Hour,
-		SessionKey: bytes.Repeat([]byte{7}, 32), Admins: []string{"admin@firma.de"}, Auditors: []string{"audit@firma.de"},
+		SessionKey: bytes.Repeat([]byte{7}, 32), Admins: []string{"admin@firma.de"}, Auditors: []string{"audit@firma.de"}, LocalLogin: true,
 	}}
 
 	// ---- admin UI with a forged, validly signed session ----
@@ -319,6 +319,88 @@ func TestIntegration(t *testing.T) {
 	}
 	if code := call(dev2, "/api/v1/checkin", api.CheckinRequest{}, nil); code != http.StatusUnauthorized {
 		t.Fatalf("retired device still accepted: %d", code)
+	}
+
+	// ---- local admin with password and TOTP ----
+	creds, err := LocalAdmin(ctx, dsn, "add", "breakglass", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	field := func(k string) string {
+		for _, l := range strings.Split(creds, "\n") {
+			if v, ok := strings.CutPrefix(l, k+":"); ok {
+				return strings.TrimSpace(v)
+			}
+		}
+		return ""
+	}
+	pw := field("password")
+	secret := regexp.MustCompile(`secret=([A-Z2-7]+)`).FindStringSubmatch(creds)[1]
+	if _, err := LocalAdmin(ctx, dsn, "add", "breakglass", "admin"); err == nil {
+		t.Fatal("duplicate local admin accepted")
+	}
+	localLogin := func(user, password, code string) (int, *http.Cookie) {
+		t.Helper()
+		form := url.Values{"csrf": {"tok"}, "username": {user}, "password": {password}, "totp": {code}}
+		req, _ := http.NewRequest("POST", admin.URL+"/login/local", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(&http.Cookie{Name: loginCookie, Value: "tok"})
+		resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		for _, c := range resp.Cookies() {
+			if c.Name == sessionCookie && c.Value != "" {
+				return resp.StatusCode, c
+			}
+		}
+		return resp.StatusCode, nil
+	}
+	code1, _ := totpCode(secret, time.Now().Unix()/30)
+	if st, c := localLogin("breakglass", pw+"x", code1); c != nil || st != 200 {
+		t.Fatalf("wrong password accepted: %d", st)
+	}
+	st, sessCookie := localLogin("breakglass", pw, code1)
+	if st != http.StatusSeeOther || sessCookie == nil {
+		t.Fatalf("local login failed: %d", st)
+	}
+	if _, c := localLogin("breakglass", pw, code1); c != nil {
+		t.Fatal("replayed TOTP code accepted")
+	}
+	getWith := func(c *http.Cookie) int {
+		req, _ := http.NewRequest("GET", admin.URL+"/", nil)
+		req.AddCookie(c)
+		resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if getWith(sessCookie) != 200 {
+		t.Fatal("local admin session rejected")
+	}
+	if _, err := LocalAdmin(ctx, dsn, "disable", "breakglass", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if getWith(sessCookie) != http.StatusFound {
+		t.Fatal("session of a disabled local admin still valid")
+	}
+	if _, err := LocalAdmin(ctx, dsn, "enable", "breakglass", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < maxFailures; i++ {
+		localLogin("breakglass", "wrong", "000000")
+	}
+	code2, _ := totpCode(secret, time.Now().Unix()/30+1)
+	if _, c := localLogin("breakglass", pw, code2); c != nil {
+		t.Fatal("locked account accepted a correct login")
+	}
+	var lockedFailures int
+	db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action='login.local.failed'`).Scan(&lockedFailures)
+	if lockedFailures < maxFailures+2 {
+		t.Fatalf("failed local logins not audited: %d", lockedFailures)
 	}
 
 	// audit log is append only and chained
