@@ -139,29 +139,39 @@ func writeIfChanged(path, content string, mode os.FileMode) (bool, error) {
 // ---- package management ----
 
 func (h *host) installedPackages() ([]api.Package, string, error) {
-	var out string
-	var err error
-	if h.family == "debian" {
-		out, err = run(time.Minute, "dpkg-query", "-W", "-f", "${db:Status-Abbrev}\t${Package}\t${Version}\n")
-	} else {
-		out, err = run(time.Minute, "rpm", "-qa", "--qf", "ii \t%{NAME}\t%{VERSION}-%{RELEASE}\n")
-	}
-	if err != nil {
-		return nil, "", err
-	}
-	var pkgs []api.Package
-	for _, line := range strings.Split(out, "\n") {
-		f := strings.Split(line, "\t")
-		if len(f) == 3 && strings.HasPrefix(f[0], "ii") {
-			pkgs = append(pkgs, api.Package{Name: f[1], Version: f[2]})
+	pkgs, err := h.osqueryPackages()
+	if err != nil || len(pkgs) == 0 {
+		if pkgs, err = h.nativePackages(); err != nil {
+			return nil, "", err
 		}
 	}
 	sort.Slice(pkgs, func(i, j int) bool { return pkgs[i].Name < pkgs[j].Name })
 	sum := sha256.New()
 	for _, p := range pkgs {
-		fmt.Fprintf(sum, "%s=%s\n", p.Name, p.Version)
+		fmt.Fprintf(sum, "%s=%s=%s\n", p.Name, p.Version, p.Arch)
 	}
 	return pkgs, hex.EncodeToString(sum.Sum(nil)), nil
+}
+
+func (h *host) nativePackages() ([]api.Package, error) {
+	var out string
+	var err error
+	if h.family == "debian" {
+		out, err = run(time.Minute, "dpkg-query", "-W", "-f", "${db:Status-Abbrev}\t${Package}\t${Version}\t${Architecture}\n")
+	} else {
+		out, err = run(time.Minute, "rpm", "-qa", "--qf", "ii \t%{NAME}\t%{VERSION}-%{RELEASE}\t%{ARCH}\n")
+	}
+	if err != nil {
+		return nil, err
+	}
+	var pkgs []api.Package
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Split(line, "\t")
+		if len(f) == 4 && strings.HasPrefix(f[0], "ii") {
+			pkgs = append(pkgs, api.Package{Name: f[1], Version: f[2], Arch: f[3]})
+		}
+	}
+	return pkgs, nil
 }
 
 func (h *host) isInstalled(name string) bool {
@@ -320,6 +330,7 @@ func (h *host) adminGroup() string {
 // users) is only collected when the privacy declaration allows it.
 func (h *host) inventory(priv api.Privacy) api.Inventory {
 	inv := api.Inventory{
+		Source:    "native",
 		MachineID: readTrim("/etc/machine-id"), OSID: h.ID, OSVersion: h.Version, OSName: h.Name,
 		Kernel: readTrim("/proc/sys/kernel/osrelease"), Arch: runtime.GOARCH,
 		Vendor: readTrim("/sys/class/dmi/id/sys_vendor"), Model: readTrim("/sys/class/dmi/id/product_name"),
@@ -355,6 +366,24 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 			}
 		}
 	}
+	inv.Disks, inv.Volumes = nativeDisks(), nativeVolumes()
+	inv.Desktop, inv.DisplayManager = desktop()
+	if addrs, err := net.Interfaces(); err == nil && priv.NetworkInfo {
+		for _, ifc := range addrs {
+			if ifc.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			n := api.NIC{Name: ifc.Name, MAC: ifc.HardwareAddr.String()}
+			if as, err := ifc.Addrs(); err == nil {
+				for _, a := range as {
+					if ipn, ok := a.(*net.IPNet); ok && !ipn.IP.IsLinkLocalUnicast() {
+						n.IPs = append(n.IPs, ipn.IP.String())
+					}
+				}
+			}
+			inv.Interfaces = append(inv.Interfaces, n)
+		}
+	}
 	if out, err := run(30*time.Second, "who"); err == nil && priv.LoggedInUsers {
 		seen := map[string]bool{}
 		for _, line := range strings.Split(out, "\n") {
@@ -364,5 +393,6 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 			}
 		}
 	}
+	enrichFromOsquery(&inv, priv)
 	return inv
 }

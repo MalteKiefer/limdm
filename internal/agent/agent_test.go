@@ -14,6 +14,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -191,5 +193,31 @@ func TestNftDropsInput(t *testing.T) {
 	}
 	if !nftDropsInput(accept + "\n" + drop) {
 		t.Fatal("drop policy chain not recognised")
+	}
+}
+
+// TestOsqueryKeyFingerprint guards the embedded repository key against swaps.
+func TestOsqueryKeyFingerprint(t *testing.T) {
+	if !strings.HasPrefix(osqueryKey, "-----BEGIN PGP PUBLIC KEY BLOCK-----") {
+		t.Fatal("embedded osquery key is not an armored public key")
+	}
+	if _, err := exec.LookPath("gpg"); err != nil {
+		t.Skip("gpg not installed")
+	}
+	cmd := exec.Command("gpg", "--show-keys", "--with-colons")
+	cmd.Stdin = strings.NewReader(osqueryKey)
+	cmd.Env = append(os.Environ(), "GNUPGHOME="+t.TempDir())
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "fpr:::::::::"+OsqueryKeyFingerprint+":") {
+		t.Fatalf("embedded key fingerprint changed:\n%s", out)
+	}
+}
+
+func TestDesktopVersionParsing(t *testing.T) {
+	if got := firstNonEmpty("", "  ", " x "); got != "x" {
+		t.Fatalf("firstNonEmpty: %q", got)
 	}
 }

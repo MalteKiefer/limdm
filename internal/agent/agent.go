@@ -80,7 +80,8 @@ type Agent struct {
 	reasons    map[string][]string // declaration type -> why it is not active
 
 	sentStatusHash, sentPkgHash string
-	failedUpdate                string // release version whose update already failed, reported once
+	failedUpdate                string    // release version whose update already failed, reported once
+	osqueryTried                time.Time // last osquery install attempt
 	syncNow                     bool
 }
 
@@ -352,6 +353,7 @@ func (a *Agent) Run(ctx context.Context) error {
 var checkToDecl = map[string]string{
 	"desktop.screenlock": api.TypeScreenLock, "firewall.active": api.TypeFirewall, "os.supported": api.TypeOSVersion,
 	"updates.auto": api.TypeUpdates, "updates.security": api.TypeUpdates, "updates.reboot": api.TypeUpdates, "auth.sso": api.TypeLogin,
+	"agent.osquery": api.TypeAgent,
 }
 
 // converge enforces every declaration and verifies the result.
@@ -507,6 +509,15 @@ func (a *Agent) enforce() {
 	}
 	if err := a.applyUsers(); err != nil {
 		a.problem(api.TypeLogin, "users: %v", err)
+	}
+	// osquery is mandatory as inventory source; retry hourly, not every cycle
+	if !hasOsquery() && time.Since(a.osqueryTried) > time.Hour {
+		a.osqueryTried = time.Now()
+		if err := a.host.ensureOsquery(); err != nil {
+			a.problem(api.TypeAgent, "osquery install: %v", err)
+		} else {
+			a.event("installed osquery %s", osqueryVersion())
+		}
 	}
 	a.maintenance(time.Now())
 }

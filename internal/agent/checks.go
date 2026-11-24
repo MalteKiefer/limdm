@@ -50,6 +50,14 @@ func refs(bsi, iso []string, cis ...string) api.Refs { return api.Refs{BSI: bsi,
 func l(s ...string) []string                         { return s }
 
 var catalog = []check{
+	{ID: "agent.osquery", Title: "osquery inventory source installed", Level: 1,
+		Refs: refs(l(bsiClient), l("A.5.9", "A.8.9")),
+		Run: func(a *Agent) (string, string) {
+			if v := osqueryVersion(); v != "" {
+				return pass, "osquery " + v
+			}
+			return fail, "osquery missing, inventory incomplete (installed by the agent, retried hourly)"
+		}},
 	{ID: "os.supported", Title: "Operating system version is supported", Level: 1,
 		Refs: refs(l(bsiClient, bsiPatch), l("A.8.8"), "Ensure updates, patches, and additional security software are installed"),
 		Run:  runOSSupported},
