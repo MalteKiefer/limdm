@@ -361,6 +361,14 @@ func TestIntegration(t *testing.T) {
 	if st, c := localLogin("breakglass", pw+"x", code1); c != nil || st != 200 {
 		t.Fatalf("wrong password accepted: %d", st)
 	}
+	if _, c := localLogin("breakglass\nforged log line", pw, code1); c != nil {
+		t.Fatal("malformed username accepted")
+	}
+	var invalidAudited int
+	db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE actor='local:(invalid)'`).Scan(&invalidAudited)
+	if invalidAudited != 1 {
+		t.Fatalf("malformed username must be audited as (invalid), got %d", invalidAudited)
+	}
 	st, sessCookie := localLogin("breakglass", pw, code1)
 	if st != http.StatusSeeOther || sessCookie == nil {
 		t.Fatalf("local login failed: %d", st)

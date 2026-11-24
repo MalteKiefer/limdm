@@ -192,6 +192,10 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.ToLower(strings.TrimSpace(r.FormValue("username")))
+	if !localNameRe.MatchString(name) {
+		// never log, query or audit arbitrary input; "(invalid)" cannot be a real account name
+		name = "(invalid)"
+	}
 	role, err := s.checkLocal(r.Context(), name, r.FormValue("password"), r.FormValue("totp"), clientIP(r))
 	if err != nil {
 		s.log.Warn("local login failed", "user", name, "remote", clientIP(r), "err", err)
