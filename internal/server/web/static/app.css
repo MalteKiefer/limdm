@@ -1,0 +1,33 @@
+:root { --bg:#fff; --fg:#1b1f24; --muted:#6b7280; --line:#e5e7eb; --ok:#15803d; --bad:#b91c1c; --warn:#b45309; --accent:#1d4ed8; }
+@media (prefers-color-scheme: dark) { :root { --bg:#111418; --fg:#e5e7eb; --muted:#9ca3af; --line:#2b3138; --ok:#4ade80; --bad:#f87171; --warn:#fbbf24; --accent:#93c5fd; } }
+* { box-sizing: border-box; }
+body { margin:0; font:14px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+header { display:flex; gap:24px; align-items:center; padding:10px 20px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+header nav { display:flex; gap:14px; flex:1; }
+header form { margin:0; }
+a { color:var(--accent); text-decoration:none; }
+nav a.on { font-weight:600; text-decoration:underline; }
+main { padding:16px 20px; max-width:1400px; }
+table { border-collapse:collapse; width:100%; margin:8px 0 24px; }
+th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+pre { margin:0; white-space:pre-wrap; max-width:600px; font-size:12px; }
+.muted { color:var(--muted); }
+.st { font-weight:600; }
+.st.ok, .st.pass { color:var(--ok); }
+.st.bad, .st.fail { color:var(--bad); }
+.st.warn, .st.excepted { color:var(--warn); }
+.st.na { color:var(--muted); }
+.grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); gap:24px; }
+dl { display:grid; grid-template-columns:120px 1fr; gap:4px 12px; }
+dt { color:var(--muted); }
+dd { margin:0; }
+label { display:block; margin:8px 0; }
+form.inline label { display:inline-block; margin-right:12px; }
+input, select, textarea, button { font:inherit; padding:5px 8px; border:1px solid var(--line); border-radius:4px; background:var(--bg); color:var(--fg); }
+textarea { width:100%; display:block; }
+textarea.code { font-family:ui-monospace, monospace; font-size:13px; }
+button { cursor:pointer; background:var(--accent); color:#fff; border:0; margin-top:6px; }
+button.danger { background:var(--bad); }
+.error { color:var(--bad); font-weight:600; }
+.notice { border:1px solid var(--accent); padding:8px 12px; border-radius:4px; }
+label.check { margin:4px 0; }

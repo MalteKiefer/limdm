@@ -1,0 +1,11 @@
+{{define "content"}}
+<h1>Devices</h1>
+<p><a href="/export/inventory.csv">Inventory as CSV</a></p>
+<table>
+<tr><th>Host</th><th>Status</th><th>Failing</th><th>System</th><th>Blueprints</th><th>Agent</th><th>Last seen</th></tr>
+{{range .Devices}}
+<tr><td><a href="/devices/{{.ID}}">{{.Hostname}}</a></td><td><span class="st {{.Class}}">{{.Status}}</span></td>
+<td>{{.Failing}}</td><td>{{.OS}}</td><td>default{{if .Blueprints}}, {{.Blueprints}}{{end}}</td><td>{{.AgentVersion}}</td><td>{{ago .LastSeen}}</td></tr>
+{{else}}<tr><td colspan="7" class="muted">No devices yet. Create an enrollment token under "Enrollment".</td></tr>{{end}}
+</table>
+{{end}}

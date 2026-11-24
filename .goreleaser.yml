@@ -1,0 +1,108 @@
+# GoReleaser v2: https://goreleaser.com
+version: 2
+project_name: limdm
+
+before:
+  hooks:
+    # Fail instead of silently changing dependencies at release time.
+    - go mod tidy -diff
+
+builds:
+  - id: agent
+    main: ./cmd/limdm-agent
+    binary: limdm-agent
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w
+      - -X github.com/maltekiefer/limdm/internal/agent.Version={{ .Version }}
+      - -X github.com/maltekiefer/limdm/internal/agent.UpdatePubKey={{ envOrDefault "UPDATE_PUBKEY" "" }}
+  - id: server
+    main: ./cmd/limdm-server
+    binary: limdm-server
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags: [-s -w]
+
+archives:
+  - id: agent
+    ids: [agent]
+    formats: [tar.gz]
+    name_template: "limdm-agent_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md, packaging/limdm-agent.service]
+  - id: server
+    ids: [server]
+    formats: [tar.gz]
+    name_template: "limdm-server_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md, packaging/limdm-server.service, packaging/server.env.example]
+
+nfpms:
+  - id: agent
+    ids: [agent]
+    package_name: limdm-agent
+    homepage: https://github.com/MalteKiefer/limdm
+    maintainer: Malte Kiefer <malte.kiefer@kiefer-networks.de>
+    description: LiMDM device agent, declarative device management for Debian, Ubuntu and Fedora
+    license: MIT
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    contents:
+      - src: packaging/limdm-agent.service
+        dst: /usr/lib/systemd/system/limdm-agent.service
+      - dst: /etc/limdm
+        type: dir
+        file_info: {mode: 0o700}
+      - dst: /var/lib/limdm
+        type: dir
+        file_info: {mode: 0o700}
+    scripts:
+      postinstall: packaging/agent-postinstall.sh
+      preremove: packaging/agent-preremove.sh
+    overrides:
+      deb:
+        recommends: [unattended-upgrades, ufw, libpam-pwquality, auditd]
+      rpm:
+        recommends: [firewalld, audit, dnf-plugins-core]
+  - id: server
+    ids: [server]
+    package_name: limdm-server
+    homepage: https://github.com/MalteKiefer/limdm
+    maintainer: Malte Kiefer <malte.kiefer@kiefer-networks.de>
+    description: LiMDM management server
+    license: MIT
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    contents:
+      - src: packaging/limdm-server.service
+        dst: /usr/lib/systemd/system/limdm-server.service
+      - src: packaging/server.env.example
+        dst: /etc/limdm-server/server.env
+        type: config|noreplace
+        file_info: {mode: 0o600}
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
+  algorithm: sha256
+
+sboms:
+  - id: archives
+    artifacts: archive
+  - id: packages
+    artifacts: package
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^chore"
+      - "^ci"
+
+release:
+  prerelease: auto
