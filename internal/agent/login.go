@@ -124,12 +124,23 @@ func accountExpired(name string) bool {
 
 func pamInstalled() bool { return exists(pamMarker) }
 
+// pamActive checks the generated PAM stack, not just our marker, so a profile
+// removed by pam-auth-update or authselect is detected and reinstalled.
+func pamActive() bool {
+	for _, f := range []string{"/etc/pam.d/common-auth", "/etc/pam.d/system-auth"} {
+		if s := readFile(f); strings.Contains(s, "pam_exec.so") && strings.Contains(s, " pam-auth") {
+			return true
+		}
+	}
+	return false
+}
+
 func pamLine(exe string) string {
 	return "pam_exec.so quiet stdout " + exe + " pam-auth"
 }
 
 func (a *Agent) installPAM() error {
-	if pamInstalled() {
+	if pamInstalled() && pamActive() {
 		return nil
 	}
 	exe, err := os.Executable()

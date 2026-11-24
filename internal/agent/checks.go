@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -55,7 +56,7 @@ var catalog = []check{
 	{ID: "updates.auto", Title: "Automatic updates are declared", Level: 1,
 		Refs: refs(l(bsiClient, bsiPatch), l("A.8.8", "A.8.32")),
 		Run: func(a *Agent) (string, string) {
-			if a.pol.Updates.Mode == "off" {
+			if m := a.pol.Updates.Mode; m == "" || m == "off" {
 				return fail, "updates mode is off or not declared"
 			}
 			return pass, "mode " + a.pol.Updates.Mode + ", window " + a.pol.Updates.Window
@@ -314,7 +315,7 @@ func runModprobe(kv map[string]string) (string, string) {
 			continue
 		}
 		s, err := sh("modprobe", "-n", "-v", m)
-		if err != nil && strings.Contains(s, "not found") {
+		if err != nil && strings.Contains(s, "FATAL: Module") && strings.Contains(s, "not found") {
 			continue // module does not exist on this kernel
 		}
 		if !strings.Contains(s, "install /bin/false") && !strings.Contains(s, "install /bin/true") &&
@@ -466,7 +467,7 @@ func runSecurityUpdates(a *Agent) (string, string) {
 		return pass, detail
 	}
 	// Patch process working: pending updates are tolerated until the next window run.
-	if a.pol.Updates.Mode != "off" && time.Since(a.state.LastUpdateRun) < 48*time.Hour {
+	if m := a.pol.Updates.Mode; m != "" && m != "off" && time.Since(a.state.LastUpdateRun) < 48*time.Hour {
 		return pass, detail + ", installed in the next maintenance window"
 	}
 	return fail, detail
@@ -738,7 +739,7 @@ func runSSO(a *Agent) (string, string) {
 	if !a.pol.Login.Enabled {
 		return na, "desktop login not declared"
 	}
-	if !pamInstalled() {
+	if !pamActive() {
 		return fail, "PAM integration missing"
 	}
 	return pass, fmt.Sprintf("%s, %d users", a.pol.Login.Issuer, len(a.users))
@@ -800,6 +801,13 @@ func fixJournald(a *Agent) error {
 	return err
 }
 
+// Only active Defaults lines count; "!use_pty" disables it.
+var (
+	sudoUsePTY  = regexp.MustCompile(`(?m)^\s*Defaults\b[^\n#]*[\s,]use_pty\b`)
+	sudoNoPTY   = regexp.MustCompile(`(?m)^\s*Defaults\b[^\n#]*!\s*use_pty\b`)
+	sudoLogfile = regexp.MustCompile(`(?m)^\s*Defaults\b[^\n#]*[\s,]logfile\s*=`)
+)
+
 func sudoDefaults() string {
 	s := readFile("/etc/sudoers")
 	files, _ := filepath.Glob("/etc/sudoers.d/*")
@@ -812,10 +820,10 @@ func sudoDefaults() string {
 func runSudoLog(a *Agent) (string, string) {
 	s := sudoDefaults()
 	var miss []string
-	if !strings.Contains(s, "use_pty") {
+	if !sudoUsePTY.MatchString(s) || sudoNoPTY.MatchString(s) {
 		miss = append(miss, "use_pty")
 	}
-	if !strings.Contains(s, "logfile=") {
+	if !sudoLogfile.MatchString(s) {
 		miss = append(miss, "logfile")
 	}
 	if len(miss) > 0 {
@@ -864,6 +872,9 @@ func runAuditd(a *Agent) (string, string) {
 	}
 	if !exists(auditRulesFile) {
 		return fail, "LiMDM audit rules missing"
+	}
+	if out, err := sh("auditctl", "-l"); err != nil || !strings.Contains(out, "key=identity") {
+		return fail, "LiMDM audit rules not loaded"
 	}
 	return pass, "auditd active"
 }

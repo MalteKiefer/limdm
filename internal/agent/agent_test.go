@@ -126,3 +126,29 @@ func TestFetchPinnedCARejectsWrongFingerprint(t *testing.T) {
 		t.Fatal("wrong fingerprint accepted")
 	}
 }
+
+func TestSudoDefaultsParsing(t *testing.T) {
+	ok := "Defaults use_pty\nDefaults logfile=\"/var/log/sudo.log\"\n"
+	if !sudoUsePTY.MatchString(ok) || sudoNoPTY.MatchString(ok) || !sudoLogfile.MatchString(ok) {
+		t.Fatal("valid sudoers not recognised")
+	}
+	for _, bad := range []string{"Defaults !use_pty\n", "# Defaults use_pty\n", "Defaults env_reset\n# logfile=x\n"} {
+		if sudoUsePTY.MatchString(bad) && !sudoNoPTY.MatchString(bad) {
+			t.Errorf("%q counted as use_pty", bad)
+		}
+	}
+	if sudoLogfile.MatchString("# Defaults logfile=/x\n") {
+		t.Fatal("commented logfile counted")
+	}
+}
+
+func TestUndeclaredUpdatesFail(t *testing.T) {
+	a := &Agent{}
+	for _, c := range catalog {
+		if c.ID == "updates.auto" {
+			if st, _ := c.Run(a); st != fail {
+				t.Fatal("missing updates declaration must fail")
+			}
+		}
+	}
+}

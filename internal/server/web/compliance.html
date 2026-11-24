@@ -1,6 +1,6 @@
 {{define "content"}}
 <h1>Compliance</h1>
-<p>{{.Total}} devices · <span class="st ok">{{.Compliant}} compliant</span> · <span class="st fail">{{.NonCompliant}} non-compliant</span> · <span class="st warn">{{.Stale}} silent for {{.StaleHours}} h</span></p>
+<p>{{.Total}} devices · <span class="st ok">{{.Compliant}} compliant</span> · <span class="st fail">{{.NonCompliant}} non-compliant</span> · <span class="st warn">{{.Stale}} silent for {{.StaleHours}} h</span> · <span class="st na">{{.Pending}} pending first report</span></p>
 <p><a href="/export/compliance.csv">Evidence CSV</a> · <a href="/export/inventory.csv">Inventory CSV</a> · <a href="/export/audit.csv">Audit log CSV</a></p>
 <h2>Checks</h2>
 <table><tr><th>Check</th><th>Level</th><th>Pass</th><th>Fail</th><th>Exception</th><th>n/a</th><th>Failing hosts</th></tr>

@@ -199,6 +199,11 @@ func TestIntegration(t *testing.T) {
 	if code, body := ui("POST", "/blueprints", url.Values{"name": {"bad"}, "priority": {"10"}, "doc": {`[{"identifier":"p","type":"com.limdm.packages","payload":{"install":["--evil"]}}]`}}, adminSess); code != 200 || !strings.Contains(body, "invalid package") {
 		t.Fatal("invalid blueprint must be rejected")
 	}
+	var defID string
+	db.QueryRow(ctx, `SELECT id::text FROM blueprints WHERE name='default'`).Scan(&defID)
+	if code, body := ui("POST", "/blueprints", url.Values{"id": {defID}, "name": {"renamed"}, "priority": {"1000"}, "doc": {"[]"}}, adminSess); code != 200 || !strings.Contains(body, "cannot be renamed") {
+		t.Fatalf("renaming default must be refused: %d", code)
+	}
 	var bpID string
 	db.QueryRow(ctx, `SELECT id::text FROM blueprints WHERE name='strict'`).Scan(&bpID)
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/assign", url.Values{"blueprint": {bpID}, "users": {"mm max@firma.de admin"}}, adminSess); code != http.StatusSeeOther {

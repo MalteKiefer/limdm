@@ -434,7 +434,12 @@ func (s *Server) blueprintSave(w http.ResponseWriter, r *http.Request, sess sess
 	doc, _ := json.Marshal(bp.Declarations)
 	err = s.auditAction(r.Context(), sess.Email, "blueprint.save", bp.Name, string(doc), func(tx pgx.Tx) error {
 		if id > 0 {
-			_, err := tx.Exec(r.Context(), `UPDATE blueprints SET name=$2, priority=$3, declarations=$4, updated_at=now() WHERE id=$1`, id, bp.Name, bp.Priority, string(doc))
+			// The default blueprint applies to every device by name; it must keep it.
+			tag, err := tx.Exec(r.Context(), `UPDATE blueprints SET name=$2, priority=$3, declarations=$4, updated_at=now()
+				WHERE id=$1 AND (name <> 'default' OR $2 = 'default')`, id, bp.Name, bp.Priority, string(doc))
+			if err == nil && tag.RowsAffected() == 0 {
+				err = errors.New("blueprint not found, or default cannot be renamed")
+			}
 			return err
 		}
 		_, err := tx.Exec(r.Context(), `INSERT INTO blueprints(name, priority, declarations) VALUES ($1,$2,$3)`, bp.Name, bp.Priority, string(doc))
@@ -528,7 +533,7 @@ func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session
 	}
 	defer rows.Close()
 	checks := map[string]*checkAgg{}
-	var total, compliant, stale int
+	var total, compliant, stale, pending int
 	for rows.Next() {
 		var host string
 		var raw []byte
@@ -539,9 +544,12 @@ func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session
 			return
 		}
 		total++
-		if seen == nil || time.Since(*seen) > s.cfg.StaleAfter {
+		switch {
+		case seen == nil || len(raw) <= 2:
+			pending++
+		case time.Since(*seen) > s.cfg.StaleAfter:
 			stale++
-		} else if failing == 0 && len(raw) > 2 {
+		case failing == 0:
 			compliant++
 		}
 		var res []api.CheckResult
@@ -604,7 +612,7 @@ func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session
 	})
 	s.render(w, sess, "compliance", map[string]any{
 		"Checks": list, "Controls": ctl, "Total": total, "Compliant": compliant, "Stale": stale,
-		"NonCompliant": total - compliant - stale, "StaleHours": int(s.cfg.StaleAfter.Hours()),
+		"NonCompliant": total - compliant - stale - pending, "Pending": pending, "StaleHours": int(s.cfg.StaleAfter.Hours()),
 	})
 }
 

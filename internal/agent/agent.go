@@ -62,7 +62,8 @@ type State struct {
 	Users         []api.User          `json:"users"`
 	LastUpdateRun time.Time           `json:"last_update_run"`
 	RebootSince   time.Time           `json:"reboot_since"`
-	Results       []api.CommandResult `json:"results"` // not yet reported
+	RebootPlanned time.Time           `json:"reboot_planned"` // when a post update reboot was scheduled
+	Results       []api.CommandResult `json:"results"`        // not yet reported
 	Events        []string            `json:"events"`
 }
 
@@ -79,6 +80,7 @@ type Agent struct {
 	reasons    map[string][]string // declaration type -> why it is not active
 
 	sentStatusHash, sentPkgHash string
+	failedUpdate                string // release version whose update already failed, reported once
 	syncNow                     bool
 }
 
@@ -257,7 +259,7 @@ func New(log *slog.Logger) (*Agent, error) {
 			a.state = State{}
 		}
 	}
-	if a.state.Declarations == nil {
+	if a.state.DeclToken == "" { // never synced: start from the built in baseline
 		a.state.Declarations = api.Effective([]api.Blueprint{api.DefaultBlueprint()})
 	}
 	a.compose()
@@ -391,7 +393,8 @@ func (a *Agent) cycle(ctx context.Context) {
 	if resp.NeedPackages {
 		a.sentPkgHash = ""
 	}
-	if resp.Declarations != nil && resp.DeclarationsToken != a.state.DeclToken {
+	// The server omits unchanged declarations; a new token with none means "nothing declared".
+	if resp.DeclarationsToken != "" && resp.DeclarationsToken != a.state.DeclToken {
 		a.state.Declarations, a.state.DeclToken = resp.Declarations, resp.DeclarationsToken
 		a.event("declarations updated (token %s)", resp.DeclarationsToken)
 		a.syncNow = true // converge and report right away
@@ -405,9 +408,10 @@ func (a *Agent) cycle(ctx context.Context) {
 		a.state.Results = append(a.state.Results, a.execute(c))
 		a.syncNow = true
 	}
-	if resp.AgentUpdate != nil {
-		if err := a.selfUpdate(ctx, *resp.AgentUpdate); err != nil {
-			a.event("agent update %s failed: %v", resp.AgentUpdate.Version, err)
+	if rel := resp.AgentUpdate; rel != nil && UpdatePubKey != "" && rel.Version != a.failedUpdate {
+		if err := a.selfUpdate(ctx, *rel); err != nil {
+			a.failedUpdate = rel.Version
+			a.event("agent update %s failed: %v", rel.Version, err)
 		}
 	}
 }
@@ -514,8 +518,10 @@ func (a *Agent) maintenance(now time.Time) {
 			a.event("updates (%s) installed: %s", u.Mode, lastLines(out, 3))
 		}
 	}
-	if u.Reboot && a.host.rebootRequired() {
+	// Schedule once: a new shutdown call would replace and postpone the pending one.
+	if u.Reboot && now.Sub(a.state.RebootPlanned) > time.Hour && a.host.rebootRequired() {
 		if _, err := sh("shutdown", "-r", "+5", "LiMDM: rebooting in 5 minutes to finish updates"); err == nil {
+			a.state.RebootPlanned = now
 			a.event("reboot scheduled after updates")
 		}
 	}
@@ -569,17 +575,22 @@ func runScript(body string) (string, error) {
 
 // collectAuthEvents ships desktop login events written by pam-auth.
 func (a *Agent) collectAuthEvents() {
-	b, err := os.ReadFile(authEvents)
-	if err != nil || len(b) == 0 {
+	// Rename first: pam-auth appends to a fresh file meanwhile, nothing is lost.
+	sending := authEvents + ".sending"
+	if err := os.Rename(authEvents, sending); err != nil && !os.IsNotExist(err) {
+		a.log.Error("rotate auth events", "err", err)
+	}
+	b, err := os.ReadFile(sending)
+	if err != nil {
 		return
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-		if len(a.state.Events) < 500 {
+		if line != "" && len(a.state.Events) < 500 {
 			a.state.Events = append(a.state.Events, line)
 		}
 	}
-	if err := os.Truncate(authEvents, 0); err != nil {
-		a.log.Error("truncate auth events", "err", err)
+	if err := os.Remove(sending); err != nil {
+		a.log.Error("remove auth events", "err", err)
 	}
 }
 
@@ -611,6 +622,11 @@ func (a *Agent) renewIdentity(ctx context.Context) {
 	}
 	c, err := tls.X509KeyPair(b, b)
 	if err != nil || c.Leaf == nil || time.Until(c.Leaf.NotAfter) > renewBefore {
+		return
+	}
+	if time.Now().After(c.Leaf.NotAfter) {
+		a.log.Error("client certificate expired, the server rejects it; re-enroll with: limdm-agent enroll --server URL --fingerprint FP --token TOKEN",
+			"expired", c.Leaf.NotAfter)
 		return
 	}
 	keyPEM, csr, err := newCSR()
@@ -646,6 +662,9 @@ func (a *Agent) selfUpdate(ctx context.Context, rel api.Release) error {
 	}
 	if err := rel.Verify(ed25519.PublicKey(pub)); err != nil {
 		return err
+	}
+	if rel.Arch != runtime.GOARCH {
+		return fmt.Errorf("release is for %s, this agent runs on %s", rel.Arch, runtime.GOARCH)
 	}
 	if rel.File != filepath.Base(rel.File) || strings.HasPrefix(rel.File, ".") {
 		return errors.New("invalid release file name")
@@ -707,7 +726,7 @@ func Report(w io.Writer, level int) error {
 			return fmt.Errorf("state file: %w", err)
 		}
 	}
-	if a.state.Declarations == nil {
+	if a.state.DeclToken == "" {
 		a.state.Declarations = api.Effective([]api.Blueprint{api.DefaultBlueprint()})
 	}
 	a.compose()
