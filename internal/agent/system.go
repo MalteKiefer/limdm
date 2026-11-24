@@ -341,7 +341,7 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 	}
 	var st syscall.Statfs_t
 	if syscall.Statfs("/", &st) == nil {
-		inv.DiskGB = st.Blocks * uint64(st.Bsize) >> 30
+		inv.DiskGB = st.Blocks * uint64(st.Bsize) >> 30 //nolint:gosec // block size is a small positive kernel value
 	}
 	for _, line := range strings.Split(readFile("/proc/stat"), "\n") {
 		if v, ok := strings.CutPrefix(line, "btime "); ok {
