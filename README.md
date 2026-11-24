@@ -139,6 +139,30 @@ requirements (policies, roles, risk analysis, training) stay with the ISMS.
 
    `reset`, `disable`, `enable` and `list` manage existing accounts.
 
+### Behind Caddy
+
+On a host install let the admin UI listen on loopback without its own
+certificate and put Caddy in front for automatic HTTPS ([`deploy/Caddyfile`](deploy/Caddyfile)):
+
+```sh
+LIMDM_LISTEN=127.0.0.1:8080
+LIMDM_PUBLIC_URL=https://mdm.example.com
+```
+
+The agent port 8444 stays exposed directly; never terminate its mTLS in a proxy.
+`LIMDM_AGENT_HOSTS` adds extra names to the agent certificate, for example the IP
+address older agents enrolled with.
+
+### Docker
+
+[`deploy/docker/compose.yaml`](deploy/docker/compose.yaml) runs PostgreSQL (unix
+socket only), the server image `ghcr.io/maltekiefer/limdm-server` and Caddy. All
+images are pinned by digest; release images carry a build provenance attestation:
+
+```sh
+gh attestation verify oci://ghcr.io/maltekiefer/limdm-server:<version> --repo MalteKiefer/limdm
+```
+
 ### Release key and builds
 
 ```sh

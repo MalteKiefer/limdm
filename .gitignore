@@ -10,6 +10,7 @@ coverage.*
 *.key
 *.pem
 server.env
+.env
 release.key
 
 # local tooling

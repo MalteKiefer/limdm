@@ -1,0 +1,7 @@
+# Caddy in front of the admin UI on a host install (limdm-server package).
+# The server listens on 127.0.0.1:8080 without TLS; Caddy obtains the
+# certificate. The agent API (8444, mTLS) is exposed directly, not proxied.
+mdm.example.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8080
+}

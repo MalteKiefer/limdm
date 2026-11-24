@@ -1,0 +1,73 @@
+# LiMDM with PostgreSQL and Caddy (automatic HTTPS for the admin UI).
+#   cp .env.example .env   # fill in, then:
+#   docker compose up -d
+# Caddy shares the server's network namespace, so the admin UI only listens on
+# loopback; the agent port 8444 is published directly because mTLS must not be
+# terminated by a proxy. PostgreSQL is reached over its unix socket only.
+services:
+  db:
+    image: postgres:17-alpine@sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: limdm
+      POSTGRES_DB: limdm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256 --auth-host=reject
+    command: ["postgres", "-c", "listen_addresses="]
+    volumes:
+      - db:/var/lib/postgresql/data
+      - dbsocket:/var/run/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "/var/run/postgresql", "-U", "limdm"]
+      interval: 5s
+      retries: 20
+
+  limdm:
+    image: ghcr.io/maltekiefer/limdm-server:${LIMDM_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      LIMDM_DATABASE_URL: postgres://limdm:${POSTGRES_PASSWORD}@/limdm?host=/var/run/postgresql
+      LIMDM_LISTEN: 127.0.0.1:8080
+      LIMDM_PUBLIC_URL: https://${LIMDM_DOMAIN:?set LIMDM_DOMAIN}
+      LIMDM_AGENT_URL: https://${LIMDM_DOMAIN}:8444
+      LIMDM_AGENT_LISTEN: :8444
+      LIMDM_SESSION_KEY: ${LIMDM_SESSION_KEY:?set LIMDM_SESSION_KEY}
+      LIMDM_LOCAL_LOGIN: ${LIMDM_LOCAL_LOGIN:-true}
+      LIMDM_OIDC_ISSUER: ${LIMDM_OIDC_ISSUER:-}
+      LIMDM_OIDC_CLIENT_ID: ${LIMDM_OIDC_CLIENT_ID:-}
+      LIMDM_OIDC_CLIENT_SECRET: ${LIMDM_OIDC_CLIENT_SECRET:-}
+      LIMDM_OIDC_ALLOWED_DOMAIN: ${LIMDM_OIDC_ALLOWED_DOMAIN:-}
+      LIMDM_ADMINS: ${LIMDM_ADMINS:-}
+      LIMDM_AUDITORS: ${LIMDM_AUDITORS:-}
+    volumes:
+      - state:/var/lib/limdm-server
+      - dbsocket:/var/run/postgresql
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8444:8444"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  caddy:
+    image: caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    restart: unless-stopped
+    network_mode: service:limdm
+    environment:
+      LIMDM_DOMAIN: ${LIMDM_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+
+volumes:
+  db:
+  dbsocket:
+  state:
+  caddy:
