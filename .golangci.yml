@@ -1,0 +1,51 @@
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - noctx
+    - nolintlint
+    - unconvert
+    - unparam
+  settings:
+    errcheck:
+      # Cleanup and response writing: nothing useful to do on failure.
+      exclude-functions:
+        - (github.com/jackc/pgx/v5.Tx).Rollback
+        - (io.Closer).Close
+        - (*os.File).Close
+        - os.Remove
+        - (net/http.ResponseWriter).Write
+        - (*encoding/json.Encoder).Encode
+        - (*encoding/csv.Writer).Write
+        - (*bytes.Buffer).WriteTo
+        - (*flag.FlagSet).Parse
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - encoding/json.Compact
+    gosec:
+      excludes:
+        # G104 duplicates errcheck, which runs with an explicit, reviewed exclusion list.
+        - G104
+        # G204: the agent's job is running package managers and systemctl; every
+        # argument from a declaration is validated against strict patterns in internal/api.
+        - G204
+        # G304: file paths come from declarations validated as absolute, clean paths.
+        - G304
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - noctx
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+
+run:
+  timeout: 5m

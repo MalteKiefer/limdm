@@ -1,0 +1,14 @@
+{{define "content"}}
+<h1>Compliance</h1>
+<p>{{.Total}} devices · <span class="st ok">{{.Compliant}} compliant</span> · <span class="st fail">{{.NonCompliant}} non-compliant</span> · <span class="st warn">{{.Stale}} silent for {{.StaleHours}} h</span></p>
+<p><a href="/export/compliance.csv">Evidence CSV</a> · <a href="/export/inventory.csv">Inventory CSV</a> · <a href="/export/audit.csv">Audit log CSV</a></p>
+<h2>Checks</h2>
+<table><tr><th>Check</th><th>Level</th><th>Pass</th><th>Fail</th><th>Exception</th><th>n/a</th><th>Failing hosts</th></tr>
+{{range .Checks}}<tr><td><code>{{.ID}}</code><br>{{.Title}}</td><td>L{{.Level}}</td><td>{{.Pass}}</td><td>{{if .Fail}}<span class="st fail">{{.Fail}}</span>{{else}}0{{end}}</td>
+<td>{{.Excepted}}</td><td>{{.NA}}</td><td>{{join .FailingHosts ", "}}</td></tr>{{end}}
+</table>
+<h2>Coverage by framework</h2>
+<table><tr><th>Framework</th><th>Control</th><th>Checks</th><th>Pass</th><th>Fail</th></tr>
+{{range .Controls}}<tr><td>{{.Framework}}</td><td>{{.Control}}</td><td><code>{{join .Checks ", "}}</code></td><td>{{.Pass}}</td><td>{{if .Fail}}<span class="st fail">{{.Fail}}</span>{{else}}0{{end}}</td></tr>{{end}}
+</table>
+{{end}}

@@ -1,0 +1,20 @@
+# build output
+/dist/
+*.deb
+*.rpm
+*.test
+*.out
+coverage.*
+
+# secrets and keys, never commit
+*.key
+*.pem
+server.env
+release.key
+
+# local tooling
+.claude/settings.local.json
+.pixi/
+
+# tool data
+/.claude/

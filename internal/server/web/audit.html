@@ -1,0 +1,9 @@
+{{define "content"}}
+<h1>Audit log</h1>
+{{if .BrokenAt}}<p class="error">Hash chain broken at entry {{.BrokenAt}}. The log was modified.</p>
+{{else}}<p class="st ok">Hash chain fully verified and intact.</p>{{end}}
+<p><a href="/export/audit.csv">Full log as CSV</a></p>
+<table><tr><th>#</th><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr>
+{{range .Entries}}<tr><td>{{.ID}}</td><td>{{fmtTime .At}}</td><td>{{.Actor}}</td><td>{{.Action}}</td><td>{{.Target}}</td><td><pre>{{.Detail}}</pre></td></tr>{{end}}
+</table>
+{{end}}

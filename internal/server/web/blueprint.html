@@ -1,0 +1,15 @@
+{{define "content"}}
+<h1>Blueprint {{.Name}}</h1>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<form method="post" action="/blueprints"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+<label>Name <input name="name" value="{{.Name}}" required pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}" {{if eq .Name "default"}}readonly{{end}}></label>
+<label>Priority (lower wins) <input name="priority" type="number" value="{{.Priority}}"></label>
+<label>Declarations (JSON list of identifier, type, payload)
+<textarea name="doc" rows="34" class="code">{{.Doc}}</textarea></label>
+{{if eq .Sess.Role "admin"}}<button>Save</button>{{end}}</form>
+<h2>Declaration types</h2>
+<table><tr><th>type</th><th>payload example</th></tr>
+{{range .Types}}<tr><td><code>{{.Type}}</code></td><td><code>{{.Example}}</code></td></tr>{{end}}
+</table>
+<p class="muted">compliance level: 1 = CIS Level 1 baseline, 2 = Level 2 for high protection needs. compliance exclude: check IDs accepted as documented risk.</p>
+{{end}}

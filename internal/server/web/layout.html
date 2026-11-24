@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LiMDM</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <strong>LiMDM</strong>
+  <nav>
+    <a href="/" {{if or (eq .Page "devices") (eq .Page "device")}}class="on"{{end}}>Devices</a>
+    <a href="/compliance" {{if eq .Page "compliance"}}class="on"{{end}}>Compliance</a>
+    <a href="/blueprints" {{if or (eq .Page "blueprints") (eq .Page "blueprint")}}class="on"{{end}}>Blueprints</a>
+    <a href="/tokens" {{if eq .Page "tokens"}}class="on"{{end}}>Enrollment</a>
+    <a href="/audit" {{if eq .Page "audit"}}class="on"{{end}}>Audit log</a>
+  </nav>
+  <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}">
+    <span class="muted">{{.Sess.Email}} ({{.Sess.Role}})</span> <button>Sign out</button></form>
+</header>
+<main>{{template "content" .}}</main>
+</body>
+</html>

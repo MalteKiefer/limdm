@@ -1,0 +1,79 @@
+-- ponytail: idempotent schema applied at startup; switch to versioned migrations at the first breaking change.
+
+CREATE TABLE IF NOT EXISTS blueprints (
+    id           BIGSERIAL PRIMARY KEY,
+    name         TEXT NOT NULL UNIQUE,
+    priority     INT NOT NULL DEFAULT 100,  -- lower wins when two blueprints declare the same type
+    declarations JSONB NOT NULL DEFAULT '[]',
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS devices (
+    id             TEXT PRIMARY KEY,
+    cert_serial    TEXT NOT NULL,           -- only this client certificate is accepted
+    cert_not_after TIMESTAMPTZ NOT NULL,
+    hostname       TEXT NOT NULL DEFAULT '',
+    machine_id     TEXT NOT NULL DEFAULT '',
+    users          JSONB NOT NULL DEFAULT '[]',
+    agent_version  TEXT NOT NULL DEFAULT '',
+    inventory      JSONB NOT NULL DEFAULT '{}',
+    checks         JSONB NOT NULL DEFAULT '[]',
+    decl_status    JSONB NOT NULL DEFAULT '[]',
+    status_hash    TEXT NOT NULL DEFAULT '',
+    packages       JSONB NOT NULL DEFAULT '[]',
+    packages_hash  TEXT NOT NULL DEFAULT '',
+    failing        INT NOT NULL DEFAULT 0,
+    enrolled_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen      TIMESTAMPTZ,
+    retired        BOOLEAN NOT NULL DEFAULT false
+);
+
+-- The blueprint named 'default' applies to every device implicitly.
+CREATE TABLE IF NOT EXISTS device_blueprints (
+    device_id    TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    blueprint_id BIGINT NOT NULL REFERENCES blueprints(id) ON DELETE CASCADE,
+    PRIMARY KEY (device_id, blueprint_id)
+);
+
+CREATE TABLE IF NOT EXISTS enroll_tokens (
+    token_hash   BYTEA PRIMARY KEY,
+    note         TEXT NOT NULL DEFAULT '',
+    blueprint_id BIGINT REFERENCES blueprints(id) ON DELETE CASCADE,
+    uses_left    INT NOT NULL,
+    expires_at   TIMESTAMPTZ NOT NULL,
+    created_by   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS commands (
+    id         BIGSERIAL PRIMARY KEY,
+    device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    type       TEXT NOT NULL,
+    payload    TEXT NOT NULL DEFAULT '',
+    status     TEXT NOT NULL DEFAULT 'pending', -- pending | sent | ok | failed
+    output     TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS commands_device_status ON commands(device_id, status);
+
+-- Append only, hash chained audit trail (ISO 27001 A.8.15, BSI OPS.1.1.5).
+CREATE TABLE IF NOT EXISTS audit_log (
+    id      BIGSERIAL PRIMARY KEY,
+    at      TIMESTAMPTZ NOT NULL,
+    actor   TEXT NOT NULL,
+    action  TEXT NOT NULL,
+    target  TEXT NOT NULL DEFAULT '',
+    detail  TEXT NOT NULL DEFAULT '',
+    prev    BYTEA NOT NULL,
+    hash    BYTEA NOT NULL
+);
+
+CREATE OR REPLACE FUNCTION audit_log_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'audit_log is append only';
+END $$;
+
+DROP TRIGGER IF EXISTS audit_log_no_change ON audit_log;
+CREATE TRIGGER audit_log_no_change BEFORE UPDATE OR DELETE OR TRUNCATE ON audit_log
+    FOR EACH STATEMENT EXECUTE FUNCTION audit_log_immutable();

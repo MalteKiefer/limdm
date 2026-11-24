@@ -1,0 +1,50 @@
+{{define "content"}}
+<h1>{{.D.Hostname}} <span class="st {{.D.Class}}">{{.D.Status}}</span></h1>
+<p class="muted">ID {{.D.ID}} · enrolled {{fmtTime .Enrolled}} · last seen {{ago .D.LastSeen}} ago · agent {{.D.AgentVersion}} · certificate valid until {{fmtTime .CertExp}}</p>
+<div class="grid">
+<section><h2>Inventory</h2><dl>
+<dt>System</dt><dd>{{.Inv.OSName}} ({{.Inv.Arch}})</dd>
+<dt>Kernel</dt><dd>{{.Inv.Kernel}}</dd>
+<dt>Hardware</dt><dd>{{.Inv.Vendor}} {{.Inv.Model}}</dd>
+<dt>Serial</dt><dd>{{.Inv.Serial}}</dd>
+<dt>CPU</dt><dd>{{.Inv.CPU}}</dd>
+<dt>Memory</dt><dd>{{.Inv.MemoryMB}} MB</dd>
+<dt>Disk</dt><dd>{{.Inv.DiskGB}} GB</dd>
+<dt>IP</dt><dd>{{if .Inv.IPs}}{{join .Inv.IPs ", "}}{{else}}<span class="muted">not collected (privacy)</span>{{end}}</dd>
+<dt>Logged in</dt><dd>{{if .Inv.Users}}{{join .Inv.Users ", "}}{{else}}<span class="muted">not collected (privacy)</span>{{end}}</dd>
+<dt>Packages</dt><dd>{{.PackageCount}}</dd>
+</dl></section>
+<section><h2>Assignment</h2>
+<form method="post" action="/devices/{{.D.ID}}/assign"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<p>Blueprints (default always applies):</p>
+{{range .Blueprints}}{{if ne .Name "default"}}<label class="check"><input type="checkbox" name="blueprint" value="{{.ID}}" {{if .Assigned}}checked{{end}}> {{.Name}} <span class="muted">(priority {{.Priority}})</span></label>{{end}}{{end}}
+<label>Desktop users (one per line: username email [admin])
+<textarea name="users" rows="4" placeholder="jdoe jane.doe@example.com admin">{{.Users}}</textarea></label>
+<button>Save</button></form>
+<h2>Command</h2>
+<form method="post" action="/devices/{{.D.ID}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<select name="type"><option value="sync">Sync now</option><option value="update">Install all updates</option>
+<option value="reboot">Reboot</option><option value="script">Script (only if allowed on the device)</option></select>
+<textarea name="payload" rows="3" placeholder="#!/bin/sh (script only)"></textarea>
+<button>Send</button></form>
+{{if ne .D.Status "retired"}}
+<form method="post" action="/devices/{{.D.ID}}/retire"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger">Retire device (revoke certificate)</button></form>
+{{end}}
+</section>
+</div>
+<h2>Declarations</h2>
+<table><tr><th>Status</th><th>Identifier</th><th>Type</th><th>Reasons</th></tr>
+{{range .Decl}}<tr><td><span class="st {{.Class}}">{{.State}}</span></td><td><code>{{.Identifier}}</code></td><td><code>{{.Type}}</code></td><td>{{join .Reasons "; "}}</td></tr>{{end}}
+</table>
+<h2>Compliance checks</h2>
+<p><a href="/export/compliance.csv">All checks as CSV</a></p>
+<table><tr><th>Status</th><th>Check</th><th>Level</th><th>Detail</th><th>BSI</th><th>CIS</th><th>ISO 27001</th></tr>
+{{range .Checks}}<tr><td><span class="st {{.Status}}">{{.Status}}</span>{{if .Remediated}} <span class="muted">remediated</span>{{end}}</td>
+<td><code>{{.ID}}</code><br>{{.Title}}</td><td>L{{.Level}}</td><td>{{.Detail}}</td>
+<td>{{join .Refs.BSI ", "}}</td><td>{{join .Refs.CIS "; "}}</td><td>{{join .Refs.ISO ", "}}</td></tr>{{end}}
+</table>
+<h2>Commands</h2>
+<table><tr><th>#</th><th>Type</th><th>Status</th><th>By</th><th>Time</th><th>Output</th></tr>
+{{range .Commands}}<tr><td>{{.ID}}</td><td>{{.Type}}</td><td>{{.Status}}</td><td>{{.By}}</td><td>{{fmtTime .At}}</td><td><pre>{{.Output}}</pre></td></tr>{{end}}
+</table>
+{{end}}

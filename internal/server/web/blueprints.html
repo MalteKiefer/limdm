@@ -1,0 +1,8 @@
+{{define "content"}}
+<h1>Blueprints</h1>
+<p>A blueprint is a set of declarations (desired state). The agent enforces them on its own and reports a status per declaration. When several blueprints declare the same type, the lower priority number wins. <code>default</code> applies to every device.</p>
+{{if eq .Sess.Role "admin"}}<p><a href="/blueprints/new">New blueprint</a></p>{{end}}
+<table><tr><th>Name</th><th>Priority</th><th>Devices</th><th>Updated</th></tr>
+{{range .Blueprints}}<tr><td><a href="/blueprints/{{.ID}}">{{.Name}}</a></td><td>{{.Priority}}</td><td>{{if eq .Name "default"}}all{{else}}{{.Devices}}{{end}}</td><td>{{fmtTime .Updated}}</td></tr>{{end}}
+</table>
+{{end}}

@@ -1,0 +1,722 @@
+// Package agent implements the LiMDM device agent. It receives declarations
+// (desired state), converges to them autonomously, also while offline, and
+// reports status per declaration plus status items over mTLS.
+package agent
+
+import (
+	"bytes"
+	"context"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/hex"
+	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/maltekiefer/limdm/internal/api"
+)
+
+// Set at build time: -ldflags "-X github.com/maltekiefer/limdm/internal/agent.Version=1.0.0 -X github.com/maltekiefer/limdm/internal/agent.UpdatePubKey=<hex>"
+var (
+	Version      = "0.0.0-dev"
+	UpdatePubKey = ""
+)
+
+const (
+	configDir    = "/etc/limdm"
+	configFile   = configDir + "/agent.json"
+	identityFile = configDir + "/device.pem" // private key + client certificate, one file for atomic rotation
+	caFile       = configDir + "/ca.crt"     // pinned device CA, the only trust anchor
+	stateDir     = "/var/lib/limdm"
+	stateFile    = stateDir + "/state.json"
+	renewBefore  = 30 * 24 * time.Hour
+)
+
+type Config struct {
+	Server       string `json:"server"`
+	DeviceID     string `json:"device_id"`
+	AllowScripts bool   `json:"allow_scripts"` // remote scripts are opt in per device
+}
+
+// State survives restarts. Declarations are kept so enforcement continues offline.
+type State struct {
+	Declarations  []api.Declaration   `json:"declarations"`
+	DeclToken     string              `json:"declarations_token"`
+	Users         []api.User          `json:"users"`
+	LastUpdateRun time.Time           `json:"last_update_run"`
+	RebootSince   time.Time           `json:"reboot_since"`
+	Results       []api.CommandResult `json:"results"` // not yet reported
+	Events        []string            `json:"events"`
+}
+
+type Agent struct {
+	cfg    Config
+	client *http.Client
+	host   *host
+	log    *slog.Logger
+	state  State
+
+	pol        api.Policy
+	declStatus []api.DeclarationStatus
+	users      []api.User
+	reasons    map[string][]string // declaration type -> why it is not active
+
+	sentStatusHash, sentPkgHash string
+	syncNow                     bool
+}
+
+func validServerURL(s string) error {
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" {
+		return errors.New("server URL must be https://host:port")
+	}
+	return nil
+}
+
+// pinnedTLS trusts only the device CA, never system roots, and presents the
+// device identity when one exists.
+func pinnedTLS(caPEM []byte, withIdentity bool) (*tls.Config, error) {
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return nil, errors.New("invalid CA certificate")
+	}
+	tc := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: pool}
+	if withIdentity {
+		tc.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			b, err := os.ReadFile(identityFile)
+			if err != nil {
+				return nil, err
+			}
+			c, err := tls.X509KeyPair(b, b)
+			return &c, err
+		}
+	}
+	return tc, nil
+}
+
+func newClient(tc *tls.Config) *http.Client {
+	return &http.Client{Timeout: 2 * time.Minute, Transport: &http.Transport{
+		TLSClientConfig: tc, Proxy: http.ProxyFromEnvironment, ForceAttemptHTTP2: true}}
+}
+
+func newCSR() (keyPEM []byte, csrPEM string, err error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, "", err
+	}
+	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "limdm-device"}}, key)
+	if err != nil {
+		return nil, "", err
+	}
+	kb, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return nil, "", err
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb}),
+		string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})), nil
+}
+
+// fetchPinnedCA downloads the CA and accepts it only if its SHA-256 matches
+// the fingerprint shown in the admin UI. The insecure connection is used for
+// this single request; the fingerprint is what authenticates the server.
+func fetchPinnedCA(server, fingerprint string) ([]byte, error) {
+	c := newClient(&tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true}) //nolint:gosec // authenticated by the pinned fingerprint below
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server+"/api/v1/ca", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		return nil, err
+	}
+	blk, _ := pem.Decode(b)
+	if blk == nil {
+		return nil, errors.New("server sent no CA certificate")
+	}
+	sum := sha256.Sum256(blk.Bytes)
+	want := strings.ToLower(strings.ReplaceAll(fingerprint, ":", ""))
+	if hex.EncodeToString(sum[:]) != want {
+		return nil, fmt.Errorf("CA fingerprint mismatch: got %x, refusing to enroll", sum)
+	}
+	return b, nil
+}
+
+// Enroll registers the device: the key is created locally and never leaves
+// the device, the server signs a CSR after checking the one time token.
+func Enroll(server, token, fingerprint string, allowScripts bool) error {
+	server = strings.TrimRight(server, "/")
+	if err := validServerURL(server); err != nil {
+		return err
+	}
+	if fingerprint == "" {
+		return errors.New("--fingerprint is required (shown on the enrollment page)")
+	}
+	caPEM, err := fetchPinnedCA(server, fingerprint)
+	if err != nil {
+		return err
+	}
+	tc, err := pinnedTLS(caPEM, false)
+	if err != nil {
+		return err
+	}
+	keyPEM, csr, err := newCSR()
+	if err != nil {
+		return err
+	}
+	hostname, _ := os.Hostname()
+	body, _ := json.Marshal(api.EnrollRequest{Token: token, CSR: csr, Hostname: hostname, MachineID: readTrim("/etc/machine-id")})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server+"/api/v1/enroll", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := newClient(tc).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("enroll failed: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+	}
+	var er api.EnrollResponse
+	if err := json.NewDecoder(resp.Body).Decode(&er); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		return err
+	}
+	if _, err := writeIfChanged(caFile, string(caPEM), 0o644); err != nil {
+		return err
+	}
+	if _, err := writeIfChanged(identityFile, string(keyPEM)+er.Cert, 0o600); err != nil {
+		return err
+	}
+	cfg, _ := json.MarshalIndent(Config{Server: server, DeviceID: er.DeviceID, AllowScripts: allowScripts}, "", "  ")
+	_, err = writeIfChanged(configFile, string(cfg)+"\n", 0o600)
+	return err
+}
+
+func New(log *slog.Logger) (*Agent, error) {
+	var cfg Config
+	b, err := os.ReadFile(configFile)
+	if err != nil {
+		return nil, fmt.Errorf("not enrolled (%w); run: limdm-agent enroll --server URL --fingerprint FP --token TOKEN", err)
+	}
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		return nil, err
+	}
+	if err := validServerURL(cfg.Server); err != nil {
+		return nil, err
+	}
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, err
+	}
+	tc, err := pinnedTLS(caPEM, true)
+	if err != nil {
+		return nil, err
+	}
+	h, err := detectHost()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return nil, err
+	}
+	a := &Agent{cfg: cfg, client: newClient(tc), host: h, log: log}
+	if b, err := os.ReadFile(stateFile); err == nil {
+		if err := json.Unmarshal(b, &a.state); err != nil {
+			log.Warn("state file unreadable, starting from defaults", "err", err)
+			a.state = State{}
+		}
+	}
+	if a.state.Declarations == nil {
+		a.state.Declarations = api.Effective([]api.Blueprint{api.DefaultBlueprint()})
+	}
+	a.compose()
+	return a, nil
+}
+
+// compose rebuilds the effective policy from the stored declarations.
+func (a *Agent) compose() {
+	a.pol, a.declStatus = api.Compose(a.state.Declarations)
+	a.users = a.state.Users
+}
+
+// problem records an event and marks the declaration of typ as not achieved.
+func (a *Agent) problem(typ, format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	a.event("%s", msg)
+	if a.reasons != nil {
+		a.reasons[typ] = append(a.reasons[typ], msg)
+	}
+}
+
+func (a *Agent) event(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	a.log.Info(msg)
+	if len(a.state.Events) < 500 {
+		a.state.Events = append(a.state.Events, time.Now().UTC().Format(time.RFC3339)+" "+msg)
+	}
+}
+
+func (a *Agent) saveState() {
+	b, _ := json.Marshal(a.state)
+	if _, err := writeIfChanged(stateFile, string(b), 0o600); err != nil {
+		a.log.Error("save state", "err", err)
+	}
+}
+
+// Run loops until ctx ends.
+func (a *Agent) Run(ctx context.Context) error {
+	a.log.Info("agent started", "version", Version, "server", a.cfg.Server, "device", a.cfg.DeviceID, "os", a.host.Name)
+	for {
+		a.cycle(ctx)
+		wait := time.Duration(a.pol.CheckinSeconds) * time.Second
+		if wait <= 0 {
+			wait = 5 * time.Minute
+		}
+		if a.syncNow {
+			a.syncNow, wait = false, 5*time.Second
+		}
+		select {
+		case <-ctx.Done():
+			a.saveState()
+			return nil
+		case <-time.After(wait):
+		}
+	}
+}
+
+// checkToDecl links compliance checks to the declaration whose goal they verify.
+var checkToDecl = map[string]string{
+	"desktop.screenlock": api.TypeScreenLock, "firewall.active": api.TypeFirewall, "os.supported": api.TypeOSVersion,
+	"updates.auto": api.TypeUpdates, "updates.security": api.TypeUpdates, "updates.reboot": api.TypeUpdates, "auth.sso": api.TypeLogin,
+}
+
+// converge enforces every declaration and verifies the result.
+func (a *Agent) converge() []api.CheckResult {
+	a.reasons = map[string][]string{}
+	a.enforce()
+	checks := a.evaluate()
+	for _, c := range checks {
+		if c.Status != fail {
+			continue
+		}
+		typ, ok := checkToDecl[c.ID]
+		if !ok {
+			typ = api.TypeCompliance
+		}
+		a.reasons[typ] = append(a.reasons[typ], c.ID+": "+c.Detail)
+	}
+	return checks
+}
+
+func (a *Agent) declarationStatus() []api.DeclarationStatus {
+	out := slices.Clone(a.declStatus)
+	for i := range out {
+		if r := a.reasons[out[i].Type]; out[i].Valid && len(r) > 0 {
+			out[i].Active, out[i].Reasons = false, r
+		}
+	}
+	return out
+}
+
+func (a *Agent) cycle(ctx context.Context) {
+	defer a.saveState()
+	a.renewIdentity(ctx)
+	checks := a.converge()
+	a.collectAuthEvents()
+
+	status := api.Status{Inventory: a.host.inventory(a.pol.Privacy), Checks: checks, Declarations: a.declarationStatus()}
+	sb, _ := json.Marshal(status)
+	sum := sha256.Sum256(sb)
+	statusHash := hex.EncodeToString(sum[:])
+	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
+		StatusHash: statusHash, Results: a.state.Results, Events: a.state.Events}
+	if statusHash != a.sentStatusHash {
+		req.Status = &status
+	}
+	pkgs, pkgHash, err := a.host.installedPackages()
+	if err != nil {
+		a.log.Error("packages", "err", err)
+	}
+	req.PackagesHash = pkgHash
+	if pkgHash != a.sentPkgHash {
+		req.Packages = pkgs
+	}
+
+	var resp api.CheckinResponse
+	if err := a.post(ctx, "/api/v1/checkin", req, &resp); err != nil {
+		a.log.Error("checkin failed, enforcing stored declarations", "err", err)
+		return
+	}
+	a.state.Results, a.state.Events = nil, nil
+	if req.Status != nil {
+		a.sentStatusHash = statusHash
+	}
+	if req.Packages != nil {
+		a.sentPkgHash = pkgHash
+	}
+	if resp.NeedStatus {
+		a.sentStatusHash, a.syncNow = "", true
+	}
+	if resp.NeedPackages {
+		a.sentPkgHash = ""
+	}
+	if resp.Declarations != nil && resp.DeclarationsToken != a.state.DeclToken {
+		a.state.Declarations, a.state.DeclToken = resp.Declarations, resp.DeclarationsToken
+		a.event("declarations updated (token %s)", resp.DeclarationsToken)
+		a.syncNow = true // converge and report right away
+	}
+	if !slices.Equal(resp.Users, a.state.Users) {
+		a.state.Users = resp.Users
+		a.syncNow = true
+	}
+	a.compose()
+	for _, c := range resp.Commands {
+		a.state.Results = append(a.state.Results, a.execute(c))
+		a.syncNow = true
+	}
+	if resp.AgentUpdate != nil {
+		if err := a.selfUpdate(ctx, *resp.AgentUpdate); err != nil {
+			a.event("agent update %s failed: %v", resp.AgentUpdate.Version, err)
+		}
+	}
+}
+
+// enforce applies the declarations that are not covered by compliance checks.
+func (a *Agent) enforce() {
+	p := a.pol
+	var missing []string
+	for _, n := range p.Packages.Install {
+		if !a.host.isInstalled(n) {
+			missing = append(missing, n)
+		}
+	}
+	if err := a.host.install(missing...); err != nil {
+		a.problem(api.TypePackages, "install %v failed: %v", missing, err)
+	} else if len(missing) > 0 {
+		a.event("installed %v", missing)
+	}
+	var present []string
+	for _, n := range p.Packages.Remove {
+		if a.host.isInstalled(n) {
+			present = append(present, n)
+		}
+	}
+	if err := a.host.remove(present...); err != nil {
+		a.problem(api.TypePackages, "remove %v failed: %v", present, err)
+	} else if len(present) > 0 {
+		a.event("removed %v", present)
+	}
+	for _, f := range p.Files {
+		mode, _ := f.FileMode()
+		if changed, err := writeIfChanged(f.Path, f.Content, os.FileMode(mode)); err != nil {
+			a.problem(api.TypeFiles, "file %s: %v", f.Path, err)
+		} else if changed {
+			a.event("wrote %s", f.Path)
+		}
+	}
+	for _, s := range p.Services.Enable {
+		if !unitActive(s) {
+			if _, err := sh("systemctl", "enable", "--now", s); err != nil {
+				a.problem(api.TypeServices, "enable %s: %v", s, err)
+			} else {
+				a.event("enabled %s", s)
+			}
+		}
+	}
+	for _, s := range p.Services.Disable {
+		if unitActive(s) {
+			if _, err := sh("systemctl", "disable", "--now", s); err != nil {
+				a.problem(api.TypeServices, "disable %s: %v", s, err)
+			} else {
+				a.event("disabled %s", s)
+			}
+		}
+	}
+	if p.Firewall.Enforce {
+		if st, _ := runFirewall(a); st != pass {
+			if err := a.applyFirewall(); err != nil {
+				a.problem(api.TypeFirewall, "firewall: %v", err)
+			}
+		}
+	}
+	if err := a.applyUsers(); err != nil {
+		a.problem(api.TypeLogin, "users: %v", err)
+	}
+	a.maintenance(time.Now())
+}
+
+// inWindow reports whether now falls into "HH:MM-HH:MM" (may wrap midnight).
+func inWindow(now time.Time, window string) bool {
+	from, to, ok := strings.Cut(window, "-")
+	if !ok {
+		return false
+	}
+	parse := func(s string) int {
+		t, err := time.Parse("15:04", s)
+		if err != nil {
+			return -1
+		}
+		return t.Hour()*60 + t.Minute()
+	}
+	f, t, m := parse(from), parse(to), now.Hour()*60+now.Minute()
+	if f < 0 || t < 0 {
+		return false
+	}
+	if f <= t {
+		return m >= f && m < t
+	}
+	return m >= f || m < t
+}
+
+// maintenance installs updates once per window and reboots if declared.
+func (a *Agent) maintenance(now time.Time) {
+	u := a.pol.Updates
+	if u.Mode == "" || u.Mode == "off" || !inWindow(now, u.Window) {
+		return
+	}
+	if now.Sub(a.state.LastUpdateRun) > 20*time.Hour {
+		out, err := a.host.upgrade(u.Mode == "security")
+		a.state.LastUpdateRun = now
+		if err != nil {
+			a.problem(api.TypeUpdates, "updates (%s) failed: %v", u.Mode, err)
+		} else {
+			a.event("updates (%s) installed: %s", u.Mode, lastLines(out, 3))
+		}
+	}
+	if u.Reboot && a.host.rebootRequired() {
+		if _, err := sh("shutdown", "-r", "+5", "LiMDM: rebooting in 5 minutes to finish updates"); err == nil {
+			a.event("reboot scheduled after updates")
+		}
+	}
+}
+
+func (a *Agent) execute(c api.Command) api.CommandResult {
+	r := api.CommandResult{ID: c.ID}
+	var out string
+	var err error
+	switch c.Type {
+	case "sync":
+		out = "ok"
+	case "update":
+		out, err = a.host.upgrade(false)
+		a.state.LastUpdateRun = time.Now()
+	case "reboot":
+		out, err = sh("shutdown", "-r", "+1", "LiMDM: reboot requested by administrator in 1 minute")
+	case "script":
+		if !a.cfg.AllowScripts {
+			err = errors.New("remote scripts are disabled on this device (allow_scripts)")
+			break
+		}
+		out, err = runScript(c.Payload)
+	default:
+		err = fmt.Errorf("unknown command %q", c.Type)
+	}
+	a.event("command %d (%s) executed, error=%v", c.ID, c.Type, err)
+	r.OK = err == nil
+	r.Output = lastLines(out, 200)
+	if err != nil {
+		r.Output += "\n" + err.Error()
+	}
+	return r
+}
+
+func runScript(body string) (string, error) {
+	f, err := os.CreateTemp(stateDir, "script-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(f.Name())
+	_, err = f.WriteString(body)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return "", err
+	}
+	return run(30*time.Minute, "/bin/sh", f.Name())
+}
+
+// collectAuthEvents ships desktop login events written by pam-auth.
+func (a *Agent) collectAuthEvents() {
+	b, err := os.ReadFile(authEvents)
+	if err != nil || len(b) == 0 {
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		if len(a.state.Events) < 500 {
+			a.state.Events = append(a.state.Events, line)
+		}
+	}
+	if err := os.Truncate(authEvents, 0); err != nil {
+		a.log.Error("truncate auth events", "err", err)
+	}
+}
+
+func (a *Agent) post(ctx context.Context, path string, in, out any) error {
+	body, _ := json.Marshal(in)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.Server+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s: %s", path, resp.Status)
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(out)
+}
+
+// renewIdentity rotates key and certificate 30 days before expiry. Key and
+// certificate live in one file, so the swap is a single atomic rename.
+func (a *Agent) renewIdentity(ctx context.Context) {
+	b, err := os.ReadFile(identityFile)
+	if err != nil {
+		a.log.Error("identity", "err", err)
+		return
+	}
+	c, err := tls.X509KeyPair(b, b)
+	if err != nil || c.Leaf == nil || time.Until(c.Leaf.NotAfter) > renewBefore {
+		return
+	}
+	keyPEM, csr, err := newCSR()
+	if err != nil {
+		a.log.Error("renew", "err", err)
+		return
+	}
+	var resp api.EnrollResponse
+	if err := a.post(ctx, "/api/v1/renew", api.RenewRequest{CSR: csr}, &resp); err != nil {
+		a.event("certificate renewal failed: %v", err)
+		return
+	}
+	if _, err := writeIfChanged(identityFile, string(keyPEM)+resp.Cert, 0o600); err != nil {
+		a.event("storing renewed certificate failed: %v", err)
+		return
+	}
+	a.client.CloseIdleConnections()
+	a.event("client certificate renewed")
+}
+
+// selfUpdate replaces the running binary with a signed newer release and exits;
+// systemd restarts the service with the new binary.
+func (a *Agent) selfUpdate(ctx context.Context, rel api.Release) error {
+	if UpdatePubKey == "" {
+		return errors.New("no update key compiled in, self update disabled")
+	}
+	if !api.NewerVersion(rel.Version, Version) {
+		return nil // never downgrade, even to a validly signed old release
+	}
+	pub, err := hex.DecodeString(UpdatePubKey)
+	if err != nil {
+		return err
+	}
+	if err := rel.Verify(ed25519.PublicKey(pub)); err != nil {
+		return err
+	}
+	if rel.File != filepath.Base(rel.File) || strings.HasPrefix(rel.File, ".") {
+		return errors.New("invalid release file name")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.cfg.Server+"/api/v1/releases/"+url.PathEscape(rel.File), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download: %s", resp.Status)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if exe, err = filepath.EvalSymlinks(exe); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(exe), ".limdm-agent-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	h := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(resp.Body, 200<<20)); err != nil {
+		tmp.Close()
+		return err
+	}
+	tmp.Close()
+	if got := hex.EncodeToString(h.Sum(nil)); got != rel.SHA256 {
+		return fmt.Errorf("checksum mismatch: %s", got)
+	}
+	if err := os.Chmod(tmp.Name(), 0o755); err != nil { //nolint:gosec // executable binary
+		return err
+	}
+	if err := os.Rename(tmp.Name(), exe); err != nil {
+		return err
+	}
+	a.event("agent updated %s -> %s, restarting", Version, rel.Version)
+	a.saveState()
+	os.Exit(0)
+	return nil
+}
+
+// Report runs all checks locally without remediation and without contacting the server.
+func Report(w io.Writer, level int) error {
+	h, err := detectHost()
+	if err != nil {
+		return err
+	}
+	a := &Agent{host: h, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	if b, err := os.ReadFile(stateFile); err == nil {
+		if err := json.Unmarshal(b, &a.state); err != nil {
+			return fmt.Errorf("state file: %w", err)
+		}
+	}
+	if a.state.Declarations == nil {
+		a.state.Declarations = api.Effective([]api.Blueprint{api.DefaultBlueprint()})
+	}
+	a.compose()
+	a.pol.Compliance.Remediate = false
+	if level > 0 {
+		a.pol.Compliance.Level = level
+	}
+	for _, r := range a.evaluate() {
+		fmt.Fprintf(w, "%-9s L%d %-26s %s  %s\n", strings.ToUpper(r.Status), r.Level, r.ID, r.Title, r.Detail)
+	}
+	return nil
+}
