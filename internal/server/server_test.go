@@ -114,3 +114,19 @@ func TestMTLS(t *testing.T) {
 		t.Fatal("garbage CSR accepted")
 	}
 }
+
+func TestAgentCertificateNames(t *testing.T) {
+	ca, err := loadOrCreateCA(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{ca: ca, cfg: Config{AgentURL: "https://mdm.example.com:8444", AgentHosts: []string{"192.0.2.10"}}}
+	tc, err := s.AgentTLSConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, _ := x509.ParseCertificate(tc.Certificates[0].Certificate[0])
+	if leaf.VerifyHostname("mdm.example.com") != nil || leaf.VerifyHostname("192.0.2.10") != nil {
+		t.Fatalf("names: %v %v", leaf.DNSNames, leaf.IPAddresses)
+	}
+}

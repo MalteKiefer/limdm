@@ -10,8 +10,17 @@
   <div class="stat"><div class="label"><span class="dot warn"></span>Stale</div><div class="value">{{.Stale}}</div><div class="hint">silent for {{.StaleHours}} h</div></div>
   <div class="stat"><div class="label"><span class="dot na"></span>Pending</div><div class="value">{{.Pending}}</div><div class="hint">no report yet</div></div>
 </div>
+<form class="filters" method="get" action="/compliance">
+  <input type="search" name="q" value="{{.F.Q}}" placeholder="Search checks" aria-label="Search checks">
+  <select name="state" aria-label="State"><option value="">All states</option><option value="failing" {{if eq .F.State "failing"}}selected{{end}}>Failing</option><option value="passing" {{if eq .F.State "passing"}}selected{{end}}>Passing</option></select>
+  <select name="level" aria-label="Level"><option value="">All levels</option><option value="1" {{if eq .F.Level "1"}}selected{{end}}>Level 1</option><option value="2" {{if eq .F.Level "2"}}selected{{end}}>Level 2</option></select>
+  <select name="framework" aria-label="Framework"><option value="">All frameworks</option><option value="bsi" {{if eq .F.Framework "bsi"}}selected{{end}}>BSI IT-Grundschutz</option><option value="cis" {{if eq .F.Framework "cis"}}selected{{end}}>CIS Benchmark</option><option value="iso" {{if eq .F.Framework "iso"}}selected{{end}}>ISO/IEC 27001</option></select>
+  <select name="sort" aria-label="Sort"><option value="">Sort by ID</option><option value="fail" {{if eq .F.Sort "fail"}}selected{{end}}>Most failing</option><option value="title" {{if eq .F.Sort "title"}}selected{{end}}>Title</option><option value="level" {{if eq .F.Sort "level"}}selected{{end}}>Level</option></select>
+  <button class="secondary">Apply</button>
+  {{if or .F.Q .F.State .F.Level .F.Framework .F.Sort}}<a href="/compliance">Reset</a>{{end}}
+</form>
 <section class="tablecard">
-  <div class="card-head"><h2>Checks</h2></div>
+  <div class="card-head"><h2>Checks</h2><span class="muted">{{.Shown}} of {{.All}}</span></div>
   <div class="scroll"><table>
     <thead><tr><th>Check</th><th>Level</th><th class="num">Pass</th><th class="num">Fail</th><th class="num">Exception</th><th class="num">n/a</th><th>Failing devices</th></tr></thead>
     <tbody>{{range .Checks}}<tr><td>{{.Title}}<span class="sub mono">{{.ID}}</span></td><td>L{{.Level}}</td><td class="num">{{.Pass}}</td>

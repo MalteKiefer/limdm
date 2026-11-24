@@ -12,6 +12,17 @@
 </div>
 <div class="grid side-right">
   <div>
+    <section class="card chart-card">
+      <div class="card-head"><h2>Fleet status</h2></div>
+      <div class="chart-row">{{.Donut}}
+        <ul class="legend">
+          <li><span class="dot ok"></span>Compliant<b>{{index .Counts "compliant"}}</b></li>
+          <li><span class="dot bad"></span>Non-compliant<b>{{index .Counts "non-compliant"}}</b></li>
+          <li><span class="dot warn"></span>Stale<b>{{index .Counts "stale"}}</b></li>
+          <li><span class="dot na"></span>Pending<b>{{index .Counts "pending"}}</b></li>
+        </ul>
+      </div>
+    </section>
     <section class="tablecard">
       <div class="card-head"><h2>Most failing checks</h2><a class="muted" href="/compliance">All checks</a></div>
       {{if .Failing}}

@@ -463,14 +463,33 @@ type Inventory struct {
 	BIOSVersion string `json:"bios_version,omitempty"`
 	BootTime    int64  `json:"boot_time"`
 	// Desktop environment and display manager, empty on servers.
-	Desktop        string   `json:"desktop,omitempty"`
-	DisplayManager string   `json:"display_manager,omitempty"`
-	Disks          []Disk   `json:"disks,omitempty"`
-	Volumes        []Volume `json:"volumes,omitempty"`
-	LocalAccounts  []string `json:"local_accounts,omitempty"`  // only with privacy.logged_in_users
-	Interfaces     []NIC    `json:"interfaces,omitempty"`      // only with privacy.network_info
-	IPs            []string `json:"ips,omitempty"`             // only with privacy.network_info
-	Users          []string `json:"logged_in_users,omitempty"` // only with privacy.logged_in_users
+	Desktop        string    `json:"desktop,omitempty"`
+	DisplayManager string    `json:"display_manager,omitempty"`
+	Disks          []Disk    `json:"disks,omitempty"`
+	Volumes        []Volume  `json:"volumes,omitempty"`
+	Accounts       []Account `json:"accounts,omitempty"`        // local login accounts and admin rights
+	Repos          []Repo    `json:"repos,omitempty"`           // configured package sources
+	Interfaces     []NIC     `json:"interfaces,omitempty"`      // only with privacy.network_info
+	IPs            []string  `json:"ips,omitempty"`             // only with privacy.network_info
+	Users          []string  `json:"logged_in_users,omitempty"` // only with privacy.logged_in_users
+}
+
+type Account struct {
+	Name  string `json:"name"`
+	UID   int    `json:"uid"`
+	Shell string `json:"shell,omitempty"`
+	Admin bool   `json:"admin"` // uid 0 or member of sudo, wheel or admin
+}
+
+// Repo is one package source. Signed reports signed-by (apt) or gpgcheck=1 (dnf).
+type Repo struct {
+	Type    string `json:"type"` // deb | rpm
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	Suites  string `json:"suites,omitempty"`
+	Enabled bool   `json:"enabled"`
+	Signed  bool   `json:"signed"`
+	File    string `json:"file"`
 }
 
 type Disk struct {
@@ -528,9 +547,12 @@ type Status struct {
 
 type Command struct {
 	ID      int64  `json:"id"`
-	Type    string `json:"type"` // sync | update | reboot | script
+	Type    string `json:"type"` // see CommandTypes
 	Payload string `json:"payload,omitempty"`
 }
+
+// CommandTypes are the one off actions an admin can send.
+var CommandTypes = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "script"}
 
 type CommandResult struct {
 	ID     int64  `json:"id"`

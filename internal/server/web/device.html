@@ -8,10 +8,19 @@
     <div class="meta"><span>{{.Inv.OSName}}</span><span>last seen {{ago .D.LastSeen}}</span><span>agent {{.D.AgentVersion}}</span>{{if .Inv.Source}}<span>inventory via {{.Inv.Source}}</span>{{end}}</div>
   </div>
   {{if and (eq .Sess.Role "admin") (ne .D.Status "retired")}}
-  <form class="actions" method="post" action="/devices/{{$id}}/command">
-    <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="sync">
-    <button class="secondary">Sync now</button>
-  </form>
+  <div class="actions">
+    <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="sync"><button class="secondary">Sync now</button></form>
+    <details class="menu">
+      <summary class="button secondary">Actions</summary>
+      <div class="menu-list" role="menu">
+        {{range $a := (list "update" "reboot" "shutdown" "lock" "unlock")}}
+        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="{{$a}}">
+          <button role="menuitem" class="menu-item{{if or (eq $a "shutdown") (eq $a "lock")}} warn{{end}}">{{actionLabel $a}}</button></form>
+        {{end}}
+        <a role="menuitem" class="menu-item" href="/devices/{{$id}}?tab=commands">Run script…</a>
+      </div>
+    </details>
+  </div>
   {{end}}
 </div>
 <nav class="tabs" aria-label="Device sections">
@@ -116,15 +125,25 @@
       <dt>Display manager</dt><dd>{{if .Inv.DisplayManager}}{{.Inv.DisplayManager}}{{else}}<span class="muted">none</span>{{end}}</dd>
     </dl>
   </section>
-  <section class="card">
-    <h2>Accounts</h2>
-    <dl class="kv">
-      <dt>Local accounts</dt><dd>{{range .Inv.LocalAccounts}}<span class="tag">{{.}}</span>{{else}}<span class="muted">not collected</span>{{end}}</dd>
-      <dt>Logged in</dt><dd>{{range .Inv.Users}}<span class="tag">{{.}}</span>{{else}}<span class="muted">not collected</span>{{end}}</dd>
-    </dl>
-    <p class="muted">Personal data is collected only when a privacy declaration allows it.</p>
+  <section class="tablecard">
+    <div class="card-head"><h2>Accounts</h2><span class="muted">{{len .Inv.Accounts}} login accounts</span></div>
+    <div class="scroll"><table>
+      <thead><tr><th>Account</th><th class="num">UID</th><th>Shell</th><th>Rights</th></tr></thead>
+      <tbody>{{range .Inv.Accounts}}<tr><td class="mono">{{.Name}}</td><td class="num">{{.UID}}</td><td class="mono muted">{{.Shell}}</td>
+        <td>{{if .Admin}}<span class="pill warn">admin</span>{{else}}<span class="pill">user</span>{{end}}</td></tr>{{else}}<tr><td colspan="4" class="empty">No account data reported.</td></tr>{{end}}</tbody>
+    </table></div>
+    <div class="empty">Logged in now: {{range .Inv.Users}}<span class="tag">{{.}}</span>{{else}}not collected (privacy){{end}}</div>
   </section>
 </div>
+<section class="tablecard">
+  <div class="card-head"><h2>Package sources</h2><span class="muted">{{len .Inv.Repos}} configured</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Source</th><th>URL</th><th>Suites</th><th>State</th><th>Signature</th></tr></thead>
+    <tbody>{{range .Inv.Repos}}<tr><td>{{.Name}}<span class="sub mono">{{.File}}</span></td><td class="mono">{{.URL}}</td><td>{{.Suites}}</td>
+      <td>{{if .Enabled}}<span class="pill ok">enabled</span>{{else}}<span class="pill">disabled</span>{{end}}</td>
+      <td>{{if .Signed}}<span class="pill ok">pinned key</span>{{else}}<span class="pill warn">global keyring</span>{{end}}</td></tr>{{else}}<tr><td colspan="5" class="empty">No package sources reported.</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
 <section class="tablecard">
   <div class="card-head"><h2>Packages</h2><span class="muted">{{.PackageCount}} installed</span></div>
   <form class="filters" method="get" action="/devices/{{$id}}">
@@ -136,7 +155,12 @@
     <thead><tr><th>Package</th><th>Version</th><th>Architecture</th></tr></thead>
     <tbody>{{range .Packages}}<tr><td class="mono">{{.Name}}</td><td class="mono">{{.Version}}</td><td>{{.Arch}}</td></tr>{{else}}<tr><td colspan="3" class="empty">No matching packages.</td></tr>{{end}}</tbody>
   </table></div>
-  {{if .PkgTruncated}}<div class="empty">First 500 matches shown. Narrow the filter.</div>{{end}}
+  {{if gt .PkgPages 1}}<nav class="pager" aria-label="Package pages">
+    <span class="muted">{{.PkgFrom}}–{{.PkgTo}} of {{.PkgMatched}}</span>
+    {{if gt .PkgPage 1}}<a class="button secondary" href="/devices/{{$id}}?tab=software&amp;q={{.PkgQ}}&amp;page={{dec .PkgPage}}">Previous</a>{{end}}
+    <span>Page {{.PkgPage}} of {{.PkgPages}}</span>
+    {{if lt .PkgPage .PkgPages}}<a class="button secondary" href="/devices/{{$id}}?tab=software&amp;q={{.PkgQ}}&amp;page={{inc .PkgPage}}">Next</a>{{end}}
+  </nav>{{end}}
 </section>
 {{end}}
 
@@ -166,9 +190,9 @@
   <form method="post" action="/devices/{{$id}}/command">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <div class="inline">
-      <label>Command<select name="type"><option value="sync">Sync now</option><option value="update">Install all updates</option><option value="reboot">Reboot in 1 minute</option><option value="script">Run script (if allowed on device)</option></select></label>
+      <label>Command<select name="type">{{range .CommandTypes}}<option value="{{.}}">{{actionLabel .}}</option>{{end}}</select></label>
     </div>
-    <label>Script <span class="hint">only for the script command</span><textarea name="payload" rows="4" class="code" placeholder="#!/bin/sh"></textarea></label>
+    <label class="script-only">Script <span class="hint">runs as root, only if the device allows scripts</span><textarea name="payload" rows="6" class="code" placeholder="#!/bin/sh"></textarea></label>
     <button>Send</button>
   </form>
 </section>

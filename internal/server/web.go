@@ -44,7 +44,14 @@ var pages = func() map[string]*template.Template {
 				return fmt.Sprintf("%d d ago", int(d.Hours()/24))
 			}
 		},
-		"frac":    func(v uint64, pct uint64) uint64 { return v * pct / 100 },
+		"frac": func(v uint64, pct uint64) uint64 { return v * pct / 100 },
+		"inc":  func(n int) int { return n + 1 },
+		"dec":  func(n int) int { return n - 1 },
+		"list": func(v ...string) []string { return v },
+		"actionLabel": func(a string) string {
+			return map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot in 1 minute",
+				"shutdown": "Shut down in 1 minute", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script"}[a]
+		},
 		"join":    strings.Join,
 		"fmtTime": func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") },
 		"gib": func(mb uint64) string {
@@ -253,8 +260,42 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 		s.fail(w, err)
 		return
 	}
-	s.render(w, sess, "overview", map[string]any{"Active": active, "Counts": counts, "OSes": oses, "Failing": failing,
+	donut := donutChart([]donutPart{{"compliant", counts["compliant"], "ok"}, {"non-compliant", counts["non-compliant"], "bad"},
+		{"stale", counts["stale"], "warn"}, {"pending", counts["pending"], "na"}})
+	s.render(w, sess, "overview", map[string]any{"Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
 		"Recent": recent, "StaleHours": int(s.cfg.StaleAfter.Hours())})
+}
+
+type donutPart struct {
+	Label string
+	Value int
+	Class string
+}
+
+// donutChart renders a ring chart as inline SVG. Only numbers and fixed class
+// names go into the markup, so returning template.HTML is safe; colours come
+// from CSS classes because the CSP forbids inline styles.
+func donutChart(parts []donutPart) template.HTML {
+	total := 0
+	for _, p := range parts {
+		total += p.Value
+	}
+	const r, c = 15.915494, 100.0 // circumference 100 makes dash lengths percentages
+	var b strings.Builder
+	b.WriteString(`<svg class="donut" viewBox="0 0 42 42" role="img" aria-label="Device status distribution">`)
+	fmt.Fprintf(&b, `<circle class="track" cx="21" cy="21" r="%.6f"/>`, r)
+	offset := 25.0 // start at 12 o'clock
+	for _, p := range parts {
+		if p.Value == 0 || total == 0 {
+			continue
+		}
+		pct := float64(p.Value) * c / float64(total)
+		fmt.Fprintf(&b, `<circle class="seg %s" cx="21" cy="21" r="%.6f" stroke-dasharray="%.3f %.3f" stroke-dashoffset="%.3f"/>`,
+			p.Class, r, pct, c-pct, offset)
+		offset -= pct
+	}
+	fmt.Fprintf(&b, `<text x="21" y="22.5" class="donut-total">%d</text></svg>`, total)
+	return template.HTML(b.String()) //nolint:gosec // numbers and constant class names only
 }
 
 func firstNonEmpty(v ...string) string {
@@ -371,10 +412,12 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 			pkgView = append(pkgView, p)
 		}
 	}
-	truncated := len(pkgView) > 500
-	if truncated {
-		pkgView = pkgView[:500]
-	}
+	const pageSize = 100
+	pageNo, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	pages := max(1, (len(pkgView)+pageSize-1)/pageSize)
+	pageNo = min(max(pageNo, 1), pages)
+	matched := len(pkgView)
+	pkgView = pkgView[(pageNo-1)*pageSize : min(pageNo*pageSize, matched)]
 	failingChecks := 0
 	for _, c := range data.Checks {
 		if c.Status == "fail" {
@@ -403,15 +446,17 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 	}
 	s.render(w, sess, "device", map[string]any{
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
-		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgTruncated": truncated,
-		"Commands": cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab,
+		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
+		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
+		"CommandTypes": api.CommandTypes,
+		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab,
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "software", "compliance", "declarations", "commands"},
 	})
 }
 
 func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess session) {
 	id, typ, payload := r.PathValue("id"), r.FormValue("type"), r.FormValue("payload")
-	if !slices.Contains([]string{"sync", "update", "reboot", "script"}, typ) || len(payload) > 64<<10 {
+	if !slices.Contains(api.CommandTypes, typ) || len(payload) > 64<<10 {
 		http.Error(w, "invalid command", http.StatusBadRequest)
 		return
 	}
@@ -668,10 +713,56 @@ func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session
 		s.fail(w, err)
 		return
 	}
+	q := r.URL.Query()
+	f := complianceFilter{Q: strings.ToLower(strings.TrimSpace(q.Get("q"))), State: q.Get("state"), Level: q.Get("level"),
+		Framework: q.Get("framework"), Sort: q.Get("sort")}
+	checks, controls := f.apply(fc.Checks, fc.Controls)
 	s.render(w, sess, "compliance", map[string]any{
-		"Checks": fc.Checks, "Controls": fc.Controls, "Total": fc.Total, "Compliant": fc.Compliant, "Stale": fc.Stale,
+		"F": f, "Shown": len(checks), "All": len(fc.Checks),
+		"Checks": checks, "Controls": controls, "Total": fc.Total, "Compliant": fc.Compliant, "Stale": fc.Stale,
 		"NonCompliant": fc.Noncompl, "Pending": fc.Pending, "StaleHours": int(s.cfg.StaleAfter.Hours()),
 	})
+}
+
+// complianceFilter narrows and orders the compliance page via query parameters.
+type complianceFilter struct {
+	Q, State, Level, Framework, Sort string
+}
+
+var frameworkNames = map[string]string{"bsi": "BSI IT-Grundschutz", "cis": "CIS Benchmark", "iso": "ISO/IEC 27001:2022"}
+
+func (f complianceFilter) apply(checks []*checkAgg, controls []*controlAgg) ([]*checkAgg, []*controlAgg) {
+	var out []*checkAgg
+	for _, c := range checks {
+		switch {
+		case f.State == "failing" && c.Fail == 0, f.State == "passing" && (c.Fail > 0 || c.Pass == 0):
+			continue
+		case f.Level != "" && strconv.Itoa(c.Level) != f.Level:
+			continue
+		case f.Q != "" && !strings.Contains(strings.ToLower(c.ID+" "+c.Title), f.Q):
+			continue
+		case f.Framework == "bsi" && len(c.Refs.BSI) == 0, f.Framework == "cis" && len(c.Refs.CIS) == 0, f.Framework == "iso" && len(c.Refs.ISO) == 0:
+			continue
+		}
+		out = append(out, c)
+	}
+	switch f.Sort {
+	case "fail":
+		sort.SliceStable(out, func(i, j int) bool { return out[i].Fail > out[j].Fail })
+	case "title":
+		sort.SliceStable(out, func(i, j int) bool { return out[i].Title < out[j].Title })
+	case "level":
+		sort.SliceStable(out, func(i, j int) bool { return out[i].Level < out[j].Level })
+	}
+	var ctl []*controlAgg
+	for _, c := range controls {
+		if name := frameworkNames[f.Framework]; f.Framework == "" || c.Framework == name {
+			if f.State != "failing" || c.Fail > 0 {
+				ctl = append(ctl, c)
+			}
+		}
+	}
+	return out, ctl
 }
 
 // fleetCompliance aggregates the latest check results of all active devices.

@@ -138,14 +138,6 @@ func enrichFromOsquery(inv *api.Inventory, priv api.Privacy) {
 			inv.Disks = disks
 		}
 	}
-	if priv.LoggedInUsers {
-		if r, err := osq("SELECT username FROM users WHERE uid >= 1000 AND uid < 60000 AND shell NOT LIKE '%nologin' AND shell NOT LIKE '%false'"); err == nil {
-			inv.LocalAccounts = nil
-			for _, u := range r {
-				inv.LocalAccounts = append(inv.LocalAccounts, u["username"])
-			}
-		}
-	}
 	if priv.NetworkInfo {
 		if r, err := osq("SELECT d.interface, d.mac, a.address FROM interface_details d LEFT JOIN interface_addresses a USING (interface) WHERE d.interface <> 'lo'"); err == nil {
 			byName := map[string]*api.NIC{}
