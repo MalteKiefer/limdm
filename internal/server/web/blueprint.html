@@ -1,15 +1,27 @@
+{{define "title"}}Blueprint {{.Name}} · LiMDM{{end}}
 {{define "content"}}
-<h1>Blueprint {{.Name}}</h1>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
-<form method="post" action="/blueprints"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
-<label>Name <input name="name" value="{{.Name}}" required pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}" {{if eq .Name "default"}}readonly{{end}}></label>
-<label>Priority (lower wins) <input name="priority" type="number" value="{{.Priority}}"></label>
-<label>Declarations (JSON list of identifier, type, payload)
-<textarea name="doc" rows="34" class="code">{{.Doc}}</textarea></label>
-{{if eq .Sess.Role "admin"}}<button>Save</button>{{end}}</form>
-<h2>Declaration types</h2>
-<table><tr><th>type</th><th>payload example</th></tr>
-{{range .Types}}<tr><td><code>{{.Type}}</code></td><td><code>{{.Example}}</code></td></tr>{{end}}
-</table>
-<p class="muted">compliance level: 1 = CIS Level 1 baseline, 2 = Level 2 for high protection needs. compliance exclude: check IDs accepted as documented risk.</p>
+<div class="page-head">
+  <div><div class="eyebrow"><a href="/blueprints">Blueprints</a></div><h1>{{if .Name}}{{.Name}}{{else}}New blueprint{{end}}</h1></div>
+</div>
+{{if .Error}}<div class="notice error" role="alert">{{.Error}}</div>{{end}}
+<div class="grid side-right">
+  <form class="card" method="post" action="/blueprints">
+    <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+    <div class="inline">
+      <label>Name<input name="name" value="{{.Name}}" required pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}" {{if eq .Name "default"}}readonly{{end}}></label>
+      <label class="narrow">Priority<input name="priority" type="number" value="{{.Priority}}"></label>
+    </div>
+    <label>Declarations <span class="hint">JSON list of identifier, type, payload</span>
+      <textarea name="doc" rows="30" class="code" spellcheck="false">{{.Doc}}</textarea></label>
+    {{if eq .Sess.Role "admin"}}<div class="form-foot"><span class="muted">Validated strictly before saving. Devices pick up changes at their next check in.</span><button>Save blueprint</button></div>{{end}}
+  </form>
+  <section class="tablecard">
+    <div class="card-head"><h2>Declaration types</h2></div>
+    <div class="scroll"><table>
+      <thead><tr><th>Type and example payload</th></tr></thead>
+      <tbody>{{range .Types}}<tr><td><code>{{.Type}}</code><span class="sub mono">{{.Example}}</span></td></tr>{{end}}</tbody>
+    </table></div>
+    <div class="empty">Compliance level 1 is the CIS Level 1 baseline, level 2 adds controls for high protection needs. Excluded check IDs are reported as documented exceptions.</div>
+  </section>
+</div>
 {{end}}

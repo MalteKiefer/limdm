@@ -1,0 +1,22 @@
+{{define "title"}}Sign in · LiMDM{{end}}
+{{define "content"}}
+<div class="login-card">
+  <div class="brand-row"><img src="/static/logo.svg" alt=""> LiMDM</div>
+  <div class="card">
+    <h1>Sign in</h1>
+    <p class="sub">Device management console</p>
+    {{if .Error}}<div class="notice error" role="alert">{{.Error}}</div>{{end}}
+    {{if .OIDC}}<a class="button" href="/login/oidc">Continue with single sign on</a>{{end}}
+    {{if and .OIDC .Local}}<div class="or">or local administrator</div>{{end}}
+    {{if .Local}}
+    <form method="post" action="/login/local" autocomplete="off">
+      <input type="hidden" name="csrf" value="{{.LoginCSRF}}">
+      <label>Username<input name="username" required autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+      <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
+      <label>Authenticator code<input name="totp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code"></label>
+      <button>Sign in</button>
+    </form>
+    {{end}}
+  </div>
+</div>
+{{end}}

@@ -50,6 +50,14 @@ func refs(bsi, iso []string, cis ...string) api.Refs { return api.Refs{BSI: bsi,
 func l(s ...string) []string                         { return s }
 
 var catalog = []check{
+	{ID: "agent.osquery", Title: "osquery inventory source installed", Level: 1,
+		Refs: refs(l(bsiClient), l("A.5.9", "A.8.9")),
+		Run: func(a *Agent) (string, string) {
+			if v := osqueryVersion(); v != "" {
+				return pass, "osquery " + v
+			}
+			return fail, "osquery missing, inventory incomplete (installed by the agent, retried hourly)"
+		}},
 	{ID: "os.supported", Title: "Operating system version is supported", Level: 1,
 		Refs: refs(l(bsiClient, bsiPatch), l("A.8.8"), "Ensure updates, patches, and additional security software are installed"),
 		Run:  runOSSupported},
@@ -517,13 +525,17 @@ func runFirewall(a *Agent) (string, string) {
 			return pass, "ufw active"
 		}
 	}
-	if unitActive("nftables") {
-		if out, _ := sh("nft", "list", "ruleset"); strings.Contains(out, "hook input") {
-			return pass, "nftables active with input rules"
-		}
+	if out, err := sh("nft", "list", "ruleset"); err == nil && nftDropsInput(out) {
+		return pass, "nftables input chain with policy drop"
 	}
-	return fail, "no active host firewall"
+	return fail, "no host firewall dropping unsolicited inbound traffic"
 }
+
+// nftInputDrop matches a base chain on the input hook whose default policy is drop.
+// A chain with policy accept filters nothing by default, however many rules it has.
+var nftInputDrop = regexp.MustCompile(`type filter hook input priority [^;]+; policy drop;`)
+
+func nftDropsInput(ruleset string) bool { return nftInputDrop.MatchString(ruleset) }
 
 func fixFirewall(a *Agent) error {
 	if !a.pol.Firewall.Enforce {
@@ -534,6 +546,11 @@ func fixFirewall(a *Agent) error {
 
 func (a *Agent) applyFirewall() error {
 	if a.host.family == "debian" {
+		// A hand written nftables ruleset (VPN clients such as NetBird add their own
+		// tables) must not be overlaid with ufw; report instead of clobbering it.
+		if unitActive("nftables") && !hasCmd("ufw") {
+			return errors.New("nftables is managed locally: add an input chain with policy drop")
+		}
 		if !hasCmd("ufw") {
 			if err := a.host.install("ufw"); err != nil {
 				return err

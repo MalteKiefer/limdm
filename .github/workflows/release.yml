@@ -50,3 +50,4 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/*_SHA256SUMS
+            scripts/install-agent.sh

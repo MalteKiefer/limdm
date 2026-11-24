@@ -18,3 +18,6 @@ release.key
 
 # tool data
 /.claude/
+
+# public osquery repository signing key, embedded into the agent (not a secret)
+!internal/agent/osquery.asc

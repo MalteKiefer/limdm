@@ -35,7 +35,7 @@ archives:
     ids: [agent]
     formats: [tar.gz]
     name_template: "limdm-agent_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    files: [LICENSE, README.md, packaging/limdm-agent.service]
+    files: [LICENSE, README.md, packaging/limdm-agent.service, scripts/install-agent.sh]
   - id: server
     ids: [server]
     formats: [tar.gz]
@@ -46,6 +46,8 @@ nfpms:
   - id: agent
     ids: [agent]
     package_name: limdm-agent
+    # osquery is the inventory source; scripts/install-agent.sh adds its repository first
+    dependencies: [osquery]
     homepage: https://github.com/MalteKiefer/limdm
     maintainer: Malte Kiefer <malte.kiefer@kiefer-networks.de>
     description: LiMDM device agent, declarative device management for Debian, Ubuntu and Fedora
@@ -84,7 +86,11 @@ nfpms:
       - src: packaging/server.env.example
         dst: /etc/limdm-server/server.env
         type: config|noreplace
-        file_info: {mode: 0o600}
+        file_info: {mode: 0o640}
+      - src: packaging/limdm-server.sysusers
+        dst: /usr/lib/sysusers.d/limdm-server.conf
+    scripts:
+      postinstall: packaging/server-postinstall.sh
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
@@ -106,3 +112,5 @@ changelog:
 
 release:
   prerelease: auto
+  extra_files:
+    - glob: scripts/install-agent.sh

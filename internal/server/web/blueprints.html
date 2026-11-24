@@ -1,8 +1,12 @@
+{{define "title"}}Blueprints · LiMDM{{end}}
 {{define "content"}}
-<h1>Blueprints</h1>
-<p>A blueprint is a set of declarations (desired state). The agent enforces them on its own and reports a status per declaration. When several blueprints declare the same type, the lower priority number wins. <code>default</code> applies to every device.</p>
-{{if eq .Sess.Role "admin"}}<p><a href="/blueprints/new">New blueprint</a></p>{{end}}
-<table><tr><th>Name</th><th>Priority</th><th>Devices</th><th>Updated</th></tr>
-{{range .Blueprints}}<tr><td><a href="/blueprints/{{.ID}}">{{.Name}}</a></td><td>{{.Priority}}</td><td>{{if eq .Name "default"}}all{{else}}{{.Devices}}{{end}}</td><td>{{fmtTime .Updated}}</td></tr>{{end}}
-</table>
+<div class="page-head">
+  <div><h1>Blueprints</h1><div class="meta"><span>Sets of declarations that devices converge to on their own</span></div></div>
+  {{if eq .Sess.Role "admin"}}<div class="actions"><a class="button" href="/blueprints/new">New blueprint</a></div>{{end}}
+</div>
+<div class="notice">When several blueprints of a device declare the same type, the lower priority number wins. <code>default</code> applies to every device.</div>
+<div class="tablecard"><div class="scroll"><table>
+  <thead><tr><th>Name</th><th class="num">Priority</th><th class="num">Devices</th><th>Updated</th></tr></thead>
+  <tbody>{{range .Blueprints}}<tr><td><a class="rowlink" href="/blueprints/{{.ID}}">{{.Name}}</a></td><td class="num">{{.Priority}}</td><td class="num">{{if eq .Name "default"}}all{{else}}{{.Devices}}{{end}}</td><td>{{fmtTime .Updated}}</td></tr>{{end}}</tbody>
+</table></div></div>
 {{end}}

@@ -30,6 +30,7 @@ and 2) and ISO/IEC 27001:2022 Annex A.
 | Blueprint | A set of declarations with a priority. If several blueprints of a device declare the same type, the lowest priority number wins. `default` applies to every device. |
 | Status | The agent reports per declaration whether it is `valid` and `active`, with reasons, plus status items (inventory, compliance checks). It only sends status when its hash changes. |
 | Command | One off actions only: `sync`, `update`, `reboot`, `script` (scripts only if allowed on the device at enrollment). |
+| Inventory | Hardware, disks, volumes with encryption state, memory, OS, desktop environment, packages, and (with consent via the privacy declaration) accounts and network interfaces. Collected with [osquery](https://osquery.io), which the agent requires. |
 
 ### Declaration types
 
@@ -66,6 +67,8 @@ before applying them.
   handshake, so this exception applies to the renewal endpoint alone.
 * **Admin UI** over HTTPS only (without its own certificate it binds to loopback only,
   behind a local TLS proxy). OIDC with PKCE, nonce, `email_verified` and domain checks.
+  Optional local admins as fallback (`LIMDM_LOCAL_LOGIN=true`): generated password
+  (argon2id) plus TOTP, single use codes, lockout after 5 failures, per IP rate limit.
   Roles `admin` and `auditor` (read only). HMAC signed sessions, 30 min idle and 8 h
   absolute timeout, CSRF tokens, strict CSP, HSTS, no JavaScript.
 * **Database** connections outside loopback must use `sslmode=verify-full`, otherwise
@@ -127,6 +130,14 @@ requirements (policies, roles, risk analysis, training) stay with the ISMS.
    `/etc/limdm-server/server.env` (mode 0600) and fill it in.
 4. `systemctl enable --now limdm-server`. Expose port 8444 directly (no TLS terminating
    proxy) and 8443 for the admin UI.
+5. Without OIDC, or as break glass access, create a local admin. The credentials
+   (password and an `otpauth://` URI for an authenticator app) go to a new 0600 file:
+
+   ```sh
+   sudo sh -c 'umask 077; sudo -u limdm limdm-server local-admin -env /etc/limdm-server/server.env add alice > /root/limdm-alice.txt'
+   ```
+
+   `reset`, `disable`, `enable` and `list` manage existing accounts.
 
 ### Release key and builds
 
@@ -146,6 +157,21 @@ Publish an agent self update (signature made offline, directory copied to the se
 ```sh
 limdm-server release -key release.key -version 1.0.1 -dir releases amd64=dist/limdm-agent-linux-amd64 arm64=dist/limdm-agent-linux-arm64
 ```
+
+### Installing the agent
+
+osquery is a hard dependency and comes from the official osquery repository.
+`install-agent.sh` (attached to every release) adds that repository, trusting only
+the embedded signing key `1484 120A C4E9 F8A1 A577 AEEE 97A8 0C63 C9D8 B80B`, then
+installs osquery and the agent package:
+
+```sh
+sudo sh install-agent.sh ./limdm-agent_<version>_amd64.deb
+```
+
+If osquery is removed later, the agent reinstalls it from the same repository
+(retried hourly) and reports `agent.osquery` as failing until it is back. Only
+`osqueryi` is used; no osquery daemon is enabled.
 
 ### Enrolling a device
 

@@ -9,7 +9,8 @@ EnvironmentFile=/etc/limdm-server/server.env
 ExecStart=/usr/bin/limdm-server serve
 Restart=always
 RestartSec=5
-DynamicUser=yes
+User=limdm
+Group=limdm
 StateDirectory=limdm-server
 StateDirectoryMode=0700
 Environment=LIMDM_CA_DIR=/var/lib/limdm-server/ca

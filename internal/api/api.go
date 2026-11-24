@@ -441,27 +441,64 @@ type RenewRequest struct {
 // ---- status channel ----
 
 type Inventory struct {
-	Hostname  string   `json:"hostname"`
-	MachineID string   `json:"machine_id"`
-	OSID      string   `json:"os_id"`
-	OSVersion string   `json:"os_version"`
-	OSName    string   `json:"os_name"`
-	Kernel    string   `json:"kernel"`
-	Arch      string   `json:"arch"`
-	CPU       string   `json:"cpu"`
-	MemoryMB  uint64   `json:"memory_mb"`
-	DiskGB    uint64   `json:"disk_gb"`
-	Vendor    string   `json:"vendor"`
-	Model     string   `json:"model"`
-	Serial    string   `json:"serial"`
-	BootTime  int64    `json:"boot_time"`
-	IPs       []string `json:"ips,omitempty"`             // only with privacy.network_info
-	Users     []string `json:"logged_in_users,omitempty"` // only with privacy.logged_in_users
+	Source      string `json:"source"` // "osquery 5.x" or "native"
+	Hostname    string `json:"hostname"`
+	MachineID   string `json:"machine_id"`
+	OSID        string `json:"os_id"`
+	OSVersion   string `json:"os_version"`
+	OSName      string `json:"os_name"`
+	OSCodename  string `json:"os_codename,omitempty"`
+	Kernel      string `json:"kernel"`
+	Arch        string `json:"arch"`
+	CPU         string `json:"cpu"`
+	CPUCores    int    `json:"cpu_cores,omitempty"`
+	CPUThreads  int    `json:"cpu_threads,omitempty"`
+	MemoryMB    uint64 `json:"memory_mb"`
+	SwapMB      uint64 `json:"swap_mb,omitempty"`
+	DiskGB      uint64 `json:"disk_gb"` // root filesystem
+	Vendor      string `json:"vendor"`
+	Model       string `json:"model"`
+	Serial      string `json:"serial"`
+	BIOSVendor  string `json:"bios_vendor,omitempty"`
+	BIOSVersion string `json:"bios_version,omitempty"`
+	BootTime    int64  `json:"boot_time"`
+	// Desktop environment and display manager, empty on servers.
+	Desktop        string   `json:"desktop,omitempty"`
+	DisplayManager string   `json:"display_manager,omitempty"`
+	Disks          []Disk   `json:"disks,omitempty"`
+	Volumes        []Volume `json:"volumes,omitempty"`
+	LocalAccounts  []string `json:"local_accounts,omitempty"`  // only with privacy.logged_in_users
+	Interfaces     []NIC    `json:"interfaces,omitempty"`      // only with privacy.network_info
+	IPs            []string `json:"ips,omitempty"`             // only with privacy.network_info
+	Users          []string `json:"logged_in_users,omitempty"` // only with privacy.logged_in_users
+}
+
+type Disk struct {
+	Name   string `json:"name"`
+	Model  string `json:"model,omitempty"`
+	SizeGB uint64 `json:"size_gb"`
+	Type   string `json:"type,omitempty"` // ssd | hdd | nvme | virtual
+}
+
+type Volume struct {
+	Device    string `json:"device"`
+	Mount     string `json:"mount"`
+	FS        string `json:"fs"`
+	SizeGB    uint64 `json:"size_gb"`
+	FreeGB    uint64 `json:"free_gb"`
+	Encrypted bool   `json:"encrypted"`
+}
+
+type NIC struct {
+	Name string   `json:"name"`
+	MAC  string   `json:"mac,omitempty"`
+	IPs  []string `json:"ips,omitempty"`
 }
 
 type Package struct {
 	Name    string `json:"n"`
 	Version string `json:"v"`
+	Arch    string `json:"a,omitempty"`
 }
 
 // Refs maps a check to the frameworks it provides evidence for.

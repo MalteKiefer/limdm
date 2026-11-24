@@ -1,14 +1,29 @@
+{{define "title"}}Compliance · LiMDM{{end}}
 {{define "content"}}
-<h1>Compliance</h1>
-<p>{{.Total}} devices · <span class="st ok">{{.Compliant}} compliant</span> · <span class="st fail">{{.NonCompliant}} non-compliant</span> · <span class="st warn">{{.Stale}} silent for {{.StaleHours}} h</span> · <span class="st na">{{.Pending}} pending first report</span></p>
-<p><a href="/export/compliance.csv">Evidence CSV</a> · <a href="/export/inventory.csv">Inventory CSV</a> · <a href="/export/audit.csv">Audit log CSV</a></p>
-<h2>Checks</h2>
-<table><tr><th>Check</th><th>Level</th><th>Pass</th><th>Fail</th><th>Exception</th><th>n/a</th><th>Failing hosts</th></tr>
-{{range .Checks}}<tr><td><code>{{.ID}}</code><br>{{.Title}}</td><td>L{{.Level}}</td><td>{{.Pass}}</td><td>{{if .Fail}}<span class="st fail">{{.Fail}}</span>{{else}}0{{end}}</td>
-<td>{{.Excepted}}</td><td>{{.NA}}</td><td>{{join .FailingHosts ", "}}</td></tr>{{end}}
-</table>
-<h2>Coverage by framework</h2>
-<table><tr><th>Framework</th><th>Control</th><th>Checks</th><th>Pass</th><th>Fail</th></tr>
-{{range .Controls}}<tr><td>{{.Framework}}</td><td>{{.Control}}</td><td><code>{{join .Checks ", "}}</code></td><td>{{.Pass}}</td><td>{{if .Fail}}<span class="st fail">{{.Fail}}</span>{{else}}0{{end}}</td></tr>{{end}}
-</table>
+<div class="page-head">
+  <div><h1>Compliance</h1><div class="meta"><span>{{.Total}} active devices</span><span>BSI IT-Grundschutz · CIS · ISO/IEC 27001:2022</span></div></div>
+  <div class="actions"><a class="button secondary" href="/export/inventory.csv">Inventory CSV</a><a class="button secondary" href="/export/audit.csv">Audit CSV</a><a class="button" href="/export/compliance.csv">Evidence CSV</a></div>
+</div>
+<div class="stats">
+  <div class="stat"><div class="label"><span class="dot ok"></span>Compliant</div><div class="value">{{.Compliant}}</div></div>
+  <div class="stat"><div class="label"><span class="dot bad"></span>Non-compliant</div><div class="value">{{.NonCompliant}}</div></div>
+  <div class="stat"><div class="label"><span class="dot warn"></span>Stale</div><div class="value">{{.Stale}}</div><div class="hint">silent for {{.StaleHours}} h</div></div>
+  <div class="stat"><div class="label"><span class="dot na"></span>Pending</div><div class="value">{{.Pending}}</div><div class="hint">no report yet</div></div>
+</div>
+<section class="tablecard">
+  <div class="card-head"><h2>Checks</h2></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Check</th><th>Level</th><th class="num">Pass</th><th class="num">Fail</th><th class="num">Exception</th><th class="num">n/a</th><th>Failing devices</th></tr></thead>
+    <tbody>{{range .Checks}}<tr><td>{{.Title}}<span class="sub mono">{{.ID}}</span></td><td>L{{.Level}}</td><td class="num">{{.Pass}}</td>
+      <td class="num">{{if .Fail}}<span class="pill fail">{{.Fail}}</span>{{else}}<span class="muted">0</span>{{end}}</td><td class="num">{{.Excepted}}</td><td class="num">{{.NA}}</td>
+      <td class="muted">{{join .FailingHosts ", "}}</td></tr>{{else}}<tr><td colspan="7" class="empty">No reports yet.</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+<section class="tablecard">
+  <div class="card-head"><h2>Coverage by framework</h2><span class="muted">pass and fail summed over devices</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Framework</th><th>Control</th><th>Checks</th><th class="num">Pass</th><th class="num">Fail</th></tr></thead>
+    <tbody>{{range .Controls}}<tr><td>{{.Framework}}</td><td>{{.Control}}</td><td>{{range .Checks}}<span class="tag">{{.}}</span>{{end}}</td><td class="num">{{.Pass}}</td><td class="num">{{if .Fail}}<span class="pill fail">{{.Fail}}</span>{{else}}<span class="muted">0</span>{{end}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
 {{end}}
