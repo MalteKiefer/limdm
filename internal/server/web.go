@@ -33,10 +33,34 @@ var pages = func() map[string]*template.Template {
 			if t == nil {
 				return "never"
 			}
-			return time.Since(*t).Round(time.Second).String()
+			switch d := time.Since(*t); {
+			case d < time.Minute:
+				return "just now"
+			case d < time.Hour:
+				return fmt.Sprintf("%d min ago", int(d.Minutes()))
+			case d < 48*time.Hour:
+				return fmt.Sprintf("%d h ago", int(d.Hours()))
+			default:
+				return fmt.Sprintf("%d d ago", int(d.Hours()/24))
+			}
 		},
+		"frac":    func(v uint64, pct uint64) uint64 { return v * pct / 100 },
 		"join":    strings.Join,
-		"fmtTime": func(t time.Time) string { return t.Local().Format("2006-01-02 15:04:05") },
+		"fmtTime": func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") },
+		"gib": func(mb uint64) string {
+			if mb == 0 {
+				return "n/a"
+			}
+			return fmt.Sprintf("%.1f GiB", float64(mb)/1024)
+		},
+		"unix": func(sec int64) time.Time { return time.Unix(sec, 0) },
+		"used": func(size, free uint64) uint64 { return size - min(free, size) },
+		"pct": func(part, total int) int {
+			if total == 0 {
+				return 0
+			}
+			return part * 100 / total
+		},
 	}
 	m := map[string]*template.Template{}
 	names, _ := fs.Glob(webFS, "web/*.html")
@@ -92,7 +116,8 @@ func (s *Server) render(w http.ResponseWriter, sess session, name string, data m
 }
 
 func (s *Server) webRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /{$}", s.page(s.devices))
+	mux.HandleFunc("GET /{$}", s.page(s.overview))
+	mux.HandleFunc("GET /devices", s.page(s.devices))
 	mux.HandleFunc("GET /devices/{id}", s.page(s.device))
 	mux.HandleFunc("POST /devices/{id}/command", s.page(s.deviceCommand))
 	mux.HandleFunc("POST /devices/{id}/assign", s.page(s.deviceAssign))
@@ -111,6 +136,8 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 
 type deviceRow struct {
 	ID, Hostname, OS, AgentVersion, Blueprints string
+	Desktop                                    string
+	MemoryMB                                   uint64
 	Failing                                    int
 	Checks                                     int
 	LastSeen                                   *time.Time
@@ -136,6 +163,7 @@ func (s *Server) status(d *deviceRow) {
 func (s *Server) listDevices(ctx context.Context) ([]deviceRow, error) {
 	rows, err := s.db.Query(ctx, `SELECT d.id, d.hostname, coalesce(d.inventory->>'os_name',''), d.agent_version,
 		coalesce((SELECT string_agg(b.name, ', ' ORDER BY b.priority) FROM device_blueprints db JOIN blueprints b ON b.id=db.blueprint_id WHERE db.device_id=d.id),''),
+		coalesce(d.inventory->>'desktop',''), coalesce((d.inventory->>'memory_mb')::bigint, 0),
 		d.failing, jsonb_array_length(d.checks), d.last_seen, d.retired
 		FROM devices d ORDER BY d.retired, d.hostname`)
 	if err != nil {
@@ -143,7 +171,7 @@ func (s *Server) listDevices(ctx context.Context) ([]deviceRow, error) {
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (deviceRow, error) {
 		var d deviceRow
-		err := row.Scan(&d.ID, &d.Hostname, &d.OS, &d.AgentVersion, &d.Blueprints, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired)
+		err := row.Scan(&d.ID, &d.Hostname, &d.OS, &d.AgentVersion, &d.Blueprints, &d.Desktop, &d.MemoryMB, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired)
 		s.status(&d)
 		return d, err
 	})
@@ -155,7 +183,87 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 		s.fail(w, err)
 		return
 	}
-	s.render(w, sess, "devices", map[string]any{"Devices": list})
+	q, status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q"))), r.URL.Query().Get("status")
+	counts := map[string]int{}
+	var shown []deviceRow
+	for _, d := range list {
+		counts[d.Status]++
+		if status != "" && d.Status != status {
+			continue
+		}
+		if q != "" && !strings.Contains(strings.ToLower(d.Hostname+" "+d.OS+" "+d.ID+" "+d.Blueprints), q) {
+			continue
+		}
+		shown = append(shown, d)
+	}
+	s.render(w, sess, "devices", map[string]any{"Devices": shown, "Total": len(list), "Counts": counts, "Q": q, "Status": status,
+		"Statuses": []string{"compliant", "non-compliant", "stale", "pending", "retired"}})
+}
+
+// overview is the landing page: fleet state, OS mix, weakest controls, recent activity.
+func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) {
+	ctx := r.Context()
+	list, err := s.listDevices(ctx)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	counts, osMix := map[string]int{}, map[string]int{}
+	active := 0
+	for _, d := range list {
+		counts[d.Status]++
+		if !d.Retired {
+			active++
+			osMix[firstNonEmpty(d.OS, "unknown")]++
+		}
+	}
+	type share struct {
+		Name  string
+		Count int
+	}
+	var oses []share
+	for n, c := range osMix {
+		oses = append(oses, share{n, c})
+	}
+	sort.Slice(oses, func(i, j int) bool {
+		return oses[i].Count > oses[j].Count || oses[i].Count == oses[j].Count && oses[i].Name < oses[j].Name
+	})
+	fc, err := s.fleetCompliance(ctx)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	var failing []*checkAgg
+	for _, c := range fc.Checks {
+		if c.Fail > 0 {
+			failing = append(failing, c)
+		}
+	}
+	sort.SliceStable(failing, func(i, j int) bool { return failing[i].Fail > failing[j].Fail })
+	if len(failing) > 6 {
+		failing = failing[:6]
+	}
+	rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log ORDER BY id DESC LIMIT 8`)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	recent, err := pgx.CollectRows(rows, pgx.RowToStructByPos[auditRow])
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.render(w, sess, "overview", map[string]any{"Active": active, "Counts": counts, "OSes": oses, "Failing": failing,
+		"Recent": recent, "StaleHours": int(s.cfg.StaleAfter.Hours())})
+}
+
+func firstNonEmpty(v ...string) string {
+	for _, s := range v {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 type blueprintRow struct {
@@ -252,6 +360,27 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		Identifier, Type, State, Class string
 		Reasons                        []string
 	}
+	tab := r.URL.Query().Get("tab")
+	if !slices.Contains([]string{"overview", "hardware", "software", "compliance", "declarations", "commands"}, tab) {
+		tab = "overview"
+	}
+	pkgQ := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	var pkgView []api.Package
+	for _, p := range data.Packages {
+		if pkgQ == "" || strings.Contains(strings.ToLower(p.Name), pkgQ) {
+			pkgView = append(pkgView, p)
+		}
+	}
+	truncated := len(pkgView) > 500
+	if truncated {
+		pkgView = pkgView[:500]
+	}
+	failingChecks := 0
+	for _, c := range data.Checks {
+		if c.Status == "fail" {
+			failingChecks++
+		}
+	}
 	reported := map[string]api.DeclarationStatus{}
 	for _, st := range data.Decl {
 		reported[st.Identifier] = st
@@ -274,7 +403,9 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 	}
 	s.render(w, sess, "device", map[string]any{
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
-		"PackageCount": len(data.Packages), "Commands": cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp,
+		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgTruncated": truncated,
+		"Commands": cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab,
+		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "software", "compliance", "declarations", "commands"},
 	})
 }
 
@@ -525,11 +656,30 @@ type controlAgg struct {
 	Pass, Fail         int
 }
 
+type fleetStats struct {
+	Checks                                     []*checkAgg
+	Controls                                   []*controlAgg
+	Total, Compliant, Stale, Pending, Noncompl int
+}
+
 func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session) {
-	rows, err := s.db.Query(r.Context(), `SELECT hostname, checks, last_seen, failing FROM devices WHERE NOT retired`)
+	fc, err := s.fleetCompliance(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	s.render(w, sess, "compliance", map[string]any{
+		"Checks": fc.Checks, "Controls": fc.Controls, "Total": fc.Total, "Compliant": fc.Compliant, "Stale": fc.Stale,
+		"NonCompliant": fc.Noncompl, "Pending": fc.Pending, "StaleHours": int(s.cfg.StaleAfter.Hours()),
+	})
+}
+
+// fleetCompliance aggregates the latest check results of all active devices.
+func (s *Server) fleetCompliance(ctx context.Context) (fleetStats, error) {
+	var fs fleetStats
+	rows, err := s.db.Query(ctx, `SELECT hostname, checks, last_seen, failing FROM devices WHERE NOT retired`)
+	if err != nil {
+		return fs, err
 	}
 	defer rows.Close()
 	checks := map[string]*checkAgg{}
@@ -540,8 +690,7 @@ func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session
 		var seen *time.Time
 		var failing int
 		if err := rows.Scan(&host, &raw, &seen, &failing); err != nil {
-			s.fail(w, err)
-			return
+			return fs, err
 		}
 		total++
 		switch {
@@ -554,8 +703,7 @@ func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session
 		}
 		var res []api.CheckResult
 		if err := json.Unmarshal(raw, &res); err != nil {
-			s.fail(w, err)
-			return
+			return fs, err
 		}
 		for _, c := range res {
 			a := checks[c.ID]
@@ -577,8 +725,7 @@ func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session
 		}
 	}
 	if err := rows.Err(); err != nil {
-		s.fail(w, err)
-		return
+		return fs, err
 	}
 	var list []*checkAgg
 	controls := map[string]*controlAgg{}
@@ -610,10 +757,8 @@ func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session
 		}
 		return ctl[i].Control < ctl[j].Control
 	})
-	s.render(w, sess, "compliance", map[string]any{
-		"Checks": list, "Controls": ctl, "Total": total, "Compliant": compliant, "Stale": stale,
-		"NonCompliant": total - compliant - stale - pending, "Pending": pending, "StaleHours": int(s.cfg.StaleAfter.Hours()),
-	})
+	return fleetStats{Checks: list, Controls: ctl, Total: total, Compliant: compliant, Stale: stale, Pending: pending,
+		Noncompl: total - compliant - stale - pending}, nil
 }
 
 // ---- audit ----

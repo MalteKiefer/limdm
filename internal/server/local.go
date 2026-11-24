@@ -152,10 +152,21 @@ func (l *limiter) allow(key string, max int, window time.Duration) bool {
 	return true
 }
 
+// clientIP returns the peer address. Only a reverse proxy on loopback (the
+// supported setup without an own TLS certificate) may name the client via
+// X-Forwarded-For; the last entry is the one that proxy appended.
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			if fwd := net.ParseIP(strings.TrimSpace(parts[len(parts)-1])); fwd != nil {
+				return fwd.String()
+			}
+		}
 	}
 	return host
 }
@@ -228,6 +239,7 @@ func (s *Server) checkLocal(ctx context.Context, name, password, code, ip string
 			return "", "", "", "", qerr
 		}
 		if lockedUntil != nil && time.Now().Before(*lockedUntil) {
+			checkPassword(dummyHash, password) // same timing as an active account
 			return localPrefix + name, result, ip, "account locked", nil
 		}
 		pwOK := checkPassword(hash, password)

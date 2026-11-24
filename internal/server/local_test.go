@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -57,5 +58,19 @@ func TestLimiter(t *testing.T) {
 	}
 	if l.allow("a", 3, time.Minute) || !l.allow("b", 3, time.Minute) {
 		t.Fatal("limit not per key")
+	}
+}
+
+func TestClientIP(t *testing.T) {
+	r := httptest.NewRequest("POST", "/login/local", nil)
+	r.RemoteAddr = "203.0.113.9:4000"
+	r.Header.Set("X-Forwarded-For", "10.0.0.1")
+	if got := clientIP(r); got != "203.0.113.9" {
+		t.Fatalf("header from a non proxy peer trusted: %s", got)
+	}
+	r.RemoteAddr = "127.0.0.1:4000"
+	r.Header.Set("X-Forwarded-For", "1.2.3.4, 198.51.100.7")
+	if got := clientIP(r); got != "198.51.100.7" {
+		t.Fatalf("loopback proxy: got %s", got)
 	}
 }

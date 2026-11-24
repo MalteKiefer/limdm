@@ -166,7 +166,9 @@ func TestIntegration(t *testing.T) {
 	}
 
 	status := &api.Status{
-		Inventory: api.Inventory{Hostname: "laptop1", OSName: "Debian GNU/Linux 12", Arch: "amd64"},
+		Inventory: api.Inventory{Hostname: "laptop1", OSName: "Debian GNU/Linux 12", Arch: "amd64", MemoryMB: 16384, Desktop: "GNOME 43",
+			Disks:   []api.Disk{{Name: "/dev/nvme0n1", Model: "Test SSD", SizeGB: 512, Type: "nvme"}},
+			Volumes: []api.Volume{{Device: "/dev/mapper/root", Mount: "/", FS: "ext4", SizeGB: 500, FreeGB: 40, Encrypted: true}}},
 		Checks: []api.CheckResult{
 			{ID: "disk.encryption", Title: "LUKS", Level: 1, Status: "fail", Detail: "=evil", Refs: api.Refs{BSI: []string{"CON.1"}, ISO: []string{"A.8.24"}}},
 			{ID: "firewall.active", Title: "FW", Level: 1, Status: "pass", Refs: api.Refs{ISO: []string{"A.8.20"}}},
@@ -223,7 +225,11 @@ func TestIntegration(t *testing.T) {
 		Results: []api.CommandResult{{ID: cr.Commands[0].ID, OK: true, Output: "ok"}}, Events: []string{"remediated kernel.aslr"}}, nil)
 
 	// every admin page renders
-	for _, p := range []string{"/", "/devices/" + er.DeviceID, "/compliance", "/blueprints", "/blueprints/" + bpID, "/blueprints/new", "/tokens", "/audit"} {
+	pages := []string{"/", "/devices", "/devices?status=non-compliant&q=laptop", "/compliance", "/blueprints", "/blueprints/" + bpID, "/blueprints/new", "/tokens", "/audit"}
+	for _, tab := range []string{"overview", "hardware", "software", "compliance", "declarations", "commands"} {
+		pages = append(pages, "/devices/"+er.DeviceID+"?tab="+tab+"&q=open")
+	}
+	for _, p := range pages {
 		if code, body := ui("GET", p, nil, auditor); code != 200 {
 			t.Fatalf("GET %s: %d %s", p, code, body)
 		}
@@ -235,7 +241,7 @@ func TestIntegration(t *testing.T) {
 	if !strings.Contains(body, "disk.encryption") || !strings.Contains(body, "'=evil") || !strings.Contains(body, "A.8.24") {
 		t.Fatalf("compliance export:\n%s", body)
 	}
-	if _, body := ui("GET", "/devices/"+er.DeviceID, nil, auditor); !strings.Contains(body, "com.limdm.compliance") {
+	if _, body := ui("GET", "/devices/"+er.DeviceID+"?tab=declarations", nil, auditor); !strings.Contains(body, "com.limdm.compliance") {
 		t.Fatal("device page must list declarations")
 	}
 
