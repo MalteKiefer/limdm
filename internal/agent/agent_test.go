@@ -182,3 +182,14 @@ func TestFetchPinnedCA(t *testing.T) {
 		t.Fatal("wrong fingerprint accepted")
 	}
 }
+
+func TestNftDropsInput(t *testing.T) {
+	accept := "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy accept;\n\t\tiifname \"wt0\" accept\n\t}\n}"
+	drop := "table inet limdm_fw {\n\tchain input {\n\t\ttype filter hook input priority filter - 10; policy drop;\n\t}\n}"
+	if nftDropsInput(accept) {
+		t.Fatal("accept policy counted as firewall")
+	}
+	if !nftDropsInput(accept + "\n" + drop) {
+		t.Fatal("drop policy chain not recognised")
+	}
+}

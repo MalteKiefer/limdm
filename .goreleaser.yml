@@ -84,7 +84,11 @@ nfpms:
       - src: packaging/server.env.example
         dst: /etc/limdm-server/server.env
         type: config|noreplace
-        file_info: {mode: 0o600}
+        file_info: {mode: 0o640}
+      - src: packaging/limdm-server.sysusers
+        dst: /usr/lib/sysusers.d/limdm-server.conf
+    scripts:
+      postinstall: packaging/server-postinstall.sh
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
