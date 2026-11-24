@@ -655,11 +655,7 @@ func (a *Agent) renewIdentity(ctx context.Context) {
 	if err != nil || c.Leaf == nil || time.Until(c.Leaf.NotAfter) > renewBefore {
 		return
 	}
-	if time.Now().After(c.Leaf.NotAfter) {
-		a.log.Error("client certificate expired, the server rejects it; re-enroll with: limdm-agent enroll --server URL --fingerprint FP --token TOKEN",
-			"expired", c.Leaf.NotAfter)
-		return
-	}
+	expired := time.Now().After(c.Leaf.NotAfter)
 	keyPEM, csr, err := newCSR()
 	if err != nil {
 		a.log.Error("renew", "err", err)
@@ -668,6 +664,11 @@ func (a *Agent) renewIdentity(ctx context.Context) {
 	var resp api.EnrollResponse
 	if err := a.post(ctx, "/api/v1/renew", api.RenewRequest{CSR: csr}, &resp); err != nil {
 		a.event("certificate renewal failed: %v", err)
+		if expired {
+			// the server accepts expired certificates for renewal only within a grace period
+			a.log.Error("client certificate expired and renewal failed; re-enroll with: limdm-agent enroll --server URL --fingerprint FP --token TOKEN",
+				"expired", c.Leaf.NotAfter)
+		}
 		return
 	}
 	if _, err := writeIfChanged(identityFile, string(keyPEM)+resp.Cert, 0o600); err != nil {

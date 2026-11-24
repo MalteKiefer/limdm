@@ -60,6 +60,10 @@ before applying them.
 * **Revocation without CRLs:** the server accepts only the certificate serial currently
   registered for a device. Retiring or rotating revokes the old certificate at once.
   Certificates last 90 days and rotate automatically 30 days before expiry, with a new key.
+  A device that was offline past expiry may still renew for 180 days; the TLS handshake
+  proves possession of the key and the serial must still be the registered one. Client
+  certificates are verified against the device CA by the server itself, not only in the
+  handshake, so this exception applies to the renewal endpoint alone.
 * **Admin UI** over HTTPS only (without its own certificate it binds to loopback only,
   behind a local TLS proxy). OIDC with PKCE, nonce, `email_verified` and domain checks.
   Roles `admin` and `auditor` (read only). HMAC signed sessions, 30 min idle and 8 h

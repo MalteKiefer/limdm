@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	_ "embed"
 	"encoding/base64"
 	"encoding/binary"
@@ -231,14 +232,16 @@ func (s *Server) AgentHandler() http.Handler {
 		w.Write(s.ca.pem)
 	})
 	mux.HandleFunc("POST /api/v1/enroll", s.enroll)
-	mux.HandleFunc("POST /api/v1/renew", s.deviceAuth(s.renew))
-	mux.HandleFunc("POST /api/v1/checkin", s.deviceAuth(s.checkin))
-	mux.HandleFunc("GET /api/v1/releases/{file}", s.deviceAuth(s.release))
+	mux.HandleFunc("POST /api/v1/renew", s.deviceAuth(s.renew, true))
+	mux.HandleFunc("POST /api/v1/checkin", s.deviceAuth(s.checkin, false))
+	mux.HandleFunc("GET /api/v1/releases/{file}", s.deviceAuth(s.release, false))
 	return securityHeaders(mux)
 }
 
-// AgentTLSConfig: TLS 1.3 only, server certificate from the device CA, client
-// certificates verified against the device CA.
+// AgentTLSConfig: TLS 1.3 only, server certificate from the device CA. The
+// handshake requests the client certificate and proves possession of its key;
+// deviceAuth verifies it against the device CA, so renewal can accept an
+// expired certificate.
 func (s *Server) AgentTLSConfig() (*tls.Config, error) {
 	u, _ := url.Parse(s.cfg.AgentURL)
 	cert, err := s.ca.serverCert([]string{u.Hostname()})
@@ -248,7 +251,7 @@ func (s *Server) AgentTLSConfig() (*tls.Config, error) {
 	return &tls.Config{
 		MinVersion:   tls.VersionTLS13,
 		Certificates: []tls.Certificate{cert},
-		ClientAuth:   tls.VerifyClientCertIfGiven,
+		ClientAuth:   tls.RequestClientCert,
 		ClientCAs:    s.ca.pool(),
 	}, nil
 }
@@ -290,18 +293,40 @@ type ctxKey int
 
 const deviceKey ctxKey = 1
 
+// expiredRenewGrace is how long after expiry a device may still renew, so a
+// laptop that was offline for a while does not need a new enrollment.
+const expiredRenewGrace = 180 * 24 * time.Hour
+
+// verifyDevice checks the client certificate against the device CA. With
+// allowExpired, a certificate that expired less than expiredRenewGrace ago is
+// verified as of its last valid minute.
+func (s *Server) verifyDevice(r *http.Request, allowExpired bool) (*x509.Certificate, error) {
+	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+		return nil, errors.New("client certificate required")
+	}
+	leaf := r.TLS.PeerCertificates[0]
+	opts := x509.VerifyOptions{Roots: s.ca.pool(), KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}
+	if now := time.Now(); allowExpired && now.After(leaf.NotAfter) && now.Sub(leaf.NotAfter) < expiredRenewGrace {
+		opts.CurrentTime = leaf.NotAfter.Add(-time.Minute)
+	}
+	if _, err := leaf.Verify(opts); err != nil {
+		return nil, err
+	}
+	return leaf, nil
+}
+
 // deviceAuth accepts only the certificate currently registered for the device,
 // so retiring a device or renewing its certificate revokes the old one at once.
-func (s *Server) deviceAuth(next http.HandlerFunc) http.HandlerFunc {
+func (s *Server) deviceAuth(next http.HandlerFunc, allowExpired bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.TLS == nil || len(r.TLS.VerifiedChains) == 0 {
-			http.Error(w, "client certificate required", http.StatusUnauthorized)
+		leaf, err := s.verifyDevice(r, allowExpired)
+		if err != nil {
+			http.Error(w, "valid client certificate required", http.StatusUnauthorized)
 			return
 		}
-		leaf := r.TLS.VerifiedChains[0][0]
 		id := leaf.Subject.CommonName
 		var current string
-		err := s.db.QueryRow(r.Context(), `SELECT cert_serial FROM devices WHERE id=$1 AND NOT retired`, id).Scan(&current)
+		err = s.db.QueryRow(r.Context(), `SELECT cert_serial FROM devices WHERE id=$1 AND NOT retired`, id).Scan(&current)
 		if err != nil || current != leaf.SerialNumber.Text(16) {
 			s.log.Warn("rejected device certificate", "device", id, "serial", leaf.SerialNumber.Text(16))
 			http.Error(w, "certificate revoked", http.StatusUnauthorized)

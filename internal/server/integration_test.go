@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
 	"io"
@@ -252,7 +253,67 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("renewed certificate rejected: %d", code)
 	}
 
+	// a certificate the device CA did not issue is rejected, even with a registered serial
+	issue := func(signer *x509.Certificate, signerKey any, pub any, notAfter time.Time) (*x509.Certificate, string) {
+		tmpl := &x509.Certificate{SerialNumber: serial(), Subject: pkix.Name{CommonName: er.DeviceID},
+			NotBefore: notAfter.Add(-90 * 24 * time.Hour), NotAfter: notAfter,
+			KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}
+		if signer == nil {
+			tmpl.IsCA, tmpl.BasicConstraintsValid, tmpl.KeyUsage = true, true, tmpl.KeyUsage|x509.KeyUsageCertSign
+			signer = tmpl
+		}
+		der, err := x509.CreateCertificate(rand.Reader, tmpl, signer, pub, signerKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, _ := x509.ParseCertificate(der)
+		return c, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	}
+	setSerial := func(c *x509.Certificate) {
+		if _, err := db.Exec(ctx, `UPDATE devices SET cert_serial=$2 WHERE id=$1`, er.DeviceID, c.SerialNumber.Text(16)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	foreign, foreignPEM := issue(nil, key2, &key2.PublicKey, time.Now().Add(time.Hour))
+	setSerial(foreign)
+	if code := call(clientFor(key2, foreignPEM), "/api/v1/checkin", api.CheckinRequest{}, nil); code != http.StatusUnauthorized {
+		t.Fatalf("foreign CA accepted: %d", code)
+	}
+	if code := call(clientFor(key2, foreignPEM), "/api/v1/renew", api.RenewRequest{CSR: csr2}, nil); code != http.StatusUnauthorized {
+		t.Fatalf("foreign CA accepted for renewal: %d", code)
+	}
+
+	// an expired certificate may renew within the grace period, but not check in
+	// expired 30 minutes ago: the test CA itself is only one hour old
+	expiredCert, expiredPEM := issue(ca.cert, ca.key, &key2.PublicKey, time.Now().Add(-30*time.Minute))
+	setSerial(expiredCert)
+	devExpired := clientFor(key2, expiredPEM)
+	if code := call(devExpired, "/api/v1/checkin", api.CheckinRequest{}, nil); code != http.StatusUnauthorized {
+		t.Fatalf("expired certificate accepted for check in: %d", code)
+	}
+	key3, csr3 := newIdentity()
+	var rr3 api.EnrollResponse
+	if code := call(devExpired, "/api/v1/renew", api.RenewRequest{CSR: csr3}, &rr3); code != 200 {
+		t.Fatalf("expired certificate within grace could not renew: %d", code)
+	}
+	dev2 = clientFor(key3, rr3.Cert)
+	if code := call(dev2, "/api/v1/checkin", api.CheckinRequest{}, nil); code != 200 {
+		t.Fatalf("certificate renewed from expired one rejected: %d", code)
+	}
+	ancient, ancientPEM := issue(ca.cert, ca.key, &key3.PublicKey, time.Now().Add(-expiredRenewGrace-time.Hour))
+	setSerial(ancient)
+	if code := call(clientFor(key3, ancientPEM), "/api/v1/renew", api.RenewRequest{CSR: csr3}, nil); code != http.StatusUnauthorized {
+		t.Fatalf("certificate beyond grace accepted for renewal: %d", code)
+	}
+
 	// retiring revokes access
+	_, freshPEM := issue(ca.cert, ca.key, &key3.PublicKey, time.Now().Add(time.Hour))
+	fresh, _ := x509.ParseCertificate(func() []byte { b, _ := pem.Decode([]byte(freshPEM)); return b.Bytes }())
+	setSerial(fresh)
+	dev2 = clientFor(key3, freshPEM)
+	if code := call(dev2, "/api/v1/checkin", api.CheckinRequest{}, nil); code != 200 {
+		t.Fatalf("fresh certificate rejected: %d", code)
+	}
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/retire", url.Values{}, adminSess); code != http.StatusSeeOther {
 		t.Fatalf("retire: %d", code)
 	}
