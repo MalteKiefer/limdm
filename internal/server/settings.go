@@ -172,7 +172,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, sess sessi
 
 func (s *Server) renderSettings(w http.ResponseWriter, sess session, set Settings, msg, errMsg string) {
 	s.render(w, sess, "settings", map[string]any{"Set": set, "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
-		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL})
+		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": s.webhookSecretHex()})
 }
 
 func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess session) {

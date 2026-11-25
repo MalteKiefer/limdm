@@ -5,10 +5,13 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"io"
@@ -23,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/maltekiefer/limdm/internal/api"
@@ -688,5 +692,103 @@ func TestMigrationFromPriorityBlueprints(t *testing.T) {
 	}
 	if err := migrate(ctx, db); err != nil {
 		t.Fatal("migrations must be idempotent: ", err)
+	}
+}
+
+// TestCompliancePolicy walks a device through grace, notification, lock and unlock.
+func TestCompliancePolicy(t *testing.T) {
+	dsn := os.Getenv("LIMDM_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("LIMDM_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	db.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, failing) VALUES ('d1', 's', now(), 'pc1', 2)`)
+	s := &Server{db: db, log: slog.New(slog.NewTextHandler(io.Discard, nil)), cfg: Config{PublicURL: "https://mdm.test", SessionKey: bytes.Repeat([]byte{1}, 32)}}
+	pol := api.Compliance{Level: 1, GraceHours: 1, Notify: true, LockAfterHours: 2, UnlockWhenCompliant: true}
+	t0 := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+	step := func(at time.Time) *webhookEvent {
+		t.Helper()
+		tx, _ := db.Begin(ctx)
+		ev, err := s.enforceCompliance(ctx, tx, "d1", pol, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx.Commit(ctx)
+		return ev
+	}
+	commands := func() []string {
+		rows, _ := db.Query(ctx, `SELECT type FROM commands WHERE device_id='d1' ORDER BY id`)
+		out, _ := pgx.CollectRows(rows, pgx.RowTo[string])
+		return out
+	}
+	if ev := step(t0); ev != nil {
+		t.Fatal("no webhook inside the grace period")
+	}
+	if ev := step(t0.Add(30 * time.Minute)); ev != nil {
+		t.Fatal("still in grace")
+	}
+	ev := step(t0.Add(61 * time.Minute))
+	if ev == nil || ev.Failing != 2 || !ev.Since.Equal(t0) {
+		t.Fatalf("webhook after grace: %+v", ev)
+	}
+	if step(t0.Add(70*time.Minute)) != nil {
+		t.Fatal("webhook must be sent once per episode")
+	}
+	if len(commands()) != 0 {
+		t.Fatal("no lock before lock_after_hours")
+	}
+	step(t0.Add(2 * time.Hour))
+	step(t0.Add(3 * time.Hour))
+	if got := commands(); !slices.Equal(got, []string{"lock"}) {
+		t.Fatalf("lock queued once: %v", got)
+	}
+	db.Exec(ctx, `UPDATE devices SET failing=0 WHERE id='d1'`)
+	step(t0.Add(4 * time.Hour))
+	var since *time.Time
+	var locked bool
+	db.QueryRow(ctx, `SELECT noncompliant_since, auto_locked FROM devices WHERE id='d1'`).Scan(&since, &locked)
+	if got := commands(); !slices.Equal(got, []string{"lock", "unlock"}) || since != nil || locked {
+		t.Fatalf("after recovery: cmds=%v since=%v locked=%v", got, since, locked)
+	}
+	var audited int
+	db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE actor='policy'`).Scan(&audited)
+	if audited != 3 {
+		t.Fatalf("notify, lock and unlock must be audited, got %d", audited)
+	}
+}
+
+func TestWebhookSignature(t *testing.T) {
+	got := make(chan *http.Request, 1)
+	bodies := make(chan []byte, 1)
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got <- r
+		bodies <- b
+	}))
+	defer ts.Close()
+	s := &Server{cfg: Config{SessionKey: bytes.Repeat([]byte{2}, 32)}, hooks: ts.Client(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s.rt.Store(&runtimeState{set: Settings{WebhookURL: ts.URL}})
+	s.sendWebhook(&webhookEvent{Type: "device.noncompliant", DeviceID: "d1"})
+	select {
+	case r := <-got:
+		body := <-bodies
+		mac := hmac.New(sha256.New, s.webhookKey())
+		mac.Write(body)
+		if r.Header.Get("X-LiMDM-Signature") != "sha256="+hex.EncodeToString(mac.Sum(nil)) {
+			t.Fatal("signature does not verify")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("webhook not delivered")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -216,7 +217,7 @@ func (s *Server) googleConfigure(w http.ResponseWriter, r *http.Request, sess se
 	g.AdminEmail = strings.ToLower(strings.TrimSpace(r.FormValue("admin_email")))
 	if key := strings.TrimSpace(r.FormValue("service_account")); key != "" {
 		var sa serviceAccount
-		if err := json.Unmarshal([]byte(key), &sa); err != nil || sa.ClientEmail == "" || sa.PrivateKey == "" || !strings.HasPrefix(sa.TokenURI, "https://") {
+		if err := json.Unmarshal([]byte(key), &sa); err != nil || sa.ClientEmail == "" || sa.PrivateKey == "" {
 			s.renderDirectory(w, r, sess, "", "", "paste the service account JSON key file")
 			return
 		}
@@ -263,6 +264,10 @@ func (s *Server) googleSyncLoop(ctx context.Context) {
 	}
 }
 
+// googleTokenURL is pinned: the token_uri inside an uploaded key is ignored,
+// so a crafted key cannot send the signed assertion to another host.
+const googleTokenURL = "https://oauth2.googleapis.com/token" //nolint:gosec // public endpoint URL, not a credential
+
 const googleScopes = "https://www.googleapis.com/auth/admin.directory.user.readonly " +
 	"https://www.googleapis.com/auth/admin.directory.group.readonly https://www.googleapis.com/auth/admin.directory.group.member.readonly"
 
@@ -280,7 +285,7 @@ func (s *Server) syncGoogle(ctx context.Context) (string, error) {
 		return "", err
 	}
 	conf := &jwt.Config{Email: sa.ClientEmail, PrivateKey: []byte(sa.PrivateKey), PrivateKeyID: sa.PrivateKeyID,
-		Scopes: strings.Fields(googleScopes), TokenURL: sa.TokenURI, Subject: g.AdminEmail}
+		Scopes: strings.Fields(googleScopes), TokenURL: googleTokenURL, Subject: g.AdminEmail}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	client := conf.Client(ctx)
@@ -399,7 +404,9 @@ func googleList[T any](ctx context.Context, c *http.Client, base, field string) 
 			return nil, err
 		}
 		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body[:min(len(body), 300)])))
+			// upstream bodies go to the log only, never to the UI
+			slog.Default().Error("google directory api", "status", resp.Status, "body", string(body[:min(len(body), 500)]))
+			return nil, fmt.Errorf("google directory API returned %s", resp.Status)
 		}
 		var res map[string]json.RawMessage
 		if err := json.Unmarshal(body, &res); err != nil {

@@ -29,6 +29,8 @@
 </nav>
 
 {{if eq .Tab "overview"}}
+{{if .D.AutoLocked}}<div class="notice error" role="status"><strong>Locked by compliance policy.</strong> Logins are blocked until the device is compliant again or an admin unlocks it.</div>{{end}}
+{{if .Since}}<div class="notice">Failing compliance since {{fmtTime (derefTime .Since)}}{{if .D.GraceUntil}}; grace period {{if eq .D.Status "in grace"}}ends{{else}}ended{{end}} {{fmtTime (derefTime .D.GraceUntil)}}{{end}}.</div>{{end}}
 <div class="stats">
   <div class="stat"><div class="label">Failing checks</div><div class="value">{{.Failing}}</div><div class="hint">of {{len .Checks}} evaluated</div></div>
   <div class="stat"><div class="label">Memory</div><div class="value">{{gib .Inv.MemoryMB}}</div><div class="hint">{{if .Inv.SwapMB}}swap {{gib .Inv.SwapMB}}{{else}}no swap{{end}}</div></div>

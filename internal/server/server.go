@@ -175,6 +175,7 @@ type Server struct {
 	log   *slog.Logger
 	limit limiter
 	rt    atomic.Pointer[runtimeState] // settings editable in the UI and the OIDC client built from them
+	hooks *http.Client                 // webhook client; nil uses http.DefaultClient (tests inject one)
 }
 
 func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
@@ -514,6 +515,12 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	if resp.DeclarationsToken != req.DeclarationsToken {
 		resp.Declarations = decls
 	}
+	pol, _ := api.Compose(decls)
+	event, err := s.enforceCompliance(ctx, tx, id, pol.Compliance, time.Now().UTC())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	if err := json.Unmarshal(users, &resp.Users); err != nil {
 		s.fail(w, err)
 		return
@@ -535,6 +542,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	s.sendWebhook(event)
 	if rel, ok := s.releaseFor(req.Arch); ok && api.NewerVersion(rel.Version, req.AgentVersion) {
 		resp.AgentUpdate = &rel
 	}

@@ -76,6 +76,11 @@ CREATE TABLE IF NOT EXISTS blueprint_group_assignments (
     blueprint_id BIGINT NOT NULL REFERENCES blueprints(id) ON DELETE CASCADE,
     priority     INT NOT NULL DEFAULT 100
 );
+-- Compliance policy state: since when failing, end of grace, last webhook, policy lock.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS noncompliant_since TIMESTAMPTZ;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS grace_until TIMESTAMPTZ;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS notified_at TIMESTAMPTZ;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS auto_locked BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS primary_user_id BIGINT REFERENCES dir_users(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS schema_migrations (

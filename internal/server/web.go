@@ -44,11 +44,12 @@ var pages = func() map[string]*template.Template {
 				return fmt.Sprintf("%d d ago", int(d.Hours()/24))
 			}
 		},
-		"frac":  func(v uint64, pct uint64) uint64 { return v * pct / 100 },
-		"inc":   func(n int) int { return n + 1 },
-		"dec":   func(n int) int { return n - 1 },
-		"list":  func(v ...string) []string { return v },
-		"deref": func(p *int64) int64 { return *p },
+		"frac":      func(v uint64, pct uint64) uint64 { return v * pct / 100 },
+		"inc":       func(n int) int { return n + 1 },
+		"dec":       func(n int) int { return n - 1 },
+		"list":      func(v ...string) []string { return v },
+		"deref":     func(p *int64) int64 { return *p },
+		"derefTime": func(p *time.Time) time.Time { return *p },
 		"typeLabel": func(t string) string {
 			if l, ok := typeLabels[t]; ok {
 				return l
@@ -191,6 +192,8 @@ type deviceRow struct {
 	ID, Hostname, OS, AgentVersion, Blueprints string
 	Desktop                                    string
 	MemoryMB                                   uint64
+	GraceUntil                                 *time.Time
+	AutoLocked                                 bool
 	Failing                                    int
 	Checks                                     int
 	LastSeen                                   *time.Time
@@ -206,6 +209,8 @@ func (s *Server) status(d *deviceRow) {
 		d.Status, d.Class = "pending", "warn"
 	case time.Since(*d.LastSeen) > s.staleAfter():
 		d.Status, d.Class = "stale", "warn"
+	case d.Failing > 0 && d.GraceUntil != nil && time.Now().Before(*d.GraceUntil):
+		d.Status, d.Class = "in grace", "warn"
 	case d.Failing > 0:
 		d.Status, d.Class = "non-compliant", "bad"
 	default:
@@ -217,14 +222,14 @@ func (s *Server) listDevices(ctx context.Context) ([]deviceRow, error) {
 	rows, err := s.db.Query(ctx, `SELECT d.id, d.hostname, coalesce(d.inventory->>'os_name',''), d.agent_version,
 		coalesce((SELECT b.name FROM blueprints b WHERE b.id=d.blueprint_id),'default') || coalesce(' · ' || nullif(array_to_string(d.tags, ', '), ''), ''),
 		coalesce(d.inventory->>'desktop',''), coalesce((d.inventory->>'memory_mb')::bigint, 0),
-		d.failing, jsonb_array_length(d.checks), d.last_seen, d.retired
+		d.failing, jsonb_array_length(d.checks), d.last_seen, d.retired, d.grace_until, d.auto_locked
 		FROM devices d ORDER BY d.retired, d.hostname`)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (deviceRow, error) {
 		var d deviceRow
-		err := row.Scan(&d.ID, &d.Hostname, &d.OS, &d.AgentVersion, &d.Blueprints, &d.Desktop, &d.MemoryMB, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired)
+		err := row.Scan(&d.ID, &d.Hostname, &d.OS, &d.AgentVersion, &d.Blueprints, &d.Desktop, &d.MemoryMB, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &d.GraceUntil, &d.AutoLocked)
 		s.status(&d)
 		return d, err
 	})
@@ -250,7 +255,7 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 		shown = append(shown, d)
 	}
 	s.render(w, sess, "devices", map[string]any{"Devices": shown, "Total": len(list), "Counts": counts, "Q": q, "Status": status,
-		"Statuses": []string{"compliant", "non-compliant", "stale", "pending", "retired"}})
+		"Statuses": []string{"compliant", "in grace", "non-compliant", "stale", "pending", "retired"}})
 }
 
 // overview is the landing page: fleet state, OS mix, weakest controls, recent activity.
@@ -307,7 +312,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 		return
 	}
 	donut := donutChart([]donutPart{{"compliant", counts["compliant"], "ok"}, {"non-compliant", counts["non-compliant"], "bad"},
-		{"stale", counts["stale"], "warn"}, {"pending", counts["pending"], "na"}})
+		{"in grace", counts["in grace"], "warn"}, {"stale", counts["stale"], "warn"}, {"pending", counts["pending"], "na"}})
 	s.render(w, sess, "overview", map[string]any{"Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
 		"Recent": recent, "StaleHours": s.settings().StaleHours})
 }
@@ -359,9 +364,10 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 	var d deviceRow
 	var inv, checks, decl, users, pkgs []byte
 	var enrolled, certExp time.Time
+	var since *time.Time
 	err := s.db.QueryRow(ctx, `SELECT id, hostname, agent_version, failing, jsonb_array_length(checks), last_seen, retired,
-		inventory, checks, decl_status, users, packages, enrolled_at, cert_not_after FROM devices WHERE id=$1`, id).
-		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &pkgs, &enrolled, &certExp)
+		inventory, checks, decl_status, users, packages, enrolled_at, cert_not_after, grace_until, auto_locked, noncompliant_since FROM devices WHERE id=$1`, id).
+		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &pkgs, &enrolled, &certExp, &d.GraceUntil, &d.AutoLocked, &since)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -492,7 +498,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
 		"CommandTypes": api.CommandTypes,
 		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab,
-		"Resolved": res, "Tags": strings.Join(tags, ", "), "Primary": primary, "People": people,
+		"Resolved": res, "Tags": strings.Join(tags, ", "), "Primary": primary, "People": people, "Since": since,
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "software", "compliance", "declarations", "commands"},
 	})
 }

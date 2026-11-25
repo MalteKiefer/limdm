@@ -18,6 +18,7 @@
         <ul class="legend">
           <li><span class="dot ok"></span>Compliant<b>{{index .Counts "compliant"}}</b></li>
           <li><span class="dot bad"></span>Non-compliant<b>{{index .Counts "non-compliant"}}</b></li>
+          <li><span class="dot warn"></span>In grace period<b>{{index .Counts "in grace"}}</b></li>
           <li><span class="dot warn"></span>Stale<b>{{index .Counts "stale"}}</b></li>
           <li><span class="dot na"></span>Pending<b>{{index .Counts "pending"}}</b></li>
         </ul>

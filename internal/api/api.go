@@ -50,7 +50,7 @@ const (
 // Types lists every declaration type with a short description for the UI.
 var Types = map[string]string{
 	TypeAgent:      `{"checkin_seconds": 300}`,
-	TypeCompliance: `{"level": 1, "remediate": true, "exclude": []}`,
+	TypeCompliance: `{"level": 1, "remediate": true, "exclude": [], "advisory": ["boot.secureboot"], "grace_hours": 72, "notify": true, "lock_after_hours": 0, "unlock_when_compliant": true}`,
 	TypeUpdates:    `{"mode": "security", "window": "02:00-05:00", "reboot": false}`,
 	TypePackages:   `{"install": [], "remove": []}`,
 	TypeServices:   `{"enable": [], "disable": []}`,
@@ -83,9 +83,15 @@ type agentPayload struct {
 }
 
 type Compliance struct {
-	Level     int      `json:"level"`     // 1 = CIS Level 1 baseline, 2 = Level 2 strict
-	Remediate bool     `json:"remediate"` // agent fixes failing checks that have an automatic fix
-	Exclude   []string `json:"exclude"`   // check IDs accepted as risk (documented exception)
+	Level     int      `json:"level"`              // 1 = CIS Level 1 baseline, 2 = Level 2 strict
+	Remediate bool     `json:"remediate"`          // agent fixes failing checks that have an automatic fix
+	Exclude   []string `json:"exclude"`            // check IDs accepted as risk (documented exception)
+	Advisory  []string `json:"advisory,omitempty"` // reported, but not counted against compliance
+	// Evaluated by the server:
+	GraceHours          int  `json:"grace_hours,omitempty"`      // time to fix before the device counts as non-compliant
+	Notify              bool `json:"notify,omitempty"`           // call the compliance webhook when the grace period ends
+	LockAfterHours      int  `json:"lock_after_hours,omitempty"` // lock the device after this long non-compliant (0 = never)
+	UnlockWhenCompliant bool `json:"unlock_when_compliant,omitempty"`
 }
 
 type Updates struct {
@@ -188,8 +194,20 @@ func (d Declaration) apply(p *Policy) error {
 		if err := strict(d.Payload, &p.Compliance); err != nil {
 			return err
 		}
-		if p.Compliance.Level != 1 && p.Compliance.Level != 2 {
+		c := p.Compliance
+		if c.Level != 1 && c.Level != 2 {
 			bad("level must be 1 or 2")
+		}
+		if c.GraceHours < 0 || c.GraceHours > 2160 || c.LockAfterHours < 0 || c.LockAfterHours > 2160 {
+			bad("grace_hours and lock_after_hours must be 0..2160")
+		}
+		if c.LockAfterHours > 0 && c.LockAfterHours < c.GraceHours {
+			bad("lock_after_hours must not be shorter than grace_hours")
+		}
+		for _, id := range append(slices.Clone(c.Exclude), c.Advisory...) {
+			if !identRe.MatchString(id) {
+				bad("invalid check ID %q", id)
+			}
 		}
 	case TypeUpdates:
 		if err := strict(d.Payload, &p.Updates); err != nil {
