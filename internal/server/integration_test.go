@@ -127,6 +127,11 @@ func TestIntegration(t *testing.T) {
 	if code, _ := ui("POST", "/tokens", url.Values{"uses": {"1"}, "days": {"1"}}, auditor); code != http.StatusForbidden {
 		t.Fatalf("auditor must be read only, got %d", code)
 	}
+	for _, path := range []string{"/software/import", "/software/apps", "/software/settings", "/software/requests/1/approve", "/software/apps/firefox/delete"} {
+		if code, _ := ui("POST", path, url.Values{"flatpak": {"org.example.App"}}, auditor); code != http.StatusForbidden {
+			t.Fatalf("auditor must not change the catalog: %s %d", path, code)
+		}
+	}
 	bad := url.Values{"uses": {"1"}, "days": {"1"}}
 	if code, _ := ui("POST", "/tokens", bad, adminSess); code != 200 {
 		t.Fatal("sanity")
