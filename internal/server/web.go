@@ -3,8 +3,10 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"embed"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,9 +29,26 @@ var webFS embed.FS
 
 var staticFS, _ = fs.Sub(webFS, "web")
 
-var pages = map[string]map[string]*template.Template{"en": parsePages("en"), "de": parsePages("de")}
+// dateFormats are the date and time notations a user can pick in the profile.
+var dateFormats = map[string]string{
+	"iso": "2006-01-02 15:04",
+	"de":  "02.01.2006 15:04",
+	"uk":  "02/01/2006 15:04",
+	"us":  "01/02/2006 3:04 PM",
+}
 
-func parsePages(lang string) map[string]*template.Template {
+// pages holds the parsed templates per language and date format ("de/iso").
+var pages = func() map[string]map[string]*template.Template {
+	m := map[string]map[string]*template.Template{}
+	for _, lang := range []string{"en", "de"} {
+		for f, layout := range dateFormats {
+			m[lang+"/"+f] = parsePages(lang, layout)
+		}
+	}
+	return m
+}()
+
+func parsePages(lang, layout string) map[string]*template.Template {
 	T := func(s string) string { return translate(lang, s) }
 	funcs := template.FuncMap{
 		"t":       T,
@@ -71,7 +90,7 @@ func parsePages(lang string) map[string]*template.Template {
 		},
 		"join":      strings.Join,
 		"hasPrefix": strings.HasPrefix,
-		"fmtTime":   func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") },
+		"fmtTime":   func(t time.Time) string { return t.Local().Format(layout) },
 		"gib": func(mb uint64) string {
 			if mb == 0 {
 				return T("n/a")
@@ -162,7 +181,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, na
 	b := s.branding()
 	data["Brand"] = map[string]any{"Name": b.Name, "Logo": len(b.Logo) > 0, "V": b.Hash}
 	var buf bytes.Buffer
-	if err := pages[requestLang(r)][name].Execute(&buf, data); err != nil {
+	if err := pages[requestLang(r)+"/"+requestDateFormat(r)][name].Execute(&buf, data); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -175,6 +194,7 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /devices", s.page(s.devices))
 	mux.HandleFunc("GET /devices/{id}", s.page(s.device))
 	mux.HandleFunc("POST /devices/{id}/command", s.helpdeskPage(s.deviceCommand))
+	mux.HandleFunc("POST /devices/{id}/agent-update", s.page(s.deviceAgentUpdate))
 	mux.HandleFunc("POST /devices/{id}/recovery", s.helpdeskPage(s.recoveryView))
 	mux.HandleFunc("GET /directory", s.page(s.adminOrAuditor(s.directoryPage)))
 	mux.HandleFunc("POST /directory/groups", s.page(s.groupAssign))
@@ -182,6 +202,10 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /directory/google", s.page(s.googleConfigure))
 	mux.HandleFunc("POST /directory/google/sync", s.page(s.googleSyncNow))
 	mux.HandleFunc("GET /users", s.page(s.adminOrAuditor(s.usersPage)))
+	mux.HandleFunc("GET /agents", s.page(s.adminOrAuditor(s.agentsPage)))
+	mux.HandleFunc("POST /agents/policy", s.page(s.agentsPolicy))
+	mux.HandleFunc("POST /agents/fetch", s.page(s.agentsFetch))
+	mux.HandleFunc("POST /agents/{version}/{op}", s.page(s.agentsRelease))
 	mux.HandleFunc("GET /profile", s.selfPage(s.profile))
 	mux.HandleFunc("POST /profile/password", s.selfPage(s.profilePassword))
 	mux.HandleFunc("POST /profile/totp", s.selfPage(s.profileTOTP))
@@ -203,6 +227,7 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /library/{id}/delete", s.page(s.libraryDelete))
 	mux.HandleFunc("GET /tokens", s.page(s.tokens))
 	mux.HandleFunc("POST /tokens", s.page(s.tokenCreate))
+	mux.HandleFunc("POST /tokens/{id}/revoke", s.page(s.tokenRevoke))
 	mux.HandleFunc("GET /compliance", s.page(s.compliance))
 	mux.HandleFunc("GET /audit", s.page(s.adminOrAuditor(s.auditPage)))
 	mux.HandleFunc("GET /export/{kind}", s.page(s.adminOrAuditor(s.export)))
@@ -216,6 +241,10 @@ type deviceRow struct {
 	MemoryMB                                   uint64
 	GraceUntil                                 *time.Time
 	AutoLocked                                 bool
+	UpdateState, UpdateVersion                 string
+	UpdateRequested                            bool
+	ExternalIP                                 string
+	Geo                                        *Geo
 	Failing                                    int
 	Checks                                     int
 	LastSeen                                   *time.Time
@@ -392,8 +421,10 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 	var enrolled, certExp time.Time
 	var since *time.Time
 	err := s.db.QueryRow(ctx, `SELECT id, hostname, agent_version, failing, jsonb_array_length(checks), last_seen, retired,
-		inventory, checks, decl_status, users, packages, enrolled_at, cert_not_after, grace_until, auto_locked, noncompliant_since FROM devices WHERE id=$1`, id).
-		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &pkgs, &enrolled, &certExp, &d.GraceUntil, &d.AutoLocked, &since)
+		inventory, checks, decl_status, users, packages, enrolled_at, cert_not_after, grace_until, auto_locked, noncompliant_since,
+		update_state, update_version, update_requested, external_ip, geo FROM devices WHERE id=$1`, id).
+		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &pkgs, &enrolled, &certExp, &d.GraceUntil, &d.AutoLocked, &since,
+			&d.UpdateState, &d.UpdateVersion, &d.UpdateRequested, &d.ExternalIP, &d.Geo)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -555,7 +586,18 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		}
 		declRows = append(declRows, row)
 	}
-	s.render(w, r, sess, "device", map[string]any{
+	encExcluded := func(string) bool { return false }
+	if tab == "hardware" {
+		if tx, err := s.db.Begin(ctx); err == nil {
+			if decls, err := effectiveDeclarations(ctx, tx, id); err == nil {
+				if pol, _ := api.Compose(decls); pol.Extra.DiskEncryption != nil {
+					encExcluded = pol.Extra.DiskEncryption.Excluded
+				}
+			}
+			_ = tx.Rollback(ctx)
+		}
+	}
+	s.render(w, r, sess, "device", map[string]any{"EncExcluded": encExcluded,
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
@@ -725,17 +767,40 @@ func (s *Server) deviceRetire(w http.ResponseWriter, r *http.Request, sess sessi
 
 // ---- enrollment tokens ----
 
+// tokenRevoke deletes an enrollment token; devices already enrolled with it stay.
+func (s *Server) tokenRevoke(w http.ResponseWriter, r *http.Request, sess session) {
+	id, err := hex.DecodeString(r.PathValue("id"))
+	if err != nil || len(id) != sha256.Size {
+		http.NotFound(w, r)
+		return
+	}
+	err = s.auditActionFn(r.Context(), func(tx pgx.Tx) (string, string, string, string, error) {
+		var note string
+		err := tx.QueryRow(r.Context(), `DELETE FROM enroll_tokens WHERE token_hash=$1 RETURNING note`, id).Scan(&note)
+		return sess.Email, "token.revoke", r.PathValue("id")[:12], note, err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/tokens", http.StatusSeeOther)
+}
+
 func (s *Server) tokens(w http.ResponseWriter, r *http.Request, sess session) {
 	s.tokenPage(w, r, sess, "")
 }
 
 func (s *Server) tokenPage(w http.ResponseWriter, r *http.Request, sess session, created string) {
 	type tok struct {
-		Note, Blueprint, By string
-		Uses                int
-		Expires             time.Time
+		ID, Note, Blueprint, By string
+		Uses                    int
+		Expires                 time.Time
 	}
-	rows, err := s.db.Query(r.Context(), `SELECT t.note, coalesce(b.name,'default'), t.created_by, t.uses_left, t.expires_at
+	rows, err := s.db.Query(r.Context(), `SELECT encode(t.token_hash, 'hex'), t.note, coalesce(b.name,'default'), t.created_by, t.uses_left, t.expires_at
 		FROM enroll_tokens t LEFT JOIN blueprints b ON b.id=t.blueprint_id WHERE t.expires_at > now() AND t.uses_left > 0 ORDER BY t.expires_at`)
 	if err != nil {
 		s.fail(w, err)
@@ -979,7 +1044,34 @@ type auditRow struct {
 }
 
 func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session) {
-	rows, err := s.db.Query(r.Context(), `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log ORDER BY id DESC LIMIT 300`)
+	q := r.URL.Query()
+	f := map[string]string{"q": strings.TrimSpace(q.Get("q")), "actor": strings.TrimSpace(q.Get("actor")), "action": strings.TrimSpace(q.Get("action")),
+		"target": strings.TrimSpace(q.Get("target")), "from": q.Get("from"), "to": q.Get("to")}
+	where, args := []string{"true"}, []any{}
+	add := func(cond string, v any) {
+		args = append(args, v)
+		where = append(where, strings.ReplaceAll(cond, "$?", "$"+strconv.Itoa(len(args))))
+	}
+	if f["q"] != "" {
+		add(`(actor || ' ' || action || ' ' || target || ' ' || detail) ILIKE '%' || $? || '%'`, f["q"])
+	}
+	if f["actor"] != "" {
+		add(`actor ILIKE '%' || $? || '%'`, f["actor"])
+	}
+	if f["action"] != "" {
+		add(`action LIKE $? || '%'`, f["action"])
+	}
+	if f["target"] != "" {
+		add(`target = $?`, f["target"])
+	}
+	for k, cond := range map[string]string{"from": `at >= $?::date`, "to": `at < $?::date + 1`} {
+		if _, err := time.Parse("2006-01-02", f[k]); err == nil {
+			add(cond, f[k])
+		} else {
+			f[k] = ""
+		}
+	}
+	rows, err := s.db.Query(r.Context(), `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE `+strings.Join(where, " AND ")+` ORDER BY id DESC LIMIT 300`, args...)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -997,7 +1089,11 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session)
 		s.fail(w, err)
 		return
 	}
-	s.render(w, r, sess, "audit", map[string]any{"Entries": list, "BrokenAt": brokenAt})
+	var actions []string
+	if rows, err := s.db.Query(r.Context(), `SELECT DISTINCT action FROM audit_log ORDER BY 1`); err == nil {
+		actions, _ = pgx.CollectRows(rows, pgx.RowTo[string])
+	}
+	s.render(w, r, sess, "audit", map[string]any{"Entries": list, "BrokenAt": brokenAt, "F": f, "Actions": actions})
 }
 
 // verifyAudit recomputes the hash chain. Returns the first broken id or 0.

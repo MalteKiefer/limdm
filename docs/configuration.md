@@ -22,8 +22,9 @@ the environment.
 | `LIMDM_OIDC_ALLOWED_DOMAIN` | | Only accept this Google `hd` claim or email domain. |
 | `LIMDM_ADMINS`, `LIMDM_AUDITORS` | | Comma separated emails seeded as console users at start. |
 | `LIMDM_STALE_HOURS` | `24` | Hours without check in until a device counts as stale. |
-| `LIMDM_RELEASE_DIR` | | Directory with signed agent self update releases ([agent.md](agent.md#updates)). |
-| `LIMDM_RELEASE_REPO` | `MalteKiefer/limdm` | GitHub repository `/install.sh` downloads agent packages from. |
+| `LIMDM_RELEASE_DIR` | `/var/lib/limdm-server/agent-releases` | Cache of verified agent packages for updates ([agent.md](agent.md#updates)). |
+| `LIMDM_RELEASE_REPO` | `MalteKiefer/limdm` | GitHub repository for agent updates and `/install.sh`. |
+| `LIMDM_GEOIP_URL` | `https://ipwho.is/` | Location lookup for device public addresses, the IP is appended. `off` disables it ([security.md](security.md#privacy)). |
 
 The server refuses to start when OIDC and local login are both off, when OIDC is set without
 an administrator, or when the console would listen publicly without a certificate.

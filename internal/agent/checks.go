@@ -507,6 +507,25 @@ func runRebootPending(a *Agent) (string, string) {
 }
 
 func runDiskEncryption(a *Agent) (string, string) {
+	if de := a.pol.Extra.DiskEncryption; de != nil && de.RequireAll {
+		var open, ok []string
+		for _, v := range nativeVolumes() {
+			switch {
+			case de.Excluded(v.Mount):
+			case v.Encrypted:
+				ok = append(ok, v.Mount)
+			default:
+				open = append(open, v.Mount)
+			}
+		}
+		if len(open) > 0 {
+			return fail, "not encrypted: " + strings.Join(open, ", ") + " (reinstall with LUKS or exclude the mount point)"
+		}
+		if len(ok) == 0 {
+			return fail, "no encrypted volume found"
+		}
+		return pass, "on LUKS: " + strings.Join(ok, ", ")
+	}
 	src, err := sh("findmnt", "-n", "-o", "SOURCE", "/")
 	if err != nil {
 		return fail, err.Error()

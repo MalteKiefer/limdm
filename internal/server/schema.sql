@@ -283,3 +283,23 @@ CREATE TABLE IF NOT EXISTS audit_checkpoint (
     last_hash   BYTEA NOT NULL,
     verified_at TIMESTAMPTZ NOT NULL
 );
+
+-- Agent releases fetched from GitHub; devices get approved, unblocked ones.
+CREATE TABLE IF NOT EXISTS agent_releases (
+    version        TEXT PRIMARY KEY,
+    published_at   TIMESTAMPTZ NOT NULL,
+    fetched_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    sums           TEXT NOT NULL,
+    sums_sig       TEXT NOT NULL DEFAULT '',
+    approved_at    TIMESTAMPTZ,
+    approved_by    TEXT,
+    blocked        BOOLEAN NOT NULL DEFAULT false,
+    blocked_reason TEXT NOT NULL DEFAULT ''
+);
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS update_requested BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS update_state TEXT NOT NULL DEFAULT '';   -- offered, ok, failed, rolled_back
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS update_version TEXT NOT NULL DEFAULT '';
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS update_at TIMESTAMPTZ;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS external_ip TEXT NOT NULL DEFAULT '';   -- peer address of the last check in
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS geo JSONB;                              -- location of external_ip (geo.go)
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS geo_at TIMESTAMPTZ;

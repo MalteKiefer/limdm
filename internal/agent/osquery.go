@@ -262,6 +262,27 @@ func desktop() (env, dm string) {
 		env = "Xfce"
 	case hasCmd("mate-session"):
 		env = "MATE"
+	case hasCmd("cosmic-session"):
+		env = "COSMIC"
+	case hasCmd("budgie-desktop"):
+		env = "Budgie"
+	case hasCmd("lxqt-session"):
+		env = "LXQt"
+	case hasCmd("sway"):
+		env = "Sway"
+		if out, err := sh("sway", "--version"); err == nil {
+			env = "Sway " + strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "sway version"))
+		}
+	case hasCmd("Hyprland"):
+		env = "Hyprland"
+	case hasCmd("niri"):
+		env = "niri"
+	case hasCmd("river"):
+		env = "river"
+	case hasCmd("labwc"):
+		env = "labwc"
+	case hasCmd("i3"):
+		env = "i3"
 	}
 	if target, err := os.Readlink("/etc/systemd/system/display-manager.service"); err == nil {
 		dm = strings.TrimSuffix(filepath.Base(target), ".service")

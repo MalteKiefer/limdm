@@ -6,5 +6,5 @@ RefuseManualStop=yes
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/limdm-agent watchdog
+ExecStart=/usr/lib/limdm/limdm-watchdog.sh
 UMask=0077

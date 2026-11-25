@@ -8,7 +8,8 @@ osquery is a hard dependency and comes from the official osquery repository.
 
 **Enrollment** in the console creates tokens with a note, an optional blueprint, a number of
 uses (1 to 10000) and a validity (1 to 90 days). The token is shown once. The page shows the
-commands below with the token filled in.
+commands below with the token filled in. **Revoke** ends a token at once (audit
+`token.revoke`); devices already enrolled with it are not affected.
 
 ## One device: install script
 
@@ -117,12 +118,30 @@ was removed stops checking in, turns `stale` and, with `offline_lock_hours`, loc
 
 ## Updates
 
-* **Package managers:** host the release packages in your repository or run the install
-  script again.
-* **Signed self update:** place releases in `LIMDM_RELEASE_DIR` on the server
-  ([operations.md](operations.md#agent-self-update)). Agents download newer versions over
-  mTLS and install them only with a valid Ed25519 signature from the release key compiled
-  into the agent; downgrades are refused.
+Agents are updated from the console, page **Agents**:
+
+1. The server checks `LIMDM_RELEASE_REPO` on GitHub every six hours (or on **Check for new
+   versions**), downloads the agent packages and verifies them against the release's
+   `SHA256SUMS`. A release signed with the release key also carries `SHA256SUMS.sig`.
+2. An admin **approves** a version. Nothing is installed before that.
+3. Rollout: with **update agents automatically**, devices tagged with the pilot tag get an
+   approved version at their next check in, all others after the delay (default 7 days).
+   **Update agent now** on a device page skips policy and delay for that device.
+4. The agent checks the signature of the checksums (when it was built with a release key),
+   downloads the package for its distribution and architecture over mTLS, verifies the
+   checksum, keeps a copy of the running binary and installs the package with apt or dnf in
+   a separate systemd unit.
+5. The new agent confirms the update at its first start. If it does not within 15 minutes,
+   the watchdog (`/usr/lib/limdm/limdm-watchdog.sh`, plain shell) restores the previous
+   binary and restarts the agent, which reports the rollback.
+
+The device page shows the update state (`offered`, `ok`, `failed`, `rolled_back`); every
+outcome is in the audit log as `agent.update`. After three failed or rolled back devices a
+version is blocked automatically. Admins can block and approve versions at any time; only
+newer versions are offered, so blocking stops a rollout but does not downgrade devices.
+
+Hosting the packages in your own repository and updating with the package manager works as
+well.
 
 ## Useful commands on a device
 

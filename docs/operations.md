@@ -29,28 +29,29 @@ Store the CA key and the session key apart from the database dump, encrypted.
 See [installation.md](installation.md#upgrades). Read the release notes; migrations run
 automatically and are not reversible, so keep the backup until the new version runs.
 
-## Releases and agent self update
+## Releases and agent updates
 
 Tagged releases (`vX.Y.Z`, signed tags) build deb, rpm and tar.gz for amd64 and arm64, SBOMs,
 checksums, provenance attestations and the container image. The release job waits for
 approval of the `release` environment.
 
-The agent can update itself from the server, independent of package managers:
+Rollout of agent versions to devices: [agent.md](agent.md#updates).
+
+### Release key
+
+Without a release key agents trust the checksums the server hands them (over mTLS). With it,
+a compromised server or GitHub account cannot push a package the key did not sign:
 
 ```sh
 limdm-server keygen -out release.key          # once; keep the private key offline
 ```
 
-Store the printed public key as the repository variable `UPDATE_PUBKEY`; release builds
-embed it into the agent. To publish an update to devices:
+* Repository secret `RELEASE_SIGNING_KEY`: content of `release.key`. The release workflow
+  signs `SHA256SUMS` and uploads `SHA256SUMS.sig`.
+* Repository variable `UPDATE_PUBKEY`: the printed public key. Release builds embed it; such
+  agents refuse unsigned or wrongly signed updates.
 
-```sh
-limdm-server release -key release.key -version 0.6.1 -dir /var/lib/limdm-server/releases \
-  amd64=limdm-agent-linux-amd64 arm64=limdm-agent-linux-arm64
-```
-
-with `LIMDM_RELEASE_DIR` pointing to that directory. Agents fetch the signed manifest at
-check in, verify the signature and install only newer versions.
+Manual signing: `limdm-server sign -key release.key limdm_<version>_SHA256SUMS`.
 
 ## Monitoring
 
@@ -67,7 +68,7 @@ check in, verify the signature and install only newer versions.
 | Enrollment fails with fingerprint mismatch | fingerprint copied from another server, or a proxy on 8444 |
 | Devices stay `pending` | no status yet; first check in takes up to one interval |
 | `/install.sh` reports "no release found" | no release in `LIMDM_RELEASE_REPO` yet, or GitHub not reachable |
-| Desktop helper does not ask | `limdm-desktop --now` in the session; zenity or kdialog installed; `/run/limdm/agent.sock` exists |
+| Desktop helper does not ask | `limdm-desktop --now` in the session; zenity or kdialog installed; `/run/limdm/agent.sock` exists. Compositors without XDG autostart (sway, Hyprland) get the dialog from the agent together with the daily notification |
 | Device locked unexpectedly | `/etc/nologin` text: manual lock, compliance lock or offline lock; check in from the device unlocks the offline lock |
 | Console sign in loops | clock skew (TOTP), cookies blocked, `LIMDM_PUBLIC_URL` differs from the URL in the browser |
 

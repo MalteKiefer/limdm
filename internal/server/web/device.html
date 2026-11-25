@@ -5,7 +5,7 @@
   <div>
     <div class="eyebrow"><a href="/devices">{{t "Devices"}}</a></div>
     <h1>{{.D.Hostname}} <span class="pill {{.D.Class}}">{{t .D.Status}}</span></h1>
-    <div class="meta"><span>{{.Inv.OSName}}</span><span>{{t "last seen"}} {{ago .D.LastSeen}}</span><span>{{t "agent"}} {{.D.AgentVersion}}</span>{{if .Inv.Source}}<span>{{t "inventory via"}} {{.Inv.Source}}</span>{{end}}</div>
+    <div class="meta"><span>{{.Inv.OSName}}</span><span>{{t "last seen"}} {{ago .D.LastSeen}}</span><span>{{t "agent"}} {{.D.AgentVersion}}{{if .D.UpdateRequested}} · {{t "update requested"}}{{else if .D.UpdateState}} · {{t "update"}} {{.D.UpdateVersion}} {{t .D.UpdateState}}{{end}}</span>{{if .Inv.Source}}<span>{{t "inventory via"}} {{.Inv.Source}}</span>{{end}}{{if .D.ExternalIP}}<span class="mono">{{.D.ExternalIP}}</span>{{end}}{{with .D.Geo}}{{if .Place}}<span title="{{.ISP}}{{if .ASN}} AS{{.ASN}}{{end}}">{{.Place}}</span>{{end}}{{end}}</div>
   </div>
   {{if and (eq .Sess.Role "admin") (ne .D.Status "retired")}}
   <div class="actions">
@@ -13,41 +13,61 @@
     <details class="menu">
       <summary class="button secondary">{{t "Actions"}}</summary>
       <div class="menu-list" role="menu">
-        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="update">
-          <button role="menuitem" class="menu-item">{{t "Install all updates"}}</button></form>
-        <div class="menu-sep"></div>
-        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="reboot"><input type="hidden" name="minutes" value="0">
-          <button role="menuitem" class="menu-item">{{t "Reboot now"}}</button></form>
-        <a role="menuitem" class="menu-item" href="/devices/{{$id}}?tab=commands&amp;type=reboot">{{t "Reboot later…"}}</a>
-        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="shutdown"><input type="hidden" name="minutes" value="0">
-          <button role="menuitem" class="menu-item warn">{{t "Shut down now"}}</button></form>
-        <a role="menuitem" class="menu-item warn" href="/devices/{{$id}}?tab=commands&amp;type=shutdown">{{t "Shut down later…"}}</a>
-        <div class="menu-sep"></div>
-        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="lock">
-          <button role="menuitem" class="menu-item warn">{{t "Lock device"}}</button></form>
-        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="unlock">
-          <button role="menuitem" class="menu-item">{{t "Unlock device"}}</button></form>
-        <div class="menu-sep"></div>
-        <a role="menuitem" class="menu-item" href="/devices/{{$id}}?tab=commands&amp;type=script">{{t "Run script…"}}</a>
-        <div class="menu-sep"></div>
-        <a role="menuitem" class="menu-item warn" href="/devices/{{$id}}?tab=commands&amp;type=lost">{{t "Lost mode…"}}</a>
-        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="found">
-          <button role="menuitem" class="menu-item">{{t "End lost mode"}}</button></form>
-        <a role="menuitem" class="menu-item danger" href="/devices/{{$id}}?tab=commands&amp;type=wipe">{{t "Wipe device…"}}</a>
-        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="allow_uninstall">
-          <button role="menuitem" class="menu-item">{{t "Allow uninstall for 1 hour"}}</button></form>
+        <details class="sub"><summary class="menu-item">{{t "Updates"}}</summary><div class="sub-list">
+            <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="update"><button role="menuitem" class="menu-item">{{t "Install all updates"}}</button></form>
+            <form method="post" action="/devices/{{$id}}/agent-update"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button role="menuitem" class="menu-item">{{t "Update agent now"}}</button></form>
+        </div></details>
+        <details class="sub"><summary class="menu-item">{{t "Power"}}</summary><div class="sub-list">
+            <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="reboot"><input type="hidden" name="minutes" value="0"><button role="menuitem" class="menu-item">{{t "Reboot now"}}</button></form>
+            <a role="menuitem" class="menu-item" href="/devices/{{$id}}?tab=commands&amp;type=reboot" data-open="dlg-reboot">{{t "Reboot later…"}}</a>
+            <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="shutdown"><input type="hidden" name="minutes" value="0"><button role="menuitem" class="menu-item warn">{{t "Shut down now"}}</button></form>
+            <a role="menuitem" class="menu-item warn" href="/devices/{{$id}}?tab=commands&amp;type=shutdown" data-open="dlg-shutdown">{{t "Shut down later…"}}</a>
+        </div></details>
+        <details class="sub"><summary class="menu-item">{{t "Security"}}</summary><div class="sub-list">
+            <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="lock"><button role="menuitem" class="menu-item warn">{{t "Lock device"}}</button></form>
+            <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="unlock"><button role="menuitem" class="menu-item">{{t "Unlock device"}}</button></form>
+            <a role="menuitem" class="menu-item warn" href="/devices/{{$id}}?tab=commands&amp;type=lost" data-open="dlg-lost">{{t "Lost mode…"}}</a>
+            <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="found"><button role="menuitem" class="menu-item">{{t "End lost mode"}}</button></form>
+            <a role="menuitem" class="menu-item danger" href="/devices/{{$id}}?tab=commands&amp;type=wipe" data-open="dlg-wipe">{{t "Wipe device…"}}</a>
+        </div></details>
+        <details class="sub"><summary class="menu-item">{{t "Agent"}}</summary><div class="sub-list">
+            <a role="menuitem" class="menu-item" href="/devices/{{$id}}?tab=commands&amp;type=script">{{t "Run script…"}}</a>
+            <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="allow_uninstall"><button role="menuitem" class="menu-item">{{t "Allow uninstall for 1 hour"}}</button></form>
+        </div></details>
       </div>
     </details>
   </div>
   {{end}}
 </div>
+{{if and (eq .Sess.Role "admin") (ne .D.Status "retired")}}
+<dialog id="dlg-reboot" class="modal" aria-labelledby="dlg-reboot-h"><form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="reboot">
+  <h2 id="dlg-reboot-h">{{t "Reboot later"}}</h2>
+  <label>{{t "Delay in minutes"}} <span class="hint">{{t "the user is warned on the device"}}</span><input name="minutes" type="number" min="1" max="1440" value="5" required autofocus></label>
+  <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Schedule"}}</button></div></form></dialog>
+<dialog id="dlg-shutdown" class="modal" aria-labelledby="dlg-shutdown-h"><form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="shutdown">
+  <h2 id="dlg-shutdown-h">{{t "Shut down later"}}</h2>
+  <label>{{t "Delay in minutes"}} <span class="hint">{{t "the user is warned on the device"}}</span><input name="minutes" type="number" min="1" max="1440" value="5" required autofocus></label>
+  <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Schedule"}}</button></div></form></dialog>
+<dialog id="dlg-lost" class="modal" aria-labelledby="dlg-lost-h"><form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="lost">
+  <h2 id="dlg-lost-h">{{t "Lost mode"}}</h2>
+  <p class="notice">{{t "Blocks every login, ends running sessions and shows your message. With an escrowed recovery key, every other disk key slot is removed: after the next power off only IT can open the disk."}}</p>
+  <label>{{t "Message on the device"}} <span class="hint">{{t "for example a phone number"}}</span><textarea name="message" rows="3" maxlength="500"></textarea></label>
+  <label>{{t "Type the host name to confirm"}} <span class="mono">{{.D.Hostname}}</span><input name="confirm" autocomplete="off" spellcheck="false" required></label>
+  <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button class="danger">{{t "Enable lost mode"}}</button></div></form></dialog>
+<dialog id="dlg-wipe" class="modal" aria-labelledby="dlg-wipe-h"><form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="wipe">
+  <h2 id="dlg-wipe-h">{{t "Wipe device"}}</h2>
+  <p class="notice error">{{t "Erases the disk encryption headers: all data on the device is lost for good. Devices without disk encryption are refused."}}</p>
+  <label>{{t "Type the host name to confirm"}} <span class="mono">{{.D.Hostname}}</span><input name="confirm" autocomplete="off" spellcheck="false" required></label>
+  <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button class="danger">{{t "Wipe device"}}</button></div></form></dialog>
+<script src="/static/actions.js" defer></script>
+{{end}}
 <nav class="tabs" aria-label="{{t "Device sections"}}">
   {{$tab := .Tab}}{{$failing := .Failing}}
   {{range .Tabs}}<a href="/devices/{{$id}}?tab={{.}}" {{if eq $tab .}}class="on" aria-current="page"{{end}}>{{t .}}{{if and (eq . "compliance") $failing}}<span class="count">{{$failing}}</span>{{end}}</a>{{end}}
 </nav>
 
 {{if eq .Tab "overview"}}
-{{if .Tampered}}<div class="notice error" role="status"><strong>{{t "Tamper attempt reported"}}</strong> {{fmtTime (derefTime .Tampered)}}. {{t "Details are in the audit log (agent.tamper)."}}</div>{{end}}
+{{if .Tampered}}<div class="notice error" role="status"><strong>{{t "Tamper attempt reported"}}</strong> {{fmtTime (derefTime .Tampered)}}. <a href="/audit?action=agent.tamper&amp;target={{$id}}">{{t "Details are in the audit log (agent.tamper)."}}</a></div>{{end}}
 {{if .D.AutoLocked}}<div class="notice error" role="status"><strong>{{t "Locked by compliance policy."}}</strong> {{t "Logins are blocked until the device is compliant again or an admin unlocks it."}}</div>{{end}}
 {{if .Since}}<div class="notice">{{t "Failing compliance since"}} {{fmtTime (derefTime .Since)}}{{if .D.GraceUntil}}{{t "; grace period"}} {{if eq .D.Status "in grace"}}{{t "ends"}}{{else}}{{t "ended"}}{{end}} {{fmtTime (derefTime .D.GraceUntil)}}{{end}}.</div>{{end}}
 <div class="stats">
@@ -128,7 +148,7 @@
   <div class="scroll"><table>
     <thead><tr><th>{{t "Mount point"}}</th><th>{{t "Device"}}</th><th>{{t "Filesystem"}}</th><th>{{t "Encryption"}}</th><th>{{t "Usage"}}</th><th class="num">{{t "Free"}}</th></tr></thead>
     <tbody>{{range .Inv.Volumes}}<tr><td class="mono">{{.Mount}}</td><td class="mono">{{.Device}}</td><td>{{.FS}}</td>
-      <td>{{if .Encrypted}}<span class="pill ok">{{t "LUKS"}}</span>{{else}}<span class="pill bad">{{t "none"}}</span>{{end}}</td>
+      <td>{{if .Encrypted}}<span class="pill ok">{{t "LUKS"}}</span>{{else if call $.EncExcluded .Mount}}<span class="pill">{{t "excluded"}}</span>{{else}}<span class="pill bad">{{t "none"}}</span>{{end}}</td>
       <td><meter min="0" max="{{.SizeGB}}" value="{{used .SizeGB .FreeGB}}" low="{{frac .SizeGB 80}}" high="{{frac .SizeGB 90}}" optimum="0"></meter> <span class="muted">{{used .SizeGB .FreeGB}} {{t "of"}} {{.SizeGB}} {{t "GB"}}</span></td>
       <td class="num">{{.FreeGB}} {{t "GB"}}</td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No volume data reported."}}</td></tr>{{end}}</tbody>
   </table></div>
@@ -184,7 +204,16 @@
 {{end}}
 
 {{if eq .Tab "network"}}
-{{if not .NetworkInfo}}<div class="notice">{{t "Addresses, DNS and routes are collected only when the privacy item allows network_info (Library, Privacy)."}}</div>{{end}}
+{{if not .NetworkInfo}}<div class="notice">{{t "No addresses reported. A privacy item with network_info set to false switches them off."}}</div>{{end}}
+{{if .D.ExternalIP}}<section class="card">
+  <h2>{{t "Public address"}}</h2>
+  <dl class="kv">
+    <dt>{{t "Address"}}</dt><dd class="mono">{{.D.ExternalIP}}</dd>
+    {{with .D.Geo}}{{if .Country}}<dt>{{t "Location"}}</dt><dd>{{.Place}}{{if .Region}} ({{.Region}}){{end}}</dd>{{end}}
+    {{if .ISP}}<dt>{{t "Provider"}}</dt><dd>{{.ISP}}{{if .ASN}} <span class="muted">AS{{.ASN}}</span>{{end}}</dd>{{end}}{{end}}
+  </dl>
+  <p class="muted">{{t "Address of the last check in as the server saw it."}}</p>
+</section>{{end}}
 <section class="tablecard">
   <div class="card-head"><h2>{{t "Interfaces"}}</h2><span class="muted">{{len .Inv.Interfaces}}</span></div>
   <div class="scroll"><table>
@@ -284,7 +313,7 @@
   <form method="post" action="/devices/{{$id}}/command">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <div class="inline">
-      <label>{{t "Command"}}<select name="type">{{$pre := .PreType}}{{range .CommandTypes}}<option value="{{.}}" {{if eq . $pre}}selected{{end}}>{{actionLabel .}}</option>{{end}}</select></label>
+      <label>{{t "Command"}}<select name="type">{{$pre := .PreType}}<optgroup label="{{t "Updates"}}"><option value="sync" {{if eq $pre "sync"}}selected{{end}}>{{actionLabel "sync"}}</option><option value="update" {{if eq $pre "update"}}selected{{end}}>{{actionLabel "update"}}</option></optgroup><optgroup label="{{t "Power"}}"><option value="reboot" {{if eq $pre "reboot"}}selected{{end}}>{{actionLabel "reboot"}}</option><option value="shutdown" {{if eq $pre "shutdown"}}selected{{end}}>{{actionLabel "shutdown"}}</option></optgroup><optgroup label="{{t "Security"}}"><option value="lock" {{if eq $pre "lock"}}selected{{end}}>{{actionLabel "lock"}}</option><option value="unlock" {{if eq $pre "unlock"}}selected{{end}}>{{actionLabel "unlock"}}</option><option value="lost" {{if eq $pre "lost"}}selected{{end}}>{{actionLabel "lost"}}</option><option value="found" {{if eq $pre "found"}}selected{{end}}>{{actionLabel "found"}}</option><option value="wipe" {{if eq $pre "wipe"}}selected{{end}}>{{actionLabel "wipe"}}</option></optgroup><optgroup label="{{t "Agent"}}"><option value="script" {{if eq $pre "script"}}selected{{end}}>{{actionLabel "script"}}</option><option value="allow_uninstall" {{if eq $pre "allow_uninstall"}}selected{{end}}>{{actionLabel "allow_uninstall"}}</option></optgroup></select></label>
       <label class="delay-only">{{t "Delay in minutes"}} <span class="hint">{{t "0 = now"}}</span><input name="minutes" type="number" min="0" max="1440" value="5"></label>
     </div>
     <div class="lost-only notice">{{t "Blocks every login, ends running sessions and shows your message. With an escrowed recovery key, every other disk key slot is removed: after the next power off only IT can open the disk."}}</div>

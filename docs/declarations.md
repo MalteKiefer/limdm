@@ -33,8 +33,10 @@ and actions. Details: [compliance.md](compliance.md).
 {"network_info": false, "logged_in_users": false}
 ```
 
-Default for both is off. `network_info` adds IP addresses to the inventory (interfaces and
-MAC addresses are always collected), `logged_in_users` reports active sessions.
+Without this declaration everything is collected; assign it to switch items off.
+`network_info` covers IP addresses, DNS and routes (interfaces and MAC addresses are always
+collected), `logged_in_users` reports active sessions. The public address and its location
+are recorded by the server and are not affected ([security.md](security.md#privacy)).
 
 ## Software
 
@@ -221,10 +223,15 @@ rights.
 ### `com.limdm.diskencryption`
 
 ```json
-{"escrow": true, "rotate_after_view": true}
+{"escrow": true, "rotate_after_view": true, "require_all": true, "exclude": ["/boot"]}
 ```
 
 LUKS recovery key escrow. See [disk-encryption.md](disk-encryption.md).
+
+Without `require_all` the check `disk.encryption` only looks at `/`. With it, every local
+volume must be on LUKS except the mount points in `exclude`; an entry covers everything below
+it (`/boot` also covers `/boot/efi`). The device page marks excluded volumes. The library
+item "Disk encryption on all volumes, /boot excluded" is a ready made start.
 
 ### `com.limdm.login`
 

@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
-	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
@@ -26,7 +25,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -80,6 +78,7 @@ type State struct {
 	LastContact    time.Time            `json:"last_contact"`
 	DoneCommands   map[int64]time.Time  `json:"done_commands,omitempty"`  // executed command IDs: the server redelivers until it has the result
 	RemovePending  map[string]bool      `json:"remove_pending,omitempty"` // removed users whose account lock still has to succeed
+	UpdateResult   *api.UpdateResult    `json:"update_result,omitempty"`  // agent update outcome not yet reported
 	OfflineLocked  bool                 `json:"offline_locked,omitempty"`
 }
 
@@ -445,6 +444,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	defer a.publishDesktop()
 	a.renewIdentity(ctx)
 	a.takeEscrowRequests()
+	a.checkUpdateOutcome()
 	a.collectTamper()
 	a.guardWatchdog()
 	checks := a.converge()
@@ -455,7 +455,8 @@ func (a *Agent) cycle(ctx context.Context) {
 	sum := sha256.Sum256(sb)
 	statusHash := hex.EncodeToString(sum[:])
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
-		StatusHash: statusHash, Results: a.state.Results, Events: a.pendingEvents(), Metrics: metrics(), BrandingHash: a.state.BrandingHash}
+		StatusHash: statusHash, Results: a.state.Results, Events: a.pendingEvents(), Metrics: metrics(), BrandingHash: a.state.BrandingHash,
+		UpdateResult: a.state.UpdateResult}
 	// an invalid key would make the server reject every check in
 	a.state.PendingKeys = slices.DeleteFunc(a.state.PendingKeys, func(k pendingKey) bool { return !k.Valid() })
 	sentKeys := slices.Clone(a.state.PendingKeys)
@@ -489,6 +490,9 @@ func (a *Agent) cycle(ctx context.Context) {
 	if len(sentKeys) > 0 {
 		a.escrowConfirmed(sentKeys)
 	}
+	if req.UpdateResult != nil {
+		a.state.UpdateResult = nil // reported
+	}
 	a.applyBranding(resp.Branding)
 	if len(resp.RecoveryRotate) > 0 {
 		a.rotateRecovery(resp.RecoveryRotate)
@@ -517,10 +521,11 @@ func (a *Agent) cycle(ctx context.Context) {
 	}
 	a.compose()
 	a.runCommands(resp.Commands)
-	if rel := resp.AgentUpdate; rel != nil && UpdatePubKey != "" && rel.Version != a.failedUpdate {
-		if err := a.selfUpdate(ctx, *rel); err != nil {
-			a.failedUpdate = rel.Version
-			a.event("agent update %s failed: %v", rel.Version, err)
+	if u := resp.AgentUpdate; u != nil && u.Version != a.failedUpdate {
+		if err := a.installUpdate(ctx, *u); err != nil {
+			a.failedUpdate = u.Version
+			a.state.UpdateResult = &api.UpdateResult{From: Version, To: u.Version, Detail: err.Error()}
+			a.event("agent update to %s failed: %v", u.Version, err)
 		}
 	}
 }
@@ -805,73 +810,6 @@ func (a *Agent) renewIdentity(ctx context.Context) {
 	}
 	a.client.CloseIdleConnections()
 	a.event("client certificate renewed")
-}
-
-// selfUpdate replaces the running binary with a signed newer release and exits;
-// systemd restarts the service with the new binary.
-func (a *Agent) selfUpdate(ctx context.Context, rel api.Release) error {
-	if UpdatePubKey == "" {
-		return errors.New("no update key compiled in, self update disabled")
-	}
-	if !api.NewerVersion(rel.Version, Version) {
-		return nil // never downgrade, even to a validly signed old release
-	}
-	pub, err := hex.DecodeString(UpdatePubKey)
-	if err != nil {
-		return err
-	}
-	if err := rel.Verify(ed25519.PublicKey(pub)); err != nil {
-		return err
-	}
-	if rel.Arch != runtime.GOARCH {
-		return fmt.Errorf("release is for %s, this agent runs on %s", rel.Arch, runtime.GOARCH)
-	}
-	if rel.File != filepath.Base(rel.File) || strings.HasPrefix(rel.File, ".") {
-		return errors.New("invalid release file name")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.cfg.Server+"/api/v1/releases/"+url.PathEscape(rel.File), nil)
-	if err != nil {
-		return err
-	}
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download: %s", resp.Status)
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	if exe, err = filepath.EvalSymlinks(exe); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(exe), ".limdm-agent-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(resp.Body, 200<<20)); err != nil {
-		tmp.Close()
-		return err
-	}
-	tmp.Close()
-	if got := hex.EncodeToString(h.Sum(nil)); got != rel.SHA256 {
-		return fmt.Errorf("checksum mismatch: %s", got)
-	}
-	if err := os.Chmod(tmp.Name(), 0o755); err != nil { //nolint:gosec // executable binary
-		return err
-	}
-	if err := os.Rename(tmp.Name(), exe); err != nil {
-		return err
-	}
-	a.event("agent updated %s -> %s, restarting", Version, rel.Version)
-	a.saveState()
-	os.Exit(0)
-	return nil
 }
 
 // Report runs all checks locally without remediation and without contacting the server.

@@ -43,17 +43,46 @@ func requestLang(r *http.Request) string {
 
 // setLang stores the choice and returns to the page the user came from
 // (same origin paths only, so it cannot be used as an open redirect).
+const dateCookie = "limdm_datefmt"
+
+// requestDateFormat is the date notation picked in the profile, by default ISO 8601.
+func requestDateFormat(r *http.Request) string {
+	if r != nil {
+		if c, err := r.Cookie(dateCookie); err == nil {
+			if _, ok := dateFormats[c.Value]; ok {
+				return c.Value
+			}
+		}
+	}
+	return "iso"
+}
+
 func (s *Server) setLang(w http.ResponseWriter, r *http.Request) {
 	lang := r.PathValue("lang")
 	if lang != "de" && lang != "en" {
 		http.NotFound(w, r)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: langCookie, Value: lang, Path: "/", Secure: true, HttpOnly: true,
+	setPref(w, r, langCookie, lang)
+}
+
+func (s *Server) setDateFormat(w http.ResponseWriter, r *http.Request) {
+	f := r.PathValue("format")
+	if _, ok := dateFormats[f]; !ok {
+		http.NotFound(w, r)
+		return
+	}
+	setPref(w, r, dateCookie, f)
+}
+
+// setPref stores a display preference in a cookie and returns to the page
+// the user came from (same host only).
+func setPref(w http.ResponseWriter, r *http.Request, name, value string) {
+	http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/", Secure: true, HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, MaxAge: int((365 * 24 * time.Hour).Seconds())})
 	back := "/"
 	if ref, err := url.Parse(r.Referer()); err == nil && ref.Host == r.Host && strings.HasPrefix(ref.Path, "/") &&
-		!strings.HasPrefix(ref.Path, "//") && !strings.HasPrefix(ref.Path, "/lang/") {
+		!strings.HasPrefix(ref.Path, "//") && !strings.HasPrefix(ref.Path, "/lang/") && !strings.HasPrefix(ref.Path, "/datefmt/") {
 		back = ref.Path
 		if ref.RawQuery != "" {
 			back += "?" + ref.RawQuery
@@ -260,6 +289,28 @@ var deCatalog = map[string]string{
 	"PNG, square, up to 256 KiB":                     "PNG, quadratisch, bis 256 KiB", "Boot loader password": "Bootloader Passwort",
 	"Disk encryption recovery": "Wiederherstellung Festplattenverschlüsselung", "polkit rules": "polkit Regeln", "sudo rules": "sudo Regeln",
 	// profile
+	"A device that does not check in within 15 minutes after an update returns to its previous agent. After three failed devices a version is blocked automatically.": "Ein Gerät, das sich nach einem Update nicht innerhalb von 15 Minuten meldet, kehrt zum vorherigen Agenten zurück. Nach drei fehlgeschlagenen Geräten wird eine Version automatisch gesperrt.",
+	"Agent version": "Agent Version", "Agents": "Agenten", "Approve": "Freigeben", "Block": "Sperren",
+	"Check for new versions": "Nach neuen Versionen suchen", "Delay for all other devices (days)": "Verzögerung für alle anderen Geräte (Tage)",
+	"Failed": "Fehlgeschlagen", "Fleet": "Flotte", "No versions fetched yet. The server checks every six hours.": "Noch keine Versionen geladen. Der Server prüft alle sechs Stunden.",
+	"Pilot tag": "Pilot Tag", "Published": "Veröffentlicht", "Rollout": "Verteilung", "Versions from": "Versionen von", "Versions": "Versionen",
+	"approved": "freigegeben", "available": "verfügbar", "blocked": "gesperrt",
+	"devices with this tag get an approved version at once": "Geräte mit diesem Tag erhalten eine freigegebene Version sofort",
+	"packages checked against the release checksums":        "Pakete gegen die Prüfsummen des Release geprüft",
+	"signed": "signiert", "unsigned": "unsigniert", "update agents automatically": "Agenten automatisch aktualisieren",
+	"The delay must be 0 to 90 days and the pilot tag a simple word.": "Die Verzögerung muss 0 bis 90 Tage betragen und der Pilot Tag ein einfaches Wort sein.",
+	"Fetching the releases failed, see the server log.":               "Laden der Releases fehlgeschlagen, siehe Serverlog.", "Versions checked.": "Versionen geprüft.", "Unknown version.": "Unbekannte Version.",
+	"update requested": "Update angefordert", "update": "Update", "Update agent now": "Agent jetzt aktualisieren",
+	"offered": "angeboten", "rolled_back": "zurückgerollt",
+	"No addresses reported. A privacy item with network_info set to false switches them off.": "Keine Adressen gemeldet. Ein Datenschutz Element mit network_info auf false schaltet sie ab.",
+	"Public address": "Öffentliche Adresse", "Address": "Adresse", "Location": "Standort", "Provider": "Provider",
+	"Address of the last check in as the server saw it.": "Adresse des letzten Check ins, wie der Server sie gesehen hat.",
+	"All actions": "Alle Aktionen", "From": "Von", "To": "Bis", "Search all fields": "Alle Felder durchsuchen", "Search the audit log": "Audit Log durchsuchen",
+	"Date and time": "Datum und Uhrzeit", "iso": "ISO 8601", "de": "Deutsch", "uk": "Britisch", "us": "US",
+	"Enable lost mode": "Verloren Modus aktivieren", "Power": "Energie", "Reboot later": "Später neu starten", "Schedule": "Planen",
+	"Security": "Sicherheit", "Shut down later": "Später herunterfahren", "Updates": "Updates", "the user is warned on the device": "der Nutzer wird am Gerät gewarnt",
+	"Revoke":   "Widerrufen",
+	"excluded": "ausgenommen", "Disk encryption on all volumes, /boot excluded": "Festplattenverschlüsselung auf allen Volumes, /boot ausgenommen",
 	"Profile": "Profil", "you": "du", "Stored in this browser.": "In diesem Browser gespeichert.",
 	"Authenticator app (TOTP)": "Authenticator App (TOTP)", "Cancel": "Abbrechen", "Confirm": "Bestätigen",
 	"Change password": "Passwort ändern", "Current password": "Aktuelles Passwort", "New password": "Neues Passwort",

@@ -462,9 +462,16 @@ func (a *Agent) notifyEscrow() {
 			args = append(args, "--icon="+brandingLogo)
 		}
 		args = append(args, "Disk recovery key required",
-			company+" needs a recovery key for your disk encryption. Open \"Disk recovery key\" in the applications menu.")
+			company+" needs a recovery key for your disk encryption. A dialog asks for your disk password; it is also in the applications menu as \"Disk recovery key\".")
 		if _, err := run(15*time.Second, "runuser", args...); err == nil {
 			sent = true
+		}
+		// open the dialog right away: compositors like sway do not run the
+		// helper's XDG autostart entry
+		if env := graphicalEnv(uid); env != nil {
+			if err := launchInSession(user, env, "/usr/bin/limdm-desktop", "--now"); err == nil {
+				sent = true
+			}
 		}
 	}
 	if sent {

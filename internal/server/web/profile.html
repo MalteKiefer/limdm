@@ -16,6 +16,13 @@
       <a class="choice-item {{if eq lang "en"}}on{{end}}" href="/lang/en"><strong>English</strong><span class="muted">en</span></a>
     </div>
   </section>
+  <section class="card">
+    <h2>{{t "Date and time"}}</h2>
+    <p class="muted">{{t "Stored in this browser."}}</p>
+    <div class="choice">
+      {{range .DateFormats}}<a class="choice-item {{if eq .Key $.DateFmt}}on{{end}}" href="/datefmt/{{.Key}}"><strong class="mono">{{.Sample}}</strong><span class="muted">{{t .Key}}</span></a>{{end}}
+    </div>
+  </section>
   {{if not .P.Local}}
   <section class="card">
     <h2>{{t "Sign in"}}</h2>
