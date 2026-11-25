@@ -524,3 +524,8 @@ a.pill { text-decoration: none; }
 .spinner { width: 14px; height: 14px; border: 2px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+
+/* notification channel form: fields by kind (CSS :has, no JavaScript) */
+.channel-form .kind-email { display: none; }
+.channel-form:has(select[name=kind] option[value=email]:checked) .kind-email { display: block; }
+.channel-form:has(select[name=kind] option[value=email]:checked) .kind-url { display: none; }

@@ -360,3 +360,25 @@ ALTER TABLE commands ADD COLUMN IF NOT EXISTS signature TEXT NOT NULL DEFAULT ''
 
 -- Ed25519 signature of each library item (command.key), checked before delivery
 ALTER TABLE library_items ADD COLUMN IF NOT EXISTS signature TEXT NOT NULL DEFAULT '';
+
+-- Notification channels (email, Slack, Discord, webhook); secret is sealed
+CREATE TABLE IF NOT EXISTS notification_channels (
+    id         BIGSERIAL PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE,
+    kind       TEXT NOT NULL CHECK (kind IN ('email', 'slack', 'discord', 'webhook')),
+    config     JSONB NOT NULL DEFAULT '{}',
+    secret     TEXT NOT NULL DEFAULT '',
+    events     TEXT[] NOT NULL DEFAULT '{}',
+    enabled    BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS notification_log (
+    id         BIGSERIAL PRIMARY KEY,
+    channel_id BIGINT NOT NULL REFERENCES notification_channels(id) ON DELETE CASCADE,
+    event      TEXT NOT NULL,
+    ok         BOOLEAN NOT NULL,
+    error      TEXT NOT NULL DEFAULT '',
+    at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS notification_log_channel ON notification_log(channel_id, id DESC);

@@ -45,6 +45,54 @@
   {{if $admin}}<dl class="kv"><dt>{{t "Signing key"}}</dt><dd><span class="fp">{{.WebhookSecret}}</span><span class="sub">X-LiMDM-Signature: sha256=HMAC-SHA256(key, body)</span></dd></dl>{{end}}
   {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
 </form>
+{{else if eq .Tab "integrations"}}
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "Notification channels"}}</h2><span class="muted">{{t "Events go to every enabled channel that subscribed to them; three attempts, each logged."}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Channel"}}</th><th>{{t "Kind"}}</th><th>{{t "Events"}}</th><th>{{t "Last delivery"}}</th>{{if $admin}}<th></th>{{end}}</tr></thead>
+    <tbody>{{range .Channels}}<tr>
+      <td>{{.Name}}<span class="sub mono">{{.Target}}</span></td>
+      <td>{{if eq .Kind "email"}}{{t "Email"}}{{else if eq .Kind "slack"}}Slack{{else if eq .Kind "discord"}}Discord{{else}}{{t "Webhook"}}{{end}}{{if not .Enabled}} <span class="pill">{{t "off"}}</span>{{end}}</td>
+      <td>{{if .Events}}{{range .Events}}<span class="tag mono">{{.}}</span> {{end}}{{else}}<span class="muted">{{t "all events"}}</span>{{end}}</td>
+      <td>{{if .LastOK}}{{if derefBool .LastOK}}<span class="pill ok">{{t "delivered"}}</span>{{else}}<span class="pill bad">{{t "failed"}}</span><span class="sub">{{.LastError}}</span>{{end}}<span class="sub">{{.LastEv}}, {{fmtTime (derefTime .LastAt)}}</span>{{else}}<span class="muted">{{t "never"}}</span>{{end}}</td>
+      {{if $admin}}<td class="row-actions">
+        <form method="post" action="/settings/notifications/{{.ID}}/test" class="inline-form">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Send test"}}</button></form>
+        <form method="post" action="/settings/notifications/{{.ID}}/{{if .Enabled}}disable{{else}}enable{{end}}" class="inline-form">{{template "csrf" $.CSRF}}<button class="secondary small">{{if .Enabled}}{{t "Switch off"}}{{else}}{{t "Switch on"}}{{end}}</button></form>
+        <form method="post" action="/settings/notifications/{{.ID}}/delete" class="inline-form">{{template "csrf" $.CSRF}}<button class="secondary small danger" data-confirm="{{t "Delete this notification channel?"}}">{{t "Delete"}}</button></form>
+      </td>{{end}}</tr>{{else}}<tr><td colspan="5" class="empty">{{t "No channels yet."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+{{if $admin}}
+<form class="card channel-form" method="post" action="/settings/notifications">
+  {{template "csrf" .CSRF}}
+  <h2>{{t "Add channel"}}</h2>
+  <div class="inline">
+    <label>{{t "Name"}}<input name="name" required maxlength="80" placeholder="{{t "IT on call"}}"></label>
+    <label>{{t "Kind"}}<select name="kind">
+      <option value="slack">Slack</option><option value="discord">Discord</option>
+      <option value="email">{{t "Email (SMTP)"}}</option><option value="webhook">{{t "Webhook (signed JSON)"}}</option></select></label>
+  </div>
+  <label class="kind-url">{{t "Webhook URL"}} <span class="hint">{{t "Slack: incoming webhook, Discord: channel webhook; stored encrypted"}}</span><input name="url" type="url" spellcheck="false" placeholder="https://hooks.slack.com/services/…"></label>
+  <div class="kind-email">
+    <div class="inline">
+      <label>{{t "SMTP server"}}<input name="smtp_host" spellcheck="false" placeholder="smtp.example.com"></label>
+      <label>{{t "Port"}}<input name="smtp_port" type="number" min="1" max="65535" value="587"></label>
+      <label>{{t "Encryption"}}<select name="smtp_tls"><option value="starttls">STARTTLS</option><option value="tls">TLS</option></select></label>
+    </div>
+    <div class="inline">
+      <label>{{t "User"}}<input name="smtp_user" autocomplete="off" spellcheck="false"></label>
+      <label>{{t "Password"}} <span class="hint">{{t "stored encrypted"}}</span><input name="smtp_password" type="password" autocomplete="new-password"></label>
+    </div>
+    <label>{{t "Sender"}}<input name="smtp_from" placeholder="LiMDM &lt;mdm@example.com&gt;"></label>
+    <label>{{t "Recipients"}} <span class="hint">{{t "separated by commas or spaces"}}</span><input name="smtp_to" placeholder="it@example.com, security@example.com"></label>
+  </div>
+  <fieldset class="checklist">
+    <legend>{{t "Events"}} <span class="hint">{{t "none selected: all events"}}</span></legend>
+    {{range .NotifyEvents}}<label class="check chip"><input type="checkbox" name="events" value="{{.Type}}"> {{t .Label}}</label>{{end}}
+  </fieldset>
+  <div class="form-foot"><span class="muted">{{t "Send a test after adding the channel."}}</span><button>{{t "Add"}}</button></div>
+</form>
+{{end}}
 {{else if eq .Tab "branding"}}
 <form class="card" method="post" action="/settings" enctype="multipart/form-data">
   {{template "csrf" .CSRF}}<input type="hidden" name="section" value="branding">

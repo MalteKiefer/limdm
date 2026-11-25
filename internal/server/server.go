@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"os"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -541,6 +542,8 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		s.failAPI(w, err)
 		return
 	}
+	s.notifyDevice(id, []notice{{Type: "device.enrolled", Severity: "info", Title: "Device enrolled: " + truncate(req.Hostname, 80),
+		Text: "A new device joined the fleet.", Hostname: truncate(req.Hostname, 255)}})
 	writeJSON(w, api.EnrollResponse{DeviceID: id, Cert: cert})
 }
 
@@ -678,16 +681,23 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		}
 		pkgHash = req.PackagesHash
 	}
+	var notices []notice // sent after the commit
 	for _, res := range req.Results {
 		status := "failed"
 		if res.OK {
 			status = "ok"
 		}
-		if _, err := tx.Exec(ctx, `UPDATE commands SET status=$3, output=$4, updated_at=now(),
-			payload=CASE WHEN type IN ('user_create','user_password') THEN '' ELSE payload END WHERE id=$1 AND device_id=$2 AND status='sent'`,
-			res.ID, id, status, truncate(res.Output, 64<<10)); err != nil {
+		var typ string
+		err := tx.QueryRow(ctx, `UPDATE commands SET status=$3, output=$4, updated_at=now(),
+			payload=CASE WHEN type IN ('user_create','user_password') THEN '' ELSE payload END WHERE id=$1 AND device_id=$2 AND status='sent'
+			RETURNING type`, res.ID, id, status, truncate(res.Output, 64<<10)).Scan(&typ)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			s.failAPI(w, err)
 			return
+		}
+		if !res.OK && slices.Contains([]string{"lock", "unlock", "lost", "found", "wipe", "script"}, typ) {
+			notices = append(notices, notice{Type: "command.failed", Severity: "critical", Title: "Command failed: " + typ,
+				Text: truncate(strings.TrimSpace(res.Output), 500)})
 		}
 		if err := audit(ctx, tx, "device:"+id, "command.result", strconv.FormatInt(res.ID, 10), status); err != nil {
 			s.failAPI(w, err)
@@ -750,9 +760,28 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	}
 	// people deactivated in the directory (SCIM, Google) lose their device accounts:
 	// the agent locks accounts that are no longer listed
+	listed := resp.Users
 	if resp.Users, err = activeUsers(ctx, tx, resp.Users); err != nil {
 		s.failAPI(w, err)
 		return
+	}
+	for _, u := range listed {
+		if !slices.ContainsFunc(resp.Users, func(k api.User) bool { return k.Username == u.Username }) {
+			notices = append(notices, notice{Type: "directory.user_disabled", Severity: "warning",
+				Title: "Device user disabled: " + u.Email, Text: "The account " + u.Username + " is locked on the device and its sessions end."})
+		}
+	}
+	if len(req.AppRequests) > 0 {
+		var apps []string
+		for _, ar := range req.AppRequests {
+			apps = append(apps, firstNonEmpty(ar.App, ar.Name, ar.Flatpak)+" ("+ar.User+")")
+		}
+		notices = append(notices, notice{Type: "catalog.request", Severity: "info", Title: "App requested",
+			Text: strings.Join(apps, ", ") + ". Decide under Software, Requests."})
+	}
+	if u := req.UpdateResult; u != nil && !u.OK {
+		notices = append(notices, notice{Type: "agent.update_failed", Severity: "warning", Title: "Agent update failed: " + u.To,
+			Text: fmt.Sprintf("%s to %s failed (rolled back: %v). %s", u.From, u.To, u.RolledBack, truncate(u.Detail, 300))})
 	}
 	if b := s.branding(); b.Hash != req.BrandingHash {
 		resp.Branding = &b
@@ -782,6 +811,12 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sendWebhook(event)
 	s.sendWebhook(tamperEvent)
+	for _, ev := range []*webhookEvent{event, tamperEvent} {
+		if ev != nil {
+			notices = append(notices, noticeOf(ev))
+		}
+	}
+	s.notifyDevice(id, notices)
 	writeJSON(w, resp)
 }
 
@@ -946,4 +981,36 @@ func (s *Server) deliverCommands(ctx context.Context, tx pgx.Tx, id string) ([]a
 		return nil, err
 	}
 	return cmds, s.attachRecoveryKeys(ctx, tx, id, cmds)
+}
+
+// noticeOf turns a compliance or tamper webhook event into a notice.
+func noticeOf(ev *webhookEvent) notice {
+	n := notice{Type: ev.Type, DeviceID: ev.DeviceID, Hostname: ev.Hostname, URL: ev.Console}
+	switch ev.Type {
+	case "device.tamper":
+		n.Severity, n.Title, n.Text = "critical", "Tamper attempt on "+ev.Hostname, ev.Detail
+	default:
+		n.Severity, n.Title = "warning", ev.Hostname+" is non-compliant"
+		n.Text = fmt.Sprintf("%d checks failing since %s.", ev.Failing, ev.Since.Local().Format("2006-01-02 15:04"))
+	}
+	return n
+}
+
+// notifyDevice completes notices of a device with host name and link and sends them.
+func (s *Server) notifyDevice(id string, notices []notice) {
+	if len(notices) == 0 {
+		return
+	}
+	var host string
+	_ = s.db.QueryRow(context.Background(), `SELECT hostname FROM devices WHERE id=$1`, id).Scan(&host)
+	for _, n := range notices {
+		n.DeviceID, n.Hostname = id, firstNonEmpty(n.Hostname, host)
+		if n.URL == "" {
+			n.URL = s.cfg.PublicURL + "/devices/" + id
+		}
+		if !strings.Contains(n.Title, n.Hostname) {
+			n.Title += " (" + n.Hostname + ")"
+		}
+		s.notify(n)
+	}
 }

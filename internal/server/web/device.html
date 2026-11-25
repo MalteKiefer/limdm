@@ -236,10 +236,11 @@
 <section class="tablecard">
   <div class="card-head"><h2>{{t "Flatpak applications"}}</h2><span class="muted">{{len .Inv.Flatpaks}}</span></div>
   <div class="scroll"><table>
-    <thead><tr><th>{{t "Application"}}</th><th>{{t "Version"}}</th><th>{{t "Branch"}}</th><th>{{t "Remote"}}</th><th>{{t "Installation"}}</th><th>{{t "Catalog"}}</th></tr></thead>
+    <thead><tr><th>{{t "Application"}}</th><th>{{t "Version"}}</th><th>{{t "Branch"}}</th><th>{{t "Remote"}}</th><th>{{t "Installation"}}</th><th>{{t "Catalog"}}</th>{{if $admin}}<th></th>{{end}}</tr></thead>
     <tbody>{{range .Inv.Flatpaks}}<tr><td>{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}<span class="sub mono">{{.ID}}</span></td><td>{{.Version}}</td><td class="mono">{{.Branch}}</td><td>{{.Origin}}</td>
       <td>{{if eq .Installation "system"}}{{t "system"}}{{else}}<span class="tag">{{.Installation}}</span>{{end}}</td>
-      <td class="row-actions">{{if $admin}}{{template "rmsw" dict "ID" $id "CSRF" $.CSRF "Kind" "flatpak" "Name" .ID "Inst" .Installation "Sub" "flatpak"}} {{end}}{{with index $.CatalogFlatpaks .ID}}<a href="/software/apps/{{.}}">{{t "in catalog"}}</a>{{else}}{{if eq $.Sess.Role "admin"}}<form method="post" action="/software/import">{{template "csrf" $.CSRF}}<input type="hidden" name="device" value="{{$id}}"><input type="hidden" name="flatpak" value="{{.ID}}"><button class="secondary small">{{t "Add to catalog"}}</button></form>{{end}}{{end}}</td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No Flatpak applications reported."}}</td></tr>{{end}}</tbody>
+      <td>{{with index $.CatalogFlatpaks .ID}}<a href="/software/apps/{{.}}">{{t "in catalog"}}</a>{{else}}{{if $admin}}<form method="post" action="/software/import" class="inline-form">{{template "csrf" $.CSRF}}<input type="hidden" name="device" value="{{$id}}"><input type="hidden" name="flatpak" value="{{.ID}}"><button class="secondary small">{{t "Add to catalog"}}</button></form>{{else}}<span class="muted">–</span>{{end}}{{end}}</td>
+      {{if $admin}}<td class="row-actions">{{template "rmsw" dict "ID" $id "CSRF" $.CSRF "Kind" "flatpak" "Name" .ID "Inst" .Installation "Sub" "flatpak"}}</td>{{end}}</tr>{{else}}<tr><td colspan="7" class="empty">{{t "No Flatpak applications reported."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 <section class="tablecard">
