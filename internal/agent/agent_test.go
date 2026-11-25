@@ -632,14 +632,18 @@ func TestIdleLockRespectsRemediation(t *testing.T) {
 	a := &Agent{}
 	a.pol.ScreenLockSeconds = 300
 	a.pol.Compliance.Level, a.pol.Compliance.Remediate = 1, true
+	snap := func() { p := a.pol; a.polView.Store(&p) }
+	snap()
 	if !a.remediatesScreenLock() {
 		t.Fatal("remediation on")
 	}
 	a.pol.Compliance.Exclude = []string{"desktop.screenlock"}
+	snap()
 	if a.remediatesScreenLock() {
 		t.Fatal("excluded check must not be enforced")
 	}
 	a.pol.Compliance.Exclude, a.pol.Compliance.Remediate = nil, false
+	snap()
 	if a.remediatesScreenLock() {
 		t.Fatal("remediation off must not start lockers")
 	}
@@ -810,5 +814,14 @@ func TestInventoryHelpers(t *testing.T) {
 		if got := desktopName(in); got != want {
 			t.Errorf("desktopName(%q) = %q", in, got)
 		}
+	}
+}
+
+func TestPollWait(t *testing.T) {
+	if w := pollWait(0); w < time.Minute || w > time.Minute+10*time.Second {
+		t.Fatalf("normal: %v", w)
+	}
+	if w := pollWait(10); w < 5*time.Minute || w > 5*time.Minute+10*time.Second {
+		t.Fatalf("backoff capped at five minutes: %v", w)
 	}
 }

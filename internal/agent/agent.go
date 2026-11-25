@@ -32,6 +32,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -98,6 +99,7 @@ type Agent struct {
 	state  State
 
 	pol        api.Policy
+	polView    atomic.Pointer[api.Policy] // copy of pol for other goroutines
 	desktop    *desktopServer
 	evMu       sync.Mutex // guards state.Events and state.AppRequests: the desktop socket works from its own goroutines
 	store      store
@@ -335,6 +337,16 @@ func New(log *slog.Logger) (*Agent, error) {
 func (a *Agent) compose() {
 	a.pol, a.declStatus = api.Compose(a.state.Declarations)
 	a.users = a.state.Users
+	p := a.pol
+	a.polView.Store(&p) // for maintainLoop, which runs beside the check in
+}
+
+// policy is the composed policy for code outside the check in goroutine.
+func (a *Agent) policy() *api.Policy {
+	if p := a.polView.Load(); p != nil {
+		return p
+	}
+	return &api.Policy{}
 }
 
 // problem records an event and marks the declaration of typ as not achieved.
@@ -813,8 +825,49 @@ func (a *Agent) post(ctx context.Context, path string, in, out any) error {
 }
 
 // pollLoop asks the server every minute whether commands wait, so a reboot,
-// lock or wipe does not wait for the next full check in.
+// lock or wipe does not wait for the next full check in. It runs on its own
+// clock: desktop upkeep runs in maintainLoop and can never delay it. A
+// random offset spreads devices; after failures it waits longer (up to 5
+// minutes) and returns to one minute with the first answer.
 func (a *Agent) pollLoop(ctx context.Context) {
+	go a.maintainLoop(ctx)
+	wait, failures := pollJitter(), 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		var resp api.PollResponse
+		pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		err := a.post(pctx, "/api/v1/poll", struct{}{}, &resp)
+		cancel()
+		if err != nil {
+			failures++
+			if failures == 3 {
+				a.log.Warn("poll failing", "err", err)
+			}
+		} else {
+			failures = 0
+		}
+		if err == nil && resp.Pending {
+			a.kickCheckin() // buffered: a check in already running picks it up next
+		}
+		wait = pollWait(failures)
+	}
+}
+
+// pollWait is one minute, doubling per failure up to five, plus jitter.
+func pollWait(failures int) time.Duration {
+	d := time.Minute << min(failures, 3)
+	return min(d, 5*time.Minute) + pollJitter()
+}
+
+func pollJitter() time.Duration { return time.Duration(mrand.Int64N(int64(10 * time.Second))) }
+
+// maintainLoop keeps desktop helpers, idle locks and a device lock in place
+// every minute, independent of the server.
+func (a *Agent) maintainLoop(ctx context.Context) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	for {
@@ -826,16 +879,6 @@ func (a *Agent) pollLoop(ctx context.Context) {
 		a.ensureHelpers()     // within a minute of a desktop login
 		a.ensureIdleLocks()   // compositors without a locker of their own
 		a.enforceDeviceLock() // a locked device stays locked
-		var resp api.PollResponse
-		pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		err := a.post(pctx, "/api/v1/poll", struct{}{}, &resp)
-		cancel()
-		if err == nil && resp.Pending {
-			select {
-			case a.kick <- struct{}{}:
-			default:
-			}
-		}
 	}
 }
 

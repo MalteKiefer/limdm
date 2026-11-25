@@ -444,8 +444,9 @@ func xTimeout(s idleSession) int {
 // remediatesScreenLock: the idle locker is a change on the device, so it
 // follows the same rules as every other remediation.
 func (a *Agent) remediatesScreenLock() bool {
-	p := a.pol.Compliance
-	return a.pol.ScreenLockSeconds > 0 && p.Remediate && p.Level >= 1 && !slices.Contains(p.Exclude, "desktop.screenlock")
+	pol := a.policy()
+	p := pol.Compliance
+	return pol.ScreenLockSeconds > 0 && p.Remediate && p.Level >= 1 && !slices.Contains(p.Exclude, "desktop.screenlock")
 }
 
 // ensureIdleLocks starts the agent's locker in sessions that lack it and
@@ -454,7 +455,7 @@ func (a *Agent) ensureIdleLocks() {
 	if !a.remediatesScreenLock() {
 		return
 	}
-	seconds := a.pol.ScreenLockSeconds
+	seconds := a.policy().ScreenLockSeconds
 	for _, s := range idleSessions() {
 		if s.kind == "x11" && hasCmd("xset") && xTimeout(s) != seconds {
 			// xss-lock follows the X screensaver timeout; a user's "xset s off" is undone here

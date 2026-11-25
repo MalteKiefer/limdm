@@ -173,22 +173,46 @@ func graphicalSessions() []graphicalSession {
 	}
 	var res []graphicalSession
 	for _, l := range loginSessions() {
-		if !l.person() || (l.Type != "x11" && l.Type != "wayland") {
+		if !l.person() || l.Remote {
 			continue
 		}
-		audit := l.Audit
-		if audit == "0" || audit == "4294967295" {
-			audit = "" // no audit session: fall back to the user's processes
-		}
-		env := graphicalEnv(l.UID, audit)
-		if env == nil && audit != "" {
-			env = graphicalEnv(l.UID, "")
-		}
+		env, kind := sessionDisplay(l)
 		if env != nil {
-			res = append(res, graphicalSession{id: l.ID, user: l.User, uid: l.UID, kind: l.Type, env: env, locked: l.Locked})
+			res = append(res, graphicalSession{id: l.ID, user: l.User, uid: l.UID, kind: kind, env: env, locked: l.Locked})
 		}
 	}
 	return res
+}
+
+// sessionDisplay returns the display environment of a login session and
+// whether it is x11 or wayland. Compositors started from a text console
+// (sway, Hyprland or startx from .bash_profile) leave logind's Type at
+// "tty"; their processes carry WAYLAND_DISPLAY or DISPLAY, which decides.
+func sessionDisplay(l loginSession) ([]string, string) {
+	audit := l.Audit
+	if audit == "0" || audit == "4294967295" {
+		audit = "" // no audit session ID: only the user's processes can tell
+	}
+	if audit == "" && l.Type != "x11" && l.Type != "wayland" {
+		return nil, "" // a text session without audit ID cannot be told apart from the user's graphical one
+	}
+	env := graphicalEnv(l.UID, audit)
+	if env == nil && audit != "" && (l.Type == "x11" || l.Type == "wayland") {
+		env = graphicalEnv(l.UID, "")
+	}
+	if env == nil {
+		return nil, ""
+	}
+	kind := l.Type
+	if kind != "x11" && kind != "wayland" {
+		kind = "x11"
+		for _, kv := range env {
+			if strings.HasPrefix(kv, "WAYLAND_DISPLAY=") {
+				kind = "wayland"
+			}
+		}
+	}
+	return env, kind
 }
 
 // procSessions finds graphical sessions without logind: one per person

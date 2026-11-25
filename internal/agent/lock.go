@@ -135,7 +135,20 @@ func (a *Agent) enforceDeviceLock() {
 // consoleSession: a person's session without a screen to lock (terminal,
 // or remote as with SSH).
 func consoleSession(l loginSession) bool {
-	return l.person() && (l.Remote || l.Type == "tty" || l.Type == "unspecified")
+	if !l.person() || (!l.Remote && l.Type != "tty" && l.Type != "unspecified") {
+		return false
+	}
+	if !l.Remote { // a compositor started from the console is graphical: locked, not ended
+		if env, _ := sessionDisplay(l); env != nil {
+			return false
+		}
+		// without an audit session ID the session cannot be told apart: when
+		// the user has a display anywhere, keep it rather than end a desktop
+		if (l.Audit == "" || l.Audit == "0" || l.Audit == "4294967295") && graphicalEnv(l.UID, "") != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // endConsoleSessions ends terminal and SSH sessions of people; they have
