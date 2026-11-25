@@ -256,9 +256,6 @@ func nativeVolumes() []api.Volume {
 	return vols
 }
 
-// onLUKS reports whether a block device sits on a dm-crypt mapping.
-func onLUKS(dev string) bool { return dmCryptType(dev) != "" }
-
 // volumeEncryption names how a mounted file system is encrypted, "" when it
 // is not: dm-crypt below it (any layering: LVM on LUKS, LUKS on LVM, RAID),
 // native ZFS encryption, eCryptfs. A Btrfs file system spanning several
