@@ -65,6 +65,7 @@ var migrations = []struct {
 			ALTER TABLE local_admins ADD CONSTRAINT local_admins_role_check CHECK (role IN ('admin', 'helpdesk', 'auditor'))`)
 		return err
 	}},
+	{5, seedCatalog},
 }
 
 func columnExists(ctx context.Context, tx pgx.Tx, table, column string) (bool, error) {

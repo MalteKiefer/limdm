@@ -470,6 +470,7 @@ type Inventory struct {
 	Flatpaks       []FlatpakApp        `json:"flatpaks,omitempty"`        // installed Flatpak applications, system and per user
 	FlatpakRemotes []FlatpakRemoteInfo `json:"flatpak_remotes,omitempty"` // Flatpak remotes, system and per user
 	Certificates   []CertInfo          `json:"certificates,omitempty"`    // CA certificates installed by LiMDM
+	Apps           []AppState          `json:"apps,omitempty"`            // software catalog state
 	Interfaces     []NIC               `json:"interfaces,omitempty"`      // addresses only with privacy.network_info
 	DNS            []DNSConfig         `json:"dns,omitempty"`             // only with privacy.network_info
 	Routes         []Route             `json:"routes,omitempty"`          // only with privacy.network_info
@@ -665,6 +666,8 @@ type CheckinRequest struct {
 	BrandingHash      string          `json:"branding_hash,omitempty"`
 	UpdateResult      *UpdateResult   `json:"update_result,omitempty"` // outcome of the last agent update
 	Events            []string        `json:"events,omitempty"`
+	CatalogHash       string          `json:"catalog_hash,omitempty"`
+	AppRequests       []AppRequest    `json:"app_requests,omitempty"` // self service requests of users
 }
 
 // Branding is the company name and PNG logo shown by the desktop helper.
@@ -696,6 +699,8 @@ type CheckinResponse struct {
 	RecoveryRotate []RecoveryKey `json:"recovery_rotate,omitempty"`
 	// Branding is sent when it differs from the agent's BrandingHash.
 	Branding *Branding `json:"branding,omitempty"`
+	// Catalog is sent when it differs from the agent's CatalogHash.
+	Catalog *Catalog `json:"catalog,omitempty"`
 }
 
 // ---- signed agent releases ----

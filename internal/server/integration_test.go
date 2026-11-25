@@ -1296,4 +1296,44 @@ func TestAgentUpdates(t *testing.T) {
 	if !pollOf("d5") {
 		t.Fatal("an admin request must retry the update")
 	}
+
+	// software catalog: 25 seeded apps, scope by blueprint, requests
+	var seeded int
+	db.QueryRow(ctx, `SELECT count(*) FROM catalog_apps`).Scan(&seeded)
+	if seeded != 25 {
+		t.Fatalf("seeded catalog: %d", seeded)
+	}
+	db.Exec(ctx, `UPDATE catalog_apps SET mode='request' WHERE slug='slack'`)
+	db.Exec(ctx, `UPDATE catalog_apps SET scope='{999}' WHERE slug='zoom'`)
+	db.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('software', '{"restrict_flathub":true}') ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`)
+	ctx2 := ctx
+	tx2, _ := db.Begin(ctx2)
+	cat, err := s.deviceCatalog(ctx2, tx2, "d3", []blueprintRec{{ID: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cat.Apps) != 24 || !cat.RestrictFlathub || cat.Hash == "" {
+		t.Fatalf("catalog: %d apps, restrict=%v", len(cat.Apps), cat.RestrictFlathub)
+	}
+	reqs := []api.AppRequest{{App: "slack", User: "bob", Note: "team chat"}, {App: "slack", User: "bob"}, {App: "firefox", User: "bob"}}
+	if err := recordAppRequests(ctx2, tx2, "d3", reqs, cat); err != nil {
+		t.Fatal(err)
+	}
+	tx2.Commit(ctx2)
+	var n int
+	db.QueryRow(ctx, `SELECT count(*) FROM catalog_requests WHERE device_id='d3'`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("one request for the request mode app expected, got %d", n)
+	}
+	tx3, _ := db.Begin(ctx)
+	cat, _ = s.deviceCatalog(ctx, tx3, "d3", []blueprintRec{{ID: 999}})
+	tx3.Rollback(ctx)
+	var slack, zoom bool
+	for _, a := range cat.Apps {
+		slack = slack || (a.ID == "slack" && a.Request == "pending")
+		zoom = zoom || a.ID == "zoom"
+	}
+	if !slack || !zoom {
+		t.Fatalf("request state or scoped app missing: slack=%v zoom=%v", slack, zoom)
+	}
 }

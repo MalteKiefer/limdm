@@ -67,6 +67,7 @@ Host installation with deb or rpm packages behind Caddy, OIDC and all options:
 | [Desktop login](docs/desktop-login.md) | SSO login, local password, reconfirmation, offline lock |
 | [Disk encryption](docs/disk-encryption.md) | Recovery key escrow and rotation |
 | [Compliance](docs/compliance.md) | Checks, frameworks, policies, webhooks, evidence |
+| [Software catalog](docs/software.md) | Self service apps in the desktop app, requests, Flathub filter |
 | [Security](docs/security.md) | Architecture, mTLS, sessions, audit log, privacy |
 | [Operations](docs/operations.md) | Backup, restore, releases, troubleshooting |
 | [Development](docs/development.md) | Building, tests, release process |

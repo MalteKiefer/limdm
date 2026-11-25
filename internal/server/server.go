@@ -248,6 +248,7 @@ func (s *Server) Background(ctx context.Context) {
 	go s.googleSyncLoop(ctx)
 	go s.historyLoop(ctx)
 	go s.releaseLoop(ctx)
+	go s.iconLoop(ctx)
 }
 
 // AdminHandler serves the web UI.
@@ -288,6 +289,7 @@ func (s *Server) AgentHandler() http.Handler {
 	mux.HandleFunc("POST /api/v1/checkin", s.deviceAuth(s.checkin, false))
 	mux.HandleFunc("POST /api/v1/poll", s.deviceAuth(s.poll, false))
 	mux.HandleFunc("GET /api/v1/agent-packages/{version}/{file}", s.deviceAuth(s.agentPackage, false))
+	mux.HandleFunc("GET /api/v1/catalog/icons/{id}", s.deviceAuth(s.catalogIcon, false))
 	return securityHeaders(mux)
 }
 
@@ -621,10 +623,29 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 
 	resp := api.CheckinResponse{ServerTime: time.Now().UTC(),
 		NeedStatus: statusHash != req.StatusHash, NeedPackages: pkgHash != req.PackagesHash}
-	decls, err := effectiveDeclarations(ctx, tx, id)
+	res, err := resolveDevice(ctx, tx, id)
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	decls := res.Decls
+	catalog, err := s.deviceCatalog(ctx, tx, id, res.Chain)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := recordAppRequests(ctx, tx, id, req.AppRequests, catalog); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if len(req.AppRequests) > 0 { // the device sees its new request states in this answer
+		if catalog, err = s.deviceCatalog(ctx, tx, id, res.Chain); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+	if catalog.Hash != req.CatalogHash {
+		resp.Catalog = catalog
 	}
 	resp.DeclarationsToken = api.DeclarationsToken(decls)
 	if resp.DeclarationsToken != req.DeclarationsToken {

@@ -304,3 +304,34 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS update_target TEXT NOT NULL DEFAULT
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS external_ip TEXT NOT NULL DEFAULT '';   -- peer address of the last check in
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS geo JSONB;                              -- location of external_ip (geo.go)
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS geo_at TIMESTAMPTZ;
+
+-- Software catalog (self service, catalog.go). sources and detect hold the
+-- api.AppSource list and extra package names; scope lists blueprint IDs
+-- (empty: every device).
+CREATE TABLE IF NOT EXISTS catalog_apps (
+    slug        TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    summary     TEXT NOT NULL DEFAULT '',
+    category    TEXT NOT NULL DEFAULT '',
+    mode        TEXT NOT NULL DEFAULT 'available',
+    enabled     BOOLEAN NOT NULL DEFAULT true,
+    sources     JSONB NOT NULL,
+    detect      TEXT[] NOT NULL DEFAULT '{}',
+    scope       BIGINT[] NOT NULL DEFAULT '{}',
+    icon        BYTEA,
+    icon_tried  TIMESTAMPTZ,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS catalog_requests (
+    id          BIGSERIAL PRIMARY KEY,
+    device_id   TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    app         TEXT NOT NULL REFERENCES catalog_apps(slug) ON DELETE CASCADE,
+    username    TEXT NOT NULL DEFAULT '',
+    note        TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'pending', -- pending | approved | denied
+    decided_by  TEXT,
+    decided_at  TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS catalog_requests_device ON catalog_requests(device_id, app, created_at DESC);

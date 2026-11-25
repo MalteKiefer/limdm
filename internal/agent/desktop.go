@@ -8,8 +8,10 @@ import (
 	"errors"
 	"net"
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +40,8 @@ type desktopInfo struct {
 	Status   DesktopStatus
 	Profiles []DesktopProfile
 	Certs    []api.CertInfo
+	Apps     []DesktopApp // catalog snapshot of the last cycle
+	Store    *StoreInfo
 }
 
 // DesktopCheck is one compliance check as the desktop app lists it.
@@ -64,7 +68,9 @@ type DesktopStatus struct {
 
 // DesktopRequest and DesktopResponse are the socket protocol (one JSON line each).
 type DesktopRequest struct {
-	Op         string `json:"op"` // status | info | sync | escrow
+	Op         string `json:"op"` // status | info | sync | escrow | catalog | app-install | app-remove | app-request
+	App        string `json:"app,omitempty"`
+	Note       string `json:"note,omitempty"`
 	UUID       string `json:"uuid,omitempty"`
 	Passphrase string `json:"passphrase,omitempty"`
 }
@@ -85,6 +91,14 @@ type DesktopResponse struct {
 	LogLines []DesktopLogLine `json:"log_lines,omitempty"` // info: latest journal entries, every level
 	Profiles []DesktopProfile `json:"profiles,omitempty"`  // info: declarations in force
 	Certs    []api.CertInfo   `json:"certificates,omitempty"`
+	Apps     []DesktopApp     `json:"apps,omitempty"` // catalog
+	Store    *StoreInfo       `json:"store,omitempty"`
+}
+
+// StoreInfo tells the desktop app about the store policy.
+type StoreInfo struct {
+	RestrictFlathub bool `json:"restrict_flathub"`
+	ReadOnly        bool `json:"read_only"`
 }
 
 // addKeyFn is cryptsetup luksAddKey; tests replace it.
@@ -149,6 +163,10 @@ func (a *Agent) publishDesktop() {
 		Version: Version, LastCheckin: a.lastCheckin, LastError: a.lastError, Checks: len(a.lastChecks), Escrowed: len(a.state.Escrowed)}}
 	info.Status.Hostname, _ = os.Hostname()
 	info.Profiles = a.desktopProfiles()
+	info.Apps = a.desktopCatalog(a.lastFlatpaks)
+	if c := a.state.Catalog; c != nil {
+		info.Store = &StoreInfo{RestrictFlathub: c.RestrictFlathub, ReadOnly: c.StoresReadOnly}
+	}
 	info.Certs = certInfo(a.pol.Extra.Certificates)
 	for _, c := range a.lastChecks {
 		if c.Status == "fail" {
@@ -249,6 +267,25 @@ func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 		st := info.Status
 		return DesktopResponse{Company: info.Company, Logo: info.Logo, Need: need, Status: &st, Log: agentLog(),
 			LogLines: agentJournal(200), Profiles: info.Profiles, Certs: info.Certs}
+	case "catalog":
+		apps := slices.Clone(info.Apps)
+		for i := range apps { // installs and removals run between cycles
+			apps[i].Busy, apps[i].Error = "", ""
+			if j := d.a.store.job(apps[i].ID); j != nil {
+				if j.Err == "" {
+					apps[i].Busy = j.Action
+				} else {
+					apps[i].Error = j.Err
+				}
+			}
+		}
+		return DesktopResponse{Company: info.Company, OK: true, Apps: apps, Store: info.Store}
+	case "app-install", "app-remove", "app-request":
+		name := itoa(uid)
+		if u, err := user.LookupId(name); err == nil {
+			name = u.Username
+		}
+		return d.a.storeAction(strings.TrimPrefix(req.Op, "app-"), req.App, name, req.Note)
 	case "sync":
 		d.mu.Lock()
 		recent := time.Since(d.lastSync) < 30*time.Second

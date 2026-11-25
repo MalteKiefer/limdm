@@ -69,14 +69,17 @@ func parsePages(lang, layout string) map[string]*template.Template {
 				return fmt.Sprintf(T("%d d ago"), int(d.Hours()/24))
 			}
 		},
-		"frac":      func(v uint64, pct uint64) uint64 { return v * pct / 100 },
-		"inc":       func(n int) int { return n + 1 },
-		"sub":       func(a, b int) int { return a - b },
-		"dec":       func(n int) int { return n - 1 },
-		"list":      func(v ...string) []string { return v },
-		"deref":     func(p *int64) int64 { return *p },
-		"derefTime": func(p *time.Time) time.Time { return *p },
-		"deref2":    func(p *string) string { return *p },
+		"frac":       func(v uint64, pct uint64) uint64 { return v * pct / 100 },
+		"inc":        func(n int) int { return n + 1 },
+		"sub":        func(a, b int) int { return a - b },
+		"dec":        func(n int) int { return n - 1 },
+		"list":       func(v ...string) []string { return v },
+		"deref":      func(p *int64) int64 { return *p },
+		"derefStr":   func(p *string) string { return *p },
+		"appSources": appSourcesText,
+		"hasID":      func(ids []int64, id int64) bool { return slices.Contains(ids, id) },
+		"derefTime":  func(p *time.Time) time.Time { return *p },
+		"deref2":     func(p *string) string { return *p },
 		"typeLabel": func(t string) string {
 			if l, ok := typeLabels[t]; ok {
 				return T(l)
@@ -203,6 +206,14 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /directory/google/sync", s.page(s.googleSyncNow))
 	mux.HandleFunc("GET /users", s.page(s.adminOrAuditor(s.usersPage)))
 	mux.HandleFunc("GET /agents", s.page(s.adminOrAuditor(s.agentsPage)))
+	mux.HandleFunc("GET /software", s.page(s.adminOrAuditor(s.softwarePage)))
+	mux.HandleFunc("GET /software/new", s.page(s.adminOrAuditor(s.appEdit)))
+	mux.HandleFunc("GET /software/apps/{id}", s.page(s.adminOrAuditor(s.appEdit)))
+	mux.HandleFunc("GET /software/icons/{id}", s.page(func(w http.ResponseWriter, r *http.Request, _ session) { s.catalogIcon(w, r) }))
+	mux.HandleFunc("POST /software/apps", s.page(s.appSave))
+	mux.HandleFunc("POST /software/apps/{id}/delete", s.page(s.appDelete))
+	mux.HandleFunc("POST /software/requests/{id}/{op}", s.page(s.requestDecide))
+	mux.HandleFunc("POST /software/settings", s.page(s.softwareSettingsSave))
 	mux.HandleFunc("POST /agents/policy", s.page(s.agentsPolicy))
 	mux.HandleFunc("POST /agents/fetch", s.page(s.agentsFetch))
 	mux.HandleFunc("POST /agents/{version}/{op}", s.page(s.agentsRelease))
@@ -539,7 +550,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 	tab := r.URL.Query().Get("tab")
 	sub := r.URL.Query().Get("sub")
 	switch {
-	case tab == "software" && sub != "sources" && sub != "flatpak":
+	case tab == "software" && sub != "sources" && sub != "flatpak" && sub != "catalog":
 		sub = "packages"
 	case tab == "accounts" && sub != "groups":
 		sub = "users"
@@ -602,7 +613,15 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		agentVersions, _ = pgx.CollectRows(rows, pgx.RowTo[string])
 		slices.SortFunc(agentVersions, func(a, b string) int { return api.CompareVersions(b, a) })
 	}
-	s.render(w, r, sess, "device", map[string]any{"EncExcluded": encExcluded, "AgentVersions": agentVersions,
+	appNames := map[string]string{}
+	if tab == "software" && sub == "catalog" {
+		if apps, err := s.catalogApps(ctx, s.db, ""); err == nil {
+			for _, a := range apps {
+				appNames[a.ID] = a.Name
+			}
+		}
+	}
+	s.render(w, r, sess, "device", map[string]any{"EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames,
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),

@@ -91,6 +91,7 @@ def when(ts):
 
 PAGES = [
     ("overview", "computer-symbolic", tr("Overview", "Übersicht")),
+    ("software", "system-software-install-symbolic", tr("Software", "Software")),
     ("compliance", "security-high-symbolic", tr("Compliance", "Compliance")),
     ("profiles", "emblem-documents-symbolic", tr("Profiles", "Profile")),
     ("certificates", "channel-secure-symbolic", tr("Certificates", "Zertifikate")),
@@ -472,6 +473,161 @@ class Window(Adw.ApplicationWindow):
         cur = self.cfg.get("scheme", "system")
         self._apply_scheme(order[(order.index(cur) + 1) % 3 if cur in order else 0])
         save_config(self.cfg)
+
+    # ---- software ----
+
+    def page_software(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.sw_box = box
+        if not hasattr(self, "sw_query"):
+            self.sw_query, self.sw_category = "", ""
+        self._load_catalog()
+        return box
+
+    def _load_catalog(self):
+        in_background(lambda: agent({"op": "catalog"}, timeout=20), self._catalog_loaded)
+
+    def _catalog_loaded(self, res, err):
+        if self.current != "software":
+            return False
+        box = self.sw_box
+        while box.get_first_child():
+            box.remove(box.get_first_child())
+        if err or not res or not res.get("ok"):
+            box.append(self._unreachable())
+            return False
+        apps = res.get("apps") or []
+        store = res.get("store") or {}
+        if store.get("read_only"):
+            box.append(Adw.Banner(title=tr("Software is installed through this catalog. Other app stores are read only.",
+                                           "Software wird über diesen Katalog installiert. Andere App Stores sind nur lesbar."), revealed=True))
+        bar = Gtk.Box(spacing=12, margin_top=18, margin_bottom=6, margin_start=24, margin_end=24)
+        search = Gtk.SearchEntry(placeholder_text=tr("Search apps", "Apps durchsuchen"), hexpand=True, text=self.sw_query)
+        cats = [tr("All categories", "Alle Kategorien")] + sorted({a.get("category") for a in apps if a.get("category")})
+        drop = Gtk.DropDown.new_from_strings(cats)
+        if self.sw_category in cats:
+            drop.set_selected(cats.index(self.sw_category))
+        bar.append(search)
+        bar.append(drop)
+        box.append(bar)
+        flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=True, max_children_per_line=4, min_children_per_line=1,
+                           row_spacing=12, column_spacing=12, margin_top=12, margin_bottom=24, margin_start=24, margin_end=24,
+                           valign=Gtk.Align.START)
+        for app in apps:
+            card = self._app_card(app)
+            card.app = app
+            flow.append(card)
+
+        def matches(child):
+            a = child.get_child().app
+            q = self.sw_query.lower()
+            cat_ok = drop.get_selected() == 0 or a.get("category") == cats[drop.get_selected()]
+            return cat_ok and (not q or q in (a.get("name", "") + " " + a.get("summary", "") + " " + a.get("category", "")).lower())
+
+        flow.set_filter_func(matches)
+
+        def on_search(entry):
+            self.sw_query = entry.get_text()
+            flow.invalidate_filter()
+
+        def on_category(d, _p):
+            self.sw_category = cats[d.get_selected()]
+            flow.invalidate_filter()
+
+        search.connect("search-changed", on_search)
+        drop.connect("notify::selected", on_category)
+        if not apps:
+            box.append(Adw.StatusPage(icon_name="system-software-install-symbolic", title=tr("No Apps Yet", "Noch keine Apps"),
+                                      description=tr("IT has not published any apps for this device.", "Die IT hat für dieses Gerät noch keine Apps freigegeben.")))
+        else:
+            box.append(Gtk.ScrolledWindow(child=flow, vexpand=True))
+        if any(a.get("busy") for a in apps):
+            GLib.timeout_add_seconds(3, lambda: (self._load_catalog(), False)[1])
+        return False
+
+    def _app_icon(self, app):
+        if app.get("icon") and os.path.isfile(app["icon"]):
+            img = Gtk.Image.new_from_file(app["icon"])
+        else:
+            theme = Gtk.IconTheme.get_for_display(self.get_display())
+            name = "application-x-executable"
+            for src in app.get("sources") or []:
+                if src.get("flatpak") and theme.has_icon(src["flatpak"]):
+                    name = src["flatpak"]
+            img = Gtk.Image(icon_name=name)
+        img.set_pixel_size(64)
+        return img
+
+    def _app_card(self, app):
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, css_classes=["card"], width_request=190)
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=16, margin_bottom=14, margin_start=14, margin_end=14)
+        inner.append(self._app_icon(app))
+        inner.append(Gtk.Label(label=app.get("name", ""), css_classes=["heading"], ellipsize=Pango.EllipsizeMode.END))
+        summary = Gtk.Label(label=app.get("summary", ""), css_classes=["dim-label", "caption"], wrap=True, lines=2,
+                            ellipsize=Pango.EllipsizeMode.END, justify=Gtk.Justification.CENTER, max_width_chars=24)
+        inner.append(summary)
+        inner.append(self._app_action(app))
+        if app.get("error"):
+            inner.append(Gtk.Label(label=app["error"], css_classes=["error", "caption"], wrap=True, max_width_chars=24))
+        card.append(inner)
+        return card
+
+    def _app_action(self, app):
+        mode, busy = app.get("mode"), app.get("busy")
+        if busy:
+            b = Gtk.Box(spacing=8, halign=Gtk.Align.CENTER)
+            b.append(Gtk.Spinner(spinning=True))
+            b.append(Gtk.Label(label=tr("Installing…", "Wird installiert…") if busy == "install" else tr("Removing…", "Wird entfernt…")))
+            return b
+        if app.get("installed"):
+            b = Gtk.Box(spacing=6, halign=Gtk.Align.CENTER)
+            flatpak = next((x.get("flatpak") for x in app.get("sources") or [] if x.get("kind") == "flatpak"), "")
+            if app.get("via") == "flatpak" and flatpak:
+                o = Gtk.Button(label=tr("Open", "Öffnen"), css_classes=["suggested-action", "pill"])
+                o.connect("clicked", lambda _b: Gio.Subprocess.new(["flatpak", "run", flatpak], Gio.SubprocessFlags.NONE))
+                b.append(o)
+            else:
+                b.append(Gtk.Label(label=tr("Installed", "Installiert"), css_classes=["success"]))
+            if mode == "available":
+                r = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text=tr("Remove", "Entfernen"), css_classes=["flat", "circular"])
+                r.connect("clicked", lambda _b: self._app_op("app-remove", app))
+                b.append(r)
+            return b
+        if mode == "required":
+            return Gtk.Label(label=tr("Installed by IT soon", "Wird von der IT installiert"), css_classes=["dim-label"])
+        if mode == "request" and app.get("request") != "approved":
+            if app.get("request") == "pending":
+                return Gtk.Label(label=tr("Requested", "Angefragt"), css_classes=["dim-label"])
+            label = tr("Request Again", "Erneut anfragen") if app.get("request") == "denied" else tr("Request", "Anfragen")
+            q = Gtk.Button(label=label, css_classes=["pill"], halign=Gtk.Align.CENTER)
+            q.connect("clicked", lambda _b: self._request_dialog(app))
+            return q
+        i = Gtk.Button(label=tr("Install", "Installieren"), css_classes=["suggested-action", "pill"], halign=Gtk.Align.CENTER)
+        i.connect("clicked", lambda _b: self._app_op("app-install", app))
+        return i
+
+    def _app_op(self, op, app, note=""):
+        def done(res, err):
+            if err or not res.get("ok"):
+                self.toast((res or {}).get("error") or str(err))
+            elif op == "app-request":
+                self.toast(tr("Request sent to IT", "Anfrage an die IT gesendet"))
+            self._load_catalog()
+            return False
+
+        in_background(lambda: agent({"op": op, "app": app.get("id"), "note": note}, timeout=20), done)
+
+    def _request_dialog(self, app):
+        dlg = Adw.MessageDialog(transient_for=self, heading=tr("Request %s", "%s anfragen") % app.get("name", ""),
+                                body=tr("IT decides on your request. The app installs by itself once approved.",
+                                        "Die IT entscheidet über die Anfrage. Nach der Freigabe installiert sich die App von selbst."))
+        entry = Gtk.Entry(placeholder_text=tr("Why do you need it? (optional)", "Wofür brauchen Sie die App? (optional)"))
+        dlg.set_extra_child(entry)
+        dlg.add_response("cancel", tr("Cancel", "Abbrechen"))
+        dlg.add_response("send", tr("Send Request", "Anfrage senden"))
+        dlg.set_response_appearance("send", Adw.ResponseAppearance.SUGGESTED)
+        dlg.connect("response", lambda d, r: self._app_op("app-request", app, entry.get_text()) if r == "send" else None)
+        dlg.present()
 
     # ---- actions ----
 

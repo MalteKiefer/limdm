@@ -1,0 +1,46 @@
+{{define "title"}}{{if .New}}{{t "Add app"}}{{else}}{{.App.Name}}{{end}} · LiMDM{{end}}
+{{define "content"}}
+<div class="page-head"><div><div class="eyebrow"><a href="/software">{{t "Software"}}</a></div><h1>{{if .New}}{{t "Add app"}}{{else}}{{.App.Name}}{{end}}</h1></div></div>
+{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+<div class="grid side-right">
+  <form class="card" method="post" action="/software/apps" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="new" value="{{if .New}}1{{end}}">
+    <div class="inline">
+      <label>{{t "ID"}} <span class="hint">{{t "lower case, digits, dashes"}}</span><input name="id" value="{{.App.ID}}" required pattern="[a-z0-9][a-z0-9-]{0,47}" {{if not .New}}readonly{{end}}></label>
+      <label>{{t "Name"}}<input name="name" value="{{.App.Name}}" required maxlength="80"></label>
+    </div>
+    <label>{{t "Summary"}}<input name="summary" value="{{.App.Summary}}" maxlength="300"></label>
+    <div class="inline">
+      <label>{{t "Category"}}<input name="category" value="{{.App.Category}}" maxlength="40" list="categories"></label>
+      <label>{{t "Mode"}}<select name="mode">
+        <option value="available" {{if eq .App.Mode "available"}}selected{{end}}>{{t "available: users install it themselves"}}</option>
+        <option value="request" {{if eq .App.Mode "request"}}selected{{end}}>{{t "on request: an admin approves"}}</option>
+        <option value="required" {{if eq .App.Mode "required"}}selected{{end}}>{{t "required: installed automatically"}}</option></select></label>
+    </div>
+    <datalist id="categories"><option value="Internet"><option value="Office"><option value="Communication"><option value="Multimedia"><option value="Graphics"><option value="Development"><option value="Security"><option value="Utilities"></datalist>
+    <h2>{{t "Sources"}}</h2>
+    <label>{{t "Flatpak ID"}} <span class="hint">{{t "from Flathub, e.g. org.mozilla.firefox"}}</span><input name="flatpak" value="{{.Flatpak}}" spellcheck="false"></label>
+    <div class="inline">
+      <label>{{t "Debian and Ubuntu packages"}}<input name="debian" value="{{.Debian}}" spellcheck="false"></label>
+      <label>{{t "Fedora packages"}}<input name="fedora" value="{{.Fedora}}" spellcheck="false"></label>
+    </div>
+    <label>{{t "Install from"}}<select name="prefer">
+      <option value="flatpak" {{if eq .Prefer "flatpak"}}selected{{end}}>{{t "Flatpak first, packages as fallback"}}</option>
+      <option value="package" {{if eq .Prefer "package"}}selected{{end}}>{{t "packages first, Flatpak as fallback"}}</option></select></label>
+    <label>{{t "Also installed when"}} <span class="hint">{{t "further package names, space separated, e.g. firefox-esr"}}</span><input name="detect" value="{{.Detect}}" spellcheck="false"></label>
+    <h2>{{t "Availability"}}</h2>
+    <label class="check"><input type="checkbox" name="enabled" {{if .App.Enabled}}checked{{end}}> {{t "in the catalog"}}</label>
+    <label>{{t "Only for these blueprints"}} <span class="hint">{{t "none selected: every device"}}</span>
+      <select name="scope" multiple size="5">{{$scope := .App.Scope}}{{range .Blueprints}}<option value="{{.ID}}" {{if hasID $scope .ID}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+    <label>{{t "Icon"}} <span class="hint">{{t "PNG; Flatpak apps get theirs from Flathub"}}</span><input type="file" name="icon" accept="image/png"></label>
+    {{if .App.HasIcon}}<div class="logo-preview"><img src="/software/icons/{{.App.ID}}?v={{.App.IconHash}}" alt=""><label class="check"><input type="checkbox" name="remove_icon"> {{t "remove icon"}}</label></div>{{end}}
+    {{if eq .Sess.Role "admin"}}<div class="form-foot"><span class="muted">{{t "Devices pick up changes at their next check in."}}</span><button>{{t "Save"}}</button></div>{{end}}
+  </form>
+  <div>
+    {{if and (not .New) (eq .Sess.Role "admin")}}<form class="card" method="post" action="/software/apps/{{.App.ID}}/delete"><input type="hidden" name="csrf" value="{{.CSRF}}">
+      <h2>{{t "Remove from catalog"}}</h2><p class="muted">{{t "Installed copies stay on the devices."}}</p><button class="danger">{{t "Remove"}}</button></form>{{end}}
+    <section class="card"><h2>{{t "How it installs"}}</h2>
+      <p class="muted">{{t "The agent uses the first source that works on the device. An app counts as installed when any of its sources or further names is installed, so a distribution package is never installed again as Flatpak."}}</p></section>
+  </div>
+</div>
+{{end}}
