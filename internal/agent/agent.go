@@ -850,3 +850,42 @@ func Report(w io.Writer, level int) error {
 	}
 	return nil
 }
+
+// EnrollConfig is the file mass deployments drop before installing the package.
+const EnrollConfig = configDir + "/enroll.conf"
+
+// Enrolled reports whether the device has an identity.
+func Enrolled() bool {
+	_, err := os.Stat(identityFile)
+	return err == nil
+}
+
+// EnrollFromConfig enrolls with a key = value file (server, fingerprint, token,
+// allow_scripts) and removes it afterwards: the token must not stay on disk.
+func EnrollFromConfig(path string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	kv := map[string]string{}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			return fmt.Errorf("%s: invalid line %q", path, line)
+		}
+		kv[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"'`)
+	}
+	for _, k := range []string{"server", "fingerprint", "token"} {
+		if kv[k] == "" {
+			return fmt.Errorf("%s: %s is missing", path, k)
+		}
+	}
+	if err := Enroll(kv["server"], kv["token"], kv["fingerprint"], kv["allow_scripts"] == "true"); err != nil {
+		return err
+	}
+	return os.Remove(path)
+}

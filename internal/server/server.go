@@ -44,6 +44,7 @@ type Config struct {
 	AgentListen   string   // agent API, mTLS terminated here, never by a proxy
 	AgentURL      string   // URL agents use, its host goes into the server certificate
 	AgentHosts    []string // additional names/IPs for the agent certificate, e.g. the IP older agents enrolled with
+	ReleaseRepo   string   // GitHub owner/name the install script downloads agent packages from
 	CADir         string
 	LocalLogin    bool // local admin accounts with password and TOTP
 	OIDCIssuer    string
@@ -84,6 +85,10 @@ func ConfigFromEnv() (Config, error) {
 		ReleaseDir:    os.Getenv("LIMDM_RELEASE_DIR"),
 		LocalLogin:    os.Getenv("LIMDM_LOCAL_LOGIN") == "true",
 		AgentHosts:    split(os.Getenv("LIMDM_AGENT_HOSTS")),
+		ReleaseRepo:   os.Getenv("LIMDM_RELEASE_REPO"),
+	}
+	if c.ReleaseRepo == "" {
+		c.ReleaseRepo = "MalteKiefer/limdm"
 	}
 	c.Listen = os.Getenv("LIMDM_LISTEN")
 	if c.Listen == "" {
@@ -240,6 +245,7 @@ func (s *Server) AdminHandler() http.Handler {
 	mux.HandleFunc("GET /login", s.loginPage)
 	mux.HandleFunc("GET /lang/{lang}", s.setLang)
 	mux.HandleFunc("GET /branding/logo.png", s.logo)
+	mux.HandleFunc("GET /install.sh", s.installScript)
 	mux.HandleFunc("GET /login/oidc", s.login)
 	mux.HandleFunc("POST /login/local", s.localLogin)
 	mux.HandleFunc("GET /auth/callback", s.callback)

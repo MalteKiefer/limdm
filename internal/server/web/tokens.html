@@ -3,12 +3,24 @@
 <div class="page-head"><div><h1>{{t "Enrollment"}}</h1><div class="meta"><span>{{t "One time tokens bind new devices to the device CA"}}</span></div></div></div>
 {{if .Created}}
 <div class="notice ok" role="status">
-  <strong>{{t "Token created."}}</strong> It is shown only once.
+  <strong>{{t "Token created."}}</strong> {{t "It is shown only once."}}
   <pre>{{.Created}}</pre>
-  <p class="muted">On the device, as root, after installing the agent with <code>install-agent.sh</code>:</p>
-  <pre>limdm-agent enroll --server {{.AgentURL}} --fingerprint {{.Fingerprint}} --token {{.Created}}</pre>
 </div>
 {{end}}
+<section class="card deploy">
+  <h2>{{t "Deploy the agent"}}</h2>
+  <p class="muted">{{t "Always installs the newest release from"}} <a href="https://github.com/{{.Repo}}/releases/latest" rel="noopener">github.com/{{.Repo}}</a>{{t ", including osquery. Debian, Ubuntu and Fedora (amd64, arm64)."}}</p>
+  <h3>{{t "Single device"}}</h3>
+  <pre>curl -fsSL {{.PublicURL}}/install.sh | sudo LIMDM_TOKEN={{if .Created}}{{.Created}}{{else}}&lt;token&gt;{{end}} sh</pre>
+  <h3>{{t "Mass deployment"}}</h3>
+  <p class="muted">{{t "Distribute this file with Ansible, Puppet or a golden image as /etc/limdm/enroll.conf (mode 0600), then install the limdm-agent package or run the script without LIMDM_TOKEN. The agent enrolls on installation and deletes the file. Use a token with enough uses."}}</p>
+  <pre>server = "{{.AgentURL}}"
+fingerprint = "{{.Fingerprint}}"
+token = "{{if .Created}}{{.Created}}{{else}}&lt;token&gt;{{end}}"
+allow_scripts = false</pre>
+  <pre>curl -fsSL {{.PublicURL}}/install.sh | sudo sh</pre>
+  <p class="muted">{{t "Other systems: use the tar.gz release and"}} <code>limdm-agent enroll --config /etc/limdm/enroll.conf</code>.</p>
+</section>
 <div class="grid side-right">
   <section class="tablecard">
     <div class="card-head"><h2>{{t "Active tokens"}}</h2></div>
