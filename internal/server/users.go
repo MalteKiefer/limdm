@@ -174,6 +174,10 @@ func (s *Server) userReset(w http.ResponseWriter, r *http.Request, sess session)
 		s.renderUsers(w, r, sess, "", "only local accounts have credentials to reset")
 		return
 	}
+	if localPrefix+name == sess.Email {
+		s.renderUsers(w, r, sess, "", "change your own credentials in your profile")
+		return
+	}
 	var creds string
 	err := s.auditAction(ctx, sess.Email, "user.reset", localPrefix+name, "new password and TOTP", func(tx pgx.Tx) error {
 		var err error

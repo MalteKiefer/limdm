@@ -245,10 +245,22 @@ func (s *Server) checkLocal(ctx context.Context, name, password, code, ip string
 		}
 		pwOK := checkPassword(hash, password)
 		step, totpOK := verifyTOTP(secret, code, time.Now(), lastStep)
+		usedRecovery := false
+		if pwOK && !totpOK {
+			ok, rerr := useRecoveryCode(ctx, tx, name, code)
+			if rerr != nil {
+				return "", "", "", "", rerr
+			}
+			totpOK, usedRecovery, step = ok, ok, lastStep
+		}
 		if pwOK && totpOK {
+			detail := role
+			if usedRecovery {
+				detail += ", with a recovery code"
+			}
 			result = "login"
 			_, uerr := tx.Exec(ctx, `UPDATE local_admins SET failures=0, locked_until=NULL, totp_last_step=$2, last_login=now() WHERE name=$1`, name, step)
-			return localPrefix + name, result, ip, role, uerr
+			return localPrefix + name, result, ip, detail, uerr
 		}
 		failures++
 		var lock *time.Time

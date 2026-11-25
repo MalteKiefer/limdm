@@ -31,7 +31,7 @@
     </nav>
     <form class="who" method="post" action="/logout">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <div class="name" title="{{.Sess.Email}}">{{.Sess.Email}}</div>
+      <a class="name" href="/profile" title="{{t "Profile"}}: {{.Sess.Email}}">{{.Sess.Email}}</a>
       <div class="role">{{t .Sess.Role}}</div>
       <button>{{t "Sign out"}}</button>
     </form>

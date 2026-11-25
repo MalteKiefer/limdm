@@ -11,14 +11,14 @@
       <tbody>{{$s := .}}{{range .Users}}{{$login := .Login}}{{if .Local}}{{$login = printf "local:%s" .Login}}{{end}}<tr>
         <td class="mono">{{.Login}}{{if .Disabled}} <span class="pill">{{t "disabled"}}</span>{{end}}</td>
         <td>{{if .Local}}{{t "local (password + TOTP)"}}{{else}}{{t "OIDC"}}{{end}}</td>
-        <td>{{if eq $s.Sess.Role "admin"}}
+        <td>{{if eq $login $s.Sess.Email}}{{t .Role}} <a class="muted" href="/profile">({{t "you"}})</a>{{else if eq $s.Sess.Role "admin"}}
           <form class="inline-form" method="post" action="/users/update"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="login" value="{{$login}}">
             <select name="role" aria-label="{{t "Role"}}">{{$r := .Role}}{{range $s.Roles}}<option value="{{.}}" {{if eq . $r}}selected{{end}}>{{t .}}</option>{{end}}</select>
             <label class="check"><input type="checkbox" name="disabled" {{if .Disabled}}checked{{end}}> {{t "disabled"}}</label>
             <button class="secondary small">{{t "Save"}}</button></form>
           {{else}}{{t .Role}}{{end}}</td>
         <td>{{ago .LastLogin}}</td>
-        {{if eq $s.Sess.Role "admin"}}<td>{{if .Local}}<form method="post" action="/users/reset"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="login" value="{{$login}}"><button class="secondary small">{{t "Reset credentials"}}</button></form>{{end}}</td>{{end}}
+        {{if eq $s.Sess.Role "admin"}}<td>{{if and .Local (ne $login $s.Sess.Email)}}<form method="post" action="/users/reset"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="login" value="{{$login}}"><button class="secondary small">{{t "Reset credentials"}}</button></form>{{end}}</td>{{end}}
       </tr>{{end}}</tbody>
     </table></div>
   </section>

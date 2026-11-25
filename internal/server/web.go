@@ -124,7 +124,7 @@ func (s *Server) pageFor(h handler, postRole string) http.HandlerFunc {
 		}
 		if r.Method == http.MethodPost {
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-			if sess.Role != "admin" && (postRole != "helpdesk" || sess.Role != "helpdesk") {
+			if sess.Role != "admin" && postRole != "self" && (postRole != "helpdesk" || sess.Role != "helpdesk") {
 				http.Error(w, "your role cannot change this", http.StatusForbidden)
 				return
 			}
@@ -179,6 +179,10 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /directory/google", s.page(s.googleConfigure))
 	mux.HandleFunc("POST /directory/google/sync", s.page(s.googleSyncNow))
 	mux.HandleFunc("GET /users", s.page(s.adminOrAuditor(s.usersPage)))
+	mux.HandleFunc("GET /profile", s.selfPage(s.profile))
+	mux.HandleFunc("POST /profile/password", s.selfPage(s.profilePassword))
+	mux.HandleFunc("POST /profile/totp", s.selfPage(s.profileTOTP))
+	mux.HandleFunc("POST /profile/recovery", s.selfPage(s.profileRecovery))
 	mux.HandleFunc("POST /users", s.page(s.userAdd))
 	mux.HandleFunc("POST /users/update", s.page(s.userUpdate))
 	mux.HandleFunc("POST /users/reset", s.page(s.userReset))

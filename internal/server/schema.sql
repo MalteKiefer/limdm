@@ -192,3 +192,12 @@ CREATE TABLE IF NOT EXISTS recovery_keys (
     rotate      BOOLEAN NOT NULL DEFAULT false,
     PRIMARY KEY (device_id, uuid)
 );
+
+ALTER TABLE local_admins ADD COLUMN IF NOT EXISTS totp_pending TEXT;
+
+CREATE TABLE IF NOT EXISTS local_recovery_codes (
+    name    TEXT NOT NULL REFERENCES local_admins(name) ON DELETE CASCADE,
+    hash    TEXT NOT NULL,
+    used_at TIMESTAMPTZ,
+    PRIMARY KEY (name, hash)
+);

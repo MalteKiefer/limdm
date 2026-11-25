@@ -927,3 +927,49 @@ func TestRecoveryEscrow(t *testing.T) {
 		t.Fatal("managed source offered")
 	}
 }
+
+func TestRecoveryCodeLogin(t *testing.T) {
+	dsn := os.Getenv("LIMDM_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("LIMDM_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{db: db, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	tx, _ := db.Begin(ctx)
+	creds, err := localAdd(ctx, tx, "alice", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := newRecoveryCode()
+	tx.Exec(ctx, `INSERT INTO local_recovery_codes(name, hash) VALUES ('alice', $1)`, hashCode(code))
+	tx.Commit(ctx)
+	var pw string
+	for _, l := range strings.Split(creds, "\n") {
+		if v, ok := strings.CutPrefix(l, "password: "); ok {
+			pw = strings.TrimSpace(v)
+		}
+	}
+	if role, err := s.checkLocal(ctx, "alice", pw, strings.ToUpper(code), "127.0.0.1"); err != nil || role != "admin" {
+		t.Fatalf("recovery code login: %q %v", role, err)
+	}
+	if _, err := s.checkLocal(ctx, "alice", pw, code, "127.0.0.1"); err == nil {
+		t.Fatal("recovery code worked twice")
+	}
+	if _, err := s.checkLocal(ctx, "alice", "wrong", newRecoveryCode(), "127.0.0.1"); err == nil {
+		t.Fatal("wrong password accepted")
+	}
+	if !strings.Contains(string(qrSVG(totpURI("alice", newTOTPSecret()))), "<path") {
+		t.Fatal("no QR code")
+	}
+}
