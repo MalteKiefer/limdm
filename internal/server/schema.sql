@@ -226,18 +226,6 @@ CREATE TABLE IF NOT EXISTS dir_tombstones (
     email      TEXT PRIMARY KEY,
     removed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE OR REPLACE FUNCTION dir_users_tombstone() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-    IF TG_OP = 'DELETE' THEN
-        INSERT INTO dir_tombstones(email) VALUES (lower(OLD.email)) ON CONFLICT (email) DO UPDATE SET removed_at = now();
-        RETURN OLD;
-    END IF;
-    DELETE FROM dir_tombstones WHERE email = lower(NEW.email);
-    RETURN NEW;
-END $$;
-DROP TRIGGER IF EXISTS dir_users_tombstone ON dir_users;
-CREATE TRIGGER dir_users_tombstone AFTER INSERT OR UPDATE OF email OR DELETE ON dir_users
-    FOR EACH ROW EXECUTE FUNCTION dir_users_tombstone();
 
 -- Console users seeded from LIMDM_ADMINS / LIMDM_AUDITORS are disabled at start
 -- once they are no longer listed; users edited in the console are not.
@@ -382,3 +370,35 @@ CREATE TABLE IF NOT EXISTS notification_log (
     at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS notification_log_channel ON notification_log(channel_id, id DESC);
+-- agents without a compliance item reported "checks": null, which the
+-- jsonb_array_* functions of the device page and the export reject
+UPDATE devices SET checks = '[]' WHERE jsonb_typeof(checks) <> 'array';
+UPDATE devices SET decl_status = '[]' WHERE jsonb_typeof(decl_status) <> 'array';
+-- users of a device already reported as disabled (notified once)
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS users_disabled TEXT[] NOT NULL DEFAULT '{}';
+-- addresses a directory user had before (renames, domain moves): device user
+-- lists still name the old one, and a later suspension must reach it
+ALTER TABLE dir_users ADD COLUMN IF NOT EXISTS previous_emails TEXT[] NOT NULL DEFAULT '{}';
+CREATE OR REPLACE FUNCTION dir_users_previous_email() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF lower(OLD.email) <> lower(NEW.email) AND NOT lower(OLD.email) = ANY(NEW.previous_emails) THEN
+        NEW.previous_emails := array_append(NEW.previous_emails, lower(OLD.email));
+    END IF;
+    RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS dir_users_previous_email ON dir_users;
+CREATE TRIGGER dir_users_previous_email BEFORE UPDATE OF email ON dir_users
+    FOR EACH ROW EXECUTE FUNCTION dir_users_previous_email();
+CREATE OR REPLACE FUNCTION dir_users_tombstone() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO dir_tombstones(email) SELECT e FROM unnest(array_append(OLD.previous_emails, lower(OLD.email))) e
+            ON CONFLICT (email) DO UPDATE SET removed_at = now();
+        RETURN OLD;
+    END IF;
+    DELETE FROM dir_tombstones WHERE email = lower(NEW.email);
+    RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS dir_users_tombstone ON dir_users;
+CREATE TRIGGER dir_users_tombstone AFTER INSERT OR UPDATE OF email OR DELETE ON dir_users
+    FOR EACH ROW EXECUTE FUNCTION dir_users_tombstone();

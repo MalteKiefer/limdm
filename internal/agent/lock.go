@@ -55,6 +55,9 @@ func readLockUsers() []string {
 }
 
 func (a *Agent) lockDevice() (string, error) {
+	if inLostMode() {
+		return "device is in lost mode and stays locked with its lost mode message", nil
+	}
 	if _, err := writeIfChanged(nologinFile, nologinText, 0o644); err != nil {
 		return "", err
 	}
@@ -66,6 +69,11 @@ func (a *Agent) lockDevice() (string, error) {
 }
 
 func (a *Agent) unlockDevice() (string, error) {
+	if inLostMode() {
+		// only "found" ends lost mode; an unlock (also the automatic one of the
+		// compliance policy) must not release its password locks
+		return "", errors.New("device is in lost mode; use Found to unlock it")
+	}
 	if readFile(nologinFile) == nologinText {
 		if err := os.Remove(nologinFile); err != nil {
 			return "", err
@@ -103,18 +111,24 @@ func lockPasswords() ([]string, error) {
 // managed users locked.
 func (a *Agent) releasePasswords() ([]string, error) {
 	var errs []error
-	var released []string
+	var released, failed []string
 	for _, u := range readLockUsers() {
 		if !passwordLocked(u) {
 			continue
 		}
 		if _, err := sh("usermod", "-U", u); err != nil {
 			errs = append(errs, err)
+			failed = append(failed, u) // kept, so the next unlock retries it
 			continue
 		}
 		released = append(released, u)
 	}
-	if err := os.Remove(deviceLockUsers); err != nil && !os.IsNotExist(err) {
+	if len(failed) > 0 {
+		b, _ := json.Marshal(failed)
+		if err := os.WriteFile(deviceLockUsers, b, 0o600); err != nil {
+			errs = append(errs, err)
+		}
+	} else if err := os.Remove(deviceLockUsers); err != nil && !os.IsNotExist(err) {
 		errs = append(errs, err)
 	}
 	a.syncPasswordLocks()

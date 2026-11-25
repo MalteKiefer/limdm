@@ -143,7 +143,15 @@ nfpms:
       archlinux:
         dependencies: [systemd, util-linux, cryptsetup, iproute2, procps-ng, kmod, gnupg, shadow, pacman-contrib]
       apk:
-        dependencies: [openrc, findmnt, lsblk, runuser, cryptsetup, iproute2, procps, kmod, gnupg, shadow]
+        dependencies: [openrc, findmnt, lsblk, runuser, cryptsetup, iproute2, procps, kmod, gnupg, shadow, bash]
+    # pacman and apk run separate hooks on upgrade (post_upgrade, .post-upgrade);
+    # the agent update relies on the restart in the post install script
+    archlinux:
+      scripts:
+        postupgrade: packaging/agent-postinstall.sh
+    apk:
+      scripts:
+        postupgrade: packaging/agent-postinstall.sh
   - id: server
     ids: [server]
     package_name: limdm-server

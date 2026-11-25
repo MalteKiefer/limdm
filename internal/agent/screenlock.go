@@ -317,6 +317,9 @@ func fixScreenLock(a *Agent) error {
 			errs = append(errs, err)
 		}
 	}
+	if err := dconfReadable(); err != nil {
+		errs = append(errs, err)
+	}
 	if !sl.allowAutologin {
 		for _, s := range autologinSettings() {
 			content := readFile(s.file)
@@ -539,4 +542,26 @@ func setINIValue(s, section, key, value string) string {
 		}
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// dconfReadable repairs the modes of the compiled dconf databases. dconf
+// update inherits the agent's UMask=0077 and writes them 0600, so sessions
+// and the greeter could not read the locked settings at all.
+func dconfReadable() error {
+	var errs []error
+	for _, dir := range []string{"/etc/dconf", "/etc/dconf/db", "/etc/dconf/profile"} {
+		if st, err := os.Stat(dir); err == nil && st.IsDir() && st.Mode().Perm() != 0o755 {
+			errs = append(errs, os.Chmod(dir, 0o755)) //nolint:gosec // read by every session
+		}
+	}
+	for _, dir := range []string{"/etc/dconf/db", "/etc/dconf/profile"} {
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			p := filepath.Join(dir, e.Name())
+			if info, err := e.Info(); err == nil && info.Mode().IsRegular() && info.Mode().Perm() != 0o644 {
+				errs = append(errs, os.Chmod(p, 0o644)) //nolint:gosec // compiled settings, read by every session
+			}
+		}
+	}
+	return errors.Join(errs...)
 }

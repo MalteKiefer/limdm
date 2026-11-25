@@ -83,6 +83,10 @@ func (a *Agent) userCommand(typ, payload string) (string, error) {
 		if _, err := sh("usermod", "-L", "-e", "1", u.Username); err != nil {
 			return "", err
 		}
+		if a.state.UserLocked == nil {
+			a.state.UserLocked = map[string]bool{}
+		}
+		a.state.UserLocked[u.Username] = true
 		_, _ = sh("loginctl", "terminate-user", u.Username)
 		a.event("locked user %s", u.Username)
 		return "account " + u.Username + " locked and its sessions ended", nil
@@ -90,6 +94,8 @@ func (a *Agent) userCommand(typ, payload string) (string, error) {
 		if _, err := sh("usermod", "-U", "-e", "", u.Username); err != nil {
 			return "", err
 		}
+		delete(a.state.UserLocked, u.Username)
+		a.syncPasswordLocks() // the SSO rules may keep a managed user's password locked
 		a.event("unlocked user %s", u.Username)
 		return "account " + u.Username + " unlocked", nil
 	case "user_password":
@@ -108,6 +114,7 @@ func (a *Agent) userCommand(typ, payload string) (string, error) {
 			return "", err
 		}
 		forgetSSO(u.Username)
+		delete(a.state.UserLocked, u.Username)
 		a.event("deleted user %s (home kept %v)", u.Username, u.KeepHome)
 		return "account " + u.Username + " deleted", nil
 	}

@@ -123,6 +123,9 @@ func run(timeout time.Duration, name string, args ...string) (string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive", "LC_ALL=C")
+	// a background child (a script starting a daemon) keeps the output pipe
+	// open; without a bound, CombinedOutput would wait for it forever
+	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, lastLines(string(out), 5))
@@ -140,6 +143,19 @@ func lastLines(s string, n int) string {
 	return strings.Join(lines, " | ")
 }
 
+// mkdirReadable creates dir and every missing parent as 0755. MkdirAll alone
+// would leave the parents at 0700: the service runs with UMask=0077, and apt,
+// polkitd and dconf read these as other users.
+func mkdirReadable(dir string) error {
+	if exists(dir) {
+		return nil
+	}
+	if err := mkdirReadable(filepath.Dir(dir)); err != nil {
+		return err
+	}
+	return errors.Join(os.Mkdir(dir, 0o755), os.Chmod(dir, 0o755)) //nolint:gosec // system config dirs (/etc/*.d) are world readable by design
+}
+
 // writeIfChanged writes atomically and reports whether the content changed.
 func writeIfChanged(path, content string, mode os.FileMode) (bool, error) {
 	if cur, err := os.ReadFile(path); err == nil && string(cur) == content {
@@ -148,11 +164,8 @@ func writeIfChanged(path, content string, mode os.FileMode) (bool, error) {
 		}
 		return false, nil
 	}
-	if dir := filepath.Dir(path); !exists(dir) {
-		// explicit chmod: the service runs with UMask=0077, apt and polkitd read these as other users
-		if err := errors.Join(os.MkdirAll(dir, 0o755), os.Chmod(dir, 0o755)); err != nil { //nolint:gosec // system config dirs (/etc/*.d) are world readable by design
-			return false, err
-		}
+	if err := mkdirReadable(filepath.Dir(path)); err != nil {
+		return false, err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".limdm-*")
 	if err != nil {
@@ -567,6 +580,7 @@ func commandWithStdin(in string) func(name string, args ...string) (string, erro
 		cmd := exec.CommandContext(ctx, name, args...)
 		cmd.Env = append(os.Environ(), "LC_ALL=C")
 		cmd.Stdin = strings.NewReader(in)
+		cmd.WaitDelay = 5 * time.Second
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}

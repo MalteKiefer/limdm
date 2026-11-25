@@ -190,16 +190,47 @@ var safeDialer = &net.Dialer{Timeout: 15 * time.Second, Control: func(_, address
 	if err != nil {
 		return err
 	}
-	ip := net.ParseIP(host)
-	if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+	if !targetAllowed(net.ParseIP(host)) {
 		return fmt.Errorf("notification target %s is not allowed", host)
 	}
 	return nil
 }}
 
+func targetAllowed(ip net.IP) bool {
+	return ip != nil && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsUnspecified() && !ip.IsMulticast()
+}
+
+// proxyChecked uses the proxy from the environment, but checks the target
+// itself first: through a proxy, the dialer only sees the proxy's address.
+// The proxy, configured by the operator, may be on loopback.
+func proxyChecked(req *http.Request) (*url.URL, error) {
+	u, err := http.ProxyFromEnvironment(req)
+	if u == nil || err != nil {
+		return u, err
+	}
+	ips, err := net.DefaultResolver.LookupIP(req.Context(), "ip", req.URL.Hostname())
+	if err != nil {
+		return nil, err
+	}
+	for _, ip := range ips {
+		if !targetAllowed(ip) {
+			return nil, fmt.Errorf("notification target %s is not allowed", req.URL.Hostname())
+		}
+	}
+	return u, nil
+}
+
+// notifyDial dials the target through safeDialer, a configured proxy directly.
+func notifyDial(ctx context.Context, network, addr string) (net.Conn, error) {
+	if p, _ := http.ProxyFromEnvironment(&http.Request{URL: &url.URL{Scheme: "https", Host: "limdm.invalid"}}); p != nil && p.Host == addr {
+		return (&net.Dialer{Timeout: 15 * time.Second}).DialContext(ctx, network, addr)
+	}
+	return safeDialer.DialContext(ctx, network, addr)
+}
+
 var notifyClient = &http.Client{
 	Timeout:       10 * time.Second,
-	Transport:     &http.Transport{DialContext: safeDialer.DialContext, Proxy: http.ProxyFromEnvironment, TLSHandshakeTimeout: 10 * time.Second},
+	Transport:     &http.Transport{DialContext: notifyDial, Proxy: proxyChecked, TLSHandshakeTimeout: 10 * time.Second},
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, // no redirects to internal addresses
 }
 
@@ -398,7 +429,7 @@ func channelField(id int64) string { return "notification_channel:" + strconv.Fo
 type channelView struct {
 	ID                 int64
 	Name, Kind, Target string
-	Events             []string
+	Events             []string // labels of the subscribed events
 	Enabled            bool
 	LastOK             *bool
 	LastError, LastEv  string
@@ -412,7 +443,16 @@ func (s *Server) channelViews(ctx context.Context) ([]channelView, error) {
 	}
 	var out []channelView
 	for _, c := range chans {
-		v := channelView{ID: c.ID, Name: c.Name, Kind: c.Kind, Events: c.Events, Enabled: c.Enabled}
+		v := channelView{ID: c.ID, Name: c.Name, Kind: c.Kind, Enabled: c.Enabled}
+		for _, e := range c.Events {
+			label := e
+			for _, n := range notifyEvents {
+				if n.Type == e {
+					label = n.Label
+				}
+			}
+			v.Events = append(v.Events, label)
+		}
 		switch c.Kind {
 		case "email":
 			v.Target = strings.Join(c.Config.To, ", ") + " via " + c.Config.Host

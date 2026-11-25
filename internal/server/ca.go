@@ -137,7 +137,11 @@ func (ca *deviceCA) serverCert(hosts []string) (tls.Certificate, error) {
 		return tls.Certificate{}, err
 	}
 	// The CA travels in the chain so a new agent can pin it by fingerprint during the handshake.
-	return tls.Certificate{Certificate: [][]byte{der, ca.cert.Raw}, PrivateKey: key}, nil
+	leaf, err := x509.ParseCertificate(der)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	return tls.Certificate{Certificate: [][]byte{der, ca.cert.Raw}, PrivateKey: key, Leaf: leaf}, nil
 }
 
 // signCSR issues a client certificate for deviceID. The subject from the CSR

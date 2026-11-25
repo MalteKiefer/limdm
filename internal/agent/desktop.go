@@ -513,14 +513,22 @@ func (d *desktopServer) ssoOp(name string, start bool) DesktopResponse {
 	}
 	f := d.flows[name]
 	if start && (f == nil || !f.running) {
+		// reserve the flow, then talk to the identity provider without the
+		// lock: the agent's main loop and every socket request share it
+		f = &ssoFlow{running: true, started: now}
+		d.flows[name] = f
+		d.mu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		flow, err := startDeviceFlow(ctx, cfg.Login)
+		startCtx, stop := context.WithTimeout(ctx, 30*time.Second)
+		flow, err := startDeviceFlow(startCtx, cfg.Login)
+		stop()
+		d.mu.Lock()
 		if err != nil {
 			cancel()
+			f.running, f.err = false, err.Error()
 			return DesktopResponse{Error: err.Error(), SSO: st}
 		}
-		f = &ssoFlow{uri: flow.URI, code: flow.Code, running: true, started: now}
-		d.flows[name] = f
+		f.uri, f.code = flow.URI, flow.Code
 		go func() {
 			defer cancel()
 			err := flow.finish(ctx, cfg.Login, email)

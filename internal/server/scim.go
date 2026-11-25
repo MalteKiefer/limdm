@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -102,7 +103,7 @@ func scimID(s string) int64 {
 func (s *Server) scimAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// refuse before evaluating the token while the client is over the limit
-		if s.limit.over("scim:"+clientIP(r), 20, 5*time.Minute) {
+		if s.limit.over("scim:"+rateKey(r), 20, 5*time.Minute) {
 			scimErr(w, http.StatusTooManyRequests, "too many failed attempts")
 			return
 		}
@@ -116,7 +117,7 @@ func (s *Server) scimAuth(next http.HandlerFunc) http.HandlerFunc {
 			err = json.Unmarshal(raw, &stored)
 		}
 		if !ok || err != nil || stored.Hash == "" || subtle.ConstantTimeCompare([]byte(fmt.Sprintf("%x", sha(tok))), []byte(stored.Hash)) != 1 {
-			s.limit.allow("scim:"+clientIP(r), 20, 5*time.Minute) // counts the failure
+			s.limit.allow("scim:"+rateKey(r), 20, 5*time.Minute) // counts the failure
 			w.Header().Set("WWW-Authenticate", `Bearer realm="limdm-scim", error="invalid_token"`)
 			scimErr(w, http.StatusUnauthorized, "invalid token")
 			return
@@ -202,6 +203,10 @@ type scimUser struct {
 	Enterprise  *scimEntExt      `json:"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User,omitempty"`
 	Meta        map[string]any   `json:"meta,omitempty"`
 	Groups      []map[string]any `json:"groups,omitempty"`
+
+	// set by PATCH: a changed name builds the display name unless the same
+	// request set displayName itself (operations arrive in any order)
+	nameChanged, displaySet bool
 }
 
 type scimEntExt struct {
@@ -224,6 +229,14 @@ func (u scimUser) email() string {
 }
 
 func (u scimUser) display() string {
+	if u.nameChanged && !u.displaySet && u.Name != nil {
+		if u.Name.Formatted != "" {
+			return u.Name.Formatted
+		}
+		if n := strings.TrimSpace(u.Name.GivenName + " " + u.Name.FamilyName); n != "" {
+			return n
+		}
+	}
 	if u.DisplayName != "" {
 		return u.DisplayName
 	}
@@ -367,6 +380,9 @@ func (s *Server) writeUser(ctx context.Context, id string, u scimUser) (string, 
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", http.StatusNotFound, errors.New("user not found")
 		}
+		if isUnique(err) {
+			return "", http.StatusConflict, errors.New("email or userName belongs to another user")
+		}
 	}
 	if err != nil {
 		return "", http.StatusInternalServerError, err
@@ -496,17 +512,25 @@ func applyUserPatch(u *scimUser, op patchOp) error {
 	case "username":
 		u.UserName = str()
 	case "displayname":
-		u.DisplayName = str()
+		u.DisplayName, u.displaySet = str(), true
 	case "title":
 		u.Title = str()
 	case "externalid":
 		u.ExternalID = str()
 	case "name.givenname":
-		u.Name.GivenName, u.DisplayName = str(), ""
+		u.Name.GivenName, u.Name.Formatted, u.nameChanged = str(), "", true
 	case "name.familyname":
-		u.Name.FamilyName, u.DisplayName = str(), ""
+		u.Name.FamilyName, u.Name.Formatted, u.nameChanged = str(), "", true
 	case "name.formatted":
-		u.Name.Formatted = str()
+		u.Name.Formatted, u.nameChanged = str(), true
+	case "name":
+		var n scimName
+		if !remove {
+			if err := json.Unmarshal(op.Value, &n); err != nil {
+				return errors.New("name must be an object")
+			}
+		}
+		u.Name, u.nameChanged = &n, true
 	case `emails[type eq "work"].value`, "emails.value":
 		u.Emails = []scimEmail{{Value: str(), Type: "work", Primary: true}}
 	case "emails":
@@ -517,7 +541,14 @@ func applyUserPatch(u *scimUser, op patchOp) error {
 			}
 		}
 		if strings.EqualFold(op.Op, "add") { // RFC 7644 3.5.2.1: add appends to multi valued attributes
-			es = append(u.Emails, es...)
+			if slices.ContainsFunc(es, func(e scimEmail) bool { return e.Primary }) {
+				for i := range u.Emails { // one primary: the added one
+					u.Emails[i].Primary = false
+				}
+				es = append(es, u.Emails...)
+			} else {
+				es = append(u.Emails, es...)
+			}
 		}
 		u.Emails = es
 	case strings.ToLower(scimEnterprise) + ":department", "department":
@@ -551,6 +582,10 @@ func ignoredUserAttr(path string) bool {
 
 func (s *Server) scimPatchUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	// read, patch and write as one step: two concurrent PATCHes must not
+	// restore what the other one changed (active=false undone)
+	s.scimMu.Lock()
+	defer s.scimMu.Unlock()
 	cur, err := s.loadDirUser(ctx, r.PathValue("id"))
 	if err != nil {
 		scimErr(w, http.StatusNotFound, "user not found")
@@ -718,7 +753,10 @@ func (s *Server) writeGroup(ctx context.Context, id string, g scimGroup, members
 	if err := audit(ctx, tx, "scim", "directory.scim_group_write", strconv.FormatInt(gid, 10), fmt.Sprintf("%s members=%d", g.DisplayName, len(members))); err != nil {
 		return "", http.StatusInternalServerError, err
 	}
-	return strconv.FormatInt(gid, 10), http.StatusOK, tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return "", http.StatusInternalServerError, err
+	}
+	return strconv.FormatInt(gid, 10), http.StatusOK, nil
 }
 
 func memberIDs(ms []map[string]string) []string {
@@ -779,6 +817,8 @@ var memberFilterRe = regexp.MustCompile(`(?i)^members\[value eq "([^"]+)"\]$`)
 
 func (s *Server) scimPatchGroup(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	s.scimMu.Lock() // see scimPatchUser
+	defer s.scimMu.Unlock()
 	g, err := s.loadGroup(ctx, r.PathValue("id"))
 	if err != nil {
 		scimErr(w, http.StatusNotFound, "group not found")
@@ -878,7 +918,8 @@ func applyGroupPatch(g *scimGroup, members *[]string, op patchOp) error {
 	case path == "members" && op.Op == "replace":
 		*members = memberIDs(vals)
 	case path == "members" && op.Op == "remove":
-		if len(vals) == 0 {
+		// RFC 7644 3.5.2.2: no value removes every member; an empty list removes none
+		if len(bytes.TrimSpace(op.Value)) == 0 || string(bytes.TrimSpace(op.Value)) == "null" {
 			*members = []string{}
 		}
 		for _, id := range memberIDs(vals) {

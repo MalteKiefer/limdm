@@ -108,3 +108,26 @@ func TestExtraMerge(t *testing.T) {
 		t.Fatal("declaration type")
 	}
 }
+
+func TestMergeRepositoriesWithDisable(t *testing.T) {
+	a := json.RawMessage(`{"repositories":[{"name":"a"}],"disable":["old.list"]}`)
+	b := json.RawMessage(`{"repositories":[{"name":"b"}],"disable":["other.list"]}`)
+	out, ok, err := mergeExtra(TypeRepositories, a, b)
+	if err != nil || !ok {
+		t.Fatalf("merge failed: %v", err)
+	}
+	for _, want := range []string{`"name":"a"`, `"name":"b"`, "old.list", "other.list"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("merged %s lacks %s", out, want)
+		}
+	}
+}
+
+func TestMergeFlatpakLaterRemoteWins(t *testing.T) {
+	a := json.RawMessage(`{"remotes":[{"name":"flathub","url":"https://dl.flathub.org/repo/"}]}`)
+	b := json.RawMessage(`{"remotes":[{"name":"flathub","url":"https://dl.flathub.org/repo/","disabled":true}]}`)
+	out, _, err := mergeExtra(TypeFlatpak, a, b)
+	if err != nil || !strings.Contains(string(out), `"disabled":true`) {
+		t.Fatalf("later remote must win: %s %v", out, err)
+	}
+}

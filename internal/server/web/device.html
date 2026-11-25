@@ -448,11 +448,17 @@
   </table></div>
 </section>
 <section class="tablecard">
-  <div class="card-head"><h2>{{t "Device events"}}</h2><span class="muted">{{t "latest 100, kept 365 days"}}</span></div>
+  <div class="card-head"><h2>{{t "Device events"}}</h2><span class="muted">{{t "kept 365 days"}}</span></div>
   <div class="scroll"><table>
     <thead><tr><th>{{t "Time"}}</th><th>{{t "Detail"}}</th></tr></thead>
     <tbody>{{range .Events}}<tr><td class="nowrap">{{fmtTime .At}}</td><td>{{.Detail}}</td></tr>{{else}}<tr><td colspan="2" class="empty">{{t "Nothing recorded yet."}}</td></tr>{{end}}</tbody>
   </table></div>
+  {{if gt .EvPages 1}}<nav class="pager" aria-label="{{t "Event pages"}}">
+    <span class="muted">{{.EvFrom}}–{{.EvTo}} {{t "of"}} {{.EvTotal}}</span>
+    {{if gt .EvPage 1}}<a class="button secondary" href="/devices/{{$id}}?tab=commands&amp;evpage={{dec .EvPage}}">{{t "Previous"}}</a>{{end}}
+    <span>{{t "Page"}} {{.EvPage}} {{t "of"}} {{.EvPages}}</span>
+    {{if lt .EvPage .EvPages}}<a class="button secondary" href="/devices/{{$id}}?tab=commands&amp;evpage={{inc .EvPage}}">{{t "Next"}}</a>{{end}}
+  </nav>{{end}}
 </section>
 {{if and (eq .Sess.Role "admin") (ne .D.Status "retired")}}
 <section class="card">

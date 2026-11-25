@@ -29,17 +29,18 @@ import (
 // ---- schema and migrations ----
 
 func migrate(ctx context.Context, db *pgxpool.Pool) error {
-	// schema changes may take longer than the request timeouts of the pool
-	if _, err := db.Exec(ctx, "SET statement_timeout = 0; SET lock_timeout = 0;\n"+schema); err != nil {
-		return fmt.Errorf("apply schema: %w", err)
-	}
+	// one migrator at a time, and the schema inside the same transaction:
+	// SET LOCAL keeps the disabled timeouts out of the pooled connection
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = 0; SELECT pg_advisory_xact_lock(7364)`); err != nil { // one migrator at a time
+	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = 0; SELECT pg_advisory_xact_lock(7364)`); err != nil {
 		return err
+	}
+	if _, err := tx.Exec(ctx, schema); err != nil {
+		return fmt.Errorf("apply schema: %w", err)
 	}
 	for _, m := range migrations {
 		var done bool
@@ -793,11 +794,21 @@ func signItem(name, typ string, payload []byte) string {
 	if itemKey == nil {
 		return ""
 	}
-	var c bytes.Buffer
-	if json.Compact(&c, payload) != nil {
-		c.Write(payload)
+	return hex.EncodeToString(ed25519.Sign(itemKey, api.ItemSigned(name, typ, canonicalJSON(payload))))
+}
+
+// canonicalJSON is the form a signature covers: decoded and encoded again, so
+// object keys are sorted and numbers and escapes are normalized. PostgreSQL
+// stores payloads as JSONB, which reorders keys; the text read back must give
+// the same bytes as the text the console signed.
+func canonicalJSON(payload []byte) []byte {
+	var v any
+	if json.Unmarshal(payload, &v) == nil {
+		if b, err := json.Marshal(v); err == nil {
+			return b
+		}
 	}
-	return hex.EncodeToString(ed25519.Sign(itemKey, api.ItemSigned(name, typ, c.Bytes())))
+	return payload
 }
 
 func itemSignatureOK(name, typ string, payload []byte, sig string) bool {
@@ -808,11 +819,16 @@ func itemSignatureOK(name, typ string, payload []byte, sig string) bool {
 	if err != nil {
 		return false
 	}
+	pub := itemKey.Public().(ed25519.PublicKey)
+	if ed25519.Verify(pub, api.ItemSigned(name, typ, canonicalJSON(payload)), b) {
+		return true
+	}
+	// signatures made before canonicalJSON cover the compacted database text
 	var c bytes.Buffer
 	if json.Compact(&c, payload) != nil {
-		c.Write(payload)
+		return false
 	}
-	return ed25519.Verify(itemKey.Public().(ed25519.PublicKey), api.ItemSigned(name, typ, c.Bytes()), b)
+	return ed25519.Verify(pub, api.ItemSigned(name, typ, c.Bytes()), b)
 }
 
 // signExistingItems signs every unsigned library item once: on the upgrade

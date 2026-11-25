@@ -87,6 +87,7 @@ type State struct {
 	LastContact    time.Time            `json:"last_contact"`
 	DoneCommands   map[int64]time.Time  `json:"done_commands,omitempty"`  // executed command IDs: the server redelivers until it has the result
 	RemovePending  map[string]bool      `json:"remove_pending,omitempty"` // removed users whose account lock still has to succeed
+	UserLocked     map[string]bool      `json:"user_locked,omitempty"`    // accounts IT locked with user_lock; the SSO rules leave them locked
 	UpdateResult   *api.UpdateResult    `json:"update_result,omitempty"`  // agent update outcome not yet reported
 	OfflineLocked  bool                 `json:"offline_locked,omitempty"`
 }

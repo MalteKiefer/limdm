@@ -50,7 +50,7 @@ func readUsers() map[string]string {
 // locks accounts that were removed centrally (home directories are kept).
 func (a *Agent) applyUsers() error {
 	if !a.pol.Login.Enabled {
-		return a.removePAM()
+		return a.disableLogin()
 	}
 	var errs []error
 	group := a.host.adminGroup()
@@ -69,7 +69,7 @@ func (a *Agent) applyUsers() error {
 				continue
 			}
 			a.event("created user %s (%s)", u.Username, u.Email)
-		} else if _, ok := prev[u.Username]; !ok || accountExpired(u.Username) {
+		} else if _, ok := prev[u.Username]; (!ok || accountExpired(u.Username)) && !a.state.UserLocked[u.Username] {
 			if _, err := sh("usermod", "-e", "", u.Username); err != nil { // re-enable after an earlier removal
 				errs = append(errs, err)
 			}
@@ -138,14 +138,43 @@ func accountExpired(name string) bool {
 	return false
 }
 
+// disableLogin undoes the desktop login when its declaration is gone: the PAM
+// hook, and the password locks the SSO rules set. Without this, the policy
+// file left behind kept locking managed users with no SSO left to unlock them.
+func (a *Agent) disableLogin() error {
+	if _, ok := readPAMPolicy(); !ok && !pamInstalled() {
+		return nil
+	}
+	err := a.removePAM()
+	if !deviceLocked() && !a.state.OfflineLocked {
+		for user := range readUsers() {
+			if passwordLocked(user) && !a.state.UserLocked[user] {
+				// fails for accounts that never had a password; those need a reset
+				if _, uerr := sh("usermod", "-U", user); uerr == nil {
+					a.event("local password of %s unlocked: desktop login switched off", user)
+				}
+			}
+		}
+	}
+	for _, f := range []string{loginFile, usersFile} {
+		if rerr := os.Remove(f); rerr != nil && !os.IsNotExist(rerr) {
+			err = errors.Join(err, rerr)
+		}
+	}
+	return err
+}
+
 func pamInstalled() bool { return exists(pamMarker) }
 
 // pamActive checks the generated PAM stack, not just our marker, so a profile
 // removed by pam-auth-update or authselect is detected and reinstalled.
 func pamActive() bool {
-	for _, f := range []string{"/etc/pam.d/common-auth", "/etc/pam.d/system-auth"} {
-		if s := readFile(f); strings.Contains(s, "pam_exec.so") && strings.Contains(s, " pam-auth") {
-			return strings.Contains(s, "expose_authtok") // older installs lack it and are replaced
+	for _, f := range []string{"/etc/pam.d/common-auth", "/etc/pam.d/system-auth", "/etc/pam.d/base-auth"} {
+		for l := range strings.SplitSeq(readFile(f), "\n") {
+			if strings.Contains(l, "pam_exec.so") && strings.Contains(l, " pam-auth") {
+				// older installs lack expose_authtok or the "auth" type and are replaced
+				return strings.HasPrefix(strings.TrimSpace(l), "auth") && strings.Contains(l, "expose_authtok")
+			}
 		}
 	}
 	return false
@@ -176,7 +205,7 @@ func (a *Agent) installPAM() error {
 			return err
 		}
 	} else if f := pamStackFile(a.host.family); f != "" {
-		if err := editPAMStack(f, pamLine(exe)); err != nil {
+		if err := editPAMStack(f, "auth       sufficient   "+pamLine(exe)); err != nil {
 			return err
 		}
 	} else if a.host.family != "fedora" {

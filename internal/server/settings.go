@@ -83,11 +83,54 @@ func (s *Server) loadSettings(ctx context.Context) error {
 		set = st.Settings
 	}
 	rt, err := s.prepare(ctx, set)
+	if errors.Is(err, errDiscovery) {
+		// the identity provider is down while the server starts: run without
+		// OIDC (agents, local accounts) and retry instead of exiting
+		s.log.Error("OIDC discovery failed, retrying in the background", "err", err)
+		noOIDC := set
+		noOIDC.OIDCIssuer, noOIDC.LocalLogin = "", true
+		if rt, err = s.prepare(ctx, noOIDC); err == nil {
+			rt.set = set
+			s.rediscover.Store(true)
+		}
+	}
 	if err != nil {
 		return err
 	}
 	s.rt.Store(rt)
 	return nil
+}
+
+// errDiscovery marks a failed OIDC discovery (network, provider down).
+var errDiscovery = errors.New("OIDC discovery failed")
+
+// rediscoverLoop retries the OIDC discovery that failed at startup.
+func (s *Server) rediscoverLoop(ctx context.Context) {
+	for s.rediscover.Load() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Minute):
+		}
+		cur := s.rt.Load()
+		set := cur.set
+		if cur.auth != nil || set.OIDCIssuer == "" { // a saved settings change did it already
+			s.rediscover.Store(false)
+			return
+		}
+		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		auth, err := newOIDCAuthFrom(cctx, set.OIDCIssuer, set.OIDCClientID, set.OIDCClientSecret, s.cfg.PublicURL)
+		cancel()
+		if err != nil {
+			continue
+		}
+		next := *cur
+		next.auth = auth
+		if s.rt.CompareAndSwap(cur, &next) {
+			s.log.Info("OIDC discovery succeeded")
+			s.rediscover.Store(false)
+		}
+	}
 }
 
 // prepare validates settings and builds the runtime state (OIDC discovery
@@ -127,7 +170,7 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		if auth, err = newOIDCAuthFrom(cctx, set.OIDCIssuer, set.OIDCClientID, set.OIDCClientSecret, s.cfg.PublicURL); err != nil {
-			return nil, fmt.Errorf("OIDC discovery failed: %w", err)
+			return nil, fmt.Errorf("%w: %w", errDiscovery, err)
 		}
 	}
 	if auth == nil && !set.LocalLogin {
@@ -228,6 +271,10 @@ var settingsTabLabels = []struct{ Key, Label string }{
 
 func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
+	// held from reading the current settings to storing them: two tabs saved
+	// at once must not overwrite each other, nor leave runtime and database apart
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
 	cur := s.settings()
 	set := cur
 	switch r.FormValue("section") {
@@ -287,8 +334,6 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 			return
 		}
 	}
-	s.saveMu.Lock() // concurrent saves must not leave runtime and database apart
-	defer s.saveMu.Unlock()
 	rt, err := s.prepare(ctx, set)
 	if err != nil {
 		s.renderSettings(w, r, sess, set, "", err.Error())
