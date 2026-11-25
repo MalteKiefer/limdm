@@ -637,6 +637,10 @@ func TestIntegration(t *testing.T) {
 		t.Fatal("the last admin demoting themselves must be refused")
 	}
 	db.Exec(ctx, `UPDATE console_users SET disabled=false, role='admin' WHERE email='admin@firma.de'`)
+	if code, _ := ui("GET", "/", nil, adminSess); code != http.StatusFound {
+		t.Fatalf("a session revoked by disabling must stay invalid after re-enabling: %d", code)
+	}
+	db.QueryRow(ctx, `SELECT session_gen FROM console_users WHERE email='admin@firma.de'`).Scan(&adminSess.Gen) // signs in again
 
 	// ---- settings ----
 	if _, body := ui("POST", "/settings", url.Values{"stale_hours": {"48"}}, adminSess); !strings.Contains(body, "can only be disabled") {
@@ -1027,6 +1031,14 @@ func TestRecoveryCodeLogin(t *testing.T) {
 	}
 	if _, err := s.checkLocal(ctx, "alice", "wrong", newRecoveryCode(), "127.0.0.1"); err == nil {
 		t.Fatal("wrong password accepted")
+	}
+	// sign out ends every session of the account
+	_, gen0 := s.account(ctx, "local:alice")
+	if err := s.revokeSessions(ctx, db, "local:alice"); err != nil {
+		t.Fatal(err)
+	}
+	if _, gen1 := s.account(ctx, "local:alice"); gen1 != gen0+1 {
+		t.Fatalf("session generation not bumped: %d -> %d", gen0, gen1)
 	}
 	// the profile password check honours the lockout
 	for range maxFailures {

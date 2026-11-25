@@ -189,13 +189,14 @@ func (s *Server) profilePassword(w http.ResponseWriter, r *http.Request, sess se
 		if err := s.checkCurrent(ctx, tx, name, r.FormValue("current")); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `UPDATE local_admins SET password_hash=$2 WHERE name=$1`, name, hashPassword(pw))
+		_, err := tx.Exec(ctx, `UPDATE local_admins SET password_hash=$2, session_gen=session_gen+1 WHERE name=$1`, name, hashPassword(pw))
 		return err
 	})
 	if err != nil {
 		s.renderProfile(w, r, sess, profileView{Tab: "password"}, "", s.profileErr(ctx, sess, name, r, err))
 		return
 	}
+	s.renewSession(w, r, sess) // other sessions of this account end
 	s.renderProfile(w, r, sess, profileView{Tab: "password"}, "Password changed.", "")
 }
 
@@ -249,13 +250,15 @@ func (s *Server) profileTOTP(w http.ResponseWriter, r *http.Request, sess sessio
 			if !ok {
 				return errors.New("the code does not match the new secret")
 			}
-			_, err := tx.Exec(ctx, `UPDATE local_admins SET totp_secret=totp_pending, totp_pending=NULL, totp_last_step=$2 WHERE name=$1`, name, step)
+			_, err := tx.Exec(ctx, `UPDATE local_admins SET totp_secret=totp_pending, totp_pending=NULL, totp_last_step=$2,
+				session_gen=session_gen+1 WHERE name=$1`, name, step)
 			return err
 		})
 		if err != nil {
 			s.renderProfile(w, r, sess, profileView{Tab: "authenticator"}, "", err.Error())
 			return
 		}
+		s.renewSession(w, r, sess)
 		s.renderProfile(w, r, sess, profileView{Tab: "authenticator"}, "Authenticator app replaced.", "")
 	case "cancel":
 		if _, err := s.db.Exec(ctx, `UPDATE local_admins SET totp_pending=NULL WHERE name=$1`, name); err != nil {

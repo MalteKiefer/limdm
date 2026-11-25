@@ -242,3 +242,8 @@ CREATE TRIGGER dir_users_tombstone AFTER INSERT OR UPDATE OF email OR DELETE ON 
 -- Console users seeded from LIMDM_ADMINS / LIMDM_AUDITORS are disabled at start
 -- once they are no longer listed; users edited in the console are not.
 ALTER TABLE console_users ADD COLUMN IF NOT EXISTS from_env BOOLEAN NOT NULL DEFAULT false;
+
+-- Session generation: bumped on sign out, credential changes, reset, role
+-- change and disable; sessions issued under an older generation end.
+ALTER TABLE console_users ADD COLUMN IF NOT EXISTS session_gen BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE local_admins ADD COLUMN IF NOT EXISTS session_gen BIGINT NOT NULL DEFAULT 0;

@@ -215,7 +215,8 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	s.setCookie(w, sessionCookie, s.seal(session{Email: localPrefix + name, Role: role, IAT: now, Last: now}), maxSession)
+	_, gen := s.account(r.Context(), localPrefix+name)
+	s.setCookie(w, sessionCookie, s.seal(session{Email: localPrefix + name, Role: role, IAT: now, Last: now, Gen: gen}), maxSession)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -298,15 +299,6 @@ func (s *Server) auditActionFn(ctx context.Context, fn func(pgx.Tx) (actor, acti
 	return tx.Commit(ctx)
 }
 
-// localRole returns the current role of an enabled local admin, or "".
-func (s *Server) localRole(ctx context.Context, name string) string {
-	var role string
-	if err := s.db.QueryRow(ctx, `SELECT role FROM local_admins WHERE name=$1 AND NOT disabled`, name).Scan(&role); err != nil {
-		return ""
-	}
-	return role
-}
-
 // localAdd creates a local account with generated credentials and returns them.
 func localAdd(ctx context.Context, tx pgx.Tx, name, role string) (string, error) {
 	pw, secret := randToken(24), newTOTPSecret()
@@ -325,7 +317,7 @@ func localAdd(ctx context.Context, tx pgx.Tx, name, role string) (string, error)
 func localReset(ctx context.Context, tx pgx.Tx, name string) (string, error) {
 	pw, secret := randToken(24), newTOTPSecret()
 	var role string
-	err := tx.QueryRow(ctx, `UPDATE local_admins SET password_hash=$2, totp_secret=$3, totp_last_step=0, failures=0, locked_until=NULL
+	err := tx.QueryRow(ctx, `UPDATE local_admins SET password_hash=$2, totp_secret=$3, totp_last_step=0, session_gen=session_gen+1, failures=0, locked_until=NULL
 		WHERE name=$1 RETURNING role`, name, hashPassword(pw), secret).Scan(&role)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = errors.New("account not found")
@@ -388,7 +380,7 @@ func LocalAdmin(ctx context.Context, databaseURL, op, name, role string) (string
 		out, err = localReset(ctx, tx, name)
 		res = rowsOne{err == nil}
 	case "disable", "enable":
-		res, err = tx.Exec(ctx, `UPDATE local_admins SET disabled=$2 WHERE name=$1`, name, op == "disable")
+		res, err = tx.Exec(ctx, `UPDATE local_admins SET disabled=$2, session_gen=session_gen+1 WHERE name=$1`, name, op == "disable")
 	case "list":
 		rows, qerr := tx.Query(ctx, `SELECT name, role, disabled, coalesce(last_login::text,'never') FROM local_admins ORDER BY name`)
 		if qerr != nil {

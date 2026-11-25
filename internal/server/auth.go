@@ -51,6 +51,7 @@ type session struct {
 	Role  string    `json:"r"` // admin | auditor
 	IAT   time.Time `json:"i"`
 	Last  time.Time `json:"l"`
+	Gen   int64     `json:"g"` // session generation of the account at sign in
 }
 
 type flow struct {
@@ -163,7 +164,8 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	s.setCookie(w, sessionCookie, s.seal(session{Email: email, Role: role, IAT: now, Last: now}), maxSession)
+	_, gen := s.account(r.Context(), email)
+	s.setCookie(w, sessionCookie, s.seal(session{Email: email, Role: role, IAT: now, Last: now, Gen: gen}), maxSession)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -179,6 +181,9 @@ func (s *Server) roleFor(ctx context.Context, email string, verified bool, hd st
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if sess, ok := s.session(w, r); ok && s.csrfOK(r, sess) {
+		if err := s.revokeSessions(r.Context(), s.db, sess.Email); err != nil { // sign out everywhere
+			s.log.Error("revoke sessions", "err", err)
+		}
 		if err := s.auditAction(r.Context(), sess.Email, "logout", "", "", nil); err != nil {
 			s.log.Error("audit logout", "err", err)
 		}
@@ -201,22 +206,14 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) (session, bool)
 	}
 	// Role is re-evaluated on every request: disabling a user in the console
 	// takes effect immediately, removing someone from LIMDM_ADMINS at restart.
-	switch {
-	case strings.HasPrefix(sess.Email, localPrefix):
-		if !s.settings().LocalLogin {
-			return sess, false
-		}
-		if sess.Role = s.localRole(r.Context(), strings.TrimPrefix(sess.Email, localPrefix)); sess.Role == "" {
-			return sess, false
-		}
-	default:
-		if s.oidc() == nil {
-			return sess, false
-		}
-		if sess.Role = s.oidcRole(r.Context(), sess.Email); sess.Role == "" {
-			return sess, false
-		}
+	if strings.HasPrefix(sess.Email, localPrefix) && !s.settings().LocalLogin || !strings.HasPrefix(sess.Email, localPrefix) && s.oidc() == nil {
+		return sess, false
 	}
+	role, gen := s.account(r.Context(), sess.Email)
+	if role == "" || gen != sess.Gen { // disabled, removed, or sessions revoked
+		return sess, false
+	}
+	sess.Role = role
 	sess.Last = now
 	s.setCookie(w, sessionCookie, s.seal(sess), maxSession-now.Sub(sess.IAT))
 	return sess, true
