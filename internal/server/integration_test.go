@@ -843,3 +843,67 @@ func TestHistory(t *testing.T) {
 		t.Fatalf("fleet chart: %v", err)
 	}
 }
+
+func TestRecoveryEscrow(t *testing.T) {
+	dsn := os.Getenv("LIMDM_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("LIMDM_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	db.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname) VALUES ('d1', 's', now(), 'pc1')`)
+	s := &Server{db: db, log: slog.New(slog.NewTextHandler(io.Discard, nil)), cfg: Config{SessionKey: bytes.Repeat([]byte{7}, 32)}}
+	k := api.RecoveryKey{UUID: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0", Device: "/dev/sda3", Key: api.NewRecoveryKey()}
+	tx, _ := db.Begin(ctx)
+	if err := s.escrowKeys(ctx, tx, "d1", []api.RecoveryKey{k}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.escrowKeys(ctx, tx, "d1", []api.RecoveryKey{{UUID: k.UUID, Device: "x", Key: "plain"}}); err == nil {
+		t.Fatal("invalid key accepted")
+	}
+	tx.Rollback(ctx)
+	tx, _ = db.Begin(ctx)
+	s.escrowKeys(ctx, tx, "d1", []api.RecoveryKey{k})
+	tx.Commit(ctx)
+	var sealed []byte
+	db.QueryRow(ctx, `SELECT sealed FROM recovery_keys`).Scan(&sealed)
+	if bytes.Contains(sealed, []byte(k.Key)) {
+		t.Fatal("key stored in clear")
+	}
+	if _, err := s.openRecovery("d2", k.UUID, sealed); err == nil {
+		t.Fatal("sealed key opens for another device")
+	}
+	tx, _ = db.Begin(ctx)
+	rot, err := s.rotations(ctx, tx, "d1")
+	tx.Rollback(ctx)
+	if err != nil || len(rot) != 0 {
+		t.Fatalf("unexpected rotation: %v %v", rot, err)
+	}
+	db.Exec(ctx, `UPDATE recovery_keys SET rotate=true, viewed_at=now()`)
+	tx, _ = db.Begin(ctx)
+	rot, err = s.rotations(ctx, tx, "d1")
+	tx.Rollback(ctx)
+	if err != nil || len(rot) != 1 || rot[0].Key != k.Key {
+		t.Fatalf("rotation: %v %v", rot, err)
+	}
+	// the replacement clears the rotation and the view
+	tx, _ = db.Begin(ctx)
+	s.escrowKeys(ctx, tx, "d1", []api.RecoveryKey{{UUID: k.UUID, Device: k.Device, Key: api.NewRecoveryKey()}})
+	tx.Commit(ctx)
+	var rotate bool
+	var viewed *time.Time
+	db.QueryRow(ctx, `SELECT rotate, viewed_at FROM recovery_keys`).Scan(&rotate, &viewed)
+	if rotate || viewed != nil {
+		t.Fatal("rotation not cleared")
+	}
+}

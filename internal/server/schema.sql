@@ -180,3 +180,15 @@ END $$;
 DROP TRIGGER IF EXISTS audit_log_no_change ON audit_log;
 CREATE TRIGGER audit_log_no_change BEFORE UPDATE OR DELETE OR TRUNCATE ON audit_log
     FOR EACH STATEMENT EXECUTE FUNCTION audit_log_immutable();
+
+CREATE TABLE IF NOT EXISTS recovery_keys (
+    device_id   TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    uuid        TEXT NOT NULL,
+    device_path TEXT NOT NULL,
+    sealed      BYTEA NOT NULL,
+    escrowed_at TIMESTAMPTZ NOT NULL,
+    viewed_at   TIMESTAMPTZ,
+    viewed_by   TEXT,
+    rotate      BOOLEAN NOT NULL DEFAULT false,
+    PRIMARY KEY (device_id, uuid)
+);

@@ -477,6 +477,10 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	if err := s.escrowKeys(ctx, tx, id, req.RecoveryKeys); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
 	if req.Packages != nil {
 		pk, _ := json.Marshal(req.Packages)
 		if _, err := tx.Exec(ctx, `UPDATE devices SET packages=$2, packages_hash=$3 WHERE id=$1`, id, string(pk), req.PackagesHash); err != nil {
@@ -528,6 +532,10 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := json.Unmarshal(users, &resp.Users); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if resp.RecoveryRotate, err = s.rotations(ctx, tx, id); err != nil {
 		s.fail(w, err)
 		return
 	}

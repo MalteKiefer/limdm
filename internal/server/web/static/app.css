@@ -289,3 +289,6 @@ button.ghost.danger { color: var(--bad); }
 .langs a { color: var(--text-3); text-decoration: none; }
 .langs a[aria-current] { color: var(--text-1); font-weight: 600; }
 .login-shell .langs { justify-content: center; }
+
+/* ---- recovery key ---- */
+.recovery-key { font-size: 20px; letter-spacing: .04em; word-break: break-all; user-select: all; margin: 0 0 12px; }

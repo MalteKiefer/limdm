@@ -24,10 +24,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/maltekiefer/limdm/internal/api"
@@ -66,6 +68,10 @@ type State struct {
 	ScriptRuns    map[string]time.Time `json:"script_runs,omitempty"` // last run of recurring scripts
 	Results       []api.CommandResult  `json:"results"`               // not yet reported
 	Events        []string             `json:"events"`
+
+	PendingKeys    []pendingKey         `json:"pending_keys,omitempty"` // recovery keys not yet escrowed
+	Escrowed       map[string]time.Time `json:"escrowed,omitempty"`     // LUKS UUID: escrowed at
+	EscrowNotified time.Time            `json:"escrow_notified"`
 }
 
 type Agent struct {
@@ -332,6 +338,9 @@ func (a *Agent) saveState() {
 // Run loops until ctx ends.
 func (a *Agent) Run(ctx context.Context) error {
 	a.log.Info("agent started", "version", Version, "server", a.cfg.Server, "device", a.cfg.DeviceID, "os", a.host.Name)
+	wake := make(chan os.Signal, 1)
+	signal.Notify(wake, syscall.SIGUSR1) // "recovery-key" asks for an immediate check in
+	defer signal.Stop(wake)
 	for {
 		a.cycle(ctx)
 		wait := time.Duration(a.pol.CheckinSeconds) * time.Second
@@ -346,12 +355,14 @@ func (a *Agent) Run(ctx context.Context) error {
 			a.saveState()
 			return nil
 		case <-time.After(wait):
+		case <-wake:
 		}
 	}
 }
 
 // checkToDecl links compliance checks to the declaration whose goal they verify.
 var checkToDecl = map[string]string{
+	"disk.recovery": api.TypeDiskEncryption, "boot.password": api.TypeBootloader,
 	"desktop.screenlock": api.TypeScreenLock, "firewall.active": api.TypeFirewall, "os.supported": api.TypeOSVersion,
 	"updates.auto": api.TypeUpdates, "updates.security": api.TypeUpdates, "updates.reboot": api.TypeUpdates, "auth.sso": api.TypeLogin,
 	"agent.osquery": api.TypeAgent,
@@ -388,6 +399,7 @@ func (a *Agent) declarationStatus() []api.DeclarationStatus {
 func (a *Agent) cycle(ctx context.Context) {
 	defer a.saveState()
 	a.renewIdentity(ctx)
+	a.takeEscrowRequests()
 	checks := a.converge()
 	a.collectAuthEvents()
 
@@ -397,6 +409,12 @@ func (a *Agent) cycle(ctx context.Context) {
 	statusHash := hex.EncodeToString(sum[:])
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
 		StatusHash: statusHash, Results: a.state.Results, Events: a.state.Events, Metrics: metrics()}
+	// an invalid key would make the server reject every check in
+	a.state.PendingKeys = slices.DeleteFunc(a.state.PendingKeys, func(k pendingKey) bool { return !k.Valid() })
+	sentKeys := slices.Clone(a.state.PendingKeys)
+	for _, k := range sentKeys {
+		req.RecoveryKeys = append(req.RecoveryKeys, k.RecoveryKey)
+	}
 	if statusHash != a.sentStatusHash {
 		req.Status = &status
 	}
@@ -415,6 +433,12 @@ func (a *Agent) cycle(ctx context.Context) {
 		return
 	}
 	a.state.Results, a.state.Events = nil, nil
+	if len(sentKeys) > 0 {
+		a.escrowConfirmed(sentKeys)
+	}
+	if len(resp.RecoveryRotate) > 0 {
+		a.rotateRecovery(resp.RecoveryRotate)
+	}
 	if req.Status != nil {
 		a.sentStatusHash = statusHash
 	}

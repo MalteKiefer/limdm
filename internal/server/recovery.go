@@ -1,0 +1,173 @@
+package server
+
+import (
+	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/hkdf"
+	"crypto/rand"
+	"crypto/sha256"
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/maltekiefer/limdm/internal/api"
+)
+
+// LUKS recovery keys are sealed with AES-256-GCM under a key derived from the
+// session key; device and volume are bound as additional data, so a sealed
+// key cannot be moved to another row. Every view is audited and can trigger
+// a rotation on the device.
+
+func (s *Server) recoveryAEAD() (cipher.AEAD, error) {
+	key, err := hkdf.Key(sha256.New, s.cfg.SessionKey, nil, "limdm recovery keys v1", 32)
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(block)
+}
+
+func (s *Server) sealRecovery(deviceID, uuid, key string) ([]byte, error) {
+	g, err := s.recoveryAEAD()
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, g.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	return g.Seal(nonce, nonce, []byte(key), []byte(deviceID+"|"+uuid)), nil
+}
+
+func (s *Server) openRecovery(deviceID, uuid string, sealed []byte) (string, error) {
+	g, err := s.recoveryAEAD()
+	if err != nil {
+		return "", err
+	}
+	if len(sealed) < g.NonceSize() {
+		return "", errors.New("sealed recovery key too short")
+	}
+	plain, err := g.Open(nil, sealed[:g.NonceSize()], sealed[g.NonceSize():], []byte(deviceID+"|"+uuid))
+	return string(plain), err
+}
+
+// escrowKeys stores keys from a check in; a new key ends a pending rotation.
+func (s *Server) escrowKeys(ctx context.Context, tx pgx.Tx, deviceID string, keys []api.RecoveryKey) error {
+	for _, k := range keys {
+		if !k.Valid() {
+			return errors.New("invalid recovery key")
+		}
+		sealed, err := s.sealRecovery(deviceID, k.UUID, k.Key)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO recovery_keys(device_id, uuid, device_path, sealed, escrowed_at)
+			VALUES ($1,$2,$3,$4,now()) ON CONFLICT (device_id, uuid) DO UPDATE SET device_path=EXCLUDED.device_path,
+			sealed=EXCLUDED.sealed, escrowed_at=now(), viewed_at=NULL, viewed_by=NULL, rotate=false`,
+			deviceID, k.UUID, k.Device, sealed); err != nil {
+			return err
+		}
+		if err := audit(ctx, tx, "device:"+deviceID, "recovery.escrow", deviceID, k.Device+" "+k.UUID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// rotations returns the current keys of volumes marked for rotation.
+func (s *Server) rotations(ctx context.Context, tx pgx.Tx, deviceID string) ([]api.RecoveryKey, error) {
+	rows, err := tx.Query(ctx, `SELECT uuid, device_path, sealed FROM recovery_keys WHERE device_id=$1 AND rotate`, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []api.RecoveryKey
+	for rows.Next() {
+		var k api.RecoveryKey
+		var sealed []byte
+		if err := rows.Scan(&k.UUID, &k.Device, &sealed); err != nil {
+			return nil, err
+		}
+		if k.Key, err = s.openRecovery(deviceID, k.UUID, sealed); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
+type recoveryRow struct {
+	UUID, Device string
+	Escrowed     time.Time
+	ViewedAt     *time.Time
+	ViewedBy     *string
+	Rotate       bool
+}
+
+func (s *Server) recoveryKeys(ctx context.Context, deviceID string) ([]recoveryRow, error) {
+	rows, err := s.db.Query(ctx, `SELECT uuid, device_path, escrowed_at, viewed_at, viewed_by, rotate FROM recovery_keys
+		WHERE device_id=$1 ORDER BY device_path`, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (recoveryRow, error) {
+		var k recoveryRow
+		return k, r.Scan(&k.UUID, &k.Device, &k.Escrowed, &k.ViewedAt, &k.ViewedBy, &k.Rotate)
+	})
+}
+
+// recoveryView reveals one key to admins and helpdesk (POST with CSRF) and audits it.
+func (s *Server) recoveryView(w http.ResponseWriter, r *http.Request, sess session) {
+	ctx := r.Context()
+	id, uuid := r.PathValue("id"), r.FormValue("uuid")
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	var path, host string
+	var sealed []byte
+	err = tx.QueryRow(ctx, `SELECT k.device_path, k.sealed, d.hostname FROM recovery_keys k JOIN devices d ON d.id=k.device_id
+		WHERE k.device_id=$1 AND k.uuid=$2`, id, uuid).Scan(&path, &sealed, &host)
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	} else if err != nil {
+		s.fail(w, err)
+		return
+	}
+	key, err := s.openRecovery(id, uuid, sealed)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	decls, err := effectiveDeclarations(ctx, tx, id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	pol, _ := api.Compose(decls)
+	rotate := pol.Extra.DiskEncryption != nil && pol.Extra.DiskEncryption.RotateAfterView
+	if _, err := tx.Exec(ctx, `UPDATE recovery_keys SET viewed_at=now(), viewed_by=$3, rotate=$4 WHERE device_id=$1 AND uuid=$2`,
+		id, uuid, sess.Email, rotate); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := audit(ctx, tx, sess.Email, "recovery.view", id, path+" "+uuid); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	s.render(w, r, sess, "recovery", map[string]any{"ID": id, "Host": host, "Path": path, "UUID": uuid, "Key": key, "Rotate": rotate})
+}

@@ -421,6 +421,14 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		s.render(w, r, sess, "item", map[string]any{"It": it, "Payload": r.FormValue("payload"), "AllTypes": sortedTypes(),
 			"Example": api.Types[it.Type], "Error": err.Error()})
 	}
+	if it.Type == api.TypeBootloader { // hash a plain password before it is validated and stored
+		p, err := api.PrepareBootloader(it.Payload)
+		if err != nil {
+			fail(err)
+			return
+		}
+		it.Payload = p
+	}
 	if err := it.Validate(); err != nil {
 		fail(err)
 		return
