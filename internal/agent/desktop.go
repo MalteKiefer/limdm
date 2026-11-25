@@ -35,11 +35,26 @@ type desktopInfo struct {
 	Company string
 	Logo    string
 	Need    []luksVolume
+	Status  DesktopStatus
+}
+
+// DesktopStatus is what the tray shows about the device and the agent.
+type DesktopStatus struct {
+	Hostname    string     `json:"hostname"`
+	DeviceID    string     `json:"device_id"`
+	Server      string     `json:"server"`
+	Version     string     `json:"version"`
+	LastCheckin *time.Time `json:"last_checkin,omitempty"`
+	LastError   string     `json:"last_error,omitempty"`
+	Checks      int        `json:"checks"`
+	Failing     []string   `json:"failing,omitempty"` // titles of failing checks
+	Escrowed    int        `json:"escrowed"`
+	Locked      bool       `json:"locked,omitempty"`
 }
 
 // DesktopRequest and DesktopResponse are the socket protocol (one JSON line each).
 type DesktopRequest struct {
-	Op         string `json:"op"` // status | escrow
+	Op         string `json:"op"` // status | info | sync | escrow
 	UUID       string `json:"uuid,omitempty"`
 	Passphrase string `json:"passphrase,omitempty"`
 }
@@ -55,6 +70,8 @@ type DesktopResponse struct {
 	Need    []DesktopVolume `json:"need,omitempty"`
 	OK      bool            `json:"ok,omitempty"`
 	Error   string          `json:"error,omitempty"`
+	Status  *DesktopStatus  `json:"status,omitempty"` // info
+	Log     []string        `json:"log,omitempty"`    // info: recent warnings and errors of the agent
 }
 
 // addKeyFn is cryptsetup luksAddKey; tests replace it.
@@ -67,6 +84,27 @@ type desktopServer struct {
 	queued   map[string]bool        // uuids handed to the agent, not yet escrowed
 	inflight map[string]bool        // uuids with a cryptsetup run in progress
 	failures map[uint32][]time.Time // wrong passphrases per uid
+	lastSync time.Time              // last check in requested from the desktop
+}
+
+// agentLog returns the latest warnings and errors of the agent and its
+// watchdog from the journal (the user cannot read the system journal).
+func agentLog() []string {
+	out, err := run(10*time.Second, "journalctl", "-u", agentUnit, "-u", "limdm-watchdog.service", "-p", "warning",
+		"-n", "30", "-o", "short-iso", "--no-pager", "-q")
+	if err != nil {
+		return nil
+	}
+	var lines []string
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			if len(l) > 400 {
+				l = l[:400]
+			}
+			lines = append(lines, l)
+		}
+	}
+	return lines
 }
 
 // applyBranding stores name and logo for the desktop helper.
@@ -94,7 +132,17 @@ func (a *Agent) publishDesktop() {
 	if a.desktop == nil {
 		return
 	}
-	info := &desktopInfo{Company: a.state.Company}
+	info := &desktopInfo{Company: a.state.Company, Status: DesktopStatus{DeviceID: a.cfg.DeviceID, Server: a.cfg.Server,
+		Version: Version, LastCheckin: a.lastCheckin, LastError: a.lastError, Checks: len(a.lastChecks), Escrowed: len(a.state.Escrowed)}}
+	info.Status.Hostname, _ = os.Hostname()
+	for _, c := range a.lastChecks {
+		if c.Status == "fail" {
+			info.Status.Failing = append(info.Status.Failing, c.Title)
+		}
+	}
+	if _, err := os.Stat("/etc/nologin"); err == nil {
+		info.Status.Locked = true
+	}
 	if _, err := os.Stat(brandingLogo); err == nil {
 		info.Logo = brandingLogo
 	}
@@ -181,6 +229,24 @@ func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 	switch req.Op {
 	case "status":
 		return DesktopResponse{Company: info.Company, Logo: info.Logo, Need: need}
+	case "info":
+		st := info.Status
+		return DesktopResponse{Company: info.Company, Logo: info.Logo, Need: need, Status: &st, Log: agentLog()}
+	case "sync":
+		d.mu.Lock()
+		recent := time.Since(d.lastSync) < 30*time.Second
+		if !recent {
+			d.lastSync = time.Now()
+		}
+		d.mu.Unlock()
+		if recent {
+			return DesktopResponse{Error: "a check in was requested less than 30 seconds ago"}
+		}
+		select {
+		case d.a.kick <- struct{}{}:
+		default: // a check in is already pending
+		}
+		return DesktopResponse{OK: true}
 	case "escrow":
 		var vol *DesktopVolume
 		for i := range need {

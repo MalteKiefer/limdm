@@ -4,8 +4,10 @@
   <div><h1>{{t "Recovery key"}}</h1><div class="meta"><span>{{.Host}}</span><span class="mono">{{.Path}}</span><span class="mono">{{.UUID}}</span></div></div>
   <div class="actions"><a class="button secondary" href="/devices/{{.ID}}?tab=hardware">{{t "Back to device"}}</a></div>
 </div>
-<section class="card">
+<section class="card" data-dialog-content>
+  <h2>{{t "Recovery key"}} <span class="muted mono">{{.Path}}</span></h2>
   <p class="recovery-key mono">{{.Key}}</p>
+  <button type="button" class="secondary small" data-copy="{{.Key}}">{{t "Copy"}}</button>
   <p class="muted">{{t "Enter this key at the disk unlock prompt instead of the passphrase. This view was recorded in the audit log."}}</p>
   {{if .Rotate}}<div class="notice" role="status">{{t "The device replaces this key at its next check in; afterwards it no longer works."}}</div>{{end}}
 </section>

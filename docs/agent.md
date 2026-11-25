@@ -165,7 +165,15 @@ well.
 
 ## Desktop helper
 
-`limdm-desktop` asks the user for what only they can provide, currently the disk passphrase
+`limdm-desktop` shows a tray icon with the device state: green (compliant), amber (checks
+failing), red (no contact to the server or locked). Its menu opens the device details
+(host, device ID, server, agent version, last check in, failing checks, escrowed keys, last
+error), starts a check in (at most every 30 seconds) and shows the agent's latest warnings
+and errors from the journal. The tray uses StatusNotifierItem: sway with waybar, KDE Plasma,
+Xfce, Cinnamon and Ubuntu show it; stock GNOME needs the AppIndicator extension. Without a
+tray host the reminders still work; `limdm-desktop --no-tray` runs only those.
+
+It also asks the user for what only they can provide, currently the disk passphrase
 to escrow a LUKS recovery key. It uses zenity (kdialog on KDE Plasma); the agent installs
 the right one on every device with a desktop and retries daily if that fails. Texts follow
 the session language and fall back to the system locale (English and German). Dialogs

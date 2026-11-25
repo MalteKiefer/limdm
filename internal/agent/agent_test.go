@@ -463,3 +463,19 @@ func TestParseFlatpak(t *testing.T) {
 		t.Fatalf("remotes: %+v", rem)
 	}
 }
+
+func TestDesktopInfoAndSync(t *testing.T) {
+	a := &Agent{kick: make(chan struct{}, 1)}
+	d := &desktopServer{a: a, queued: map[string]bool{}, inflight: map[string]bool{}, failures: map[uint32][]time.Time{}}
+	d.info.Store(&desktopInfo{Company: "ACME", Status: DesktopStatus{Version: "1.0", Failing: []string{"Firewall"}}})
+	info := d.serve(1000, DesktopRequest{Op: "info"})
+	if info.Status == nil || info.Status.Version != "1.0" || len(info.Status.Failing) != 1 {
+		t.Fatalf("info: %+v", info)
+	}
+	if r := d.serve(1000, DesktopRequest{Op: "sync"}); !r.OK || len(a.kick) != 1 {
+		t.Fatalf("sync: %+v", r)
+	}
+	if r := d.serve(1000, DesktopRequest{Op: "sync"}); r.OK || r.Error == "" {
+		t.Fatal("a second sync within 30 seconds must be refused")
+	}
+}

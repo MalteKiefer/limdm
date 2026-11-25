@@ -407,3 +407,20 @@ td.mono, td .mono, td .sub { overflow-wrap: anywhere; }
   .filters input[type=search] { width: 100%; }
   .menu-list { right: auto; left: 0; }
 }
+
+/* ---- library table ---- */
+table.library { table-layout: fixed; }
+table.library col.c-name { width: 32%; }
+table.library col.c-desc { width: 46%; }
+table.library col.c-used { width: 22%; }
+table.library tr.group th { background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; padding-top: 18px; text-transform: none; }
+table.library tr.group th .n { color: var(--text-3); font-weight: 500; margin: 0 6px; }
+table.library tr.group th .mono { font-size: 11px; font-weight: 400; }
+table.library tbody + tbody tr.group th { border-top: 1px solid var(--line); }
+@media (max-width: 860px) { table.library { table-layout: auto; } }
+dialog.modal.wide { width: min(760px, calc(100vw - 32px)); }
+.dialog-scroll { max-height: 60vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.inline-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.inline-actions form { margin: 0; }
+.actions form { margin: 0; }
+.nowrap, td.nowrap { white-space: nowrap; }

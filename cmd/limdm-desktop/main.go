@@ -1,4 +1,7 @@
-// limdm-desktop runs in the user's desktop session (XDG autostart) and asks
+//go:build linux
+
+// limdm-desktop runs in the user's desktop session (XDG autostart). It shows
+// a tray icon with the device's state (details, check in, agent log) and asks
 // the user for what only they can provide, currently the disk passphrase to
 // create a recovery key. Dialogs use zenity (GNOME) or kdialog (KDE), so the
 // helper needs no GUI libraries and never runs as root.
@@ -272,6 +275,7 @@ func run(now bool) error {
 
 func main() {
 	now := flag.Bool("now", false, "ask right away (menu entry) instead of the daily reminder")
+	noTray := flag.Bool("no-tray", false, "only the reminders, no tray icon")
 	flag.Parse()
 	if *now {
 		if err := run(true); err != nil {
@@ -280,11 +284,9 @@ func main() {
 		}
 		return
 	}
-	time.Sleep(time.Minute) // let the session settle after login
-	for {
-		if err := run(false); err != nil {
-			fmt.Fprintln(os.Stderr, "limdm-desktop:", err)
-		}
-		time.Sleep(30 * time.Minute)
+	if *noTray {
+		reminders()
+		return
 	}
+	runTray()
 }

@@ -688,14 +688,23 @@ func TestIntegration(t *testing.T) {
 	db.QueryRow(ctx, `SELECT session_gen FROM console_users WHERE email='admin@firma.de'`).Scan(&adminSess.Gen) // signs in again
 
 	// ---- settings ----
-	if _, body := ui("POST", "/settings", url.Values{"stale_hours": {"48"}}, adminSess); !strings.Contains(body, "can only be disabled") {
-		t.Fatal("disabling local login without OIDC must be refused")
+	if _, body := ui("POST", "/settings", url.Values{"section": {"general"}, "stale_hours": {"24"}}, adminSess); !strings.Contains(body, "Settings saved") {
+		t.Fatal("an OIDC admin may switch off local login while OIDC works")
 	}
-	if _, body := ui("POST", "/settings", url.Values{"stale_hours": {"48"}, "local_login": {"on"}, "webhook_url": {"http://plain"}}, adminSess); !strings.Contains(body, "must be https") {
+	if _, body := ui("POST", "/settings", url.Values{"section": {"sso"}}, adminSess); !strings.Contains(body, "can only be disabled") {
+		t.Fatal("removing OIDC while local login is off must be refused")
+	}
+	if _, body := ui("POST", "/settings", url.Values{"section": {"monitoring"}, "webhook_url": {"http://plain"}}, adminSess); !strings.Contains(body, "must be https") {
 		t.Fatal("plain http webhook accepted")
 	}
-	if _, body := ui("POST", "/settings", url.Values{"stale_hours": {"48"}, "local_login": {"on"}}, adminSess); !strings.Contains(body, "Settings saved") {
-		t.Fatalf("settings save failed:\n%s", body)
+	if code, _ := ui("POST", "/settings", url.Values{"section": {"bogus"}}, adminSess); code != http.StatusBadRequest {
+		t.Fatalf("unknown section: %d", code)
+	}
+	if _, body := ui("POST", "/settings", url.Values{"section": {"general"}, "stale_hours": {"48"}, "local_login": {"on"}}, adminSess); !strings.Contains(body, "Settings saved") {
+		t.Fatalf("general settings not saved: %s", body)
+	}
+	if _, body := ui("POST", "/settings", url.Values{"section": {"sso"}}, adminSess); !strings.Contains(body, "Settings saved") {
+		t.Fatalf("clearing OIDC: %s", body)
 	}
 	if s.settings().StaleHours != 48 || s.oidc() != nil {
 		t.Fatalf("settings not active: %+v", s.settings())

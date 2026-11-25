@@ -367,6 +367,16 @@ func (s *Server) library(w http.ResponseWriter, r *http.Request, sess session) {
 		}
 		groups[it.Type] = append(groups[it.Type], row{it, use[it.ID]})
 	}
+	label := func(t string) string {
+		if l, ok := typeLabels[t]; ok {
+			return strings.ToLower(l)
+		}
+		return t
+	}
+	sort.Slice(types, func(i, j int) bool { return label(types[i]) < label(types[j]) })
+	for _, g := range groups {
+		sort.Slice(g, func(i, j int) bool { return strings.ToLower(g[i].Name) < strings.ToLower(g[j].Name) })
+	}
 	s.render(w, r, sess, "library", map[string]any{"Groups": groups, "Types": types, "AllTypes": sortedTypes()})
 }
 
