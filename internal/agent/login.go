@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -174,6 +175,12 @@ func (a *Agent) installPAM() error {
 		if _, err := sh("pam-auth-update", "--package", "--enable", "limdm"); err != nil {
 			return err
 		}
+	} else if f := pamStackFile(a.host.family); f != "" {
+		if err := editPAMStack(f, pamLine(exe)); err != nil {
+			return err
+		}
+	} else if a.host.family != "fedora" {
+		return errors.New("no PAM stack found (Alpine needs linux-pam)")
 	} else if err := authselectInstall(exe); err != nil {
 		return err
 	}
@@ -187,6 +194,10 @@ func (a *Agent) removePAM() error {
 	}
 	if a.host.family == "debian" {
 		if _, err := sh("pam-auth-update", "--package", "--remove", "limdm"); err != nil {
+			return err
+		}
+	} else if f := pamStackFile(a.host.family); f != "" {
+		if err := restorePAMStack(f); err != nil {
 			return err
 		}
 	} else {
@@ -420,4 +431,50 @@ func localService(service, rhost string) bool {
 		return false
 	}
 	return pamServices[service]
+}
+
+// pamStackFile is the shared auth stack edited directly on families without
+// pam-auth-update or authselect: Arch's system-auth, Alpine's base-auth
+// (with linux-pam). "" elsewhere.
+func pamStackFile(family string) string {
+	f := map[string]string{"arch": "/etc/pam.d/system-auth", "alpine": "/etc/pam.d/base-auth"}[family]
+	if f == "" || !exists(f) {
+		return ""
+	}
+	return f
+}
+
+// editPAMStack inserts the hook before the first auth module and keeps the
+// original next to the agent's state, so removal restores it exactly.
+func editPAMStack(file, line string) error {
+	orig := stateDir + "/pam-" + filepath.Base(file) + ".orig"
+	cur := readFile(file)
+	if !exists(orig) {
+		if err := os.WriteFile(orig, []byte(cur), 0o600); err != nil {
+			return err
+		}
+	}
+	next, err := insertPAMLine(cur, line)
+	if err != nil {
+		return err
+	}
+	_, err = writeIfChanged(file, next, 0o644)
+	return err
+}
+
+func restorePAMStack(file string) error {
+	orig := stateDir + "/pam-" + filepath.Base(file) + ".orig"
+	b, err := os.ReadFile(orig)
+	if err != nil {
+		// no backup: take only our line out
+		lines := slices.DeleteFunc(strings.Split(readFile(file), "\n"), func(l string) bool {
+			return strings.Contains(l, "pam_exec.so") && strings.Contains(l, " pam-auth")
+		})
+		_, err = writeIfChanged(file, strings.Join(lines, "\n"), 0o644)
+		return err
+	}
+	if _, err := writeIfChanged(file, string(b), 0o644); err != nil {
+		return err
+	}
+	return os.Remove(orig)
 }

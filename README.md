@@ -5,7 +5,7 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/MalteKiefer/limdm/badge)](https://scorecard.dev/viewer/?uri=github.com/MalteKiefer/limdm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Declarative device management for Linux clients (Debian, Ubuntu, Fedora), modelled on
+Declarative device management for Linux clients (Debian, Ubuntu, Fedora, CentOS Stream and other RHEL rebuilds, Arch, Alpine), modelled on
 Apple's Declarative Device Management. Administrators describe the desired state; the agent
 on every device converges to it on its own, also while offline, and reports back.
 Compliance checks map to BSI IT-Grundschutz, CIS Benchmarks (Level 1 and 2) and

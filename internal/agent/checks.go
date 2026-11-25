@@ -56,6 +56,9 @@ var catalog = []check{
 			if v := osqueryVersion(); v != "" {
 				return pass, "osquery " + v
 			}
+			if a.host.family == "arch" || a.host.family == "alpine" {
+				return na, "osquery is not packaged for " + a.host.family + "; the native inventory is used"
+			}
 			return fail, "osquery missing, inventory incomplete (installed by the agent, retried hourly)"
 		}},
 	{ID: "os.supported", Title: "Operating system version is supported", Level: 1,
@@ -558,7 +561,7 @@ func fixSSHCrypto(a *Agent) error {
 		return err
 	}
 	for _, unit := range []string{"ssh", "sshd"} {
-		_, _ = sh("systemctl", "try-reload-or-restart", unit)
+		_ = svc("reload-or-restart", unit)
 	}
 	return nil
 }
@@ -608,7 +611,7 @@ func fixSSHD(a *Agent) error {
 		return err
 	}
 	for _, unit := range []string{"ssh", "sshd"} {
-		_, _ = sh("systemctl", "try-reload-or-restart", unit) // only one of ssh/sshd exists
+		_ = svc("reload-or-restart", unit) // only one of ssh/sshd exists
 	}
 	return nil
 }
@@ -730,6 +733,9 @@ func fixFirewall(a *Agent) error {
 }
 
 func (a *Agent) applyFirewall() error {
+	if a.host.family == "alpine" {
+		return errors.New("firewall management is not supported on Alpine yet; use nftables or awall")
+	}
 	if a.host.family == "debian" {
 		// A hand written nftables ruleset (VPN clients such as NetBird add their own
 		// tables) must not be overlaid with ufw; report instead of clobbering it.
@@ -758,7 +764,7 @@ func (a *Agent) applyFirewall() error {
 			return err
 		}
 	}
-	if _, err := sh("systemctl", "enable", "--now", "firewalld"); err != nil {
+	if err := svc("enable-now", "firewalld"); err != nil {
 		return err
 	}
 	for _, rule := range a.pol.Firewall.Allow {
@@ -927,8 +933,8 @@ func runPWQuality(a *Agent) (string, string) {
 }
 
 func fixPWQuality(a *Agent) error {
-	if a.host.family == "debian" && !a.host.isInstalled("libpam-pwquality") {
-		if err := a.host.install("libpam-pwquality"); err != nil {
+	if pkg := map[string]string{"debian": "libpam-pwquality", "arch": "libpwquality", "alpine": "libpwquality"}[a.host.family]; pkg != "" && !a.host.isInstalled(pkg) {
+		if err := a.host.install(pkg); err != nil {
 			return err
 		}
 	}
@@ -958,24 +964,27 @@ func runTimeSync(a *Agent) (string, string) {
 
 func fixTimeSync(a *Agent) error {
 	if a.host.isInstalled("chrony") {
-		unit := "chrony"
-		if a.host.family == "fedora" {
-			unit = "chronyd"
+		unit := "chronyd"
+		if a.host.family == "debian" {
+			unit = "chrony"
 		}
-		_, err := sh("systemctl", "enable", "--now", unit)
+		err := svc("enable-now", unit)
 		return err
+	}
+	if a.host.family == "arch" { // part of systemd on Arch
+		return svc("enable-now", "systemd-timesyncd")
 	}
 	if a.host.family == "debian" {
 		if err := a.host.install("systemd-timesyncd"); err != nil {
 			return err
 		}
-		_, err := sh("systemctl", "enable", "--now", "systemd-timesyncd")
+		err := svc("enable-now", "systemd-timesyncd")
 		return err
 	}
 	if err := a.host.install("chrony"); err != nil {
 		return err
 	}
-	_, err := sh("systemctl", "enable", "--now", "chronyd")
+	err := svc("enable-now", "chronyd")
 	return err
 }
 
@@ -999,7 +1008,7 @@ func fixJournald(a *Agent) error {
 	if _, err := sh("systemd-tmpfiles", "--create", "--prefix", "/var/log/journal"); err != nil {
 		return err
 	}
-	_, err := sh("systemctl", "restart", "systemd-journald")
+	err := svc("restart", "systemd-journald")
 	return err
 }
 
@@ -1101,7 +1110,7 @@ func fixAuditd(a *Agent) error {
 	if _, err := writeIfChanged(auditRulesFile, b.String(), 0o640); err != nil {
 		return err
 	}
-	if _, err := sh("systemctl", "enable", "--now", "auditd"); err != nil {
+	if err := svc("enable-now", "auditd"); err != nil {
 		return err
 	}
 	_, err := sh("augenrules", "--load")

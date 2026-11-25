@@ -36,6 +36,9 @@ func (h *host) ensureOsquery() error {
 	if hasOsquery() {
 		return nil
 	}
+	if h.family == "arch" || h.family == "alpine" {
+		return errors.New("osquery is not packaged for " + h.family + "; the native inventory is used")
+	}
 	if h.family == "debian" {
 		const key = "/etc/apt/keyrings/limdm-osquery.asc"
 		if _, err := writeIfChanged(key, osqueryKey, 0o644); err != nil {
@@ -453,8 +456,8 @@ func displayManager() string {
 
 // osqueryPackages returns installed packages from osquery.
 func (h *host) osqueryPackages() ([]api.Package, error) {
-	if !hasOsquery() {
-		return nil, errors.New("osquery not installed")
+	if !hasOsquery() || (h.family != "debian" && h.family != "fedora") {
+		return nil, errors.New("osquery packages unavailable") // pacman and apk lists come from the native collector
 	}
 	q := "SELECT name, version, arch FROM deb_packages WHERE status LIKE '%installed'"
 	if h.family != "debian" {
