@@ -1,0 +1,386 @@
+#!/usr/bin/python3
+# LiMDM desktop app: a GNOME style window (GTK 4, libadwaita) with the state
+# of this device. It runs as the signed in user and talks only to the local
+# agent socket; nothing here needs privileges. Started from the tray icon
+# (limdm-desktop) or the applications menu.
+#
+# Exit codes: 0 done, 3 GTK 4 or libadwaita 1.4 missing (the tray then falls
+# back to simple dialogs).
+import json
+import locale
+import os
+import socket
+import sys
+import threading
+from datetime import datetime
+
+try:
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw, Gio, GLib, Gtk, Pango
+except (ImportError, ValueError):
+    sys.exit(3)
+if (Adw.get_major_version(), Adw.get_minor_version()) < (1, 4):
+    sys.exit(3)
+
+SOCKET = "/run/limdm/agent.sock"
+APP_ID = "io.github.maltekiefer.LiMDM"
+
+
+def _german():
+    for k in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        v = os.environ.get(k)
+        if v:
+            return v.startswith("de")
+    try:
+        with open("/etc/locale.conf") as f:
+            for line in f:
+                if line.startswith("LANG="):
+                    return line.split("=", 1)[1].strip().strip("\"'").startswith("de")
+    except OSError:
+        pass
+    return False
+
+
+DE = _german()
+
+
+def tr(en, de):
+    return de if DE else en
+
+
+def agent(req, timeout=120):
+    """One request on the agent socket: a JSON line out, a JSON line back."""
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(timeout)
+        s.connect(SOCKET)
+        s.sendall(json.dumps(req).encode() + b"\n")
+        buf = b""
+        while not buf.endswith(b"\n"):
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            buf += chunk
+    return json.loads(buf or b"{}")
+
+
+def in_background(work, done):
+    """Run work() off the UI thread and hand its result (or error) to done()."""
+
+    def run():
+        try:
+            res, err = work(), None
+        except Exception as e:  # shown to the user, never raised in GTK
+            res, err = None, e
+        GLib.idle_add(done, res, err)
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def when(ts):
+    if not ts:
+        return tr("never", "nie")
+    try:
+        t = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone()
+    except ValueError:
+        return ts
+    return t.strftime("%Y-%m-%d %H:%M")
+
+
+PAGES = [
+    ("overview", "computer-symbolic", tr("Overview", "Übersicht")),
+    ("compliance", "security-high-symbolic", tr("Compliance", "Compliance")),
+    ("disk", "drive-harddisk-system-symbolic", tr("Disk Encryption", "Verschlüsselung")),
+    ("log", "utilities-terminal-symbolic", tr("Agent Log", "Agent Protokoll")),
+    ("about", "help-about-symbolic", tr("About", "Info")),
+]
+
+
+class Window(Adw.ApplicationWindow):
+    def __init__(self, app, start):
+        super().__init__(application=app, title="LiMDM", default_width=900, default_height=640)
+        self.info = {}
+        self.toasts = Adw.ToastOverlay()
+        self.split = Adw.NavigationSplitView(min_sidebar_width=220, max_sidebar_width=260)
+        self.toasts.set_child(self.split)
+        self.set_content(self.toasts)
+
+        # sidebar: company and pages with icons, like GNOME Settings
+        side = Adw.ToolbarView()
+        self.side_header = Adw.HeaderBar()
+        self.side_title = Adw.WindowTitle(title="LiMDM")
+        self.side_header.set_title_widget(self.side_title)
+        side.add_top_bar(self.side_header)
+        self.nav = Gtk.ListBox(css_classes=["navigation-sidebar"])
+        for key, icon, label in PAGES:
+            row = Gtk.ListBoxRow()
+            row.key = key
+            box = Gtk.Box(spacing=12, margin_top=6, margin_bottom=6, margin_start=6, margin_end=6)
+            box.append(Gtk.Image(icon_name=icon))
+            box.append(Gtk.Label(label=label, xalign=0))
+            row.set_child(box)
+            self.nav.append(row)
+        self.nav.connect("row-activated", lambda _l, row: self.show(row.key))
+        side.set_content(Gtk.ScrolledWindow(child=self.nav, vexpand=True))
+        self.split.set_sidebar(Adw.NavigationPage(title="LiMDM", child=side))
+
+        # content: header with refresh, preferences page per section
+        self.content = Adw.ToolbarView()
+        self.header = Adw.HeaderBar()
+        refresh = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text=tr("Refresh", "Aktualisieren"))
+        refresh.connect("clicked", lambda _b: self.refresh())
+        self.header.pack_end(refresh)
+        self.content.add_top_bar(self.header)
+        self.page = Adw.NavigationPage(title="", child=self.content)
+        self.split.set_content(self.page)
+
+        self.current = start if any(p[0] == start for p in PAGES) else "overview"
+        self.refresh()
+        GLib.timeout_add_seconds(60, self._tick)
+
+    def _tick(self):
+        self.refresh()
+        return True
+
+    # ---- data ----
+
+    def refresh(self):
+        in_background(lambda: agent({"op": "info"}, timeout=20), self._loaded)
+
+    def _loaded(self, res, err):
+        if err or not res or res.get("error") and not res.get("status"):
+            self.info = {"error": str(err or res.get("error") or tr("no answer", "keine Antwort"))}
+        else:
+            self.info = res
+        company = self.info.get("company") or "LiMDM"
+        self.side_title.set_title(company)
+        self.side_title.set_subtitle(tr("Managed device", "Verwaltetes Gerät"))
+        self.show(self.current)
+        return False
+
+    def toast(self, text):
+        self.toasts.add_toast(Adw.Toast(title=text, timeout=4))
+
+    # ---- pages ----
+
+    def show(self, key):
+        self.current = key
+        for i, p in enumerate(PAGES):
+            if p[0] == key:
+                self.nav.select_row(self.nav.get_row_at_index(i))
+                self.page.set_title(p[2])
+        build = getattr(self, "page_" + key)
+        self.content.set_content(build())
+        self.split.set_show_content(True)
+
+    def _unreachable(self):
+        page = Adw.StatusPage(icon_name="network-offline-symbolic", title=tr("Agent Not Reachable", "Agent nicht erreichbar"),
+                              description=tr("The LiMDM agent on this device does not respond. IT has been informed when it comes back.",
+                                             "Der LiMDM Agent auf diesem Gerät antwortet nicht.") + "\n" + self.info.get("error", ""))
+        return page
+
+    def page_overview(self):
+        st = self.info.get("status")
+        if not st:
+            return self._unreachable()
+        failing = st.get("failing") or []
+        if st.get("locked"):
+            icon, title, desc, css = "system-lock-screen-symbolic", tr("Device Locked", "Gerät gesperrt"), \
+                tr("IT locked this device.", "Die IT hat dieses Gerät gesperrt."), "error"
+        elif st.get("last_error"):
+            icon, title, desc, css = "network-offline-symbolic", tr("No Connection to the Server", "Keine Verbindung zum Server"), \
+                st["last_error"], "warning"
+        elif failing:
+            icon, title, css = "dialog-warning-symbolic", tr("Action Needed", "Handlung erforderlich"), "warning"
+            desc = tr("%d checks failing", "%d Prüfungen fehlgeschlagen") % len(failing)
+        else:
+            icon, title, desc, css = "emblem-ok-symbolic", tr("Device Is Compliant", "Gerät ist konform"), \
+                tr("All checks passed.", "Alle Prüfungen bestanden."), "success"
+        page = Adw.PreferencesPage()
+        status = Adw.StatusPage(icon_name=icon, title=title, description=desc, css_classes=["compact"])
+        status.add_css_class(css)
+        top = Adw.PreferencesGroup()
+        top.add(status)
+        page.add(top)
+
+        dev = Adw.PreferencesGroup(title=tr("Device", "Gerät"))
+        dev.add(self._row(tr("Name", "Name"), st.get("hostname", ""), "computer-symbolic"))
+        dev.add(self._row(tr("Managed by", "Verwaltet von"), self.info.get("company", ""), "system-users-symbolic"))
+        sync = Gtk.Button(label=tr("Check In Now", "Jetzt synchronisieren"), valign=Gtk.Align.CENTER, css_classes=["suggested-action"])
+        sync.connect("clicked", self._sync)
+        last = self._row(tr("Last check in", "Letzte Synchronisierung"), when(st.get("last_checkin")), "emblem-synchronizing-symbolic")
+        last.add_suffix(sync)
+        dev.add(last)
+        page.add(dev)
+
+        if self.info.get("need"):
+            g = Adw.PreferencesGroup(title=tr("Needs Your Attention", "Ihre Mithilfe nötig"))
+            row = Adw.ActionRow(title=tr("Disk recovery key missing", "Wiederherstellungsschlüssel fehlt"),
+                                subtitle=tr("IT needs a recovery key for your encrypted disk.", "Die IT benötigt einen Schlüssel für Ihre verschlüsselte Festplatte."),
+                                activatable=True)
+            row.add_prefix(Gtk.Image(icon_name="drive-harddisk-system-symbolic"))
+            row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+            row.connect("activated", lambda _r: self.show("disk"))
+            g.add(row)
+            page.add(g)
+        return page
+
+    def page_compliance(self):
+        st = self.info.get("status")
+        if not st:
+            return self._unreachable()
+        page = Adw.PreferencesPage()
+        checks = st.get("check_list") or []
+        order = {"fail": 0, "excepted": 1, "na": 2, "pass": 3}
+        checks.sort(key=lambda c: (order.get(c.get("status"), 4), c.get("title", "")))
+        groups = {}
+        names = {"fail": tr("Failing", "Fehlgeschlagen"), "excepted": tr("Exceptions", "Ausnahmen"),
+                 "na": tr("Not applicable", "Nicht anwendbar"), "pass": tr("Passed", "Bestanden")}
+        icons = {"fail": ("dialog-warning-symbolic", "warning"), "pass": ("emblem-ok-symbolic", "success"),
+                 "excepted": ("action-unavailable-symbolic", "dim-label"), "na": ("action-unavailable-symbolic", "dim-label")}
+        for c in checks:
+            s = c.get("status", "na")
+            g = groups.get(s)
+            if g is None:
+                g = groups[s] = Adw.PreferencesGroup(title=names.get(s, s))
+                page.add(g)
+            row = Adw.ActionRow(title=GLib.markup_escape_text(c.get("title", "")),
+                                subtitle=GLib.markup_escape_text(c.get("detail", "")), subtitle_lines=3)
+            icon, css = icons.get(s, icons["na"])
+            img = Gtk.Image(icon_name=icon)
+            img.add_css_class(css)
+            row.add_prefix(img)
+            g.add(row)
+        if not checks:
+            g = Adw.PreferencesGroup()
+            g.add(Adw.StatusPage(icon_name="security-high-symbolic", title=tr("No Checks Yet", "Noch keine Prüfungen"),
+                                 css_classes=["compact"]))
+            page.add(g)
+        return page
+
+    def page_disk(self):
+        st = self.info.get("status")
+        if not st:
+            return self._unreachable()
+        page = Adw.PreferencesPage()
+        need = self.info.get("need") or []
+        if not need:
+            g = Adw.PreferencesGroup()
+            g.add(Adw.StatusPage(icon_name="channel-secure-symbolic", title=tr("Recovery Keys Stored", "Schlüssel hinterlegt"),
+                                 description=tr("%d disk recovery keys are stored with IT. Nothing to do.",
+                                                "%d Wiederherstellungsschlüssel sind bei der IT hinterlegt. Nichts zu tun.") % st.get("escrowed", 0),
+                                 css_classes=["compact"]))
+            page.add(g)
+            return page
+        for vol in need:
+            g = Adw.PreferencesGroup(title=vol.get("device", ""),
+                                     description=tr("IT needs a recovery key for this encrypted disk, so access can be restored if the passphrase is ever lost. Enter the passphrase you type when the computer starts; it stays unchanged.",
+                                                    "Die IT benötigt einen Wiederherstellungsschlüssel für diese verschlüsselte Festplatte, damit der Zugriff bei verlorener Passphrase wiederhergestellt werden kann. Geben Sie die Passphrase ein, die Sie beim Start eingeben; sie bleibt unverändert."))
+            entry = Adw.PasswordEntryRow(title=tr("Disk passphrase", "Festplatten Passphrase"))
+            button = Gtk.Button(label=tr("Store Key", "Schlüssel hinterlegen"), valign=Gtk.Align.CENTER, css_classes=["suggested-action"])
+            button.connect("clicked", self._escrow, vol.get("uuid"), entry)
+            entry.connect("entry-activated", lambda e, b=button: b.emit("clicked"))
+            entry.add_suffix(button)
+            g.add(entry)
+            page.add(g)
+        return page
+
+    def page_log(self):
+        page = Adw.PreferencesPage()
+        g = Adw.PreferencesGroup(title=tr("Warnings and Errors", "Warnungen und Fehler"),
+                                 description=tr("Latest entries of the agent and its watchdog.", "Letzte Einträge des Agenten und seines Watchdogs."))
+        lines = self.info.get("log") or []
+        if not lines:
+            g.add(Adw.StatusPage(icon_name="emblem-ok-symbolic", title=tr("Nothing Recorded", "Nichts aufgezeichnet"), css_classes=["compact"]))
+        else:
+            view = Gtk.TextView(editable=False, cursor_visible=False, monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR,
+                                top_margin=12, bottom_margin=12, left_margin=12, right_margin=12)
+            view.get_buffer().set_text("\n".join(lines))
+            frame = Gtk.Frame(child=Gtk.ScrolledWindow(child=view, min_content_height=360), css_classes=["view"])
+            g.add(frame)
+        page.add(g)
+        return page
+
+    def page_about(self):
+        st = self.info.get("status") or {}
+        page = Adw.PreferencesPage()
+        head = Adw.PreferencesGroup()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=12, margin_bottom=12)
+        box.append(Gtk.Image(icon_name="limdm", pixel_size=96))
+        box.append(Gtk.Label(label="LiMDM", css_classes=["title-1"]))
+        box.append(Gtk.Label(label=tr("Device management for Linux", "Geräteverwaltung für Linux"), css_classes=["dim-label"]))
+        head.add(box)
+        page.add(head)
+        g = Adw.PreferencesGroup(title=tr("Agent", "Agent"))
+        g.add(self._row(tr("Version", "Version"), st.get("version", ""), None, True))
+        g.add(self._row(tr("Server", "Server"), st.get("server", ""), None, True))
+        g.add(self._row(tr("Device ID", "Geräte ID"), st.get("device_id", ""), None, True))
+        g.add(self._row(tr("Managed by", "Verwaltet von"), self.info.get("company", ""), None))
+        page.add(g)
+        return page
+
+    def _row(self, title, value, icon, selectable=False):
+        row = Adw.ActionRow(title=title, subtitle=GLib.markup_escape_text(value or "–"),
+                            css_classes=["property"], subtitle_selectable=selectable)
+        if icon:
+            row.add_prefix(Gtk.Image(icon_name=icon))
+        return row
+
+    # ---- actions ----
+
+    def _sync(self, button):
+        button.set_sensitive(False)
+
+        def done(res, err):
+            button.set_sensitive(True)
+            if err or not res.get("ok"):
+                self.toast((res or {}).get("error") or str(err))
+            else:
+                self.toast(tr("Check in started", "Synchronisierung gestartet"))
+                GLib.timeout_add_seconds(15, lambda: (self.refresh(), False)[1])
+            return False
+
+        in_background(lambda: agent({"op": "sync"}, timeout=20), done)
+
+    def _escrow(self, button, uuid, entry):
+        pw = entry.get_text()
+        if not pw:
+            return
+        button.set_sensitive(False)
+        entry.set_sensitive(False)
+
+        def done(res, err):
+            entry.set_text("")
+            entry.set_sensitive(True)
+            button.set_sensitive(True)
+            if err:
+                self.toast(tr("The agent does not respond.", "Der Agent antwortet nicht."))
+            elif res.get("ok"):
+                self.toast(tr("Recovery key stored. Your passphrase is unchanged.", "Schlüssel hinterlegt. Ihre Passphrase bleibt unverändert."))
+                self.refresh()
+            elif "too many" in res.get("error", ""):
+                self.toast(tr("Too many attempts. Try again later.", "Zu viele Versuche. Bitte später erneut versuchen."))
+            else:
+                self.toast(tr("The passphrase was not accepted.", "Die Passphrase wurde nicht akzeptiert."))
+            return False
+
+        in_background(lambda: agent({"op": "escrow", "uuid": uuid, "passphrase": pw}), done)
+
+
+class App(Adw.Application):
+    def __init__(self, start):
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        self.start = start
+
+    def do_activate(self):
+        win = self.props.active_window or Window(self, self.start)
+        win.present()
+
+
+if __name__ == "__main__":
+    start = "overview"
+    if len(sys.argv) > 2 and sys.argv[1] == "--page":
+        start = sys.argv[2]
+    sys.exit(App(start).run([sys.argv[0]]))

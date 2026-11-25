@@ -99,6 +99,22 @@ nfpms:
         dst: /usr/share/applications/limdm-recovery-key.desktop
         file_info:
           mode: 0o644
+      - src: packaging/limdm.desktop
+        dst: /usr/share/applications/limdm.desktop
+        file_info:
+          mode: 0o644
+      - src: packaging/limdm-desktop-ui
+        dst: /usr/lib/limdm/limdm-desktop-ui
+        file_info:
+          mode: 0o755
+      - src: packaging/icons/limdm.svg
+        dst: /usr/share/icons/hicolor/scalable/apps/limdm.svg
+        file_info:
+          mode: 0o644
+      - src: packaging/icons/limdm-symbolic.svg
+        dst: /usr/share/icons/hicolor/symbolic/apps/limdm-symbolic.svg
+        file_info:
+          mode: 0o644
       - dst: /etc/limdm
         type: dir
         file_info: {mode: 0o700}
@@ -115,11 +131,11 @@ nfpms:
       deb:
         dependencies: [osquery, systemd, util-linux, cryptsetup-bin, iproute2, procps, kmod, gpg]
         recommends: [unattended-upgrades, ufw, libpam-pwquality, auditd, nftables]
-        suggests: [zenity, kdialog, libnotify-bin, dconf-cli, flatpak]
+        suggests: [zenity, kdialog, libnotify-bin, dconf-cli, flatpak, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1]
       rpm:
         dependencies: [osquery, systemd, util-linux, cryptsetup, iproute, procps-ng, kmod, gnupg2]
         recommends: [firewalld, audit, dnf-plugins-core, nftables]
-        suggests: [zenity, kdialog, libnotify, dconf, flatpak]
+        suggests: [zenity, kdialog, libnotify, dconf, flatpak, python3-gobject, gtk4, libadwaita]
   - id: server
     ids: [server]
     package_name: limdm-server

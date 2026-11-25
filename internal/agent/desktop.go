@@ -38,18 +38,26 @@ type desktopInfo struct {
 	Status  DesktopStatus
 }
 
+// DesktopCheck is one compliance check as the desktop app lists it.
+type DesktopCheck struct {
+	Title  string `json:"title"`
+	Status string `json:"status"` // pass | fail | na | excepted
+	Detail string `json:"detail,omitempty"`
+}
+
 // DesktopStatus is what the tray shows about the device and the agent.
 type DesktopStatus struct {
-	Hostname    string     `json:"hostname"`
-	DeviceID    string     `json:"device_id"`
-	Server      string     `json:"server"`
-	Version     string     `json:"version"`
-	LastCheckin *time.Time `json:"last_checkin,omitempty"`
-	LastError   string     `json:"last_error,omitempty"`
-	Checks      int        `json:"checks"`
-	Failing     []string   `json:"failing,omitempty"` // titles of failing checks
-	Escrowed    int        `json:"escrowed"`
-	Locked      bool       `json:"locked,omitempty"`
+	Hostname    string         `json:"hostname"`
+	DeviceID    string         `json:"device_id"`
+	Server      string         `json:"server"`
+	Version     string         `json:"version"`
+	LastCheckin *time.Time     `json:"last_checkin,omitempty"`
+	LastError   string         `json:"last_error,omitempty"`
+	Checks      int            `json:"checks"`
+	Failing     []string       `json:"failing,omitempty"` // titles of failing checks
+	CheckList   []DesktopCheck `json:"check_list,omitempty"`
+	Escrowed    int            `json:"escrowed"`
+	Locked      bool           `json:"locked,omitempty"`
 }
 
 // DesktopRequest and DesktopResponse are the socket protocol (one JSON line each).
@@ -139,6 +147,7 @@ func (a *Agent) publishDesktop() {
 		if c.Status == "fail" {
 			info.Status.Failing = append(info.Status.Failing, c.Title)
 		}
+		info.Status.CheckList = append(info.Status.CheckList, DesktopCheck{Title: c.Title, Status: c.Status, Detail: c.Detail})
 	}
 	if _, err := os.Stat("/etc/nologin"); err == nil {
 		info.Status.Locked = true
