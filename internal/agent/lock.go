@@ -166,7 +166,7 @@ func endTTYs() []string {
 	var ended []string
 	for _, l := range strings.Split(out, "\n") {
 		f := strings.Fields(l)
-		if len(f) < 2 || f[0] == "root" || !userRe.MatchString(f[0]) || !(strings.HasPrefix(f[1], "pts/") || strings.HasPrefix(f[1], "tty")) {
+		if len(f) < 2 || f[0] == "root" || !userRe.MatchString(f[0]) || !strings.HasPrefix(f[1], "pts/") && !strings.HasPrefix(f[1], "tty") {
 			continue
 		}
 		if !slices.Contains(peopleAccounts(), f[0]) {
