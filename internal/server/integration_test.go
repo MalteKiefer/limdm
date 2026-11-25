@@ -819,6 +819,7 @@ func TestWebhookSignature(t *testing.T) {
 	case r := <-got:
 		body := <-bodies
 		mac := hmac.New(sha256.New, s.webhookKey())
+		mac.Write([]byte(r.Header.Get("X-LiMDM-Timestamp") + "."))
 		mac.Write(body)
 		if r.Header.Get("X-LiMDM-Signature") != "sha256="+hex.EncodeToString(mac.Sum(nil)) {
 			t.Fatal("signature does not verify")

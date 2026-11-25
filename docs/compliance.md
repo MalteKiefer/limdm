@@ -73,13 +73,18 @@ server posts:
  "noncompliant_since": "2026-11-25T08:00:00Z", "console_url": "https://mdm.example.com/devices/..."}
 ```
 
-with the header `X-LiMDM-Signature: sha256=<hex>`, the HMAC-SHA256 of the raw body with the
-signing key shown in the settings. Verify it before trusting the content:
+with the headers `X-LiMDM-Timestamp: <unix seconds>` and `X-LiMDM-Signature: sha256=<hex>`,
+the HMAC-SHA256 of `<timestamp>.<raw body>` with the signing key shown in the settings.
+Verify the signature and reject timestamps older than five minutes (replay protection):
 
 ```python
-import hmac, hashlib
-ok = hmac.compare_digest("sha256=" + hmac.new(bytes.fromhex(key), body, hashlib.sha256).hexdigest(), header)
+import hmac, hashlib, time
+msg = ts.encode() + b"." + body
+ok = hmac.compare_digest("sha256=" + hmac.new(bytes.fromhex(key), msg, hashlib.sha256).hexdigest(), sig) \
+     and abs(time.time() - int(ts)) < 300
 ```
+
+The server does not follow redirects for webhook requests.
 
 ## Evidence
 

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -78,15 +79,25 @@ func TestClientIP(t *testing.T) {
 
 func TestSecretSealing(t *testing.T) {
 	s := &Server{cfg: Config{SessionKey: []byte("0123456789abcdef0123456789abcdef")}}
-	enc, err := s.seal32("client-secret")
+	enc, err := s.sealField("settings.oidc_client_secret", "client-secret")
 	if err != nil || enc == "" || strings.Contains(enc, "client-secret") {
 		t.Fatalf("seal: %q %v", enc, err)
 	}
-	if got, err := s.open32(enc); err != nil || got != "client-secret" {
+	if got, err := s.openField("settings.oidc_client_secret", enc); err != nil || got != "client-secret" {
 		t.Fatalf("open: %q %v", got, err)
 	}
 	other := &Server{cfg: Config{SessionKey: []byte("ffffffffffffffffffffffffffffffff")}}
-	if _, err := other.open32(enc); err == nil {
+	if _, err := other.openField("settings.oidc_client_secret", enc); err == nil {
 		t.Fatal("secret opened with a different key")
+	}
+	// bound to the field: a sealed OIDC secret cannot be read as another field
+	if _, err := s.openField("settings.google_service_account_key", enc); err == nil {
+		t.Fatal("sealed value opened for another field")
+	}
+	// values sealed before per field binding stay readable
+	a, _ := s.aead(infoSettings)
+	legacy := base64.StdEncoding.EncodeToString(seal(a, []byte("old"), []byte(legacyAD)))
+	if got, err := s.openField("settings.google_service_account_key", legacy); err != nil || got != "old" {
+		t.Fatalf("legacy value: %q %v", got, err)
 	}
 }

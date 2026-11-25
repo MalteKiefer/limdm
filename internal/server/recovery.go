@@ -2,11 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/hkdf"
-	"crypto/rand"
-	"crypto/sha256"
 	"errors"
 	"net/http"
 	"time"
@@ -21,39 +16,20 @@ import (
 // key cannot be moved to another row. Every view is audited and can trigger
 // a rotation on the device.
 
-func (s *Server) recoveryAEAD() (cipher.AEAD, error) {
-	key, err := hkdf.Key(sha256.New, s.cfg.SessionKey, nil, "limdm recovery keys v1", 32)
-	if err != nil {
-		return nil, err
-	}
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	return cipher.NewGCM(block)
-}
-
 func (s *Server) sealRecovery(deviceID, uuid, key string) ([]byte, error) {
-	g, err := s.recoveryAEAD()
+	a, err := s.aead(infoRecovery)
 	if err != nil {
 		return nil, err
 	}
-	nonce := make([]byte, g.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
-	}
-	return g.Seal(nonce, nonce, []byte(key), []byte(deviceID+"|"+uuid)), nil
+	return seal(a, []byte(key), []byte(deviceID+"|"+uuid)), nil
 }
 
 func (s *Server) openRecovery(deviceID, uuid string, sealed []byte) (string, error) {
-	g, err := s.recoveryAEAD()
+	a, err := s.aead(infoRecovery)
 	if err != nil {
 		return "", err
 	}
-	if len(sealed) < g.NonceSize() {
-		return "", errors.New("sealed recovery key too short")
-	}
-	plain, err := g.Open(nil, sealed[:g.NonceSize()], sealed[g.NonceSize():], []byte(deviceID+"|"+uuid))
+	plain, err := open(a, sealed, []byte(deviceID+"|"+uuid))
 	return string(plain), err
 }
 

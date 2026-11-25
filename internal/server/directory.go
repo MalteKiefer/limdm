@@ -224,7 +224,7 @@ func (s *Server) googleConfigure(w http.ResponseWriter, r *http.Request, sess se
 			s.renderDirectory(w, r, sess, "", "", "paste the service account JSON key file")
 			return
 		}
-		if g.KeyEnc, err = s.seal32(key); err != nil {
+		if g.KeyEnc, err = s.sealField("settings.google_service_account_key", key); err != nil {
 			s.fail(w, err)
 			return
 		}
@@ -279,7 +279,7 @@ func (s *Server) syncGoogle(ctx context.Context) (string, error) {
 	if err != nil || g.KeyEnc == "" {
 		return "", errors.Join(err, errors.New("not configured"))
 	}
-	key, err := s.open32(g.KeyEnc)
+	key, err := s.openField("settings.google_service_account_key", g.KeyEnc)
 	if err != nil {
 		return "", err
 	}

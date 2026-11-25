@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -125,8 +126,15 @@ func (s *Server) sendWebhook(ev *webhookEvent) {
 	if ev == nil || target == "" {
 		return
 	}
-	body, _ := json.Marshal(ev)
+	body, err := json.Marshal(ev)
+	if err != nil {
+		s.log.Error("webhook", "err", err)
+		return
+	}
+	// the timestamp is signed with the body, so receivers can reject replays
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
 	mac := hmac.New(sha256.New, s.webhookKey())
+	mac.Write([]byte(ts + "."))
 	mac.Write(body)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -137,10 +145,11 @@ func (s *Server) sendWebhook(ev *webhookEvent) {
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-LiMDM-Timestamp", ts)
 		req.Header.Set("X-LiMDM-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 		client := s.hooks
 		if client == nil {
-			client = http.DefaultClient
+			client = webhookClient
 		}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -152,4 +161,11 @@ func (s *Server) sendWebhook(ev *webhookEvent) {
 			s.log.Error("webhook", "status", resp.Status)
 		}
 	}()
+}
+
+// webhookClient does not follow redirects: a redirect could point the server
+// at internal addresses (blind SSRF).
+var webhookClient = &http.Client{
+	Timeout:       10 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }

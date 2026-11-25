@@ -183,6 +183,7 @@ type Server struct {
 	rt    atomic.Pointer[runtimeState] // settings editable in the UI and the OIDC client built from them
 	hooks *http.Client                 // webhook client; nil uses http.DefaultClient (tests inject one)
 
+	saveMu sync.Mutex // serializes settings saves
 	relMu  sync.Mutex // release manifest, reloaded when its modification time changes
 	relMod time.Time
 	rels   []api.Release
