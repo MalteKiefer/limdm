@@ -89,15 +89,28 @@ func (a *Agent) applyUsers() error {
 			}
 		}
 	}
+	// removed users: locked and forgotten; a failed lock is retried next cycle
+	if a.state.RemovePending == nil {
+		a.state.RemovePending = map[string]bool{}
+	}
 	for name := range prev {
 		if _, keep := cur[name]; !keep {
-			_, _ = sh("gpasswd", "-d", name, group) // fails when not a member, that is fine
-			if _, err := sh("usermod", "-L", "-e", "1", name); err != nil {
-				errs = append(errs, err)
-			} else {
-				a.event("locked removed user %s", name)
-			}
+			a.state.RemovePending[name] = true
 		}
+	}
+	for name := range a.state.RemovePending {
+		if _, back := cur[name]; back {
+			delete(a.state.RemovePending, name)
+			continue
+		}
+		_, _ = sh("gpasswd", "-d", name, group) // fails when not a member, that is fine
+		if _, err := sh("usermod", "-L", "-e", "1", name); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		forgetSSO(name) // coming back later must not skip the SSO confirmation
+		delete(a.state.RemovePending, name)
+		a.event("locked removed user %s", name)
 	}
 	b, _ := json.Marshal(cur)
 	if _, err := writeIfChanged(usersFile, string(b), 0o600); err != nil {

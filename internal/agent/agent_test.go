@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/pem"
+	"errors"
 	"io"
 	"log/slog"
 	"math/big"
@@ -19,7 +20,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -307,7 +311,7 @@ func TestPolkitAndSudoRendering(t *testing.T) {
 
 func TestDesktopServer(t *testing.T) {
 	a := &Agent{kick: make(chan struct{}, 1)}
-	d := &desktopServer{a: a, queued: map[string]bool{"u2": true}, failures: map[uint32][]time.Time{}}
+	d := &desktopServer{a: a, queued: map[string]bool{"u2": true}, inflight: map[string]bool{}, failures: map[uint32][]time.Time{}}
 	d.info.Store(&desktopInfo{Company: "ACME", Need: []luksVolume{{"/dev/sda3", "u1"}, {"/dev/sdb1", "u2"}}})
 	st := d.serve(1000, DesktopRequest{Op: "status"})
 	if st.Company != "ACME" || len(st.Need) != 1 || st.Need[0].UUID != "u1" {
@@ -399,5 +403,34 @@ func TestPAMServiceFilter(t *testing.T) {
 		if localService(c.service, c.rhost) != c.want {
 			t.Errorf("%s from %q: want %v", c.service, c.rhost, c.want)
 		}
+	}
+}
+
+func TestDesktopRateLimitParallel(t *testing.T) {
+	var calls atomic.Int32
+	addKeyFn = func(string, string, string) error {
+		calls.Add(1)
+		time.Sleep(20 * time.Millisecond)
+		return errors.New("wrong")
+	}
+	defer func() { addKeyFn = luksAddKey }()
+	a := &Agent{kick: make(chan struct{}, 1)}
+	d := &desktopServer{a: a, queued: map[string]bool{}, inflight: map[string]bool{}, failures: map[uint32][]time.Time{}}
+	vols := make([]luksVolume, 10)
+	for i := range vols {
+		vols[i] = luksVolume{"/dev/x" + strconv.Itoa(i), "u" + strconv.Itoa(i)}
+	}
+	d.info.Store(&desktopInfo{Need: vols})
+	var wg sync.WaitGroup
+	for i := range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.serve(1000, DesktopRequest{Op: "escrow", UUID: "u" + strconv.Itoa(i), Passphrase: "x"})
+		}()
+	}
+	wg.Wait()
+	if n := calls.Load(); n > 5 {
+		t.Fatalf("%d passphrase attempts ran in parallel, limit is 5", n)
 	}
 }

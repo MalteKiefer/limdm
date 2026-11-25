@@ -78,7 +78,8 @@ type State struct {
 	Company        string               `json:"company,omitempty"`
 	BrandingHash   string               `json:"branding_hash,omitempty"`
 	LastContact    time.Time            `json:"last_contact"`
-	DoneCommands   map[int64]time.Time  `json:"done_commands,omitempty"` // executed command IDs: the server redelivers until it has the result
+	DoneCommands   map[int64]time.Time  `json:"done_commands,omitempty"`  // executed command IDs: the server redelivers until it has the result
+	RemovePending  map[string]bool      `json:"remove_pending,omitempty"` // removed users whose account lock still has to succeed
 	OfflineLocked  bool                 `json:"offline_locked,omitempty"`
 }
 
@@ -354,16 +355,20 @@ func (a *Agent) pendingEvents() []string {
 }
 
 func (a *Agent) saveState() {
+	if err := a.saveStateErr(); err != nil {
+		a.log.Error("save state", "err", err)
+	}
+}
+
+func (a *Agent) saveStateErr() error {
 	a.evMu.Lock()
 	b, err := json.Marshal(a.state)
 	a.evMu.Unlock()
 	if err != nil {
-		a.log.Error("save state", "err", err)
-		return
+		return err
 	}
-	if _, err := writeIfChanged(stateFile, string(b), 0o600); err != nil {
-		a.log.Error("save state", "err", err)
-	}
+	_, err = writeIfChanged(stateFile, string(b), 0o600)
+	return err
 }
 
 // Run loops until ctx ends.
@@ -373,7 +378,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	signal.Notify(wake, syscall.SIGUSR1) // "recovery-key" asks for an immediate check in
 	defer signal.Stop(wake)
 	a.kick = make(chan struct{}, 1)
-	a.desktop = &desktopServer{a: a, queued: map[string]bool{}, failures: map[uint32][]time.Time{}}
+	a.desktop = &desktopServer{a: a, queued: map[string]bool{}, inflight: map[string]bool{}, failures: map[uint32][]time.Time{}}
 	go a.serveDesktop(ctx)
 	a.enforceOffline(false) // before anything else: the device may have been off for a long time
 	for {
@@ -653,8 +658,10 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = powerAction(c.Type, c.Payload)
 	case "lock":
 		out, err = lockDevice()
+		a.syncPasswordLocks()
 	case "unlock":
 		out, err = unlockDevice()
+		a.syncPasswordLocks()
 	case "script":
 		if !a.cfg.AllowScripts {
 			err = errors.New("remote scripts are disabled on this device (allow_scripts)")

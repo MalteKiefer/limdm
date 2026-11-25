@@ -55,6 +55,23 @@ func readSSO() map[string]time.Time {
 	return m
 }
 
+// forgetSSO drops the confirmation of a removed user.
+func forgetSSO(user string) {
+	m := readSSO()
+	if _, ok := m[user]; !ok {
+		return
+	}
+	delete(m, user)
+	if b, err := json.Marshal(m); err == nil {
+		_, _ = writeIfChanged(ssoFile, string(b), 0o600)
+	}
+}
+
+// deviceLocked: locked from the console or by the compliance policy. Local
+// passwords are locked too, so screen lockers and sudo without pam_nologin
+// cannot be used to get back in.
+func deviceLocked() bool { return readFile(nologinFile) == nologinText }
+
 func recordSSO(user string, at time.Time) error {
 	m := readSSO()
 	m[user] = at.UTC()
@@ -130,7 +147,7 @@ func (a *Agent) syncPasswordLocks() {
 	}
 	now := time.Now()
 	for user := range readUsers() {
-		want := a.state.OfflineLocked || ssoDue(p, user, now)
+		want := a.state.OfflineLocked || deviceLocked() || ssoDue(p, user, now)
 		has := passwordLocked(user)
 		switch {
 		case want && !has:

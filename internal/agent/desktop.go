@@ -57,16 +57,17 @@ type DesktopResponse struct {
 	Error   string          `json:"error,omitempty"`
 }
 
+// addKeyFn is cryptsetup luksAddKey; tests replace it.
+var addKeyFn = luksAddKey
+
 type desktopServer struct {
 	a        *Agent
 	info     atomic.Pointer[desktopInfo]
 	mu       sync.Mutex
 	queued   map[string]bool        // uuids handed to the agent, not yet escrowed
+	inflight map[string]bool        // uuids with a cryptsetup run in progress
 	failures map[uint32][]time.Time // wrong passphrases per uid
 }
-
-// escrowMu serializes access to the escrow request file within the agent.
-var escrowMu sync.Mutex
 
 // applyBranding stores name and logo for the desktop helper.
 func (a *Agent) applyBranding(b *api.Branding) {
@@ -193,14 +194,33 @@ func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 		if len(req.Passphrase) == 0 || len(req.Passphrase) > 1024 {
 			return DesktopResponse{Error: "passphrase not accepted"}
 		}
-		if !d.allowAttempt(uid) {
+		// Check and reserve in one step: parallel connections must not run more
+		// guesses than the limit, nor add two key slots for one volume. The
+		// attempt counts as a failure until it succeeded.
+		d.mu.Lock()
+		if d.inflight[vol.UUID] {
+			d.mu.Unlock()
+			return DesktopResponse{Error: "a recovery key is being created for this volume"}
+		}
+		if !d.allowLocked(uid) {
+			d.mu.Unlock()
 			return DesktopResponse{Error: "too many attempts, try again later"}
 		}
+		d.failures[uid] = append(d.failures[uid], time.Now())
+		d.inflight[vol.UUID] = true
+		d.mu.Unlock()
+		defer func() {
+			d.mu.Lock()
+			delete(d.inflight, vol.UUID)
+			d.mu.Unlock()
+		}()
 		key := api.NewRecoveryKey()
-		if err := luksAddKey(vol.Device, req.Passphrase, key); err != nil {
-			d.recordFailure(uid)
+		if err := addKeyFn(vol.Device, req.Passphrase, key); err != nil {
 			return DesktopResponse{Error: "passphrase not accepted"}
 		}
+		d.mu.Lock()
+		d.failures[uid] = d.failures[uid][:len(d.failures[uid])-1] // succeeded: not a failure
+		d.mu.Unlock()
 		if err := queueEscrow(pendingKey{RecoveryKey: api.RecoveryKey{UUID: vol.UUID, Device: vol.Device, Key: key}}); err != nil {
 			return DesktopResponse{Error: "could not store the key, contact IT"}
 		}
@@ -221,6 +241,11 @@ func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 func (d *desktopServer) allowAttempt(uid uint32) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	return d.allowLocked(uid)
+}
+
+// allowLocked is allowAttempt for callers holding d.mu; it prunes old entries.
+func (d *desktopServer) allowLocked(uid uint32) bool {
 	var recent []time.Time
 	for _, t := range d.failures[uid] {
 		if time.Since(t) < 15*time.Minute {
@@ -239,17 +264,7 @@ func (d *desktopServer) recordFailure(uid uint32) {
 
 // queueEscrow appends to the request file the agent reads each cycle.
 func queueEscrow(k pendingKey) error {
-	escrowMu.Lock()
-	defer escrowMu.Unlock()
-	var req []pendingKey
-	if b, err := os.ReadFile(escrowRequest); err == nil {
-		if err := json.Unmarshal(b, &req); err != nil {
-			return err
-		}
-	}
-	req = append(req, k)
-	b, _ := json.Marshal(req)
-	return os.WriteFile(escrowRequest, b, 0o600)
+	return withEscrowRequests(func(ks []pendingKey) ([]pendingKey, error) { return append(ks, k), nil })
 }
 
 // activeLocalUser reports whether uid has an active, non-remote session.
