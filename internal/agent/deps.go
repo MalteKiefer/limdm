@@ -3,6 +3,7 @@ package agent
 import (
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -14,9 +15,10 @@ import (
 // devices with a desktop.
 
 type dependency struct {
-	cmd            string // program the agent calls, or a file pattern (contains "/")
-	debian, fedora string // package providing it
-	desktop        bool   // only on devices with a desktop
+	cmd            string   // program the agent calls, or a file pattern (contains "/")
+	debian, fedora string   // package providing it
+	desktop        bool     // only on devices with a desktop
+	with           []string // only if one of these programs is installed
 }
 
 var dependencies = []dependency{
@@ -37,6 +39,11 @@ var dependencies = []dependency{
 	{cmd: "/usr/lib*/python3*/*-packages/gi/__init__.py", debian: "python3-gi", fedora: "python3-gobject", desktop: true},
 	{cmd: "/usr/lib*/*/girepository-1.0/Gtk-4.0.typelib", debian: "gir1.2-gtk-4.0", fedora: "gtk4", desktop: true},
 	{cmd: "/usr/lib*/*/girepository-1.0/Adw-1.typelib", debian: "gir1.2-adw-1", fedora: "libadwaita", desktop: true},
+	// idle screen lock for compositors and window managers (screenlock.go)
+	{cmd: "swayidle", debian: "swayidle", fedora: "swayidle", desktop: true, with: waylandCompositors},
+	{cmd: "swaylock", debian: "swaylock", fedora: "swaylock", desktop: true, with: waylandCompositors},
+	{cmd: "xss-lock", debian: "xss-lock", fedora: "xss-lock", desktop: true, with: x11WindowManagers},
+	{cmd: "i3lock", debian: "i3lock", fedora: "i3lock", desktop: true, with: x11WindowManagers},
 }
 
 var depsChecked time.Time
@@ -53,7 +60,7 @@ func missingPackages(family string, desktopPresent, kde bool, has func(string) b
 		pkgs = append(pkgs, p)
 	}
 	for _, d := range dependencies {
-		if (d.desktop && !desktopPresent) || has(d.cmd) {
+		if (d.desktop && !desktopPresent) || has(d.cmd) || (d.with != nil && !slices.ContainsFunc(d.with, has)) {
 			continue
 		}
 		if family == "debian" {

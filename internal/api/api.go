@@ -56,7 +56,7 @@ var Types = map[string]string{
 	TypeFiles:      `{"files": [{"path": "/etc/motd", "content": "...", "mode": "0644"}]}`,
 	TypeFirewall:   `{"enforce": true, "allow": ["22/tcp"]}`,
 	TypeOSVersion:  `{"min": {"ubuntu": "22.04", "debian": "12", "fedora": "41"}}`,
-	TypeScreenLock: `{"idle_seconds": 300}`,
+	TypeScreenLock: `{"idle_seconds": 300, "hide_users": true, "allow_autologin": false}`,
 	TypeLogin:      `{"issuer": "https://accounts.google.com", "client_id": "", "client_secret": "", "allowed_domain": "", "local_password": true, "reverify_hours": 168}`,
 	TypePrivacy:    `{"network_info": true, "logged_in_users": true}`,
 }
@@ -74,6 +74,7 @@ type Policy struct {
 	Firewall          Firewall          `json:"firewall"`
 	MinOSVersion      map[string]string `json:"min_os_version"`
 	ScreenLockSeconds int               `json:"screen_lock_seconds"`
+	ScreenLock        ScreenLock        `json:"screen_lock"`
 	Login             Login             `json:"login"`
 	Privacy           Privacy           `json:"privacy"`
 	Extra             ExtraPolicy       `json:"extra"`
@@ -132,7 +133,15 @@ type osPayload struct {
 }
 
 type screenLockPayload struct {
-	IdleSeconds int `json:"idle_seconds"`
+	IdleSeconds    int  `json:"idle_seconds"`
+	HideUsers      bool `json:"hide_users,omitempty"`      // login screen asks for the user name instead of listing users
+	AllowAutologin bool `json:"allow_autologin,omitempty"` // automatic login is switched off unless this is set
+}
+
+// ScreenLock is the effective screen lock and login screen policy.
+type ScreenLock struct {
+	HideUsers      bool `json:"hide_users,omitempty"`
+	AllowAutologin bool `json:"allow_autologin,omitempty"`
 }
 
 // Login configures desktop login with an OIDC provider (Google Workspace or any
@@ -296,6 +305,7 @@ func (d Declaration) apply(p *Policy) error {
 			bad("idle_seconds must be 30..3600")
 		}
 		p.ScreenLockSeconds = v.IdleSeconds
+		p.ScreenLock = ScreenLock{HideUsers: v.HideUsers, AllowAutologin: v.AllowAutologin}
 	case TypeLogin:
 		if err := strict(d.Payload, &p.Login); err != nil {
 			return err

@@ -802,7 +802,8 @@ func (a *Agent) pollLoop(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		a.ensureHelpers() // within a minute of a desktop login
+		a.ensureHelpers()   // within a minute of a desktop login
+		a.ensureIdleLocks() // compositors without a locker of their own
 		var resp api.PollResponse
 		pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		err := a.post(pctx, "/api/v1/poll", struct{}{}, &resp)

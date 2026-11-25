@@ -179,10 +179,27 @@ Changes are tested with `sshd -t` and rolled back on error.
 ### `com.limdm.screenlock`
 
 ```json
-{"idle_seconds": 300}
+{"idle_seconds": 300, "hide_users": true, "allow_autologin": false}
 ```
 
-GNOME idle lock, locked against user changes.
+Locks the screen after `idle_seconds` (30 to 3600) and before suspend, on every desktop, in a
+way users cannot change:
+
+| Desktop | How |
+|---|---|
+| GNOME, Budgie, Cinnamon, MATE | dconf system database with locked keys |
+| KDE Plasma | `/etc/xdg/kscreenlockerrc`, immutable through KDE kiosk (`[$i]`) |
+| Xfce | xfconf system defaults with locked properties (xfce4-screensaver) |
+| sway, Hyprland, river, labwc, niri, Wayfire | `swayidle` with `swaylock`; for sway also `/etc/sway/config.d` |
+| i3, bspwm, openbox, awesome, herbstluftwm | `xss-lock` with `i3lock` and the X screensaver timeout |
+
+For compositors and window managers the agent starts the locker in every session (as the user
+unit `limdm-idle-lock`) and starts it again within a minute when it is ended; the check
+`desktop.screenlock` fails for a session without one. Missing tools are installed.
+
+Login screen privacy for GDM, SDDM and LightDM: automatic login is switched off unless
+`allow_autologin` is set; `hide_users` hides the user list (GDM `disable-user-list`, LightDM
+`greeter-hide-users`, SDDM does not remember the last user). Guest sessions are off.
 
 ### `com.limdm.sudo` (list)
 
