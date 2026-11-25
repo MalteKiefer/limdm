@@ -162,3 +162,16 @@ well.
 | `/var/lib/limdm/repo-backup/` | originals of package sources switched off |
 | `/var/cache/limdm/logo.png` | company logo for the desktop helper |
 | `/run/limdm/agent.sock` | socket for the desktop helper |
+
+## Desktop helper
+
+`limdm-desktop` asks the user for what only they can provide, currently the disk passphrase
+to escrow a LUKS recovery key. It uses zenity (kdialog on KDE Plasma); the agent installs
+the right one on every device with a desktop and retries daily if that fails. Texts follow
+the session language and fall back to the system locale (English and German). Dialogs
+follow the GNOME HIG: a short heading, one sentence, buttons named after their action.
+
+Desktops with XDG autostart start the helper at login. On compositors without it (sway,
+Hyprland) the agent opens the dialog in the user's session together with the daily
+notification. Manually: `limdm-desktop --now`.
+

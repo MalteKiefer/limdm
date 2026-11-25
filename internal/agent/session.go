@@ -70,3 +70,25 @@ func launchInSession(user string, env []string, prog string, args ...string) err
 	go func() { _ = cmd.Wait(); cancel() }()
 	return nil
 }
+
+var dialogToolTried time.Time
+
+// ensureDialogTool installs the dialog program the desktop helper needs
+// (kdialog on KDE Plasma, zenity elsewhere) on devices with a desktop. A
+// failed installation is retried after a day.
+func (a *Agent) ensureDialogTool() {
+	env, dm := desktop()
+	if (env == "" && dm == "") || hasCmd("zenity") || hasCmd("kdialog") || time.Since(dialogToolTried) < 24*time.Hour {
+		return
+	}
+	dialogToolTried = time.Now()
+	pkg := "zenity"
+	if strings.HasPrefix(env, "KDE") {
+		pkg = "kdialog"
+	}
+	if err := a.host.install(pkg); err != nil {
+		a.event("installing %s for the desktop helper failed: %v", pkg, err)
+		return
+	}
+	a.event("installed %s for the desktop helper", pkg)
+}

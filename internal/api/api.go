@@ -445,19 +445,21 @@ type Inventory struct {
 	BIOSVersion string `json:"bios_version,omitempty"`
 	BootTime    int64  `json:"boot_time"`
 	// Desktop environment and display manager, empty on servers.
-	Desktop        string      `json:"desktop,omitempty"`
-	DisplayManager string      `json:"display_manager,omitempty"`
-	Disks          []Disk      `json:"disks,omitempty"`
-	Volumes        []Volume    `json:"volumes,omitempty"`
-	Accounts       []Account   `json:"accounts,omitempty"`   // local login accounts and admin rights
-	Repos          []Repo      `json:"repos,omitempty"`      // configured package sources
-	Interfaces     []NIC       `json:"interfaces,omitempty"` // addresses only with privacy.network_info
-	DNS            []DNSConfig `json:"dns,omitempty"`        // only with privacy.network_info
-	Routes         []Route     `json:"routes,omitempty"`     // only with privacy.network_info
-	VPNs           []VPN       `json:"vpns,omitempty"`
-	Groups         []Group     `json:"groups,omitempty"`
-	IPs            []string    `json:"ips,omitempty"`             // only with privacy.network_info
-	Users          []string    `json:"logged_in_users,omitempty"` // only with privacy.logged_in_users
+	Desktop        string              `json:"desktop,omitempty"`
+	DisplayManager string              `json:"display_manager,omitempty"`
+	Disks          []Disk              `json:"disks,omitempty"`
+	Volumes        []Volume            `json:"volumes,omitempty"`
+	Accounts       []Account           `json:"accounts,omitempty"`        // local login accounts and admin rights
+	Repos          []Repo              `json:"repos,omitempty"`           // configured package sources
+	Flatpaks       []FlatpakApp        `json:"flatpaks,omitempty"`        // installed Flatpak applications, system and per user
+	FlatpakRemotes []FlatpakRemoteInfo `json:"flatpak_remotes,omitempty"` // Flatpak remotes, system and per user
+	Interfaces     []NIC               `json:"interfaces,omitempty"`      // addresses only with privacy.network_info
+	DNS            []DNSConfig         `json:"dns,omitempty"`             // only with privacy.network_info
+	Routes         []Route             `json:"routes,omitempty"`          // only with privacy.network_info
+	VPNs           []VPN               `json:"vpns,omitempty"`
+	Groups         []Group             `json:"groups,omitempty"`
+	IPs            []string            `json:"ips,omitempty"`             // only with privacy.network_info
+	Users          []string            `json:"logged_in_users,omitempty"` // only with privacy.logged_in_users
 }
 
 type Account struct {
@@ -474,6 +476,25 @@ type Account struct {
 	SSO       bool       `json:"sso,omitempty"`
 	LastSSO   *time.Time `json:"last_sso,omitempty"`
 	PwdLocked bool       `json:"pwd_locked,omitempty"` // local password refused until the next SSO confirmation
+}
+
+// FlatpakApp is an installed Flatpak application. Installation is "system"
+// or the name of the user it is installed for.
+type FlatpakApp struct {
+	ID           string `json:"id"`
+	Name         string `json:"name,omitempty"`
+	Version      string `json:"version,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+	Origin       string `json:"origin,omitempty"`
+	Installation string `json:"installation"`
+}
+
+type FlatpakRemoteInfo struct {
+	Name         string `json:"name"`
+	URL          string `json:"url"`
+	Title        string `json:"title,omitempty"`
+	Installation string `json:"installation"` // system or a user name
+	Disabled     bool   `json:"disabled,omitempty"`
 }
 
 // Repo is one package source. Signed reports signed-by (apt) or gpgcheck=1 (dnf).

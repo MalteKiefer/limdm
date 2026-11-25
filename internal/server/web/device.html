@@ -87,6 +87,7 @@
       <dt>{{t "Kernel"}}</dt><dd class="mono">{{.Inv.Kernel}}</dd>
       <dt>{{t "Architecture"}}</dt><dd>{{.Inv.Arch}}</dd>
       <dt>{{t "Desktop"}}</dt><dd>{{if .Inv.Desktop}}{{.Inv.Desktop}}{{if .Inv.DisplayManager}} <span class="muted">{{t "via"}} {{.Inv.DisplayManager}}</span>{{end}}{{else}}<span class="muted">{{t "none (server)"}}</span>{{end}}</dd>
+      <dt>{{t "Disk recovery keys"}}</dt><dd>{{if .Recovery}}<a href="/devices/{{$id}}?tab=hardware#recovery">{{len .Recovery}} {{t "escrowed"}}</a>{{else}}<span class="muted">{{t "none"}}</span>{{end}}</dd>
       <dt>{{t "Hardware"}}</dt><dd>{{.Inv.Vendor}} {{.Inv.Model}}</dd>
       <dt>{{t "Serial number"}}</dt><dd class="mono">{{.Inv.Serial}}</dd>
       <dt>{{t "Logged in now:"}}</dt><dd>{{range .Inv.Users}}<span class="tag">{{.}}</span>{{else}}<span class="muted">{{t "not collected (privacy)"}}</span>{{end}}</dd>
@@ -153,7 +154,7 @@
       <td class="num">{{.FreeGB}} {{t "GB"}}</td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No volume data reported."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
-<section class="tablecard">
+<section id="recovery" class="tablecard">
   <div class="card-head"><h2>{{t "Recovery keys"}}</h2><span class="muted">{{t "LUKS, escrowed by the agent; every view is audited"}}</span></div>
   <div class="scroll"><table>
     <thead><tr><th>{{t "Device"}}</th><th>{{t "Volume UUID"}}</th><th>{{t "Escrowed"}}</th><th>{{t "Last viewed"}}</th><th></th></tr></thead>
@@ -169,8 +170,29 @@
 <nav class="subtabs" aria-label="{{t "Software"}}">
   <a href="/devices/{{$id}}?tab=software&amp;sub=packages" {{if eq .Sub "packages"}}class="on" aria-current="page"{{end}}>{{t "Packages"}} <span class="n">{{.PackageCount}}</span></a>
   <a href="/devices/{{$id}}?tab=software&amp;sub=sources" {{if eq .Sub "sources"}}class="on" aria-current="page"{{end}}>{{t "Package sources"}} <span class="n">{{len .Inv.Repos}}</span></a>
+  <a href="/devices/{{$id}}?tab=software&amp;sub=flatpak" {{if eq .Sub "flatpak"}}class="on" aria-current="page"{{end}}>{{t "Flatpak"}} <span class="n">{{len .Inv.Flatpaks}}</span></a>
 </nav>
-{{if eq .Sub "sources"}}
+{{if eq .Sub "flatpak"}}
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "Flatpak remotes"}}</h2>{{if eq $.Sess.Role "admin"}}<a class="button secondary small" href="/library/new?type=com.limdm.flatpak">{{t "Add remote…"}}</a>{{end}}</div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Remote"}}</th><th>{{t "URL"}}</th><th>{{t "Installation"}}</th><th>{{t "State"}}</th>{{if eq $.Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
+    <tbody>{{range .Inv.FlatpakRemotes}}<tr><td>{{.Name}}{{if .Title}}<span class="sub">{{.Title}}</span>{{end}}</td><td class="mono">{{.URL}}</td>
+      <td>{{if eq .Installation "system"}}{{t "system"}}{{else}}<span class="tag">{{.Installation}}</span>{{end}}</td>
+      <td>{{if .Disabled}}<span class="pill">{{t "disabled"}}</span>{{else}}<span class="pill ok">{{t "enabled"}}</span>{{end}}</td>
+      {{if eq $.Sess.Role "admin"}}<td class="row-actions"><a href="/library/new?from={{$id}}&amp;remote={{.Name}}&amp;inst={{.Installation}}&amp;mode=edit">{{t "Edit"}}</a> <a href="/library/new?from={{$id}}&amp;remote={{.Name}}&amp;inst={{.Installation}}&amp;mode={{if .Disabled}}enable{{else}}disable{{end}}">{{if .Disabled}}{{t "Enable"}}{{else}}{{t "Disable"}}{{end}}</a></td>{{end}}</tr>{{else}}<tr><td colspan="5" class="empty">{{t "No Flatpak remotes reported."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "Flatpak applications"}}</h2><span class="muted">{{len .Inv.Flatpaks}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Application"}}</th><th>{{t "Version"}}</th><th>{{t "Branch"}}</th><th>{{t "Remote"}}</th><th>{{t "Installation"}}</th></tr></thead>
+    <tbody>{{range .Inv.Flatpaks}}<tr><td>{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}<span class="sub mono">{{.ID}}</span></td><td>{{.Version}}</td><td class="mono">{{.Branch}}</td><td>{{.Origin}}</td>
+      <td>{{if eq .Installation "system"}}{{t "system"}}{{else}}<span class="tag">{{.Installation}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="5" class="empty">{{t "No Flatpak applications reported."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+{{else if eq .Sub "sources"}}
+
 <section class="tablecard">
   <div class="card-head"><h2>{{t "Package sources"}}</h2><span class="muted">{{len .Inv.Repos}} {{t "configured"}}</span></div>
   <div class="scroll"><table>

@@ -70,6 +70,7 @@ func (a *Agent) applyExtra() {
 	run(api.TypePolkit, applyPolkit(x.Polkit))
 	run(api.TypeSudo, applySudo(x.Sudo))
 	run(api.TypeBootloader, a.applyBootloader(x.Bootloader))
+	a.ensureDialogTool()
 	a.notifyEscrow()
 }
 
@@ -325,9 +326,33 @@ func (a *Agent) applyFlatpak(f *api.Flatpak) error {
 		}
 	}
 	var errs []error
+	sysRemotes, userRemotes := []api.FlatpakRemote{}, []api.FlatpakRemote{}
 	for _, r := range f.Remotes {
-		if _, err := run(5*time.Minute, "flatpak", "remote-add", "--system", "--if-not-exists", r.Name, r.URL); err != nil {
-			errs = append(errs, err)
+		if r.InstallationScope() == "user" {
+			userRemotes = append(userRemotes, r)
+		} else {
+			sysRemotes = append(sysRemotes, r)
+		}
+	}
+	if len(sysRemotes) > 0 {
+		out, _ := flatpakCmd(nil, time.Minute, "remotes", "--show-disabled", "--columns=name,url,title,options")
+		existing := parseFlatpakRemotes(out, "system")
+		for _, r := range sysRemotes {
+			if err := applyRemote(nil, r, existing); err != nil {
+				errs = append(errs, fmt.Errorf("remote %s: %w", r.Name, err))
+			}
+		}
+	}
+	if len(userRemotes) > 0 {
+		accts, _ := nssAccounts()
+		for _, u := range flatpakUsers(accts, true) {
+			out, _ := flatpakCmd(&u, time.Minute, "remotes", "--show-disabled", "--columns=name,url,title,options")
+			existing := parseFlatpakRemotes(out, u.Name)
+			for _, r := range userRemotes {
+				if err := applyRemote(&u, r, existing); err != nil {
+					errs = append(errs, fmt.Errorf("remote %s for %s: %w", r.Name, u.Name, err))
+				}
+			}
 		}
 	}
 	out, _ := sh("flatpak", "list", "--system", "--app", "--columns=application")
