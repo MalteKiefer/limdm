@@ -2,7 +2,7 @@
 
 All notable changes, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
-## Unreleased
+## 0.14.0
 
 ### Added
 - Settings, Security: a password policy (minimum length, character classes, no user name) for passwords set in the console, on devices and for local console accounts.
