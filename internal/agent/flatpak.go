@@ -3,6 +3,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,7 +40,7 @@ func flatpakCmd(user *api.Account, timeout time.Duration, args ...string) (strin
 	if user == nil {
 		return run(timeout, "flatpak", append([]string{"--system"}, args...)...)
 	}
-	argv := append([]string{"-u", user.Name, "--", "env", "HOME=" + user.Home, "XDG_RUNTIME_DIR=/run/user/" + itoa(uint32(user.UID)), //nolint:gosec // uid >= 1000
+	argv := append([]string{"-u", user.Name, "--", "env", "HOME=" + user.Home, "XDG_RUNTIME_DIR=/run/user/" + strconv.Itoa(user.UID),
 		"flatpak", "--user"}, args...)
 	return run(timeout, "runuser", argv...)
 }
