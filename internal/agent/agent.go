@@ -729,6 +729,10 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = allowUninstall()
 	case "message":
 		out, err = a.showMessage(c.Payload)
+	case "software_remove":
+		out, err = a.removeSoftware(c.Payload)
+	case "user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete":
+		out, err = a.userCommand(c.Type, c.Payload)
 	case "app_install", "app_remove":
 		out, err = a.appCommand(strings.TrimPrefix(c.Type, "app_"), c.Payload)
 	case "script":

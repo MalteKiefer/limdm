@@ -578,7 +578,8 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		if res.OK {
 			status = "ok"
 		}
-		if _, err := tx.Exec(ctx, `UPDATE commands SET status=$3, output=$4, updated_at=now() WHERE id=$1 AND device_id=$2 AND status='sent'`,
+		if _, err := tx.Exec(ctx, `UPDATE commands SET status=$3, output=$4, updated_at=now(),
+			payload=CASE WHEN type IN ('user_create','user_password') THEN '' ELSE payload END WHERE id=$1 AND device_id=$2 AND status='sent'`,
 			res.ID, id, status, truncate(res.Output, 64<<10)); err != nil {
 			s.fail(w, err)
 			return
@@ -700,7 +701,8 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	}
 	// Commands are delivered until a result arrives (the agent ignores IDs it
 	// already ran), so a lost response cannot drop them. After 7 days they expire.
-	if _, err := tx.Exec(ctx, `UPDATE commands SET status='expired', updated_at=now()
+	if _, err := tx.Exec(ctx, `UPDATE commands SET status='expired', updated_at=now(),
+		payload=CASE WHEN type IN ('user_create','user_password') THEN '' ELSE payload END
 		WHERE device_id=$1 AND status IN ('pending','sent') AND created_at < now() - interval '7 days'`, id); err != nil {
 		s.fail(w, err)
 		return

@@ -469,6 +469,8 @@ type Inventory struct {
 	Repos          []Repo              `json:"repos,omitempty"`           // configured package sources
 	Flatpaks       []FlatpakApp        `json:"flatpaks,omitempty"`        // installed Flatpak applications, system and per user
 	FlatpakRemotes []FlatpakRemoteInfo `json:"flatpak_remotes,omitempty"` // Flatpak remotes, system and per user
+	Snaps          []SnapApp           `json:"snaps,omitempty"`           // installed snaps
+	AppImages      []AppImage          `json:"appimages,omitempty"`       // AppImage files found in homes, /opt and /usr/local/bin
 	Certificates   []CertInfo          `json:"certificates,omitempty"`    // CA certificates installed by LiMDM
 	Apps           []AppState          `json:"apps,omitempty"`            // software catalog state
 	Interfaces     []NIC               `json:"interfaces,omitempty"`      // addresses only with privacy.network_info
@@ -631,7 +633,8 @@ type Command struct {
 }
 
 // CommandTypes are the one off actions an admin can send.
-var CommandTypes = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "script", "lost", "found", "wipe", "allow_uninstall", "message", "app_install", "app_remove"}
+var CommandTypes = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "script", "lost", "found", "wipe", "allow_uninstall", "message", "app_install", "app_remove",
+	"user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete", "software_remove"}
 
 // PollResponse answers the agent's frequent poll (POST /api/v1/poll).
 type PollResponse struct {
@@ -647,6 +650,78 @@ type Message struct {
 // LostMode is the payload of the "lost" command. The server adds the escrowed
 // recovery keys only when it delivers the command; they are never stored in
 // the command itself.
+type SnapApp struct {
+	Name      string `json:"name"`
+	Version   string `json:"version"`
+	Publisher string `json:"publisher,omitempty"`
+	Notes     string `json:"notes,omitempty"` // base, snapd, classic …
+}
+
+type AppImage struct {
+	Path   string `json:"path"`
+	Owner  string `json:"owner,omitempty"`
+	SizeMB int64  `json:"size_mb"`
+}
+
+// UserCommand is the payload of the user_* commands for local accounts.
+type UserCommand struct {
+	Username string `json:"username"`
+	FullName string `json:"full_name,omitempty"`
+	Password string `json:"password,omitempty"` // user_create, user_password: must be changed at first login
+	Admin    bool   `json:"admin,omitempty"`    // user_create, user_admin
+	KeepHome bool   `json:"keep_home,omitempty"`
+}
+
+var localUserRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+
+// Validate checks a user command for its type.
+func (u UserCommand) Validate(typ string) error {
+	if !localUserRe.MatchString(u.Username) || u.Username == "root" {
+		return errors.New("user name: lower case letters, digits, dash and underscore, not root")
+	}
+	if len(u.FullName) > 100 || strings.ContainsAny(u.FullName, ":\n\r\x00,") {
+		return errors.New("full name: up to 100 characters, no colon or comma")
+	}
+	if typ == "user_create" || typ == "user_password" {
+		if len(u.Password) < 12 || len(u.Password) > 256 || strings.ContainsAny(u.Password, "\n\r\x00:") {
+			return errors.New("password: 12 to 256 characters, no colon or line break")
+		}
+	}
+	return nil
+}
+
+// SoftwareRemove is the payload of software_remove.
+type SoftwareRemove struct {
+	Kind         string `json:"kind"`                   // package | snap | flatpak | appimage
+	Name         string `json:"name"`                   // package, snap or Flatpak ID; for an AppImage its path
+	Installation string `json:"installation,omitempty"` // Flatpak: system or a user name
+}
+
+var (
+	pkgNameRe      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.+_:-]{0,127}$`)
+	appImagePathRe = regexp.MustCompile(`^/(home/[^/]+|opt|usr/local/bin|root)/[^\x00\n]*\.(AppImage|appimage)$`)
+)
+
+func (r SoftwareRemove) Validate() error {
+	switch r.Kind {
+	case "package", "snap":
+		if !pkgNameRe.MatchString(r.Name) {
+			return errors.New("invalid package name")
+		}
+	case "flatpak":
+		if !flatpakIDRe.MatchString(r.Name) || (r.Installation != "system" && !localUserRe.MatchString(r.Installation)) {
+			return errors.New("invalid Flatpak ID or installation")
+		}
+	case "appimage":
+		if !appImagePathRe.MatchString(r.Name) || strings.Contains(r.Name, "/../") {
+			return errors.New("an AppImage path below /home, /opt, /usr/local/bin or /root")
+		}
+	default:
+		return errors.New("kind is package, snap, flatpak or appimage")
+	}
+	return nil
+}
+
 type LostMode struct {
 	Message string        `json:"message"`
 	Keys    []RecoveryKey `json:"keys,omitempty"`

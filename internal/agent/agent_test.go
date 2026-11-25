@@ -825,3 +825,11 @@ func TestPollWait(t *testing.T) {
 		t.Fatalf("backoff capped at five minutes: %v", w)
 	}
 }
+
+func TestParseSnapList(t *testing.T) {
+	out := "Name      Version   Rev    Tracking       Publisher   Notes\ncore22    20240111  1122   latest/stable  canonical✓  base\nfirefox   125.0     4173   latest/stable  mozilla*    -\n"
+	got := parseSnapList(out)
+	if len(got) != 2 || got[0].Notes != "base" || got[1].Name != "firefox" || got[1].Publisher != "mozilla" || got[1].Notes != "" {
+		t.Fatalf("%+v", got)
+	}
+}

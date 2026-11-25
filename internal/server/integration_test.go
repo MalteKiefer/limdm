@@ -1500,6 +1500,15 @@ func TestAgentUpdates(t *testing.T) {
 	if n != 2 {
 		t.Fatalf("app install commands: %d", n)
 	}
+	// a new local user's password never reaches the audit log
+	if err := s.queueCommand(ctx, "admin@firma.de", "d3", "user_create", `{"username":"anna","password":"correct horse battery"}`); err != nil {
+		t.Fatal(err)
+	}
+	var auditDetail string
+	db.QueryRow(ctx, `SELECT detail FROM audit_log WHERE action='command.user_create' ORDER BY id DESC LIMIT 1`).Scan(&auditDetail)
+	if strings.Contains(auditDetail, "horse") || !strings.Contains(auditDetail, "anna") {
+		t.Fatalf("audit detail: %s", auditDetail)
+	}
 	for _, f := range deviceFilters {
 		if f.Key == "tag" {
 			tagged, err := s.listDevicesWhere(ctx, f.Where, "finance")

@@ -78,6 +78,7 @@ func parsePages(lang, layout string) map[string]*template.Template {
 			}
 		},
 		"frac":       func(v uint64, pct uint64) uint64 { return v * pct / 100 },
+		"add":        func(a, b int) int { return a + b },
 		"inc":        func(n int) int { return n + 1 },
 		"sub":        func(a, b int) int { return a - b },
 		"dec":        func(n int) int { return n - 1 },
@@ -98,7 +99,9 @@ func parsePages(lang, layout string) map[string]*template.Template {
 			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot",
 				"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script",
 				"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour", "message": "Message",
-				"app_install": "Install app", "app_remove": "Remove app"}[a])
+				"app_install": "Install app", "app_remove": "Remove app",
+				"user_create": "Create user", "user_admin": "Change admin rights", "user_lock": "Lock user", "user_unlock": "Unlock user",
+				"user_password": "Reset password", "user_delete": "Delete user", "software_remove": "Remove software"}[a])
 		},
 		"join":      strings.Join,
 		"hasPrefix": strings.HasPrefix,
@@ -830,15 +833,27 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 		return
 	}
 	back := "/devices/" + id
-	if typ == "app_install" || typ == "app_remove" {
+	switch {
+	case typ == "app_install" || typ == "app_remove":
 		back += "?tab=software&sub=catalog"
+	case strings.HasPrefix(typ, "user_"):
+		back += "?tab=accounts"
+	case typ == "software_remove":
+		back += "?tab=software&sub=" + url.QueryEscape(r.FormValue("back_sub"))
 	}
 	http.Redirect(w, r, back, http.StatusSeeOther)
 }
 
 // queueCommand stores a command for a device and audits it.
 func (s *Server) queueCommand(ctx context.Context, actor, id, typ, payload string) error {
-	return s.auditAction(ctx, actor, "command."+typ, id, truncate(payload, 2000), func(tx pgx.Tx) error {
+	detail := payload
+	var u api.UserCommand
+	if strings.HasPrefix(typ, "user_") && json.Unmarshal([]byte(payload), &u) == nil {
+		u.Password = "" // never in the audit log
+		b, _ := json.Marshal(u)
+		detail = string(b)
+	}
+	return s.auditAction(ctx, actor, "command."+typ, id, truncate(detail, 2000), func(tx pgx.Tx) error {
 		if err := s.insertCommand(ctx, tx, id, typ, payload, actor); err != nil {
 			return err
 		}
@@ -896,6 +911,27 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 			return "", http.StatusBadRequest, "message: text up to 1000 characters, title up to 100"
 		}
 		b, _ := json.Marshal(api.Message{Title: title, Text: text})
+		payload = string(b)
+	case strings.HasPrefix(typ, "user_"):
+		if sess.Role != "admin" {
+			return "", http.StatusForbidden, "this action requires the admin role"
+		}
+		u := api.UserCommand{Username: strings.TrimSpace(r.FormValue("username")), FullName: strings.TrimSpace(r.FormValue("full_name")),
+			Password: r.FormValue("password"), Admin: r.FormValue("admin") == "on" || r.FormValue("admin") == "1", KeepHome: r.FormValue("keep_home") == "on"}
+		if err := u.Validate(typ); err != nil {
+			return "", http.StatusBadRequest, err.Error()
+		}
+		b, _ := json.Marshal(u)
+		payload = string(b)
+	case typ == "software_remove":
+		if sess.Role != "admin" {
+			return "", http.StatusForbidden, "this action requires the admin role"
+		}
+		sr := api.SoftwareRemove{Kind: r.FormValue("kind"), Name: r.FormValue("name"), Installation: r.FormValue("installation")}
+		if err := sr.Validate(); err != nil {
+			return "", http.StatusBadRequest, err.Error()
+		}
+		b, _ := json.Marshal(sr)
 		payload = string(b)
 	case typ == "app_install" || typ == "app_remove":
 		if sess.Role != "admin" {

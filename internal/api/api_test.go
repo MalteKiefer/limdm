@@ -170,3 +170,31 @@ func TestCatalogRemotes(t *testing.T) {
 		t.Fatalf("fedora: %v", f)
 	}
 }
+
+func TestUserAndSoftwareCommands(t *testing.T) {
+	ok := UserCommand{Username: "anna", FullName: "Anna Muster", Password: "correct horse battery"}
+	if err := ok.Validate("user_create"); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []UserCommand{{Username: "root", Password: "correct horse battery"}, {Username: "Anna", Password: "correct horse battery"},
+		{Username: "anna", Password: "short"}, {Username: "anna", FullName: "a:b", Password: "correct horse battery"}} {
+		if bad.Validate("user_create") == nil {
+			t.Errorf("accepted %+v", bad)
+		}
+	}
+	if (UserCommand{Username: "anna"}).Validate("user_admin") != nil {
+		t.Fatal("admin change needs no password")
+	}
+	for _, r := range []SoftwareRemove{{Kind: "package", Name: "vlc"}, {Kind: "snap", Name: "firefox"}, {Kind: "flatpak", Name: "org.gimp.GIMP", Installation: "system"},
+		{Kind: "flatpak", Name: "org.gimp.GIMP", Installation: "anna"}, {Kind: "appimage", Name: "/home/anna/Applications/Obsidian.AppImage"}} {
+		if err := r.Validate(); err != nil {
+			t.Errorf("%+v: %v", r, err)
+		}
+	}
+	for _, r := range []SoftwareRemove{{Kind: "package", Name: "-rf /"}, {Kind: "appimage", Name: "/etc/passwd"}, {Kind: "appimage", Name: "/home/anna/../../etc/x.AppImage"},
+		{Kind: "flatpak", Name: "org.gimp.GIMP", Installation: "../root"}, {Kind: "rpm", Name: "vlc"}} {
+		if r.Validate() == nil {
+			t.Errorf("accepted %+v", r)
+		}
+	}
+}
