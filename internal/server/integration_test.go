@@ -401,18 +401,22 @@ func TestIntegration(t *testing.T) {
 		t.Fatal("directory page")
 	}
 
-	// certificate renewal revokes the old certificate
+	// renewal: the old certificate stays valid until the new one is used (a lost
+	// response must not lock the device out), then it is revoked
 	key2, csr2 := newIdentity()
 	var rr api.EnrollResponse
 	if code := call(dev, "/api/v1/renew", api.RenewRequest{CSR: csr2}, &rr); code != 200 {
 		t.Fatalf("renew: %d", code)
 	}
-	if code := call(dev, "/api/v1/checkin", api.CheckinRequest{}, nil); code != http.StatusUnauthorized {
-		t.Fatalf("old certificate still accepted: %d", code)
+	if code := call(dev, "/api/v1/checkin", api.CheckinRequest{}, nil); code != 200 {
+		t.Fatalf("old certificate rejected before the new one was used: %d", code)
 	}
 	dev2 := clientFor(key2, rr.Cert)
 	if code := call(dev2, "/api/v1/checkin", api.CheckinRequest{}, nil); code != 200 {
 		t.Fatalf("renewed certificate rejected: %d", code)
+	}
+	if code := call(dev, "/api/v1/checkin", api.CheckinRequest{}, nil); code != http.StatusForbidden {
+		t.Fatalf("old certificate still accepted after the new one was used: %d", code)
 	}
 
 	// a certificate the device CA did not issue is rejected, even with a registered serial
@@ -479,7 +483,7 @@ func TestIntegration(t *testing.T) {
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/retire", url.Values{}, adminSess); code != http.StatusSeeOther {
 		t.Fatalf("retire: %d", code)
 	}
-	if code := call(dev2, "/api/v1/checkin", api.CheckinRequest{}, nil); code != http.StatusUnauthorized {
+	if code := call(dev2, "/api/v1/checkin", api.CheckinRequest{}, nil); code != http.StatusForbidden {
 		t.Fatalf("retired device still accepted: %d", code)
 	}
 

@@ -370,12 +370,25 @@ func (s *Server) deviceAuth(next http.HandlerFunc, allowExpired bool) http.Handl
 			http.Error(w, "valid client certificate required", http.StatusUnauthorized)
 			return
 		}
-		id := leaf.Subject.CommonName
+		id, serial := leaf.Subject.CommonName, leaf.SerialNumber.Text(16)
 		var current string
-		err = s.db.QueryRow(r.Context(), `SELECT cert_serial FROM devices WHERE id=$1 AND NOT retired`, id).Scan(&current)
-		if err != nil || current != leaf.SerialNumber.Text(16) {
-			s.log.Warn("rejected device certificate", "device", id, "serial", leaf.SerialNumber.Text(16))
-			http.Error(w, "certificate revoked", http.StatusUnauthorized)
+		var pending *string
+		err = s.db.QueryRow(r.Context(), `SELECT cert_serial, pending_serial FROM devices WHERE id=$1 AND NOT retired`, id).Scan(&current, &pending)
+		switch {
+		case err == nil && serial == current:
+		case err == nil && pending != nil && serial == *pending:
+			// first use of a renewed certificate: it replaces (and revokes) the previous one
+			if err := s.auditAction(r.Context(), "device:"+id, "device.cert_activate", id, serial, func(tx pgx.Tx) error {
+				_, err := tx.Exec(r.Context(), `UPDATE devices SET cert_serial=pending_serial, cert_not_after=pending_not_after,
+					pending_serial=NULL, pending_not_after=NULL WHERE id=$1 AND pending_serial=$2`, id, serial)
+				return err
+			}); err != nil {
+				s.fail(w, err)
+				return
+			}
+		default:
+			s.log.Warn("rejected device certificate", "device", id, "serial", serial)
+			http.Error(w, "certificate revoked", http.StatusForbidden)
 			return
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), deviceKey, id)))
@@ -438,7 +451,8 @@ func (s *Server) renew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err = s.auditAction(r.Context(), "device:"+id, "device.cert_renew", id, serial, func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `UPDATE devices SET cert_serial=$2, cert_not_after=$3 WHERE id=$1`, id, serial, notAfter)
+		// the current certificate stays valid until the new one is used once
+		_, err := tx.Exec(r.Context(), `UPDATE devices SET pending_serial=$2, pending_not_after=$3 WHERE id=$1`, id, serial, notAfter)
 		return err
 	})
 	if err != nil {

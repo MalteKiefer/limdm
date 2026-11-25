@@ -213,3 +213,8 @@ CREATE INDEX IF NOT EXISTS devices_primary_user ON devices(primary_user_id);
 CREATE INDEX IF NOT EXISTS device_metrics_at ON device_metrics USING brin(at);
 -- last_seen and status updates change no indexed column: leave room for HOT updates
 ALTER TABLE devices SET (fillfactor = 70);
+
+-- Certificate renewal: the new serial is pending until the device first uses
+-- it, so a lost renewal response cannot lock the device out.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS pending_serial TEXT;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS pending_not_after TIMESTAMPTZ;

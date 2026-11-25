@@ -31,6 +31,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -89,6 +90,7 @@ type Agent struct {
 
 	pol        api.Policy
 	desktop    *desktopServer
+	evMu       sync.Mutex // guards state.Events: the desktop socket logs from its own goroutines
 	kick       chan struct{}
 	declStatus []api.DeclarationStatus
 	users      []api.User
@@ -331,13 +333,33 @@ func (a *Agent) problem(typ, format string, args ...any) {
 func (a *Agent) event(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	a.log.Info(msg)
+	a.addEvent(time.Now().UTC().Format(time.RFC3339) + " " + msg)
+}
+
+// addEvent queues one line for the next check in (bounded while offline).
+func (a *Agent) addEvent(line string) {
+	a.evMu.Lock()
+	defer a.evMu.Unlock()
 	if len(a.state.Events) < 500 {
-		a.state.Events = append(a.state.Events, time.Now().UTC().Format(time.RFC3339)+" "+msg)
+		a.state.Events = append(a.state.Events, line)
 	}
 }
 
+// pendingEvents copies the queued events.
+func (a *Agent) pendingEvents() []string {
+	a.evMu.Lock()
+	defer a.evMu.Unlock()
+	return slices.Clone(a.state.Events)
+}
+
 func (a *Agent) saveState() {
-	b, _ := json.Marshal(a.state)
+	a.evMu.Lock()
+	b, err := json.Marshal(a.state)
+	a.evMu.Unlock()
+	if err != nil {
+		a.log.Error("save state", "err", err)
+		return
+	}
 	if _, err := writeIfChanged(stateFile, string(b), 0o600); err != nil {
 		a.log.Error("save state", "err", err)
 	}
@@ -425,7 +447,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	sum := sha256.Sum256(sb)
 	statusHash := hex.EncodeToString(sum[:])
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
-		StatusHash: statusHash, Results: a.state.Results, Events: a.state.Events, Metrics: metrics(), BrandingHash: a.state.BrandingHash}
+		StatusHash: statusHash, Results: a.state.Results, Events: a.pendingEvents(), Metrics: metrics(), BrandingHash: a.state.BrandingHash}
 	// an invalid key would make the server reject every check in
 	a.state.PendingKeys = slices.DeleteFunc(a.state.PendingKeys, func(k pendingKey) bool { return !k.Valid() })
 	sentKeys := slices.Clone(a.state.PendingKeys)
@@ -451,7 +473,11 @@ func (a *Agent) cycle(ctx context.Context) {
 		return
 	}
 	a.enforceOffline(true)
-	a.state.Results, a.state.Events = nil, nil
+	// drop only what was sent: entries added meanwhile (unlock events, desktop) stay
+	a.state.Results = a.state.Results[len(req.Results):]
+	a.evMu.Lock()
+	a.state.Events = a.state.Events[len(req.Events):]
+	a.evMu.Unlock()
 	if len(sentKeys) > 0 {
 		a.escrowConfirmed(sentKeys)
 	}
@@ -703,8 +729,8 @@ func (a *Agent) collectAuthEvents() {
 		return
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-		if line != "" && len(a.state.Events) < 500 {
-			a.state.Events = append(a.state.Events, line)
+		if line != "" {
+			a.addEvent(line)
 		}
 	}
 	if err := os.Remove(sending); err != nil {

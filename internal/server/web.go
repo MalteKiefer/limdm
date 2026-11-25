@@ -662,7 +662,7 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 func (s *Server) deviceRetire(w http.ResponseWriter, r *http.Request, sess session) {
 	id := r.PathValue("id")
 	err := s.auditAction(r.Context(), sess.Email, "device.retire", id, "client certificate revoked", func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `UPDATE devices SET retired=true, cert_serial='' WHERE id=$1`, id)
+		_, err := tx.Exec(r.Context(), `UPDATE devices SET retired=true, cert_serial='', pending_serial=NULL WHERE id=$1`, id)
 		return err
 	})
 	if err != nil {
