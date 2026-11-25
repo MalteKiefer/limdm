@@ -544,6 +544,9 @@ type Volume struct {
 	SizeGB    uint64 `json:"size_gb"`
 	FreeGB    uint64 `json:"free_gb"`
 	Encrypted bool   `json:"encrypted"`
+	// Encryption names the method: LUKS2, LUKS1, LUKS2 hw-opal, plain dm-crypt,
+	// TCRYPT, BITLK, ZFS native, eCryptfs.
+	Encryption string `json:"encryption,omitempty"`
 }
 
 type NIC struct {

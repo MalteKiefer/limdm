@@ -75,7 +75,7 @@ var catalog = []check{
 	{ID: "updates.reboot", Title: "No pending reboot older than 7 days", Level: 1,
 		Refs: refs(l(bsiPatch), l("A.8.8")),
 		Run:  runRebootPending},
-	{ID: "disk.encryption", Title: "System disk is encrypted (LUKS)", Level: 1,
+	{ID: "disk.encryption", Title: "System disk is encrypted", Level: 1,
 		Refs: refs(l(bsiClient, bsiCrypto), l("A.8.1", "A.8.24", "A.7.10")),
 		Run:  runDiskEncryption},
 	{ID: "firewall.active", Title: "Host firewall is active", Level: 1,
@@ -665,7 +665,7 @@ func runDiskEncryption(a *Agent) (string, string) {
 			switch {
 			case de.Excluded(v.Mount):
 			case v.Encrypted:
-				ok = append(ok, v.Mount)
+				ok = append(ok, v.Mount+" ("+v.Encryption+")")
 			default:
 				open = append(open, v.Mount)
 			}
@@ -676,24 +676,29 @@ func runDiskEncryption(a *Agent) (string, string) {
 		if len(ok) == 0 {
 			return fail, "no encrypted volume found"
 		}
-		return pass, "on LUKS: " + strings.Join(ok, ", ")
+		return pass, "encrypted: " + strings.Join(ok, ", ")
 	}
-	src, err := sh("findmnt", "-n", "-o", "SOURCE", "/")
-	if err != nil {
-		return fail, err.Error()
+	// image based systems (ostree, composefs) mount an overlay at /: the
+	// data lives on /sysroot, otherwise /var holds it
+	for _, mnt := range []string{"/", "/sysroot", "/var"} {
+		out, err := sh("findmnt", "-n", "-o", "SOURCE,FSTYPE", mnt)
+		f := strings.Fields(out)
+		if err != nil || len(f) < 2 {
+			continue
+		}
+		src, fstype := f[0], f[1]
+		if i := strings.Index(src, "["); i > 0 { // btrfs subvolume: /dev/mapper/x[/root]
+			src = src[:i]
+		}
+		if !strings.HasPrefix(src, "/dev/") && fstype != "zfs" {
+			continue // overlay, composefs, tmpfs
+		}
+		if m := volumeEncryption(src, fstype, mnt); m != "" {
+			return pass, mnt + " (" + src + ") is encrypted: " + m
+		}
+		return fail, mnt + " (" + src + ") is not encrypted (reinstall with LUKS required)"
 	}
-	src = strings.TrimSpace(src)
-	if i := strings.Index(src, "["); i > 0 { // btrfs subvolume: /dev/mapper/x[/root]
-		src = src[:i]
-	}
-	out, err := sh("lsblk", "-s", "-n", "-o", "TYPE", src)
-	if err != nil {
-		return fail, err.Error()
-	}
-	if slices.Contains(strings.Fields(out), "crypt") {
-		return pass, src + " is on LUKS"
-	}
-	return fail, src + " is not encrypted (reinstall with LUKS required)"
+	return fail, "no block device found below /"
 }
 
 func runFirewall(a *Agent) (string, string) {

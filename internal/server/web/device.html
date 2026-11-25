@@ -183,7 +183,7 @@
   <div class="scroll"><table>
     <thead><tr><th>{{t "Mount point"}}</th><th>{{t "Device"}}</th><th>{{t "Filesystem"}}</th><th>{{t "Encryption"}}</th><th>{{t "Usage"}}</th><th class="num">{{t "Free"}}</th></tr></thead>
     <tbody>{{range .Inv.Volumes}}<tr><td class="mono">{{.Mount}}</td><td class="mono">{{.Device}}</td><td>{{.FS}}</td>
-      <td>{{if .Encrypted}}<span class="pill ok">{{t "LUKS"}}</span>{{else if call $.EncExcluded .Mount}}<span class="pill">{{t "excluded"}}</span>{{else}}<span class="pill bad">{{t "none"}}</span>{{end}}</td>
+      <td>{{if .Encrypted}}<span class="pill ok">{{if .Encryption}}{{.Encryption}}{{else}}{{t "encrypted"}}{{end}}</span>{{else if call $.EncExcluded .Mount}}<span class="pill">{{t "excluded"}}</span>{{else}}<span class="pill bad">{{t "none"}}</span>{{end}}</td>
       <td><meter min="0" max="{{.SizeGB}}" value="{{used .SizeGB .FreeGB}}" low="{{frac .SizeGB 80}}" high="{{frac .SizeGB 90}}" optimum="0"></meter> <span class="muted">{{used .SizeGB .FreeGB}} {{t "of"}} {{.SizeGB}} {{t "GB"}}</span></td>
       <td class="num">{{.FreeGB}} {{t "GB"}}</td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No volume data reported."}}</td></tr>{{end}}</tbody>
   </table></div>

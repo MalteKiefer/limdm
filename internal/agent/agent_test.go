@@ -848,3 +848,20 @@ func TestWeakSSH(t *testing.T) {
 		t.Fatal("strong configuration flagged")
 	}
 }
+
+func TestEncryptionParsing(t *testing.T) {
+	st := "/dev/mapper/luks-1 is active and is in use.\n  type:    LUKS2\n  cipher:  aes-xts-plain64\n"
+	if got := cryptTypeOf(st); got != "LUKS2" {
+		t.Fatal(got)
+	}
+	if got := cryptTypeOf("  type:    PLAIN\n"); got != "plain dm-crypt" {
+		t.Fatal(got)
+	}
+	if got := cryptTypeOf("  type:    LUKS2\n  hw-opal: yes\n"); got != "LUKS2 hw-opal" {
+		t.Fatal(got)
+	}
+	show := "Label: none  uuid: 1\n\tTotal devices 2 FS bytes used 1.00GiB\n\tdevid    1 size 100.00GiB used 2.00GiB path /dev/mapper/a\n\tdevid    2 size 100.00GiB used 2.00GiB path /dev/sdb1\n"
+	if d := btrfsDevices(show); !slices.Equal(d, []string{"/dev/mapper/a", "/dev/sdb1"}) {
+		t.Fatal(d)
+	}
+}

@@ -218,7 +218,7 @@ func nativeDisks() []api.Disk {
 }
 
 var localFS = map[string]bool{"ext4": true, "ext3": true, "ext2": true, "xfs": true, "btrfs": true, "bcachefs": true, "vfat": true,
-	"exfat": true, "ntfs": true, "ntfs3": true, "f2fs": true, "zfs": true, "jfs": true, "nilfs2": true, "reiserfs": true}
+	"exfat": true, "ecryptfs": true, "ntfs": true, "ntfs3": true, "f2fs": true, "zfs": true, "jfs": true, "nilfs2": true, "reiserfs": true}
 
 func nativeVolumes() []api.Volume {
 	out, err := sh("findmnt", "-J", "-b", "-l", "-o", "SOURCE,TARGET,FSTYPE,SIZE,AVAIL")
@@ -248,25 +248,112 @@ func nativeVolumes() []api.Volume {
 			continue
 		}
 		seen[f.Target] = true
-		enc := onLUKS(dev)
-		if f.FSType == "zfs" && !enc { // native ZFS encryption of the dataset
-			if out, err := sh("zfs", "get", "-H", "-o", "value", "encryption", dev); err == nil {
-				enc = strings.TrimSpace(out) != "off" && strings.TrimSpace(out) != "-"
-			}
-		}
-		vols = append(vols, api.Volume{Device: dev, Mount: f.Target, FS: f.FSType, SizeGB: f.Size >> 30, FreeGB: f.Avail >> 30, Encrypted: enc})
+		method := volumeEncryption(dev, f.FSType, f.Target)
+		vols = append(vols, api.Volume{Device: dev, Mount: f.Target, FS: f.FSType, SizeGB: f.Size >> 30, FreeGB: f.Avail >> 30,
+			Encrypted: method != "", Encryption: method})
 	}
 	sort.Slice(vols, func(i, j int) bool { return vols[i].Mount < vols[j].Mount })
 	return vols
 }
 
 // onLUKS reports whether a block device sits on a dm-crypt mapping.
-func onLUKS(dev string) bool {
-	if !strings.HasPrefix(dev, "/dev/") {
-		return false
+func onLUKS(dev string) bool { return dmCryptType(dev) != "" }
+
+// volumeEncryption names how a mounted file system is encrypted, "" when it
+// is not: dm-crypt below it (any layering: LVM on LUKS, LUKS on LVM, RAID),
+// native ZFS encryption, eCryptfs. A Btrfs file system spanning several
+// devices counts only when every device is encrypted.
+func volumeEncryption(src, fstype, target string) string {
+	switch fstype {
+	case "zfs":
+		out, err := sh("zfs", "get", "-H", "-o", "value", "encryption", src)
+		if v := strings.TrimSpace(out); err == nil && v != "off" && v != "-" && v != "" {
+			return "ZFS native (" + v + ")"
+		}
+		return ""
+	case "ecryptfs":
+		return "eCryptfs"
 	}
-	out, err := sh("lsblk", "-s", "-n", "-o", "TYPE", dev)
-	return err == nil && strings.Contains(" "+strings.Join(strings.Fields(out), " ")+" ", " crypt ")
+	if !strings.HasPrefix(src, "/dev/") {
+		return ""
+	}
+	devs := []string{src}
+	if fstype == "btrfs" && target != "" {
+		if out, err := sh("btrfs", "filesystem", "show", target); err == nil {
+			if d := btrfsDevices(out); len(d) > 0 {
+				devs = d
+			}
+		}
+	}
+	method := ""
+	for _, d := range devs {
+		m := dmCryptType(d)
+		if m == "" {
+			return "" // one plain device leaves data unencrypted
+		}
+		method = m
+	}
+	return method
+}
+
+// btrfsDevices reads the "devid … path /dev/x" lines of btrfs filesystem show.
+func btrfsDevices(out string) []string {
+	var devs []string
+	for _, l := range strings.Split(out, "\n") {
+		f := strings.Fields(l)
+		if len(f) >= 2 && f[0] == "devid" && strings.HasPrefix(f[len(f)-1], "/dev/") {
+			devs = append(devs, f[len(f)-1])
+		}
+	}
+	return devs
+}
+
+// dmCryptType finds the dm-crypt mapping below a device and its type from
+// cryptsetup (LUKS1, LUKS2, PLAIN, TCRYPT, BITLK; hw-opal for self
+// encrypting drives); "" when the device is not encrypted.
+func dmCryptType(dev string) string {
+	if !strings.HasPrefix(dev, "/dev/") {
+		return ""
+	}
+	out, err := sh("lsblk", "-s", "-n", "-r", "-o", "NAME,TYPE", dev)
+	if err != nil {
+		return ""
+	}
+	name := ""
+	for _, l := range strings.Split(out, "\n") {
+		if f := strings.Fields(l); len(f) == 2 && f[1] == "crypt" {
+			name = f[0]
+			break
+		}
+	}
+	if name == "" {
+		return ""
+	}
+	st, err := sh("cryptsetup", "status", name)
+	if err != nil {
+		return "dm-crypt"
+	}
+	return cryptTypeOf(st)
+}
+
+func cryptTypeOf(status string) string {
+	typ, opal := "dm-crypt", false
+	for _, l := range strings.Split(status, "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(l), ":")
+		switch {
+		case ok && k == "type":
+			typ = strings.TrimSpace(v)
+			if typ == "PLAIN" {
+				typ = "plain dm-crypt"
+			}
+		case strings.Contains(l, "hw-opal"):
+			opal = true
+		}
+	}
+	if opal {
+		typ += " hw-opal"
+	}
+	return typ
 }
 
 // desktop reports the desktop in use (the running sessions' XDG_CURRENT_DESKTOP)

@@ -427,6 +427,7 @@ var deCatalog = map[string]string{
 	"Unlock user":                         "Nutzer entsperren",
 	"Delete user":                         "Nutzer löschen",
 	"Remove software":                     "Software entfernen",
+	"encrypted":                           "verschlüsselt",
 	"Fedora packages":                     "Fedora Pakete",
 	"Filter apps":                         "Apps filtern",
 	"Filter by name, category or source":  "Nach Name, Kategorie oder Quelle filtern",
