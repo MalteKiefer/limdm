@@ -833,3 +833,18 @@ func TestParseSnapList(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+func TestWeakSSH(t *testing.T) {
+	evals := map[string]map[string]string{
+		"":         {"ciphers": "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com", "macs": "hmac-sha2-256-etm@openssh.com", "kexalgorithms": "curve25519-sha256"},
+		" for bob": {"ciphers": "aes128-cbc", "macs": "hmac-sha1", "kexalgorithms": "curve25519-sha256"},
+	}
+	bad := weakSSH(evals, map[string]int{"ssh_host_rsa_key.pub": 2048, "ssh_host_ed25519_key.pub": 256, "ssh_host_dsa_key.pub": 1024})
+	want := []string{"ciphers: aes128-cbc", "host key ssh_host_dsa_key.pub: DSA", "host key ssh_host_rsa_key.pub: RSA 2048 bits", "macs: hmac-sha1"}
+	if !slices.Equal(bad, want) {
+		t.Fatalf("%v", bad)
+	}
+	if len(weakSSH(map[string]map[string]string{"": evals[""]}, map[string]int{"ssh_host_rsa_key.pub": 4096})) != 0 {
+		t.Fatal("strong configuration flagged")
+	}
+}
