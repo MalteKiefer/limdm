@@ -563,7 +563,7 @@ func (s *Server) flathubAdd(w http.ResponseWriter, r *http.Request, sess session
 	}
 	app, icon, err := s.flathubApp(ctx, id)
 	if err != nil {
-		s.log.Warn("flathub app", "id", id, "err", err)
+		s.log.Warn("flathub app lookup failed") // no details: they carry the requested ID
 		s.renderApp(w, r, sess, catalogRow{CatalogApp: api.CatalogApp{Mode: api.AppAvailable}, Enabled: true}, true, "Flathub did not answer; try again later.")
 		return
 	}

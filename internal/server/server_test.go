@@ -257,3 +257,19 @@ func TestDefaultCatalogValid(t *testing.T) {
 		t.Fatal("invalid package list accepted")
 	}
 }
+
+func TestFlathubIconURL(t *testing.T) {
+	ok := "https://dl.flathub.org/media/org/kde/krita/7a1c/icons/128x128/org.kde.krita.png"
+	if flathubIconURL(ok) != ok {
+		t.Fatal("Flathub icon refused")
+	}
+	for _, bad := range []string{"http://dl.flathub.org/a.png", "https://evil.example/a.png", "https://dl.flathub.org.evil.example/a.png",
+		"https://dl.flathub.org/a.png?x=1", "https://u@dl.flathub.org/a.png", "https://dl.flathub.org/../a.png", "https://dl.flathub.org/a.svg"} {
+		if flathubIconURL(bad) != "" {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+	if catalogCategory("AudioVideo") != "Multimedia" || catalogCategory("WebBrowser") != "Internet" || catalogCategory("Unknown") != "" {
+		t.Fatal("category mapping")
+	}
+}

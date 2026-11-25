@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -133,13 +134,17 @@ func (s *Server) flathubSearch(ctx context.Context, query string) ([]api.Flatpak
 	return hits, nil
 }
 
-// flathubIconURL keeps icon links to Flathub's own media server only.
+var flathubIconPath = regexp.MustCompile(`^/[A-Za-z0-9._/-]{1,300}\.png$`)
+
+// flathubIconURL keeps icon links to Flathub's own media server only and
+// rebuilds them on the fixed host.
 func flathubIconURL(u string) string {
 	p, err := url.Parse(u)
-	if err != nil || p.Scheme != "https" || p.Host != "dl.flathub.org" {
+	if err != nil || p.Scheme != "https" || p.Host != "dl.flathub.org" || p.RawQuery != "" || p.User != nil ||
+		!flathubIconPath.MatchString(p.Path) || strings.Contains(p.Path, "..") {
 		return ""
 	}
-	return u
+	return "https://dl.flathub.org/" + strings.TrimPrefix(p.Path, "/")
 }
 
 // flathubApp reads an app's metadata for the catalog: name, summary,
