@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/netip"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Location of a device's public address. The agent port is never behind a
@@ -102,3 +104,10 @@ func (s *Server) lookupGeo(ctx context.Context, ip string) (Geo, error) {
 type geoError struct{ msg string }
 
 func (e *geoError) Error() string { return "geoip: " + e.msg }
+
+// forgetPublicAddress removes the public address and location of a device
+// whose privacy declaration switches network information off.
+func forgetPublicAddress(ctx context.Context, tx pgx.Tx, id string) error {
+	_, err := tx.Exec(ctx, `UPDATE devices SET external_ip='', geo=NULL, geo_at=NULL WHERE id=$1`, id)
+	return err
+}

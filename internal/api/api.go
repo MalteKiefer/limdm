@@ -600,13 +600,25 @@ type Status struct {
 }
 
 type Command struct {
-	ID      int64  `json:"id"`
-	Type    string `json:"type"` // see CommandTypes
-	Payload string `json:"payload,omitempty"`
+	ID        int64     `json:"id"`
+	Type      string    `json:"type"` // see CommandTypes
+	Payload   string    `json:"payload,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitzero"` // when the admin sent it; delays count from here
 }
 
 // CommandTypes are the one off actions an admin can send.
-var CommandTypes = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "script", "lost", "found", "wipe", "allow_uninstall"}
+var CommandTypes = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "script", "lost", "found", "wipe", "allow_uninstall", "message"}
+
+// PollResponse answers the agent's frequent poll (POST /api/v1/poll).
+type PollResponse struct {
+	Pending bool `json:"pending"`
+}
+
+// Message is the payload of the "message" command: shown on the device's desktop.
+type Message struct {
+	Title string `json:"title"`
+	Text  string `json:"text"`
+}
 
 // LostMode is the payload of the "lost" command. The server adds the escrowed
 // recovery keys only when it delivers the command; they are never stored in

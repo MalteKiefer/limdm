@@ -286,6 +286,7 @@ func (s *Server) AgentHandler() http.Handler {
 	mux.HandleFunc("POST /api/v1/enroll", s.enroll)
 	mux.HandleFunc("POST /api/v1/renew", s.deviceAuth(s.renew, true))
 	mux.HandleFunc("POST /api/v1/checkin", s.deviceAuth(s.checkin, false))
+	mux.HandleFunc("POST /api/v1/poll", s.deviceAuth(s.poll, false))
 	mux.HandleFunc("GET /api/v1/agent-packages/{version}/{file}", s.deviceAuth(s.agentPackage, false))
 	return securityHeaders(mux)
 }
@@ -480,6 +481,20 @@ func countFailing(checks []api.CheckResult) int {
 	return n
 }
 
+// poll is the agent's cheap minute-by-minute question whether something waits
+// for it (commands, a requested update); the agent then checks in at once.
+func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
+	id := r.Context().Value(deviceKey).(string)
+	var pending bool
+	if err := s.db.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM commands WHERE device_id=$1 AND status='pending')
+		OR EXISTS (SELECT 1 FROM devices WHERE id=$1 AND update_requested AND update_state <> 'offered')`, id).Scan(&pending); err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(api.PollResponse{Pending: pending})
+}
+
 func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	id := r.Context().Value(deviceKey).(string)
 	var req api.CheckinRequest
@@ -601,6 +616,14 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		resp.Declarations = decls
 	}
 	pol, _ := api.Compose(decls)
+	if !pol.Privacy.NetworkInfo {
+		// the public address and its location are network data too
+		relocate = false
+		if err := forgetPublicAddress(ctx, tx, id); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
 	event, err := s.enforceCompliance(ctx, tx, id, pol.Compliance, time.Now().UTC())
 	if err != nil {
 		s.fail(w, err)
@@ -639,14 +662,14 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := tx.Query(ctx, `UPDATE commands SET status='sent', updated_at=now() WHERE device_id=$1 AND status IN ('pending','sent')
-		RETURNING id, type, payload`, id)
+		RETURNING id, type, payload, created_at`, id)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	resp.Commands, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (api.Command, error) {
 		var c api.Command
-		return c, row.Scan(&c.ID, &c.Type, &c.Payload)
+		return c, row.Scan(&c.ID, &c.Type, &c.Payload, &c.CreatedAt)
 	})
 	if err != nil {
 		s.fail(w, err)

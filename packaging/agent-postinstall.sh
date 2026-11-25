@@ -3,6 +3,8 @@
 set -e
 systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl enable --now limdm-watchdog.timer >/dev/null 2>&1 || true
+# desktop helper in every graphical session (user unit for all users)
+systemctl --global enable limdm-desktop.service >/dev/null 2>&1 || true
 if [ -f /etc/limdm/device.pem ]; then
     # RefuseManualStop blocks "restart"; Restart=always brings up the new binary
     systemctl kill --kill-who=main --signal=SIGTERM limdm-agent.service >/dev/null 2>&1 || true

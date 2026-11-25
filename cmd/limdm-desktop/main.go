@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/maltekiefer/limdm/internal/agent"
@@ -158,6 +159,37 @@ func (d *dialogs) message(heading, body string, isErr bool) {
 	_ = exec.CommandContext(ctx, d.tool, d.kdialogArgs(kind, d.text(heading, body))...).Run()
 }
 
+// sheet shows a read only page with one Close button: a heading, an optional
+// sentence and property rows (dim label above its value, like libadwaita
+// property rows) or a preformatted block.
+func (d *dialogs) sheet(icon, heading, intro string, rows [][2]string, pre string) {
+	if !d.zenity {
+		var b strings.Builder
+		b.WriteString(heading + "\n\n")
+		if intro != "" {
+			b.WriteString(intro + "\n\n")
+		}
+		for _, r := range rows {
+			b.WriteString(r[0] + ": " + r[1] + "\n")
+		}
+		b.WriteString(pre)
+		_ = exec.CommandContext(ctx, d.tool, d.kdialogArgs("--msgbox", b.String())...).Run()
+		return
+	}
+	var b strings.Builder
+	b.WriteString(`<span size="large" weight="bold">` + html.EscapeString(heading) + "</span>")
+	if intro != "" {
+		b.WriteString("\n" + html.EscapeString(intro))
+	}
+	for _, r := range rows {
+		b.WriteString("\n\n<span size=\"small\" alpha=\"60%\">" + html.EscapeString(r[0]) + "</span>\n" + html.EscapeString(r[1]))
+	}
+	if pre != "" {
+		b.WriteString("\n\n<tt><small>" + html.EscapeString(pre) + "</small></tt>")
+	}
+	_ = exec.CommandContext(ctx, d.tool, d.zenityArgs("--info", icon, "--width=480", "--text="+b.String(), "--ok-label="+tr("Close", "Schließen"))...).Run()
+}
+
 // password returns the entered text; the dialog prints it on stdout, never in argv.
 func (d *dialogs) password(heading, body, label, ok string) ([]byte, bool) {
 	var cmd *exec.Cmd
@@ -276,7 +308,13 @@ func run(now bool) error {
 func main() {
 	now := flag.Bool("now", false, "ask right away (menu entry) instead of the daily reminder")
 	noTray := flag.Bool("no-tray", false, "only the reminders, no tray icon")
+	msg := flag.String("message", "", "show a message from IT (started by the agent)")
+	msgTitle := flag.String("message-title", "", "title of -message")
 	flag.Parse()
+	if *msg != "" {
+		showMessage(*msgTitle, *msg)
+		return
+	}
 	if *now {
 		if err := run(true); err != nil {
 			fmt.Fprintln(os.Stderr, "limdm-desktop:", err)
@@ -284,9 +322,32 @@ func main() {
 		}
 		return
 	}
+	lock := singleInstance()
+	if lock == nil {
+		return // systemd user unit, XDG autostart and the agent may all start it
+	}
+	defer lock.Close()
 	if *noTray {
 		reminders()
 		return
 	}
 	runTray()
+}
+
+// singleInstance takes a lock in the user's runtime directory, held while the
+// returned file stays open; nil means another helper of this user runs.
+func singleInstance() *os.File {
+	dir := os.Getenv("XDG_RUNTIME_DIR")
+	if dir == "" {
+		dir = fmt.Sprintf("/run/user/%d", os.Getuid())
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "limdm-desktop.lock"), os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // the user's own runtime directory, runs as that user
+	if err != nil {
+		return os.Stdin // no runtime dir: better a second icon than none
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return nil
+	}
+	return f
 }

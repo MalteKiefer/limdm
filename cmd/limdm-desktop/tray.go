@@ -9,7 +9,6 @@ import (
 	"image/color"
 	"image/png"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -162,7 +161,7 @@ func dialogsFor(last agent.DesktopResponse) *dialogs {
 func showDetails(last agent.DesktopResponse) {
 	st := last.Status
 	d := dialogsFor(last)
-	if st == nil || d.tool == "" {
+	if st == nil {
 		d.message(tr("Agent Not Reachable", "Agent nicht erreichbar"), tr("The LiMDM agent does not respond.", "Der LiMDM Agent antwortet nicht."), true)
 		return
 	}
@@ -170,60 +169,46 @@ func showDetails(last agent.DesktopResponse) {
 	if st.LastCheckin != nil {
 		seen = st.LastCheckin.Local().Format("2006-01-02 15:04")
 	}
-	failing := tr("none", "keine")
+	state := tr("Compliant", "Konform")
 	if len(st.Failing) > 0 {
-		failing = strings.Join(st.Failing, "; ")
+		state = strings.Join(st.Failing, "\n")
 	}
 	rows := [][2]string{
 		{tr("Device", "Gerät"), st.Hostname},
-		{tr("Device ID", "Geräte ID"), st.DeviceID},
-		{tr("Managed by", "Verwaltet von"), last.Company},
-		{tr("Server", "Server"), st.Server},
-		{tr("Agent version", "Agent Version"), st.Version},
+		{tr("Compliance", "Compliance"), state},
 		{tr("Last check in", "Letzte Synchronisierung"), seen},
-		{tr("Checks", "Prüfungen"), fmt.Sprintf(tr("%d evaluated, %d failing", "%d geprüft, %d fehlgeschlagen"), st.Checks, len(st.Failing))},
-		{tr("Failing checks", "Fehlgeschlagene Prüfungen"), failing},
+		{tr("Agent version", "Agent Version"), st.Version},
+		{tr("Server", "Server"), st.Server},
 		{tr("Recovery keys", "Wiederherstellungsschlüssel"), fmt.Sprint(st.Escrowed)},
+		{tr("Device ID", "Geräte ID"), st.DeviceID},
 	}
 	if st.LastError != "" {
 		rows = append(rows, [2]string{tr("Last error", "Letzter Fehler"), st.LastError})
 	}
-	if d.zenity {
-		args := d.zenityArgs("--list", "computer", "--height=460", "--column="+tr("Property", "Eigenschaft"), "--column="+tr("Value", "Wert"),
-			"--text="+d.text(tr("Device Details", "Gerätedetails"), tr("Managed by LiMDM.", "Verwaltet mit LiMDM.")), "--ok-label="+tr("Close", "Schließen"))
-		for _, r := range rows {
-			args = append(args, r[0], r[1])
-		}
-		_ = exec.CommandContext(ctx, d.tool, args...).Run() // read only window
-		return
-	}
-	var b strings.Builder
-	for _, r := range rows {
-		b.WriteString(r[0] + ": " + r[1] + "\n")
-	}
-	d.message(tr("Device Details", "Gerätedetails"), b.String(), false)
+	d.sheet("computer", tr("Device Details", "Gerätedetails"), fmt.Sprintf(tr("Managed by %s with LiMDM.", "Verwaltet von %s mit LiMDM."), last.Company), rows, "")
 }
 
 func showLog(last agent.DesktopResponse) {
 	d := dialogsFor(last)
-	text := strings.Join(last.Log, "\n")
-	if text == "" {
-		text = tr("No warnings or errors recorded.", "Keine Warnungen oder Fehler aufgezeichnet.")
+	lines := last.Log
+	if len(lines) > 15 {
+		lines = lines[len(lines)-15:]
 	}
-	if d.zenity {
-		cmd := exec.CommandContext(ctx, d.tool, d.zenityArgs("--text-info", "utilities-terminal", "--width=820", "--height=480")...)
-		cmd.Stdin = strings.NewReader(text)
-		_ = cmd.Run()
+	if len(lines) == 0 {
+		d.sheet("emblem-ok-symbolic", tr("Agent Log", "Agent Protokoll"), tr("No warnings or errors recorded.", "Keine Warnungen oder Fehler aufgezeichnet."), nil, "")
 		return
 	}
-	f, err := os.CreateTemp("", "limdm-log-*.txt")
-	if err != nil {
-		return
+	d.sheet("utilities-terminal", tr("Agent Log", "Agent Protokoll"), tr("Latest warnings and errors of the agent.", "Letzte Warnungen und Fehler des Agenten."), nil, strings.Join(lines, "\n"))
+}
+
+// showMessage displays a message an admin sent from the console.
+func showMessage(title, text string) {
+	resp, _ := call(agent.DesktopRequest{Op: "status"})
+	d := dialogsFor(resp)
+	if title == "" {
+		title = tr("Message from IT", "Nachricht der IT")
 	}
-	defer os.Remove(f.Name())
-	_, _ = f.WriteString(text)
-	f.Close()
-	_ = exec.CommandContext(ctx, d.tool, d.kdialogArgs("--textbox", f.Name(), "820", "480")...).Run()
+	d.sheet("mail-unread", title, text, nil, "")
 }
 
 // reminders is the daily prompt for what the device needs from the user.

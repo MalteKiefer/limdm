@@ -1,0 +1,17 @@
+# User unit: starts the desktop helper in every graphical session whose
+# compositor activates graphical-session.target (GNOME, KDE Plasma, sway with
+# sway-systemd, Hyprland with uwsm, ...). The XDG autostart entry covers the
+# rest; the agent starts the helper itself where neither applies. A lock in
+# the helper keeps it to one instance per user.
+[Unit]
+Description=LiMDM desktop helper
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/limdm-desktop
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target

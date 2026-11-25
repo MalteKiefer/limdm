@@ -35,8 +35,8 @@ and actions. Details: [compliance.md](compliance.md).
 
 Without this declaration everything is collected; assign it to switch items off.
 `network_info` covers IP addresses, DNS and routes (interfaces and MAC addresses are always
-collected), `logged_in_users` reports active sessions. The public address and its location
-are recorded by the server and are not affected ([security.md](security.md#privacy)).
+collected) as well as the public address and its location that the server records;
+switching it off also deletes stored values. `logged_in_users` reports active sessions.
 
 ## Software
 

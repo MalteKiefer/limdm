@@ -498,3 +498,22 @@ func TestMissingPackages(t *testing.T) {
 		t.Fatalf("fedora kde: %v", kde)
 	}
 }
+
+func TestPowerDelay(t *testing.T) {
+	now := time.Date(2026, 11, 25, 9, 55, 0, 0, time.UTC)
+	for _, c := range []struct {
+		m    int
+		sent time.Time
+		want int
+	}{
+		{0, now.Add(-4 * time.Minute), 0}, // now stays now
+		{5, time.Time{}, 5},               // older server without a send time
+		{5, now.Add(-4 * time.Minute), 1}, // 4 of 5 minutes passed waiting for the check in
+		{5, now.Add(-9 * time.Minute), 1}, // overdue: still one minute warning
+		{30, now.Add(-10 * time.Minute), 20},
+	} {
+		if got := powerDelay(c.m, c.sent, now); got != c.want {
+			t.Errorf("powerDelay(%d, -%v) = %d, want %d", c.m, now.Sub(c.sent), got, c.want)
+		}
+	}
+}
