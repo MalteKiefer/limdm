@@ -105,11 +105,17 @@ nfpms:
       postinstall: packaging/agent-postinstall.sh
       preremove: packaging/agent-preremove.sh
       postremove: packaging/agent-postremove.sh
+    # tools the agent calls; the agent also installs missing ones itself (deps.go).
+    # Desktop tools are only suggested: servers must not pull in GTK.
     overrides:
       deb:
-        recommends: [unattended-upgrades, ufw, libpam-pwquality, auditd, zenity]
+        dependencies: [osquery, systemd, util-linux, cryptsetup-bin, iproute2, procps, kmod, gpg]
+        recommends: [unattended-upgrades, ufw, libpam-pwquality, auditd, nftables]
+        suggests: [zenity, kdialog, libnotify-bin, dconf-cli, flatpak]
       rpm:
-        recommends: [firewalld, audit, dnf-plugins-core, zenity]
+        dependencies: [osquery, systemd, util-linux, cryptsetup, iproute, procps-ng, kmod, gnupg2]
+        recommends: [firewalld, audit, dnf-plugins-core, nftables]
+        suggests: [zenity, kdialog, libnotify, dconf, flatpak]
   - id: server
     ids: [server]
     package_name: limdm-server

@@ -15,7 +15,7 @@
       <div class="menu-list" role="menu">
         <details class="sub"><summary class="menu-item">{{t "Updates"}}</summary><div class="sub-list">
             <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="update"><button role="menuitem" class="menu-item">{{t "Install all updates"}}</button></form>
-            <form method="post" action="/devices/{{$id}}/agent-update"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button role="menuitem" class="menu-item">{{t "Update agent now"}}</button></form>
+            <a role="menuitem" class="menu-item" href="#dlg-agent" data-open="dlg-agent">{{t "Update agent…"}}</a>
         </div></details>
         <details class="sub"><summary class="menu-item">{{t "Power"}}</summary><div class="sub-list">
             <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="reboot"><input type="hidden" name="minutes" value="0"><button role="menuitem" class="menu-item">{{t "Reboot now"}}</button></form>
@@ -50,6 +50,14 @@
   <h2 id="dlg-shutdown-h">{{t "Shut down later"}}</h2>
   <label>{{t "Delay in minutes"}} <span class="hint">{{t "the user is warned on the device"}}</span><input name="minutes" type="number" min="1" max="1440" value="5" required autofocus></label>
   <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Schedule"}}</button></div></form></dialog>
+<dialog id="dlg-agent" class="modal" aria-labelledby="dlg-agent-h"><form method="post" action="/devices/{{$id}}/agent-update"><input type="hidden" name="csrf" value="{{.CSRF}}">
+  <h2 id="dlg-agent-h">{{t "Update agent"}}</h2>
+  <p class="muted">{{t "Installed:"}} <span class="mono">{{.D.AgentVersion}}</span>. {{t "The device installs the version at its next check in and returns to the current one if the new agent does not check in within 15 minutes."}}</p>
+  <label>{{t "Version"}}<select name="version">
+    <option value="">{{t "newest approved version"}}</option>
+    {{range .AgentVersions}}<option value="{{.}}">{{.}}{{if eq . $.D.AgentVersion}} ({{t "installed"}}){{end}}</option>{{end}}
+  </select></label>
+  <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Update"}}</button></div></form></dialog>
 <dialog id="dlg-lost" class="modal" aria-labelledby="dlg-lost-h"><form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="lost">
   <h2 id="dlg-lost-h">{{t "Lost mode"}}</h2>
   <p class="notice">{{t "Blocks every login, ends running sessions and shows your message. With an escrowed recovery key, every other disk key slot is removed: after the next power off only IT can open the disk."}}</p>

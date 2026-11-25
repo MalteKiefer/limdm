@@ -479,3 +479,22 @@ func TestDesktopInfoAndSync(t *testing.T) {
 		t.Fatal("a second sync within 30 seconds must be refused")
 	}
 }
+
+func TestMissingPackages(t *testing.T) {
+	none := func(string) bool { return false }
+	all := func(string) bool { return true }
+	if p := missingPackages("debian", false, false, all); len(p) != 0 {
+		t.Fatalf("nothing missing: %v", p)
+	}
+	srv := missingPackages("debian", false, false, none)
+	if slices.Contains(srv, "zenity") || slices.Contains(srv, "libnotify-bin") || !slices.Contains(srv, "cryptsetup-bin") {
+		t.Fatalf("server: %v", srv)
+	}
+	if n := len(srv); n != len(slices.Compact(slices.Sorted(slices.Values(srv)))) {
+		t.Fatalf("duplicates: %v", srv)
+	}
+	kde := missingPackages("fedora", true, true, none)
+	if !slices.Contains(kde, "kdialog") || slices.Contains(kde, "zenity") || !slices.Contains(kde, "libnotify") || !slices.Contains(kde, "iproute") {
+		t.Fatalf("fedora kde: %v", kde)
+	}
+}

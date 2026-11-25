@@ -54,8 +54,9 @@
   <h2 id="dlg-outdated-h">{{t "Outdated agents"}} <span class="muted">{{t "older than"}} {{.Latest}}</span></h2>
   <input type="search" data-filter="outdated-table" placeholder="{{t "Filter by host or version"}}" aria-label="{{t "Filter devices"}}" autofocus>
   <div class="scroll dialog-scroll"><table id="outdated-table">
-    <thead><tr><th>{{t "Device"}}</th><th>{{t "Agent version"}}</th><th>{{t "Last seen"}}</th></tr></thead>
-    <tbody>{{range .Outdated}}<tr data-row><td><a href="/devices/{{.ID}}">{{.Hostname}}</a></td><td class="mono">{{.Version}}</td><td>{{ago .LastSeen}}</td></tr>{{else}}<tr><td colspan="3" class="empty">{{t "All agents are up to date."}}</td></tr>{{end}}</tbody>
+    <thead><tr><th>{{t "Device"}}</th><th>{{t "Agent version"}}</th><th>{{t "Last seen"}}</th>{{if eq $.Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
+    <tbody>{{range .Outdated}}<tr data-row><td><a href="/devices/{{.ID}}">{{.Hostname}}</a></td><td class="mono">{{.Version}}</td><td>{{ago .LastSeen}}</td>
+      {{if eq $.Sess.Role "admin"}}<td class="row-actions"><form method="post" action="/devices/{{.ID}}/agent-update"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{$.Latest}}"><input type="hidden" name="back" value="agents"><button class="secondary small">{{t "Update to"}} {{$.Latest}}</button></form></td>{{end}}</tr>{{else}}<tr><td colspan="4" class="empty">{{t "All agents are up to date."}}</td></tr>{{end}}</tbody>
   </table></div>
   <div class="form-foot"><span class="muted">{{len .Outdated}} {{t "devices"}}</span><button type="button" data-close>{{t "Close"}}</button></div>
 </dialog>
