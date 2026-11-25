@@ -94,3 +94,12 @@ func TestDeliverWebhookKinds(t *testing.T) {
 		t.Fatalf("deliveries: %q", got)
 	}
 }
+
+func TestNotifyRefusesLocalTargets(t *testing.T) {
+	for _, target := range []string{"https://127.0.0.1:9/x", "https://[::1]:9/x", "https://169.254.169.254/latest/meta-data"} {
+		s := &Server{} // the real client with the guarded dialer
+		if err := s.postJSON(context.Background(), target, []byte("{}"), false); err == nil || !strings.Contains(err.Error(), "not allowed") {
+			t.Errorf("%s: %v", target, err)
+		}
+	}
+}

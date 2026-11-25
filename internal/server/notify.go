@@ -20,6 +20,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -167,8 +168,25 @@ func emailMessage(from string, to []string, n notice) []byte {
 
 // ---- delivery ----
 
+// safeDialer refuses loopback, link-local (cloud metadata at 169.254.169.254)
+// and unspecified addresses after name resolution, so a channel cannot be
+// pointed at the server itself. Private networks stay allowed (an internal
+// SIEM or mail relay).
+var safeDialer = &net.Dialer{Timeout: 15 * time.Second, Control: func(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+		return fmt.Errorf("notification target %s is not allowed", host)
+	}
+	return nil
+}}
+
 var notifyClient = &http.Client{
 	Timeout:       10 * time.Second,
+	Transport:     &http.Transport{DialContext: safeDialer.DialContext, Proxy: http.ProxyFromEnvironment, TLSHandshakeTimeout: 10 * time.Second},
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, // no redirects to internal addresses
 }
 
@@ -203,7 +221,7 @@ func (s *Server) postJSON(ctx context.Context, target string, body []byte, signe
 
 func sendEmail(ctx context.Context, cfg channelConfig, password string, n notice) error {
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-	d := &net.Dialer{Timeout: 15 * time.Second}
+	d := safeDialer
 	tc := &tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12}
 	var conn net.Conn
 	var err error
