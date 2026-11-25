@@ -539,15 +539,31 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var tamper []string
+	var evAt []time.Time
+	var evText []string
 	for i, ev := range req.Events {
 		if i >= 500 {
 			break
 		}
-		action := "agent.event"
-		if _, msg, ok := strings.Cut(ev, " tamper: "); ok {
-			action, tamper = "agent.tamper", append(tamper, msg)
+		if _, msg, ok := strings.Cut(ev, " tamper: "); ok { // security relevant: chained audit log
+			tamper = append(tamper, msg)
+			if err := audit(ctx, tx, "device:"+id, "agent.tamper", id, truncate(ev, 2000)); err != nil {
+				s.fail(w, err)
+				return
+			}
+			continue
 		}
-		if err := audit(ctx, tx, "device:"+id, action, id, truncate(ev, 2000)); err != nil {
+		at, msg := time.Now().UTC(), ev
+		if ts, rest, ok := strings.Cut(ev, " "); ok {
+			if t, err := time.Parse(time.RFC3339, ts); err == nil {
+				at, msg = t, rest
+			}
+		}
+		evAt, evText = append(evAt, at), append(evText, truncate(msg, 2000))
+	}
+	if len(evText) > 0 {
+		if _, err := tx.Exec(ctx, `INSERT INTO device_events(device_id, at, detail) SELECT $1, a, d FROM unnest($2::timestamptz[], $3::text[]) AS e(a, d)`,
+			id, evAt, evText); err != nil {
 			s.fail(w, err)
 			return
 		}

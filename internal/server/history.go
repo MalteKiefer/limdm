@@ -33,7 +33,8 @@ func (s *Server) historyLoop(ctx context.Context) {
 			s.log.Error("fleet snapshot", "err", err)
 		}
 		if _, err := s.db.Exec(ctx, `DELETE FROM device_metrics WHERE at < now() - interval '30 days';
-			DELETE FROM fleet_history WHERE day < current_date - 400`); err != nil {
+			DELETE FROM fleet_history WHERE day < current_date - 400;
+			DELETE FROM device_events WHERE at < now() - interval '365 days'`); err != nil {
 			s.log.Error("prune history", "err", err)
 		}
 	}

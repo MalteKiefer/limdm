@@ -45,8 +45,11 @@ start otherwise. Schema changes run as versioned migrations under an advisory lo
 Append only (a trigger blocks `UPDATE`, `DELETE` and `TRUNCATE`) and hash chained; the audit
 page verifies the whole chain and shows where it breaks. Recorded: console actions,
 settings changes, sign ins (also failed ones), enrollments, certificate rotations, command
-results, every change the agent makes on a device, desktop logins, recovery key escrow and
-every recovery key view, policy actions.
+results, tamper events, recovery key escrow and every recovery key view, policy actions.
+
+Routine agent events (every change the agent makes on a device, desktop logins) are high
+volume and kept separately in `device_events`: append only, 365 days, shown on the device
+page (Commands tab). They do not take part in the hash chain.
 
 ## Devices
 

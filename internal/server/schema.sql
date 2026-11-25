@@ -250,3 +250,21 @@ ALTER TABLE local_admins ADD COLUMN IF NOT EXISTS session_gen BIGINT NOT NULL DE
 
 -- Last tamper event reported by the agent or its watchdog.
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS tampered_at TIMESTAMPTZ;
+
+-- Routine agent events (changes made, desktop logins) are high volume; they
+-- live here instead of the hash chained audit log, append only, one multi row
+-- insert per check in and no global lock. Security events (tamper, escrow,
+-- command results, enrollment) stay in audit_log. Kept 365 days.
+CREATE TABLE IF NOT EXISTS device_events (
+    id        BIGSERIAL PRIMARY KEY,
+    device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    at        TIMESTAMPTZ NOT NULL,
+    detail    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS device_events_device ON device_events(device_id, id DESC);
+CREATE INDEX IF NOT EXISTS device_events_at ON device_events USING brin(at);
+CREATE OR REPLACE FUNCTION device_events_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'device_events is append only'; END $$;
+DROP TRIGGER IF EXISTS device_events_append_only ON device_events;
+CREATE TRIGGER device_events_append_only BEFORE UPDATE ON device_events
+    FOR EACH ROW EXECUTE FUNCTION device_events_append_only();

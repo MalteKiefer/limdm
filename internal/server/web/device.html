@@ -300,7 +300,14 @@
   <div class="card-head"><h2>{{t "History"}}</h2></div>
   <div class="scroll"><table>
     <thead><tr><th>#</th><th>{{t "Command"}}</th><th>{{t "Status"}}</th><th>{{t "By"}}</th><th>{{t "Created"}}</th><th>{{t "Output"}}</th></tr></thead>
-    <tbody>{{range .Commands}}<tr><td class="num">{{.ID}}</td><td>{{.Type}}</td><td><span class="pill {{if eq .Status "ok"}}ok{{else if eq .Status "failed"}}bad{{else}}warn{{end}}">{{t .Status}}</span></td><td>{{.By}}</td><td>{{fmtTime .At}}</td><td><pre>{{.Output}}</pre></td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No commands sent."}}</td></tr>{{end}}</tbody>
+    <tbody>{{range .Commands}}<tr><td class="num">{{.ID}}</td><td>{{actionLabel .Type}}</td><td><span class="pill {{if eq .Status "ok"}}ok{{else if eq .Status "failed"}}bad{{else}}warn{{end}}">{{t .Status}}</span></td><td>{{.By}}</td><td>{{fmtTime .At}}</td><td><pre>{{.Output}}</pre></td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No commands sent."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "Device events"}}</h2><span class="muted">{{t "latest 100, kept 365 days"}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Time"}}</th><th>{{t "Detail"}}</th></tr></thead>
+    <tbody>{{range .Events}}<tr><td class="nowrap">{{fmtTime .At}}</td><td>{{.Detail}}</td></tr>{{else}}<tr><td colspan="2" class="empty">{{t "Nothing recorded yet."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 {{if and (eq .Sess.Role "admin") (ne .D.Status "retired")}}

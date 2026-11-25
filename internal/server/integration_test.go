@@ -424,6 +424,19 @@ func TestIntegration(t *testing.T) {
 	if tamperedAt == nil || tamperAudits != 1 {
 		t.Fatalf("tamper event: tampered_at=%v audits=%d", tamperedAt, tamperAudits)
 	}
+	// routine events go to device_events, not into the chained audit log
+	if code := call(dev, "/api/v1/checkin", api.CheckinRequest{Events: []string{"2026-11-25T08:01:00Z created user anna", "no timestamp"}}, nil); code != 200 {
+		t.Fatalf("checkin with events: %d", code)
+	}
+	var routine, routineAudits int
+	db.QueryRow(ctx, `SELECT count(*) FROM device_events WHERE device_id=$1 AND detail IN ('created user anna','no timestamp')`, er.DeviceID).Scan(&routine)
+	db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE detail LIKE '%created user anna%'`).Scan(&routineAudits)
+	if routine != 2 || routineAudits != 0 {
+		t.Fatalf("routine events: stored=%d audited=%d", routine, routineAudits)
+	}
+	if _, err := db.Exec(ctx, `UPDATE device_events SET detail='x'`); err == nil {
+		t.Fatal("device_events must be append only")
+	}
 	// renewal: the old certificate stays valid until the new one is used (a lost
 	// response must not lock the device out), then it is revoked
 	key2, csr2 := newIdentity()
