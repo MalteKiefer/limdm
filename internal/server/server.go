@@ -485,11 +485,26 @@ func countFailing(checks []api.CheckResult) int {
 // for it (commands, a requested update); the agent then checks in at once.
 func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 	id := r.Context().Value(deviceKey).(string)
-	var pending bool
-	if err := s.db.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM commands WHERE device_id=$1 AND status='pending')
-		OR EXISTS (SELECT 1 FROM devices WHERE id=$1 AND update_requested AND update_state <> 'offered')`, id).Scan(&pending); err != nil {
+	ctx := r.Context()
+	var commands bool
+	var running, state, version string
+	var at *time.Time
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM commands WHERE device_id=$1 AND status='pending'),
+		agent_version, update_state, update_version, update_at FROM devices WHERE id=$1`, id).Scan(&commands, &running, &state, &version, &at); err != nil {
 		s.fail(w, err)
 		return
+	}
+	pending := commands
+	if !pending {
+		// agent updates can be security fixes: a due version triggers a check in
+		// at once, unless it was just handed out and is being installed
+		rel, clearTarget, err := s.dueUpdate(ctx, s.db, id, running)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		installing := rel != nil && state == "offered" && version == rel.Version && at != nil && time.Since(*at) < 20*time.Minute
+		pending = clearTarget || (rel != nil && !installing)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(api.PollResponse{Pending: pending})

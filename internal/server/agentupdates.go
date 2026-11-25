@@ -38,9 +38,7 @@ type UpdatePolicy struct {
 	PilotTag  string `json:"pilot_tag"`
 }
 
-func (s *Server) updatePolicy(ctx context.Context, q interface {
-	QueryRow(context.Context, string, ...any) pgx.Row
-}) (UpdatePolicy, error) {
+func (s *Server) updatePolicy(ctx context.Context, q querier) (UpdatePolicy, error) {
 	p := UpdatePolicy{DelayDays: 7, PilotTag: "pilot"}
 	var raw []byte
 	err := q.QueryRow(ctx, `SELECT value FROM settings WHERE key='agent_updates'`).Scan(&raw)
@@ -65,64 +63,86 @@ type agentRelease struct {
 
 const agentReleaseCols = `version, published_at, sums, sums_sig, approved_at, approved_by, blocked, blocked_reason`
 
-// offerUpdate decides whether a device gets an agent version in this check in.
-func (s *Server) offerUpdate(ctx context.Context, tx pgx.Tx, deviceID, running string) (*api.AgentUpdate, error) {
-	pol, err := s.updatePolicy(ctx, tx)
+type querier interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+// dueUpdate decides which agent version a device running "running" should
+// install now, without changing anything: the version an admin picked for
+// it, otherwise the newest approved version that is due by policy. A version
+// that already failed on this device is not offered again unless an admin
+// requests it. clearTarget reports a picked version that is already running.
+func (s *Server) dueUpdate(ctx context.Context, q querier, deviceID, running string) (rel *agentRelease, clearTarget bool, err error) {
+	pol, err := s.updatePolicy(ctx, q)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var tags []string
 	var requested bool
-	var target string
-	if err := tx.QueryRow(ctx, `SELECT tags, update_requested, update_target FROM devices WHERE id=$1`, deviceID).Scan(&tags, &requested, &target); err != nil {
-		return nil, err
+	var target, state, lastVersion string
+	if err := q.QueryRow(ctx, `SELECT tags, update_requested, update_target, update_state, update_version FROM devices WHERE id=$1`, deviceID).
+		Scan(&tags, &requested, &target, &state, &lastVersion); err != nil {
+		return nil, false, err
 	}
 	if requested && target != "" {
 		// a version an admin picked for this device counts as its approval
 		if target == running {
-			_, err := tx.Exec(ctx, `UPDATE devices SET update_requested=false, update_target='' WHERE id=$1`, deviceID)
-			return nil, err
+			return nil, true, nil
 		}
 		var r agentRelease
-		err := tx.QueryRow(ctx, `SELECT `+agentReleaseCols+` FROM agent_releases WHERE version=$1 AND NOT blocked`, target).
+		err := q.QueryRow(ctx, `SELECT `+agentReleaseCols+` FROM agent_releases WHERE version=$1 AND NOT blocked`, target).
 			Scan(&r.Version, &r.PublishedAt, &r.Sums, &r.SumsSig, &r.ApprovedAt, &r.ApprovedBy, &r.Blocked, &r.BlockedReason)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil // blocked meanwhile
+			return nil, false, nil // blocked meanwhile
 		}
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE devices SET update_state='offered', update_version=$2, update_at=now() WHERE id=$1
-			AND (update_state <> 'offered' OR update_version <> $2)`, deviceID, r.Version); err != nil {
-			return nil, err
-		}
-		return &api.AgentUpdate{Version: r.Version, Sums: r.Sums, SumsSig: r.SumsSig}, nil
+		return &r, false, nil
 	}
 	if !pol.Auto && !requested {
-		return nil, nil
+		return nil, false, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT `+agentReleaseCols+` FROM agent_releases WHERE approved_at IS NOT NULL AND NOT blocked`)
+	rows, err := q.Query(ctx, `SELECT `+agentReleaseCols+` FROM agent_releases WHERE approved_at IS NOT NULL AND NOT blocked`)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	rels, err := pgx.CollectRows(rows, pgx.RowToStructByPos[agentRelease])
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	slices.SortFunc(rels, func(a, b agentRelease) int { return api.CompareVersions(b.Version, a.Version) })
 	pilot := pol.PilotTag != "" && slices.ContainsFunc(tags, func(t string) bool { return strings.EqualFold(t, pol.PilotTag) })
 	for _, r := range rels {
 		due := requested || pilot || time.Since(*r.ApprovedAt) >= time.Duration(pol.DelayDays)*24*time.Hour
-		if !due || !api.NewerVersion(r.Version, running) {
+		failedHere := !requested && r.Version == lastVersion && (state == "failed" || state == "rolled_back")
+		if !due || failedHere || !api.NewerVersion(r.Version, running) {
 			continue
 		}
-		if _, err := tx.Exec(ctx, `UPDATE devices SET update_state='offered', update_version=$2, update_at=now() WHERE id=$1
-			AND (update_state <> 'offered' OR update_version <> $2)`, deviceID, r.Version); err != nil {
-			return nil, err
-		}
-		return &api.AgentUpdate{Version: r.Version, Sums: r.Sums, SumsSig: r.SumsSig}, nil
+		return &r, false, nil
 	}
-	return nil, nil
+	return nil, false, nil
+}
+
+// offerUpdate hands the due version to the device in this check in.
+func (s *Server) offerUpdate(ctx context.Context, tx pgx.Tx, deviceID, running string) (*api.AgentUpdate, error) {
+	r, clearTarget, err := s.dueUpdate(ctx, tx, deviceID, running)
+	if err != nil {
+		return nil, err
+	}
+	if clearTarget {
+		_, err := tx.Exec(ctx, `UPDATE devices SET update_requested=false, update_target='' WHERE id=$1`, deviceID)
+		return nil, err
+	}
+	if r == nil {
+		return nil, nil
+	}
+	if _, err := tx.Exec(ctx, `UPDATE devices SET update_state='offered', update_version=$2, update_at=now() WHERE id=$1
+		AND (update_state <> 'offered' OR update_version <> $2)`, deviceID, r.Version); err != nil {
+		return nil, err
+	}
+	return &api.AgentUpdate{Version: r.Version, Sums: r.Sums, SumsSig: r.SumsSig}, nil
 }
 
 // recordUpdateResult stores what the agent reports and blocks a version that

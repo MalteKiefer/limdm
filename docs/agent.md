@@ -202,8 +202,12 @@ a dialog to everyone signed in on the desktop.
 
 ## Command delivery
 
-Besides the regular check in, the agent asks the server every minute whether commands wait
-(`POST /api/v1/poll`, a single boolean) and checks in at once if so. Restart and shutdown
+Besides the regular check in, the agent asks the server every minute whether something waits
+(`POST /api/v1/poll`, a single boolean) and checks in at once if so: queued commands, and an
+agent update that is due (a version picked for the device, an admin request, or an approved
+version the rollout policy releases for it). Agent updates can carry security fixes, so they
+do not wait for the next regular check in. A version being installed or one that already
+failed on the device does not trigger check ins. Restart and shutdown
 delays count from when the command was sent in the console; a command that arrives late
 still gives users at least one minute of warning.
 

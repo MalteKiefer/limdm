@@ -1277,4 +1277,23 @@ func TestAgentUpdates(t *testing.T) {
 			t.Errorf("%s: %d, want %d", path, rec.Code, want)
 		}
 	}
+
+	// poll reports a due agent update, but not while it installs or after it failed here
+	db.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, agent_version) VALUES ('d5', 'd5', now(), 'd5', '1.0.0')`)
+	db.Exec(ctx, `UPDATE agent_releases SET approved_at=now() - interval '30 days', blocked=false WHERE version='1.2.0'`)
+	if !pollOf("d5") {
+		t.Fatal("due update not reported by poll")
+	}
+	db.Exec(ctx, `UPDATE devices SET update_state='offered', update_version='1.2.0', update_at=now() WHERE id='d5'`)
+	if pollOf("d5") {
+		t.Fatal("an update being installed must not trigger check ins")
+	}
+	db.Exec(ctx, `UPDATE devices SET update_state='rolled_back' WHERE id='d5'`)
+	if u := offer("d5"); u != nil && u.Version == "1.2.0" {
+		t.Fatal("a version that rolled back must not be offered again by policy")
+	}
+	db.Exec(ctx, `UPDATE devices SET update_requested=true WHERE id='d5'`)
+	if !pollOf("d5") {
+		t.Fatal("an admin request must retry the update")
+	}
 }
