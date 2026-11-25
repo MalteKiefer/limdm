@@ -317,13 +317,14 @@ func githubRequest(ctx context.Context, u string) (*http.Response, error) {
 	if !strings.HasPrefix(u, "https://") {
 		return nil, errors.New("asset URL missing or not https")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	// callers pass GitHub release assets or dl.flathub.org icons (flathubIconURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil) //nolint:gosec // fixed hosts, see above
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "limdm-server")
 	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := releaseClient.Do(req)
+	resp, err := releaseClient.Do(req) //nolint:gosec // fixed hosts, see above
 	if err != nil {
 		return nil, err
 	}
