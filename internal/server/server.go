@@ -516,11 +516,11 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		s.failAPI(w, err)
 		return
 	}
-	// the same machine enrolled again (reinstall): the old record is retired
-	// and its certificate revoked, so it does not linger as a stale device
+	// the same machine ID enrolled again (reinstall): reported, not acted on.
+	// The ID is readable by every user and cannot prove anything, so retiring
+	// the older record stays an admin decision in the console.
 	if mid := strings.TrimSpace(req.MachineID); mid != "" {
-		rows, err := tx.Query(ctx, `UPDATE devices SET retired=true, cert_serial='', pending_serial=NULL
-			WHERE machine_id=$1 AND id<>$2 AND NOT retired RETURNING id`, truncate(mid, 64), id)
+		rows, err := tx.Query(ctx, `SELECT id FROM devices WHERE machine_id=$1 AND id<>$2 AND NOT retired`, truncate(mid, 64), id)
 		if err != nil {
 			s.failAPI(w, err)
 			return
@@ -531,7 +531,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, o := range old {
-			if err := audit(ctx, tx, "device:"+id, "device.retire", o, "replaced by the new enrollment "+id+" of the same machine"); err != nil {
+			if err := audit(ctx, tx, "device:"+id, "device.duplicate", o, "enrolled again as "+id+" with the same machine ID; retire the older record if it is a reinstall"); err != nil {
 				s.failAPI(w, err)
 				return
 			}

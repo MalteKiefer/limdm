@@ -12,7 +12,7 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 ### Changed
 - Database sessions get statement, lock and idle transaction timeouts.
 - Enrollment is rate limited per address; Flathub search and icons per device, cached for an hour.
-- A second enrollment of the same machine retires the older device record.
+- A second enrollment of the same machine ID is recorded in the audit log (`device.duplicate`).
 - One check in per device at a time; background loops survive panics and run on one instance only.
 - The session cookie is `__Host-limdm_session`; everybody signs in once again after the update.
 
