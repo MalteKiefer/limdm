@@ -244,3 +244,15 @@ func TestFirewallPortRanges(t *testing.T) {
 		}
 	}
 }
+
+func TestTokenIgnoresHTMLEscapes(t *testing.T) {
+	plain := Declaration{Identifier: "s", Type: TypeFiles, Payload: []byte(`{"files":[{"path":"/x","content":"a && b > c \\u0026 <"}]}`)}
+	escaped := Declaration{Identifier: "s", Type: TypeFiles, Payload: []byte(`{"files":[{"path":"/x","content":"a && b > c \\u0026 <"}]}`)}
+	if plain.Token() != escaped.Token() {
+		t.Fatal("HTML escapes change the token")
+	}
+	other := Declaration{Identifier: "s", Type: TypeFiles, Payload: []byte(`{"files":[{"path":"/x","content":"a && b > c & <"}]}`)}
+	if other.Token() == plain.Token() {
+		t.Fatal("an escaped backslash sequence must stay distinct")
+	}
+}

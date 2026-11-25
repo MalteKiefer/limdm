@@ -267,6 +267,13 @@ func runScreenLock(a *Agent) (string, string) {
 		return fail, "screen lock not declared"
 	}
 	missing := unenforced(env)
+	// databases compiled 0600 (dconf update under the agent's UMask=0077)
+	// are unreadable for sessions: the settings would not apply
+	for _, f := range []string{"/etc/dconf/db/local", "/etc/dconf/db/gdm"} {
+		if st, err := os.Stat(f); err == nil && st.Mode().Perm()&0o004 == 0 {
+			missing = append(missing, f+" (not readable for sessions)")
+		}
+	}
 	for f, want := range lockTargets(sl) {
 		if readFile(f) != want {
 			missing = append(missing, f)

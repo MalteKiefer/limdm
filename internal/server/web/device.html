@@ -46,7 +46,7 @@
     <div><dt>{{t "Model"}}</dt><dd>{{if .Inv.Model}}{{.Inv.Vendor}} {{.Inv.Model}}{{else}}–{{end}}</dd>
       <dt>{{t "Serial"}}</dt><dd class="mono">{{if .Inv.Serial}}{{.Inv.Serial}}{{else}}–{{end}}</dd>
       <dt>{{t "OS version"}}</dt><dd>{{if .Inv.OSName}}{{.Inv.OSName}}{{else}}–{{end}}</dd></div>
-    <div><dt>{{t "User"}}</dt><dd>{{if .Primary}}<a href="/directory?q={{.Primary}}">{{.Primary}}</a>{{else}}–{{end}}</dd>
+    <div><dt>{{t "User"}}</dt><dd>{{if .Primary}}{{if eq .Sess.Role "helpdesk"}}{{.Primary}}{{else}}<a href="/directory?q={{.Primary}}">{{.Primary}}</a>{{end}}{{else}}–{{end}}</dd>
       <dt>{{t "Tags"}}</dt><dd>{{range .TagList}}<a class="tag" href="/devices?tag={{.}}">#{{.}}</a> {{else}}–{{end}}</dd>
       <dt>{{t "Signed in"}}</dt><dd>{{range .Inv.Users}}<span class="tag">{{.}}</span> {{else}}–{{end}}</dd></div>
     <div><dt>{{t "Blueprint"}}</dt><dd>{{range .Blueprints}}{{if .Applies}}<a href="/blueprints/{{.ID}}">{{.Name}}</a>{{end}}{{end}}</dd>
@@ -120,7 +120,7 @@
 </nav>
 
 {{if eq .Tab "overview"}}
-{{if .Tampered}}<div class="notice error" role="status"><strong>{{t "Tamper attempt reported"}}</strong> {{fmtTime (derefTime .Tampered)}}. <a href="/audit?action=agent.tamper&amp;target={{$id}}">{{t "Details are in the audit log (agent.tamper)."}}</a></div>{{end}}
+{{if .Tampered}}<div class="notice error" role="status"><strong>{{t "Tamper attempt reported"}}</strong> {{fmtTime (derefTime .Tampered)}}. {{if eq .Sess.Role "helpdesk"}}{{t "Details are in the audit log (agent.tamper)."}}{{else}}<a href="/audit?action=agent.tamper&amp;target={{$id}}">{{t "Details are in the audit log (agent.tamper)."}}</a>{{end}}</div>{{end}}
 {{if .D.AutoLocked}}<div class="notice error" role="status"><strong>{{t "Locked by compliance policy."}}</strong> {{t "Logins are blocked until the device is compliant again or an admin unlocks it."}}</div>{{end}}
 {{if .Since}}<div class="notice">{{t "Failing compliance since"}} {{fmtTime (derefTime .Since)}}{{if .D.GraceUntil}}{{t "; grace period"}} {{if eq .D.Status "in grace"}}{{t "ends"}}{{else}}{{t "ended"}}{{end}} {{fmtTime (derefTime .D.GraceUntil)}}{{end}}.</div>{{end}}
 <div class="stats">
@@ -366,7 +366,7 @@
   <h2 id="dlg-user-h">{{t "Add local user"}}</h2>
   <div class="inline"><label>{{t "User name"}}<input name="username" required pattern="[a-z_][a-z0-9_-]{0,31}" autocomplete="off" spellcheck="false"></label>
     <label>{{t "Full name"}}<input name="full_name" maxlength="100"></label></div>
-  <label>{{t "Initial password"}}<input name="password" type="password" minlength="{{$.PwMin}}" required autocomplete="new-password"><small class="field-hint">{{t "Follows the password policy (Settings, Security); must be changed at the first login; removed from the server once applied"}}</small></label>
+  <label>{{t "Initial password"}}<input name="password" type="password" minlength="{{$.PwMin}}" required autocomplete="new-password"><small class="field-hint">{{t "At least"}} {{$.PwMin}} {{t "characters, per the password policy; must be changed at the first login; removed from the server once applied"}}</small></label>
   <label class="check"><input type="checkbox" name="admin"> {{t "Administrator (sudo)"}}</label>
   <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Create"}}</button></div></form></dialog>{{end}}
 <section class="tablecard"><div class="scroll"><table>

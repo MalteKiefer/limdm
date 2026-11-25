@@ -18,7 +18,7 @@
     {{range $t := .Types}}{{$rows := index $.Groups $t}}
     <tbody>
       <tr class="group"><th colspan="3">{{typeLabel $t}} <span class="n">{{len $rows}}</span> <span class="muted mono">{{$t}}</span></th></tr>
-      {{range $rows}}<tr data-row><td><a class="rowlink" href="/library/{{.ID}}">{{.Name}}</a></td><td class="muted">{{.Description}}</td>
+      {{range $rows}}<tr data-row><td><a class="rowlink" href="/library/{{.ID}}">{{.Name}}</a>{{if .Invalid}} <span class="pill bad" title="{{t "Not delivered to devices. Open the item and save it again."}}">{{t "Signature invalid"}}</span>{{end}}</td><td class="muted">{{.Description}}</td>
         <td>{{range .UsedBy}}<span class="tag">{{.}}</span>{{else}}<span class="muted">{{t "unused"}}</span>{{end}}</td></tr>{{end}}
     </tbody>{{end}}
   </table></div>

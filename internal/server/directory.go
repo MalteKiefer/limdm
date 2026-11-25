@@ -359,11 +359,39 @@ func (s *Server) syncGoogle(ctx context.Context) (string, error) {
 		email := strings.ToLower(u.PrimaryEmail)
 		active := !u.Suspended && !u.Archived
 		// the Google ID first: a renamed primary email updates the same row
-		// (the old address goes to previous_emails) instead of leaving an
-		// orphan that stays active
-		err := tx.QueryRow(ctx, `UPDATE dir_users SET user_name=$2, email=$2, display_name=$3, department=$4, title=$5, active=$6, updated_at=now()
-			WHERE source='google' AND external_id=$1 RETURNING id`, u.ID, email, u.Name.FullName, dept, title, active).Scan(&id)
-		if errors.Is(err, pgx.ErrNoRows) {
+		// (the old address goes to previous_emails). Installs before 0.13
+		// left one row per former address: the newest one is updated, the
+		// older ones follow its status, since device user lists may still
+		// name their addresses.
+		var cur int64
+		err := tx.QueryRow(ctx, `SELECT id FROM dir_users WHERE source='google' AND external_id=$1 ORDER BY updated_at DESC, id DESC LIMIT 1`, u.ID).Scan(&cur)
+		switch {
+		case err == nil:
+			id = cur
+			// the new address may still belong to another row: keep the old
+			// one then instead of failing the whole sync
+			sp, err := tx.Begin(ctx)
+			if err != nil {
+				return "", err
+			}
+			_, err = sp.Exec(ctx, `UPDATE dir_users SET user_name=$2, email=$2, display_name=$3, department=$4, title=$5, active=$6, updated_at=now() WHERE id=$1`,
+				cur, email, u.Name.FullName, dept, title, active)
+			if isUnique(err) {
+				_ = sp.Rollback(ctx)
+				s.log.Warn("google sync: address belongs to another directory user, kept the old one", "user", u.ID)
+				_, err = tx.Exec(ctx, `UPDATE dir_users SET display_name=$2, department=$3, title=$4, active=$5, updated_at=now() WHERE id=$1`,
+					cur, u.Name.FullName, dept, title, active)
+			} else if err == nil {
+				err = sp.Commit(ctx)
+			}
+			if err != nil {
+				return "", err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE dir_users SET active=$3, updated_at=now() WHERE source='google' AND external_id=$1 AND id<>$2 AND active<>$3`,
+				u.ID, cur, active); err != nil {
+				return "", err
+			}
+		case errors.Is(err, pgx.ErrNoRows):
 			// a row of another source (SCIM) with this email stays with that source
 			err = tx.QueryRow(ctx, `INSERT INTO dir_users(external_id, source, user_name, email, display_name, department, title, active)
 				VALUES ($1,'google',$2,$2,$3,$4,$5,$6)
@@ -486,9 +514,12 @@ func activeUsers(ctx context.Context, tx pgx.Tx, users []api.User) ([]api.User, 
 	for i, u := range users {
 		emails[i] = strings.ToLower(u.Email)
 	}
+	// an address an active person holds now is theirs, even when a disabled
+	// or deleted user had it before (renamed, then the address reused)
 	rows, err := tx.Query(ctx, `SELECT e FROM unnest($1::text[]) e WHERE
-		EXISTS (SELECT 1 FROM dir_users WHERE NOT active AND (lower(email) = e OR e = ANY(previous_emails)))
-		OR EXISTS (SELECT 1 FROM dir_tombstones WHERE email = e)`, emails)
+		NOT EXISTS (SELECT 1 FROM dir_users WHERE active AND lower(email) = e)
+		AND (EXISTS (SELECT 1 FROM dir_users WHERE NOT active AND (lower(email) = e OR e = ANY(previous_emails)))
+		OR EXISTS (SELECT 1 FROM dir_tombstones WHERE email = e))`, emails)
 	if err != nil {
 		return nil, err
 	}

@@ -79,6 +79,7 @@ type State struct {
 	PendingKeys    []pendingKey         `json:"pending_keys,omitempty"` // recovery keys not yet escrowed
 	Escrowed       map[string]time.Time `json:"escrowed,omitempty"`     // LUKS UUID: escrowed at
 	CommandKey     string               `json:"command_key,omitempty"`  // pinned public key commands are signed with
+	Enrollment     string               `json:"enrollment,omitempty"`   // server and device ID this state belongs to
 	EscrowNotified time.Time            `json:"escrow_notified"`
 	Company        string               `json:"company,omitempty"`
 	BrandingHash   string               `json:"branding_hash,omitempty"`
@@ -349,6 +350,17 @@ func New(log *slog.Logger) (*Agent, error) {
 			a.state = State{}
 		}
 	}
+	// enrolled again (other server, new device ID): the previous server's
+	// command key, command IDs and unsent results do not apply any more.
+	// Checked here as well, since a running agent writes its state back
+	// after "enroll" cleaned the file.
+	if enr := cfg.Server + " " + cfg.DeviceID; a.state.Enrollment != enr {
+		if a.state.Enrollment != "" {
+			log.Info("new enrollment: forgetting the previous server's command key and command IDs")
+			a.state.CommandKey, a.state.DoneCommands, a.state.Results = "", nil, nil
+		}
+		a.state.Enrollment = enr
+	}
 	if a.state.DeclToken == "" { // never synced: start from the built in baseline
 		a.state.Declarations = api.DefaultDeclarations()
 	}
@@ -558,7 +570,13 @@ func (a *Agent) cycle(ctx context.Context) {
 	// drop only what was sent: entries added meanwhile (unlock events, desktop) stay
 	a.state.Results = a.state.Results[len(req.Results):]
 	a.evMu.Lock()
-	a.state.Events = a.state.Events[len(req.Events):]
+	// by content, not by count: a full queue drops its oldest routine line
+	// while the check in runs, so the sent lines are no longer a prefix
+	for _, sent := range req.Events {
+		if i := slices.Index(a.state.Events, sent); i >= 0 {
+			a.state.Events = slices.Delete(a.state.Events, i, i+1)
+		}
+	}
 	a.state.AppRequests = a.state.AppRequests[len(req.AppRequests):]
 	a.evMu.Unlock()
 	if len(sentKeys) > 0 {

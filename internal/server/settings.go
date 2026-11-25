@@ -166,6 +166,13 @@ func (s *Server) loadSettings(ctx context.Context) error {
 	return nil
 }
 
+// localAllowed: local accounts are on, or OIDC is configured but its
+// provider could not be reached since the start (the fallback local accounts
+// exist for).
+func (s *Server) localAllowed() bool {
+	return s.settings().LocalLogin || s.rediscover.Load() && s.oidc() == nil
+}
+
 // errDiscovery marks a failed OIDC discovery (network, provider down).
 var errDiscovery = errors.New("OIDC discovery failed")
 
@@ -189,12 +196,18 @@ func (s *Server) rediscoverLoop(ctx context.Context) {
 		if err != nil {
 			continue
 		}
-		next := *cur
-		next.auth = auth
-		if s.rt.CompareAndSwap(cur, &next) {
+		// under saveMu: a settings save loads, prepares and stores the runtime
+		// in one step and would otherwise overwrite this with auth=nil
+		s.saveMu.Lock()
+		if now := s.rt.Load(); now.auth == nil && now.set.OIDCIssuer == set.OIDCIssuer &&
+			now.set.OIDCClientID == set.OIDCClientID && now.set.OIDCClientSecret == set.OIDCClientSecret {
+			next := *now
+			next.auth = auth
+			s.rt.Store(&next)
 			s.log.Info("OIDC discovery succeeded")
-			s.rediscover.Store(false)
 		}
+		s.rediscover.Store(false)
+		s.saveMu.Unlock()
 	}
 }
 
@@ -228,8 +241,11 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 	}
 	var auth *oidcAuth
 	if cur := s.rt.Load(); cur != nil && set.OIDCIssuer != "" && cur.set.OIDCIssuer == set.OIDCIssuer &&
-		cur.set.OIDCClientID == set.OIDCClientID && cur.set.OIDCClientSecret == set.OIDCClientSecret {
-		auth = cur.auth // unchanged provider: no new discovery when another tab is saved
+		cur.set.OIDCClientID == set.OIDCClientID && cur.set.OIDCClientSecret == set.OIDCClientSecret &&
+		(cur.auth != nil || s.rediscover.Load()) {
+		// unchanged provider: no new discovery when another tab is saved (also
+		// while the startup discovery is still being retried)
+		auth = cur.auth
 	} else if set.OIDCIssuer != "" {
 		if !strings.HasPrefix(set.OIDCIssuer, "https://") || set.OIDCClientID == "" {
 			return nil, errors.New("OIDC needs an https issuer and a client ID")
@@ -241,7 +257,7 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 			return nil, fmt.Errorf("%w: %w", errDiscovery, err)
 		}
 	}
-	if auth == nil && !set.LocalLogin {
+	if auth == nil && !set.LocalLogin && (!s.rediscover.Load() || set.OIDCIssuer == "") {
 		return nil, errors.New("enable at least one login method: OIDC or local accounts")
 	}
 	return &runtimeState{set: set, auth: auth, branding: computeBranding(set), allow: allow, block: block}, nil
@@ -417,9 +433,9 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		return
 	}
 	doc, _ := json.Marshal(storedSettings{Settings: set, SecretEnc: enc})
-	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d",
+	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d allow=%q block=%q password=%+v",
 		set.OIDCIssuer, set.AllowedDomain, set.LocalLogin, set.StaleHours, set.WebhookURL != "", set.OIDCClientSecret != cur.OIDCClientSecret,
-		set.CompanyName, len(set.Logo))
+		set.CompanyName, len(set.Logo), set.ConsoleAllow, set.ConsoleBlock, set.Password)
 	err = s.auditAction(ctx, sess.Email, "settings.save", "server", detail, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
 		return err

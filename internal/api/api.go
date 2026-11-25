@@ -354,7 +354,9 @@ func (d Declaration) apply(p *Policy) error {
 			// SSO at every login, and keep that instead of turning into sessions
 			var keys map[string]json.RawMessage
 			if json.Unmarshal(d.Payload, &keys) == nil {
-				if _, legacy := keys["local_password"]; legacy {
+				// reverify_hours above 2160 only ever validated in session mode:
+				// such an item was written for sessions, not before 0.11
+				if _, legacy := keys["local_password"]; legacy && p.Login.ReverifyHours <= 2160 {
 					p.Login.Mode = "login"
 				}
 			}
@@ -401,8 +403,33 @@ func (d Declaration) apply(p *Policy) error {
 func (d Declaration) Token() string {
 	var buf bytes.Buffer
 	json.Compact(&buf, d.Payload)
-	h := sha256.Sum256([]byte(d.Type + "\x00" + d.Identifier + "\x00" + buf.String()))
+	h := sha256.Sum256([]byte(d.Type + "\x00" + d.Identifier + "\x00" + string(unescapeHTML(buf.Bytes()))))
 	return hex.EncodeToString(h[:8])
+}
+
+// unescapeHTML undoes the escapes json.Marshal adds for <, >, &, U+2028 and
+// U+2029. The same payload comes back escaped or not depending on who encoded
+// it last (the agent's state file, an older server), and the token must not
+// change with that.
+func unescapeHTML(b []byte) []byte {
+	repl := map[string]string{"003c": "<", "003e": ">", "0026": "&", "2028": "\u2028", "2029": "\u2029"}
+	out := make([]byte, 0, len(b))
+	for i := 0; i < len(b); i++ {
+		if b[i] == '\\' && i+1 < len(b) {
+			if b[i+1] == 'u' && i+6 <= len(b) {
+				if r, ok := repl[strings.ToLower(string(b[i+2:i+6]))]; ok {
+					out = append(out, r...)
+					i += 5
+					continue
+				}
+			}
+			out = append(out, b[i], b[i+1]) // any other escape, \\ included, stays as it is
+			i++
+			continue
+		}
+		out = append(out, b[i])
+	}
+	return out
 }
 
 // validPortRule checks "port/proto" and "low:high/proto" beyond the syntax:

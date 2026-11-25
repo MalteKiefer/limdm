@@ -10,7 +10,7 @@
   <a class="stat" href="/devices?status=stale"><div class="label"><span class="dot warn"></span>{{t "Stale"}}</div><div class="value">{{index .Counts "stale"}}</div><div class="hint">{{t "Silent for"}} {{.StaleHours}} {{t "h"}}</div></a>
   <a class="stat" href="/devices?status=pending"><div class="label"><span class="dot na"></span>{{t "Pending"}}</div><div class="value">{{index .Counts "pending"}}</div><div class="hint">{{t "No report yet"}}</div></a>
 </div>
-<div class="grid side-right">
+<div class="grid{{if ne .Sess.Role "helpdesk"}} side-right{{end}}">
   <div>
     <section class="card chart-card">
       <div class="card-head"><h2>{{t "Fleet status"}}</h2></div>

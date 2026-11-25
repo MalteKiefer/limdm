@@ -36,7 +36,9 @@ func migrate(ctx context.Context, db *pgxpool.Pool) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = 0; SELECT pg_advisory_xact_lock(7364)`); err != nil {
+	// no statement limit, but a bounded lock wait: the schema takes table
+	// locks until the commit, and a running instance must not stall behind them
+	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = '30s'; SELECT pg_advisory_xact_lock(7364)`); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, schema); err != nil {
@@ -387,9 +389,24 @@ func (s *Server) library(w http.ResponseWriter, r *http.Request, sess session) {
 		s.fail(w, err)
 		return
 	}
+	// items whose signature fails are not delivered; saving them again in
+	// the console signs them anew (items saved under 0.12.0 can be affected)
+	invalid := map[int64]bool{}
+	if rows, err := s.db.Query(r.Context(), `SELECT id, name, type, payload, signature FROM library_items`); err == nil {
+		for rows.Next() {
+			var id int64
+			var name, typ, sig string
+			var payload []byte
+			if rows.Scan(&id, &name, &typ, &payload, &sig) == nil && !itemSignatureOK(name, typ, payload, sig) {
+				invalid[id] = true
+			}
+		}
+		rows.Close()
+	}
 	type row struct {
 		api.LibraryItem
-		UsedBy []string
+		UsedBy  []string
+		Invalid bool
 	}
 	groups := map[string][]row{}
 	var types []string
@@ -397,7 +414,7 @@ func (s *Server) library(w http.ResponseWriter, r *http.Request, sess session) {
 		if _, ok := groups[it.Type]; !ok {
 			types = append(types, it.Type)
 		}
-		groups[it.Type] = append(groups[it.Type], row{it, use[it.ID]})
+		groups[it.Type] = append(groups[it.Type], row{it, use[it.ID], invalid[it.ID]})
 	}
 	label := func(t string) string {
 		if l, ok := typeLabels[t]; ok {

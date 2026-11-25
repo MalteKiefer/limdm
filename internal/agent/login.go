@@ -146,20 +146,21 @@ func (a *Agent) disableLogin() error {
 		return nil
 	}
 	err := a.removePAM()
-	if !deviceLocked() && !a.state.OfflineLocked {
-		for user := range readUsers() {
-			if passwordLocked(user) && !a.state.UserLocked[user] {
-				// fails for accounts that never had a password; those need a reset
-				if _, uerr := sh("usermod", "-U", user); uerr == nil {
-					a.event("local password of %s unlocked: desktop login switched off", user)
-				}
+	if deviceLocked() || a.state.OfflineLocked {
+		return err // the device lock decides now; the release follows after the unlock
+	}
+	for user := range readUsers() {
+		if passwordLocked(user) && !a.state.UserLocked[user] {
+			// fails for accounts that never had a password; those need a reset
+			if _, uerr := sh("usermod", "-U", user); uerr == nil {
+				a.event("local password of %s unlocked: desktop login switched off", user)
 			}
 		}
 	}
-	for _, f := range []string{loginFile, usersFile} {
-		if rerr := os.Remove(f); rerr != nil && !os.IsNotExist(rerr) {
-			err = errors.Join(err, rerr)
-		}
+	// users.json stays: when the login comes back, people removed meanwhile
+	// are still recognized as removed and locked
+	if rerr := os.Remove(loginFile); rerr != nil && !os.IsNotExist(rerr) {
+		err = errors.Join(err, rerr)
 	}
 	return err
 }
@@ -288,7 +289,9 @@ func insertPAMLine(content, line string) (string, error) {
 	})
 	for i, l := range lines {
 		f := strings.Fields(l)
-		if len(f) < 3 || f[0] != "auth" {
+		// "-auth" too: a line inserted after pam_systemd_home's
+		// [success=2] would shift its jump onto pam_faillock authfail
+		if len(f) < 3 || f[0] != "auth" && f[0] != "-auth" {
 			continue
 		}
 		if strings.Contains(l, "pam_env.so") || strings.Contains(l, "pam_faildelay.so") || strings.Contains(l, "pam_faillock.so") {

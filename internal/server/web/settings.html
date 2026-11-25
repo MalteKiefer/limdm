@@ -72,16 +72,16 @@
       <td class="delivery">{{if .LastOK}}{{if derefBool .LastOK}}<span class="pill ok">{{t "delivered"}}</span>{{else}}<span class="pill bad">{{t "failed"}}</span>{{end}} <span class="muted nowrap">{{fmtTime (derefTime .LastAt)}}</span>{{if not (derefBool .LastOK)}}<span class="sub">{{.LastError}}</span>{{end}}{{else}}<span class="muted">{{t "never"}}</span>{{end}}</td>
       {{if $admin}}<td class="row-actions">
         <details class="menu"><summary class="button secondary small icon-only" aria-label="{{t "Actions"}}">⋯</summary><div class="menu-list" role="menu">
-          <form method="post" action="/settings/notifications/{{.ID}}/test">{{template "csrf" $.CSRF}}<button role="menuitem" class="menu-item">{{t "Send test"}}</button></form>
-          <form method="post" action="/settings/notifications/{{.ID}}/{{if .Enabled}}disable{{else}}enable{{end}}">{{template "csrf" $.CSRF}}<button role="menuitem" class="menu-item">{{if .Enabled}}{{t "Switch off"}}{{else}}{{t "Switch on"}}{{end}}</button></form>
-          <form method="post" action="/settings/notifications/{{.ID}}/delete">{{template "csrf" $.CSRF}}<button role="menuitem" class="menu-item danger" data-confirm="{{t "Delete this notification channel?"}}">{{t "Delete"}}</button></form>
+          <form method="post" action="/settings/notifications/{{.ID}}/test">{{template "csrf" $.CSRF}}<input type="hidden" name="section" value="integrations"><button role="menuitem" class="menu-item">{{t "Send test"}}</button></form>
+          <form method="post" action="/settings/notifications/{{.ID}}/{{if .Enabled}}disable{{else}}enable{{end}}">{{template "csrf" $.CSRF}}<input type="hidden" name="section" value="integrations"><button role="menuitem" class="menu-item">{{if .Enabled}}{{t "Switch off"}}{{else}}{{t "Switch on"}}{{end}}</button></form>
+          <form method="post" action="/settings/notifications/{{.ID}}/delete">{{template "csrf" $.CSRF}}<input type="hidden" name="section" value="integrations"><button role="menuitem" class="menu-item danger" data-confirm="{{t "Delete this notification channel?"}}">{{t "Delete"}}</button></form>
         </div></details>
       </td>{{end}}</tr>{{end}}</tbody>
   </table></div>{{else}}<div class="empty-state"><strong>{{t "No channels yet."}}</strong><p class="muted">{{t "Connect Slack, Discord, email or a signed webhook to hear about non-compliant devices, tamper attempts and failed commands."}}</p></div>{{end}}
 </section>
 {{if $admin}}
 <form class="card channel-form" method="post" action="/settings/notifications">
-  {{template "csrf" .CSRF}}
+  {{template "csrf" .CSRF}}<input type="hidden" name="section" value="integrations">
   <div class="card-head stacked"><h2>{{t "Add channel"}}</h2><p class="muted">{{t "Send a test after adding the channel."}}</p></div>
   <fieldset class="kind-picker">
     <legend>{{t "Kind"}}</legend>

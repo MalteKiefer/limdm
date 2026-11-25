@@ -492,8 +492,9 @@ func sshdEffective(bin string) (map[string]map[string]string, error) {
 			}
 		}
 		label := ""
-		if spec != "" {
-			label = " for " + strings.TrimPrefix(strings.Split(spec, ",")[0], "user=")
+		if spec != "" { // user and client address: each Match context is its own entry
+			parts := strings.Split(spec, ",")
+			label = " for " + strings.TrimPrefix(parts[0], "user=") + " from " + strings.TrimPrefix(parts[2], "addr=")
 		}
 		res[label] = got
 	}
@@ -1023,13 +1024,23 @@ func runTimeSync(a *Agent) (string, string) {
 func fixTimeSync(a *Agent) error {
 	// an installed daemon is started instead of installing another one: on
 	// Debian, systemd-timesyncd conflicts with ntpsec and apt would remove it
-	for _, pkg := range []struct{ pkg, unit string }{{"ntpsec", "ntpsec"}, {"ntp", "ntp"}, {"openntpd", "openntpd"}} {
-		if a.host.isInstalled(pkg.pkg) {
-			return svc("enable-now", pkg.unit)
+	if !a.host.isInstalled("chrony") {
+		// unit names differ by distribution (Arch and Fedora: ntpd)
+		for _, d := range []struct {
+			pkg   string
+			units []string
+		}{{"ntpsec", []string{"ntpsec", "ntpd"}}, {"ntp", []string{"ntp", "ntpd"}}, {"openntpd", []string{"openntpd"}}} {
+			if a.host.isInstalled(d.pkg) {
+				for _, u := range d.units {
+					if svc("enable-now", u) == nil {
+						return nil
+					}
+				}
+			}
 		}
-	}
-	if a.host.family == "alpine" && a.host.isInstalled("busybox-openrc") {
-		return svc("enable-now", "ntpd") // busybox ntpd
+		if a.host.family == "alpine" {
+			return svc("enable-now", "ntpd") // busybox ntpd, always there
+		}
 	}
 	if a.host.isInstalled("chrony") {
 		unit := "chronyd"

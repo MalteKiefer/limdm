@@ -958,6 +958,13 @@ func TestCountDnfSecurity(t *testing.T) {
 	if countDnfLines(dnf4) != 2 || countDnfLines(dnf5) != 1 || countDnfLines("") != 0 {
 		t.Fatalf("dnf4 %d dnf5 %d", countDnfLines(dnf4), countDnfLines(dnf5))
 	}
+	if countDnfLines("FEDORA-EPEL-2024-5fd0ca6e30 Important/Sec. nginx-1.26-1.el9.x86_64\n") != 1 {
+		t.Error("EPEL advisory not counted")
+	}
+	checkUpdate := "\nkernel.x86_64    6.11.4-301.fc41    updates\nopenssl.x86_64   1:3.2.2-9.fc41     updates\nObsoleting Packages\n"
+	if countDnfPackages(checkUpdate) != 2 {
+		t.Errorf("check-update count %d", countDnfPackages(checkUpdate))
+	}
 }
 
 func TestDisableDeb822KeepsCommentStanzas(t *testing.T) {

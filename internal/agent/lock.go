@@ -51,6 +51,9 @@ func parsePeople(passwd string) []string {
 	return users
 }
 
+// lockAfterLost records a lock sent during lost mode.
+const lockAfterLost = stateDir + "/lock-after-lost"
+
 func readLockUsers() []string {
 	var users []string
 	_ = json.Unmarshal([]byte(readFile(deviceLockUsers)), &users)
@@ -59,7 +62,11 @@ func readLockUsers() []string {
 
 func (a *Agent) lockDevice() (string, error) {
 	if inLostMode() {
-		return "device is in lost mode and stays locked with its lost mode message", nil
+		// remembered: "found" ends lost mode into this lock, not into a free device
+		if err := os.WriteFile(lockAfterLost, nil, 0o600); err != nil {
+			return "", err
+		}
+		return "device is in lost mode; it stays locked after Found as well", nil
 	}
 	if _, err := writeIfChanged(nologinFile, nologinText, 0o644); err != nil {
 		return "", err
@@ -82,6 +89,7 @@ func (a *Agent) unlockDevice() (string, error) {
 			return "", err
 		}
 	}
+	_ = os.Remove(lockAfterLost)
 	released, err := a.releasePasswords()
 	return "logins allowed again, local passwords released: " + strings.Join(released, ", ") + "; users unlock their screen with their password", err
 }
@@ -116,8 +124,8 @@ func (a *Agent) releasePasswords() ([]string, error) {
 	var errs []error
 	var released, failed []string
 	for _, u := range readLockUsers() {
-		if !passwordLocked(u) {
-			continue
+		if !passwordLocked(u) || a.state.UserLocked[u] {
+			continue // locked by IT with user_lock: stays locked
 		}
 		if _, err := sh("usermod", "-U", u); err != nil {
 			errs = append(errs, err)
@@ -216,8 +224,10 @@ func endTTYs() []string {
 	return ended
 }
 
-// procTTYs maps the terminals (pts/N, ttyN) that processes of people run on
-// to the user, from the standard input of each process.
+// procTTYs maps the terminals that processes of people run on to the user,
+// from the standard input of each process, keeping graphical sessions: a
+// virtual console running a compositor or X is locked, not ended, and so are
+// the terminals inside it. Pseudo terminals end only when they belong to SSH.
 func procTTYs(people []string) map[string]string {
 	uids := map[uint32]string{}
 	for _, p := range people {
@@ -227,7 +237,11 @@ func procTTYs(people []string) map[string]string {
 			}
 		}
 	}
-	out := map[string]string{}
+	type ttyInfo struct {
+		user              string
+		graphical, remote bool
+	}
+	ttys := map[string]*ttyInfo{}
 	dirs, _ := filepath.Glob("/proc/[0-9]*")
 	for _, d := range dirs {
 		var st syscall.Stat_t
@@ -238,14 +252,41 @@ func procTTYs(people []string) map[string]string {
 		if !ok {
 			continue
 		}
-		if t, err := os.Readlink(d + "/fd/0"); err == nil {
-			if tty, ok := strings.CutPrefix(t, "/dev/"); ok && (strings.HasPrefix(tty, "pts/") || strings.HasPrefix(tty, "tty") && tty != "tty") {
-				out[tty] = name
+		t, err := os.Readlink(d + "/fd/0")
+		if err != nil {
+			continue
+		}
+		tty, ok := strings.CutPrefix(t, "/dev/")
+		if !ok || !strings.HasPrefix(tty, "pts/") && (!strings.HasPrefix(tty, "tty") || tty == "tty") {
+			continue
+		}
+		info := ttys[tty]
+		if info == nil {
+			info = &ttyInfo{user: name}
+			ttys[tty] = info
+		}
+		if graphicalComm[readTrim(d+"/comm")] {
+			info.graphical = true
+		}
+		if f := strings.Fields(readFile(d + "/stat")); len(f) > 3 {
+			if strings.HasPrefix(readTrim("/proc/"+f[3]+"/comm"), "sshd") {
+				info.remote = true
 			}
+		}
+	}
+	out := map[string]string{}
+	for tty, info := range ttys {
+		if strings.HasPrefix(tty, "pts/") && info.remote || !strings.HasPrefix(tty, "pts/") && !info.graphical {
+			out[tty] = info.user
 		}
 	}
 	return out
 }
+
+// graphicalComm are compositors and X servers started from a console.
+var graphicalComm = map[string]bool{"sway": true, "Hyprland": true, "Xorg": true, "X": true, "xinit": true, "startx": true,
+	"weston": true, "labwc": true, "river": true, "wayfire": true, "niri": true, "cage": true, "gnome-shell": true,
+	"kwin_wayland": true, "startplasma-way": true, "startplasma-x11": true, "dwl": true, "hyprland": true}
 
 // lockSessions locks every graphical session: through logind first (the
 // desktop's own locker), then, where after a few seconds neither logind

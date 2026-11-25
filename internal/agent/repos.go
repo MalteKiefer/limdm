@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 )
 
 // Switching off package sources the agent does not manage. The original file
@@ -145,7 +144,7 @@ func (a *Agent) applyRepoDisable(files []string) error {
 		errs = append(errs, os.Remove(b))
 	}
 	if changed {
-		a.host.aptUpdated = time.Time{}
+		a.host.aptStale.Store(true)
 	}
 	return errors.Join(errs...)
 }

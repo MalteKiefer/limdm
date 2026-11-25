@@ -431,6 +431,8 @@ func (s *Server) scimGetUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) scimReplaceUser(w http.ResponseWriter, r *http.Request) {
+	s.scimMu.Lock() // see scimPatchUser: a PUT must not interleave with a PATCH
+	defer s.scimMu.Unlock()
 	var u scimUser
 	if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
 		scimErr(w, http.StatusBadRequest, "invalid JSON")
@@ -800,6 +802,8 @@ func (s *Server) scimGetGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) scimReplaceGroup(w http.ResponseWriter, r *http.Request) {
+	s.scimMu.Lock()
+	defer s.scimMu.Unlock()
 	var g scimGroup
 	if err := json.NewDecoder(r.Body).Decode(&g); err != nil {
 		scimErr(w, http.StatusBadRequest, "invalid JSON")

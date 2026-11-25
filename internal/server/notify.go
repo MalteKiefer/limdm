@@ -208,9 +208,19 @@ func proxyChecked(req *http.Request) (*url.URL, error) {
 	if u == nil || err != nil {
 		return u, err
 	}
-	ips, err := net.DefaultResolver.LookupIP(req.Context(), "ip", req.URL.Hostname())
+	host := req.URL.Hostname()
+	if ip := net.ParseIP(host); ip != nil {
+		if !targetAllowed(ip) {
+			return nil, fmt.Errorf("notification target %s is not allowed", host)
+		}
+		return u, nil
+	}
+	ips, err := net.DefaultResolver.LookupIP(req.Context(), "ip", host)
 	if err != nil {
-		return nil, err
+		// egress only through the proxy, without outside DNS on this host: the
+		// proxy resolves and enforces its own rules (channel URLs are set by
+		// admins only)
+		return u, nil //nolint:nilerr // see above
 	}
 	for _, ip := range ips {
 		if !targetAllowed(ip) {
@@ -220,9 +230,19 @@ func proxyChecked(req *http.Request) (*url.URL, error) {
 	return u, nil
 }
 
+// proxyAddr is the host:port the transport dials for proxy p (the scheme's
+// default port when the URL names none).
+func proxyAddr(p *url.URL) string {
+	port := p.Port()
+	if port == "" {
+		port = map[string]string{"http": "80", "https": "443", "socks5": "1080", "socks5h": "1080"}[p.Scheme]
+	}
+	return net.JoinHostPort(p.Hostname(), port)
+}
+
 // notifyDial dials the target through safeDialer, a configured proxy directly.
 func notifyDial(ctx context.Context, network, addr string) (net.Conn, error) {
-	if p, _ := http.ProxyFromEnvironment(&http.Request{URL: &url.URL{Scheme: "https", Host: "limdm.invalid"}}); p != nil && p.Host == addr {
+	if p, _ := http.ProxyFromEnvironment(&http.Request{URL: &url.URL{Scheme: "https", Host: "limdm.invalid"}}); p != nil && proxyAddr(p) == addr {
 		return (&net.Dialer{Timeout: 15 * time.Second}).DialContext(ctx, network, addr)
 	}
 	return safeDialer.DialContext(ctx, network, addr)

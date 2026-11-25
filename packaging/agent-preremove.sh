@@ -12,10 +12,17 @@ esac
 release=/var/lib/limdm/uninstall-allowed
 if [ ! -f "$release" ] || [ $(( $(date +%s) - $(stat -c %Y "$release") )) -gt 3600 ]; then
     limdm-agent tamper-report "package removal attempted without release from the console" >/dev/null 2>&1 || true
-    echo "LiMDM: removal refused. Ask IT to allow the uninstall for this device in the console." >&2
-    exit 1
+    if command -v pacman >/dev/null 2>&1; then
+        # pacman ignores the exit code of this hook and removes the package
+        # anyway: report it, then clean up so no PAM line points to a removed binary
+        echo "LiMDM: removal without release from the console was reported to IT." >&2
+    else
+        echo "LiMDM: removal refused. Ask IT to allow the uninstall for this device in the console." >&2
+        exit 1
+    fi
+else
+    limdm-agent tamper-report "package removed with release from the console" >/dev/null 2>&1 || true
 fi
-limdm-agent tamper-report "package removed with release from the console" >/dev/null 2>&1 || true
 if ! [ -d /run/systemd/system ] && command -v rc-service >/dev/null 2>&1; then
     # OpenRC (Alpine)
     rc-service limdm-agent stop >/dev/null 2>&1 || true

@@ -52,7 +52,7 @@
         <label>{{t "Components"}}<input name="deb_repo_components" value="{{.DebRepo.Components}}" placeholder="main" spellcheck="false"></label>
       </div>
       <label>{{t "Debian signing key"}}<textarea name="deb_repo_key" rows="3" spellcheck="false" class="mono">{{.DebRepo.Key}}</textarea><small class="field-hint">{{t "ASCII armored public key"}}</small></label>
-      <label>{{t "Fedora repository URL"}}<input name="rpm_repo_url" value="{{.RpmRepo.URL}}" type="url" pattern="https://.*" placeholder="https://repo.example.com/rpm/$basearch" spellcheck="false"><small class="field-hint">{{t "Baseurl, $basearch allowed"}}</small></label>
+      <label>{{t "Fedora repository URL"}}<input name="rpm_repo_url" value="{{.RpmRepo.URL}}" type="url" pattern="https://.*" placeholder="https://repo.example.com/rpm/$basearch" spellcheck="false"><small class="field-hint"><code>baseurl</code>, {{t "$basearch allowed"}}</small></label>
       <label>{{t "Fedora signing key"}}<textarea name="rpm_repo_key" rows="3" spellcheck="false" class="mono">{{.RpmRepo.Key}}</textarea><small class="field-hint">{{t "ASCII armored public key"}}</small></label>
       <label class="check"><input type="checkbox" name="rpm_repo_signed_metadata" {{if .RpmRepo.SignedMetadata}}checked{{end}}> {{t "The repository signs its metadata, not each package"}}</label>
     </details>

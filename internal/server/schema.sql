@@ -392,7 +392,7 @@ CREATE TRIGGER dir_users_previous_email BEFORE UPDATE OF email ON dir_users
 CREATE OR REPLACE FUNCTION dir_users_tombstone() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN
-        INSERT INTO dir_tombstones(email) SELECT e FROM unnest(array_append(OLD.previous_emails, lower(OLD.email))) e
+        INSERT INTO dir_tombstones(email) SELECT DISTINCT e FROM unnest(array_append(OLD.previous_emails, lower(OLD.email))) e
             ON CONFLICT (email) DO UPDATE SET removed_at = now();
         RETURN OLD;
     END IF;

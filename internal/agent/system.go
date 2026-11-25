@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -29,8 +30,9 @@ type host struct {
 
 	// pkgMu runs package manager calls one at a time: catalog installs run
 	// in the background next to the check in's own installs and upgrades
-	pkgMu   sync.Mutex
-	cacheMu sync.Mutex // guards pkgs
+	pkgMu    sync.Mutex
+	cacheMu  sync.Mutex  // guards pkgs
+	aptStale atomic.Bool // new sources: the next install refreshes the lists (set without pkgMu)
 
 	aptUpdated time.Time
 	pending    pendingCache
@@ -134,6 +136,9 @@ func run(timeout time.Duration, name string, args ...string) (string, error) {
 	// open; without a bound, CombinedOutput would wait for it forever
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
+	if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
+		err = nil // exited fine; a background child it started keeps the output open
+	}
 	if err != nil {
 		return string(out), fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, lastLines(string(out), 5))
 	}
@@ -271,10 +276,14 @@ func (h *host) isInstalled(name string) bool {
 }
 
 func (h *host) aptUpdate() error {
-	if h.family != "debian" || time.Since(h.aptUpdated) < time.Hour {
+	if h.family != "debian" {
+		return nil
+	}
+	if !h.aptStale.Swap(false) && time.Since(h.aptUpdated) < time.Hour {
 		return nil
 	}
 	if _, err := run(10*time.Minute, "apt-get", "update", "-qq"); err != nil {
+		h.aptStale.Store(true)
 		return err
 	}
 	h.aptUpdated = time.Now()
@@ -282,6 +291,9 @@ func (h *host) aptUpdate() error {
 }
 
 func (h *host) install(pkgs ...string) error {
+	if len(pkgs) == 0 {
+		return nil // nothing to do: do not wait behind a running catalog install
+	}
 	h.pkgMu.Lock()
 	defer h.pkgMu.Unlock()
 	return h.installLocked(pkgs...)
@@ -312,11 +324,11 @@ func (h *host) installLocked(pkgs ...string) error {
 }
 
 func (h *host) remove(pkgs ...string) error {
-	h.pkgMu.Lock()
-	defer h.pkgMu.Unlock()
 	if len(pkgs) == 0 {
 		return nil
 	}
+	h.pkgMu.Lock()
+	defer h.pkgMu.Unlock()
 	if h.family == "debian" {
 		_, err := run(30*time.Minute, "apt-get", append([]string{"remove", "-y", "-q", "-o", "DPkg::Lock::Timeout=300", "--"}, pkgs...)...)
 		return err
@@ -440,7 +452,7 @@ func (h *host) pendingUpdates() (all, security int, err error) {
 	if cerr != nil && (!errors.As(cerr, &ee) || ee.ExitCode() != 100) {
 		return 0, 0, cerr
 	}
-	all = countDnfLines(out)
+	all = countDnfPackages(out)
 	sec, serr := run(10*time.Minute, "dnf", "-q", "updateinfo", "list", "--security")
 	if serr != nil {
 		return all, 0, serr
@@ -464,7 +476,18 @@ func countAptPending(out string) (all, security int) {
 // advisoryRe matches the advisory ID that starts every package line of
 // "dnf updateinfo list" (dnf4: ID, severity, package) and of dnf5's
 // "advisory list" table (ID, type, severity, package, issued).
-var advisoryRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[0-9]{4}[:-][0-9A-Za-z]+`)
+var advisoryRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*(-[A-Z][A-Z0-9]*)*-[0-9]{4}[:-][0-9A-Za-z]+`) // FEDORA-, FEDORA-EPEL-, RHSA- …
+
+// countDnfPackages counts "name.arch version repo" lines of dnf check-update.
+func countDnfPackages(out string) int {
+	n := 0
+	for _, line := range strings.Split(out, "\n") {
+		if f := strings.Fields(line); len(f) == 3 && strings.Contains(f[0], ".") && !strings.HasSuffix(line, ":") {
+			n++
+		}
+	}
+	return n
+}
 
 func countDnfLines(out string) int {
 	n := 0
@@ -612,6 +635,9 @@ func commandWithStdin(in string) func(name string, args ...string) (string, erro
 		cmd.Stdin = strings.NewReader(in)
 		cmd.WaitDelay = 5 * time.Second
 		out, err := cmd.CombinedOutput()
+		if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
+			err = nil
+		}
 		return string(out), err
 	}
 }
