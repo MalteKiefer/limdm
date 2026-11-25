@@ -1,0 +1,24 @@
+# /etc/crowdsec/parsers/s01-parse/limdm-logs.yaml
+# Security events of limdm-server: failed sign ins, rejected enrollments
+# (JSON log lines) and failed TLS handshakes on the agent port (Go log line).
+name: limdm/limdm-logs
+description: "Parse LiMDM server security events"
+filter: "evt.Parsed.program == 'limdm-server'"
+onsuccess: next_stage
+nodes:
+  - filter: "JsonExtract(evt.Parsed.message, 'msg') in ['local login failed', 'oidc login failed', 'enroll rejected']"
+    statics:
+      - meta: log_type
+        value: limdm_auth_failed
+      - meta: source_ip
+        expression: "JsonExtract(evt.Parsed.message, 'remote')"
+      - meta: user
+        expression: "JsonExtract(evt.Parsed.message, 'user')"
+  - grok:
+      pattern: 'http: TLS handshake error from \[?%{IP:source_ip}\]?:%{INT}:'
+      apply_on: message
+    statics:
+      - meta: log_type
+        value: limdm_tls_failed
+      - meta: source_ip
+        expression: "evt.Parsed.source_ip"

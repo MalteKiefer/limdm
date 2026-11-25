@@ -1,0 +1,25 @@
+# /etc/fail2ban/jail.d/limdm.local
+# LiMDM already locks accounts after 5 wrong passwords and rate limits sign
+# ins per address; these jails stop the source at the firewall as well.
+[DEFAULT]
+# your office or VPN egress addresses, so a typo never locks out IT
+ignoreip = 127.0.0.1/8 ::1
+
+[limdm]
+enabled  = true
+backend  = systemd
+filter   = limdm
+port     = http,https
+maxretry = 5
+findtime = 10m
+bantime  = 1h
+bantime.increment = true
+
+[limdm-tls]
+enabled  = true
+backend  = systemd
+filter   = limdm-tls
+port     = 8444
+maxretry = 30
+findtime = 10m
+bantime  = 30m

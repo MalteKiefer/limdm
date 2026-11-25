@@ -1,0 +1,6 @@
+# /etc/crowdsec/acquis.d/limdm.yaml
+source: journalctl
+journalctl_filter:
+  - "_SYSTEMD_UNIT=limdm-server.service"
+labels:
+  type: syslog

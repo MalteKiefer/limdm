@@ -420,7 +420,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRow(ctx, `UPDATE enroll_tokens SET uses_left = uses_left - 1
 		WHERE token_hash=$1 AND uses_left > 0 AND expires_at > now() RETURNING blueprint_id`, sha(req.Token)).Scan(&blueprintID)
 	if err != nil {
-		s.log.Warn("enroll rejected", "remote", r.RemoteAddr)
+		s.log.Warn("enroll rejected", "remote", clientIP(r))
 		http.Error(w, "invalid or expired token", http.StatusForbidden)
 		return
 	}
