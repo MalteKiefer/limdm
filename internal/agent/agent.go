@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -620,10 +621,8 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 	case "update":
 		out, err = a.host.upgrade(false)
 		a.state.LastUpdateRun = time.Now()
-	case "reboot":
-		out, err = sh("shutdown", "-r", "+1", "LiMDM: reboot requested by administrator in 1 minute")
-	case "shutdown":
-		out, err = sh("shutdown", "-h", "+1", "LiMDM: shutdown requested by administrator in 1 minute")
+	case "reboot", "shutdown":
+		out, err = powerAction(c.Type, c.Payload)
 	case "lock":
 		out, err = lockDevice()
 	case "unlock":
@@ -893,4 +892,25 @@ func EnrollFromConfig(path string) error {
 		return err
 	}
 	return os.Remove(path)
+}
+
+// powerAction reboots or shuts down after payload minutes (0 = now, empty = 1 for
+// commands queued by older servers).
+func powerAction(typ, payload string) (string, error) {
+	m := 1
+	if payload != "" {
+		var err error
+		if m, err = strconv.Atoi(payload); err != nil || m < 0 || m > 1440 {
+			return "", errors.New("delay must be 0..1440 minutes")
+		}
+	}
+	flag, word := "-r", "reboot"
+	if typ == "shutdown" {
+		flag, word = "-h", "shutdown"
+	}
+	when, text := "now", "LiMDM: "+word+" requested by administrator now"
+	if m > 0 {
+		when, text = "+"+strconv.Itoa(m), fmt.Sprintf("LiMDM: %s requested by administrator in %d minutes", word, m)
+	}
+	return sh("shutdown", flag, when, text)
 }

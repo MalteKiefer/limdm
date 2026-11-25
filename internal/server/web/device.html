@@ -13,11 +13,22 @@
     <details class="menu">
       <summary class="button secondary">{{t "Actions"}}</summary>
       <div class="menu-list" role="menu">
-        {{range $a := (list "update" "reboot" "shutdown" "lock" "unlock")}}
-        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="{{$a}}">
-          <button role="menuitem" class="menu-item{{if or (eq $a "shutdown") (eq $a "lock")}} warn{{end}}">{{actionLabel $a}}</button></form>
-        {{end}}
-        <a role="menuitem" class="menu-item" href="/devices/{{$id}}?tab=commands">{{t "Run script…"}}</a>
+        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="update">
+          <button role="menuitem" class="menu-item">{{t "Install all updates"}}</button></form>
+        <div class="menu-sep"></div>
+        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="reboot"><input type="hidden" name="minutes" value="0">
+          <button role="menuitem" class="menu-item">{{t "Reboot now"}}</button></form>
+        <a role="menuitem" class="menu-item" href="/devices/{{$id}}?tab=commands&amp;type=reboot">{{t "Reboot later…"}}</a>
+        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="shutdown"><input type="hidden" name="minutes" value="0">
+          <button role="menuitem" class="menu-item warn">{{t "Shut down now"}}</button></form>
+        <a role="menuitem" class="menu-item warn" href="/devices/{{$id}}?tab=commands&amp;type=shutdown">{{t "Shut down later…"}}</a>
+        <div class="menu-sep"></div>
+        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="lock">
+          <button role="menuitem" class="menu-item warn">{{t "Lock device"}}</button></form>
+        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="unlock">
+          <button role="menuitem" class="menu-item">{{t "Unlock device"}}</button></form>
+        <div class="menu-sep"></div>
+        <a role="menuitem" class="menu-item" href="/devices/{{$id}}?tab=commands&amp;type=script">{{t "Run script…"}}</a>
       </div>
     </details>
   </div>
@@ -44,11 +55,13 @@
     <h2>{{t "System"}}</h2>
     <dl class="kv">
       <dt>{{t "Operating system"}}</dt><dd>{{.Inv.OSName}}{{if .Inv.OSCodename}} <span class="muted">({{.Inv.OSCodename}})</span>{{end}}</dd>
+      <dt>{{t "Version"}}</dt><dd>{{.Inv.OSVersion}}</dd>
       <dt>{{t "Kernel"}}</dt><dd class="mono">{{.Inv.Kernel}}</dd>
       <dt>{{t "Architecture"}}</dt><dd>{{.Inv.Arch}}</dd>
       <dt>{{t "Desktop"}}</dt><dd>{{if .Inv.Desktop}}{{.Inv.Desktop}}{{if .Inv.DisplayManager}} <span class="muted">{{t "via"}} {{.Inv.DisplayManager}}</span>{{end}}{{else}}<span class="muted">{{t "none (server)"}}</span>{{end}}</dd>
       <dt>{{t "Hardware"}}</dt><dd>{{.Inv.Vendor}} {{.Inv.Model}}</dd>
       <dt>{{t "Serial number"}}</dt><dd class="mono">{{.Inv.Serial}}</dd>
+      <dt>{{t "Logged in now:"}}</dt><dd>{{range .Inv.Users}}<span class="tag">{{.}}</span>{{else}}<span class="muted">{{t "not collected (privacy)"}}</span>{{end}}</dd>
       <dt>{{t "Booted"}}</dt><dd>{{if .Inv.BootTime}}{{fmtTime (unix .Inv.BootTime)}}{{end}}</dd>
       <dt>{{t "Device ID"}}</dt><dd class="mono">{{.D.ID}}</dd>
       <dt>{{t "Enrolled"}}</dt><dd>{{fmtTime .Enrolled}}</dd>
@@ -122,37 +135,14 @@
     {{else}}<tr><td colspan="5" class="empty">{{t "No recovery key escrowed. Declare disk encryption recovery; the user is then asked on the desktop."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
-<section class="tablecard">
-  <div class="card-head"><h2>{{t "Network"}}</h2><span class="muted">{{t "addresses only with privacy option network_info"}}</span></div>
-  <div class="scroll"><table>
-    <thead><tr><th>{{t "Interface"}}</th><th>{{t "MAC"}}</th><th>{{t "Addresses"}}</th></tr></thead>
-    <tbody>{{range .Inv.Interfaces}}<tr><td class="mono">{{.Name}}</td><td class="mono">{{.MAC}}</td><td>{{range .IPs}}<span class="tag">{{.}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="3" class="empty">{{t "No interfaces reported."}}</td></tr>{{end}}</tbody>
-  </table></div>
-</section>
 {{end}}
 
 {{if eq .Tab "software"}}
-<div class="grid two">
-  <section class="card">
-    <h2>{{t "Operating system"}}</h2>
-    <dl class="kv">
-      <dt>{{t "Distribution"}}</dt><dd>{{.Inv.OSName}}</dd><dt>{{t "Version"}}</dt><dd>{{.Inv.OSVersion}} {{.Inv.OSCodename}}</dd>
-      <dt>{{t "Kernel"}}</dt><dd class="mono">{{.Inv.Kernel}}</dd>
-      <dt>{{t "Desktop"}}</dt><dd>{{if .Inv.Desktop}}{{.Inv.Desktop}}{{else}}<span class="muted">{{t "none"}}</span>{{end}}</dd>
-      <dt>{{t "Display manager"}}</dt><dd>{{if .Inv.DisplayManager}}{{.Inv.DisplayManager}}{{else}}<span class="muted">{{t "none"}}</span>{{end}}</dd>
-    </dl>
-  </section>
-  <section class="tablecard">
-    <div class="card-head"><h2>{{t "Accounts"}}</h2><span class="muted">{{len .Inv.Accounts}} {{t "login accounts"}}</span></div>
-    <div class="scroll"><table>
-      <thead><tr><th>{{t "Account"}}</th><th class="num">{{t "UID"}}</th><th>{{t "Shell"}}</th><th>{{t "Rights"}}</th><th>{{t "SSO"}}</th></tr></thead>
-      <tbody>{{range .Inv.Accounts}}<tr><td class="mono">{{.Name}}</td><td class="num">{{.UID}}</td><td class="mono muted">{{.Shell}}</td>
-        <td>{{if .Admin}}<span class="pill warn">{{t "admin"}}</span>{{else}}<span class="pill">{{t "user"}}</span>{{end}}</td>
-        <td>{{if .SSO}}{{if .LastSSO}}{{t "confirmed"}} {{ago .LastSSO}}{{else}}<span class="muted">{{t "never confirmed"}}</span>{{end}}{{if .PwdLocked}} <span class="pill warn">{{t "local password locked"}}</span>{{end}}{{else}}<span class="muted">{{t "local account"}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="5" class="empty">{{t "No account data reported."}}</td></tr>{{end}}</tbody>
-    </table></div>
-    <div class="empty">{{t "Logged in now:"}} {{range .Inv.Users}}<span class="tag">{{.}}</span>{{else}}{{t "not collected (privacy)"}}{{end}}</div>
-  </section>
-</div>
+<nav class="subtabs" aria-label="{{t "Software"}}">
+  <a href="/devices/{{$id}}?tab=software&amp;sub=packages" {{if eq .Sub "packages"}}class="on" aria-current="page"{{end}}>{{t "Packages"}} <span class="n">{{.PackageCount}}</span></a>
+  <a href="/devices/{{$id}}?tab=software&amp;sub=sources" {{if eq .Sub "sources"}}class="on" aria-current="page"{{end}}>{{t "Package sources"}} <span class="n">{{len .Inv.Repos}}</span></a>
+</nav>
+{{if eq .Sub "sources"}}
 <section class="tablecard">
   <div class="card-head"><h2>{{t "Package sources"}}</h2><span class="muted">{{len .Inv.Repos}} {{t "configured"}}</span></div>
   <div class="scroll"><table>
@@ -163,10 +153,11 @@
       {{if eq $.Sess.Role "admin"}}<td class="row-actions">{{if hasPrefix .Name "limdm-"}}<span class="muted">{{t "managed"}}</span>{{else}}<a href="/library/new?from={{$id}}&amp;file={{.File}}&amp;mode=edit">{{t "Edit"}}</a> <a href="/library/new?from={{$id}}&amp;file={{.File}}&amp;mode=disable">{{t "Disable"}}</a>{{end}}</td>{{end}}</tr>{{else}}<tr><td colspan="6" class="empty">{{t "No package sources reported."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
+{{else}}
 <section class="tablecard">
   <div class="card-head"><h2>{{t "Packages"}}</h2><span class="muted">{{.PackageCount}} {{t "installed"}}</span></div>
   <form class="filters" method="get" action="/devices/{{$id}}">
-    <input type="hidden" name="tab" value="software">
+    <input type="hidden" name="tab" value="software"><input type="hidden" name="sub" value="packages">
     <input type="search" name="q" value="{{.PkgQ}}" placeholder="{{t "Filter by package name"}}" aria-label="{{t "Filter packages"}}">
     <button class="secondary">{{t "Filter"}}</button>
   </form>
@@ -176,11 +167,80 @@
   </table></div>
   {{if gt .PkgPages 1}}<nav class="pager" aria-label="{{t "Package pages"}}">
     <span class="muted">{{.PkgFrom}}–{{.PkgTo}} {{t "of"}} {{.PkgMatched}}</span>
-    {{if gt .PkgPage 1}}<a class="button secondary" href="/devices/{{$id}}?tab=software&amp;q={{.PkgQ}}&amp;page={{dec .PkgPage}}">{{t "Previous"}}</a>{{end}}
+    {{if gt .PkgPage 1}}<a class="button secondary" href="/devices/{{$id}}?tab=software&amp;sub=packages&amp;q={{.PkgQ}}&amp;page={{dec .PkgPage}}">{{t "Previous"}}</a>{{end}}
     <span>{{t "Page"}} {{.PkgPage}} {{t "of"}} {{.PkgPages}}</span>
-    {{if lt .PkgPage .PkgPages}}<a class="button secondary" href="/devices/{{$id}}?tab=software&amp;q={{.PkgQ}}&amp;page={{inc .PkgPage}}">{{t "Next"}}</a>{{end}}
+    {{if lt .PkgPage .PkgPages}}<a class="button secondary" href="/devices/{{$id}}?tab=software&amp;sub=packages&amp;q={{.PkgQ}}&amp;page={{inc .PkgPage}}">{{t "Next"}}</a>{{end}}
   </nav>{{end}}
 </section>
+{{end}}
+{{end}}
+
+{{if eq .Tab "network"}}
+{{if not .NetworkInfo}}<div class="notice">{{t "Addresses, DNS and routes are collected only when the privacy item allows network_info (Library, Privacy)."}}</div>{{end}}
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "Interfaces"}}</h2><span class="muted">{{len .Inv.Interfaces}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Interface"}}</th><th>{{t "Type"}}</th><th>{{t "State"}}</th><th>{{t "Addresses"}}</th><th>{{t "MAC"}}</th><th class="num">{{t "MTU"}}</th></tr></thead>
+    <tbody>{{range .Inv.Interfaces}}<tr><td class="mono">{{.Name}}{{if .VPN}} <span class="pill accent">{{.VPN}}</span>{{end}}</td><td>{{if .Kind}}{{t .Kind}}{{end}}</td>
+      <td>{{if eq .State "up"}}<span class="pill ok">{{t "up"}}</span>{{else if eq .State "down"}}<span class="pill">{{t "down"}}</span>{{else if .State}}<span class="pill">{{.State}}</span>{{end}}</td>
+      <td>{{range .IPs}}<span class="tag mono">{{.}}</span>{{end}}</td><td class="mono muted">{{.MAC}}</td><td class="num">{{if .MTU}}{{.MTU}}{{end}}</td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No interfaces reported."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "VPN"}}</h2><span class="muted">{{t "WireGuard, OpenVPN, Tailscale, NetBird, Mullvad, NordVPN, ZeroTier, IPsec"}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Client"}}</th><th>{{t "Service"}}</th><th>{{t "Interface"}}</th><th>{{t "State"}}</th></tr></thead>
+    <tbody>{{range .Inv.VPNs}}<tr><td>{{.Name}}</td><td class="mono muted">{{.Service}}</td><td class="mono">{{.Interface}}</td><td>{{if .Active}}<span class="pill ok">{{t "active"}}</span>{{else}}<span class="pill">{{t "inactive"}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="4" class="empty">{{t "No VPN client found."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+<div class="grid two">
+  <section class="tablecard">
+    <div class="card-head"><h2>{{t "DNS"}}</h2></div>
+    <div class="scroll"><table>
+      <thead><tr><th>{{t "Scope"}}</th><th>{{t "Servers"}}</th><th>{{t "Search domains"}}</th></tr></thead>
+      <tbody>{{range .Inv.DNS}}<tr><td class="mono">{{.Scope}}</td><td>{{range .Servers}}<span class="tag mono">{{.}}</span>{{end}}</td><td>{{range .Domains}}<span class="tag mono">{{.}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="3" class="empty">{{t "Not collected on this device."}}</td></tr>{{end}}</tbody>
+    </table></div>
+  </section>
+  <section class="tablecard">
+    <div class="card-head"><h2>{{t "Default gateways"}}</h2></div>
+    <div class="scroll"><table>
+      <thead><tr><th>{{t "Family"}}</th><th>{{t "Gateway"}}</th><th>{{t "Interface"}}</th><th class="num">{{t "Metric"}}</th></tr></thead>
+      <tbody>{{range .Inv.Routes}}{{if eq .Dst "default"}}<tr><td>{{if eq .Family "inet6"}}IPv6{{else}}IPv4{{end}}</td><td class="mono">{{.Gateway}}</td><td class="mono">{{.Dev}}</td><td class="num">{{.Metric}}</td></tr>{{end}}{{else}}<tr><td colspan="4" class="empty">{{t "Not collected on this device."}}</td></tr>{{end}}</tbody>
+    </table></div>
+  </section>
+</div>
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "Routes"}}</h2><span class="muted">{{len .Inv.Routes}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Destination"}}</th><th>{{t "Gateway"}}</th><th>{{t "Interface"}}</th><th>{{t "Protocol"}}</th><th class="num">{{t "Metric"}}</th></tr></thead>
+    <tbody>{{range .Inv.Routes}}<tr><td class="mono">{{.Dst}}</td><td class="mono">{{.Gateway}}</td><td class="mono">{{.Dev}}</td><td class="muted">{{.Proto}}</td><td class="num">{{if .Metric}}{{.Metric}}{{end}}</td></tr>{{else}}<tr><td colspan="5" class="empty">{{t "Not collected on this device."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+{{end}}
+
+{{if eq .Tab "accounts"}}
+<nav class="subtabs" aria-label="{{t "Accounts"}}">
+  <a href="/devices/{{$id}}?tab=accounts&amp;sub=users{{if .ShowSystem}}&amp;system=1{{end}}" {{if eq .Sub "users"}}class="on" aria-current="page"{{end}}>{{t "Users"}}</a>
+  <a href="/devices/{{$id}}?tab=accounts&amp;sub=groups{{if .ShowSystem}}&amp;system=1{{end}}" {{if eq .Sub "groups"}}class="on" aria-current="page"{{end}}>{{t "Groups"}}</a>
+  <span class="spacer"></span>
+  {{if .ShowSystem}}<a class="toggle" href="/devices/{{$id}}?tab=accounts&amp;sub={{.Sub}}">{{t "Hide system accounts"}}</a>{{else}}<a class="toggle" href="/devices/{{$id}}?tab=accounts&amp;sub={{.Sub}}&amp;system=1">{{t "Show system accounts"}}</a>{{end}}
+</nav>
+<p class="muted">{{t "Resolved through NSS: local files and directory sources such as sssd, LDAP, winbind, systemd-homed and DynamicUser. Sources that disable enumeration only list known entries."}}</p>
+{{if eq .Sub "groups"}}
+<section class="tablecard"><div class="scroll"><table>
+  <thead><tr><th>{{t "Group"}}</th><th class="num">GID</th><th>{{t "Members"}}</th><th>{{t "Source"}}</th></tr></thead>
+  <tbody>{{range .Inv.Groups}}{{if or $.ShowSystem (not .System) (len .Members)}}<tr><td class="mono">{{.Name}}{{if .System}} <span class="pill">{{t "system"}}</span>{{end}}</td><td class="num">{{.GID}}</td>
+    <td>{{range .Members}}<span class="tag mono">{{.}}</span>{{end}}</td><td>{{if eq .Source "local"}}{{t "local"}}{{else}}<span class="pill accent">{{t "directory / NSS"}}</span>{{end}}</td></tr>{{end}}{{else}}<tr><td colspan="4" class="empty">{{t "No account data reported."}}</td></tr>{{end}}</tbody>
+</table></div></section>
+{{else}}
+<section class="tablecard"><div class="scroll"><table>
+  <thead><tr><th>{{t "Account"}}</th><th class="num">UID</th><th>{{t "Name"}}</th><th>{{t "Home"}}</th><th>{{t "Shell"}}</th><th>{{t "Source"}}</th><th>{{t "Rights"}}</th><th>{{t "SSO"}}</th></tr></thead>
+  <tbody>{{range .Inv.Accounts}}{{if or $.ShowSystem (not .System)}}<tr><td class="mono">{{.Name}}</td><td class="num">{{.UID}}</td><td>{{.Gecos}}</td><td class="mono muted">{{.Home}}</td><td class="mono muted">{{.Shell}}</td>
+    <td>{{if eq .Source "nss"}}<span class="pill accent">{{t "directory / NSS"}}</span>{{else}}{{t "local"}}{{end}}{{if .System}} <span class="pill">{{t "system"}}</span>{{end}}</td>
+    <td>{{if .Admin}}<span class="pill warn">{{t "admin"}}</span>{{else}}<span class="pill">{{t "user"}}</span>{{end}}</td>
+    <td>{{if .SSO}}{{if .LastSSO}}{{t "confirmed"}} {{ago .LastSSO}}{{else}}<span class="muted">{{t "never confirmed"}}</span>{{end}}{{if .PwdLocked}} <span class="pill warn">{{t "local password locked"}}</span>{{end}}{{else}}<span class="muted">–</span>{{end}}</td></tr>{{end}}{{else}}<tr><td colspan="8" class="empty">{{t "No account data reported."}}</td></tr>{{end}}</tbody>
+</table></div></section>
+{{end}}
 {{end}}
 
 {{if eq .Tab "compliance"}}
@@ -216,7 +276,8 @@
   <form method="post" action="/devices/{{$id}}/command">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <div class="inline">
-      <label>{{t "Command"}}<select name="type">{{range .CommandTypes}}<option value="{{.}}">{{actionLabel .}}</option>{{end}}</select></label>
+      <label>{{t "Command"}}<select name="type">{{$pre := .PreType}}{{range .CommandTypes}}<option value="{{.}}" {{if eq . $pre}}selected{{end}}>{{actionLabel .}}</option>{{end}}</select></label>
+      <label class="delay-only">{{t "Delay in minutes"}} <span class="hint">{{t "0 = now"}}</span><input name="minutes" type="number" min="0" max="1440" value="5"></label>
     </div>
     <label class="script-only">{{t "Script"}} <span class="hint">{{t "runs as root, only if the device allows scripts"}}</span><textarea name="payload" rows="6" class="code" placeholder="#!/bin/sh"></textarea></label>
     <button>{{t "Send"}}</button>

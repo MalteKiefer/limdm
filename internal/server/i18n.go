@@ -288,4 +288,24 @@ var deCatalog = map[string]string{
 	// local password after SSO
 	"SSO": "SSO", "confirmed": "bestätigt", "never confirmed": "nie bestätigt", "local password locked": "lokales Passwort gesperrt",
 	"local account": "lokales Konto",
+	// power actions
+	"Reboot": "Neustart", "Shut down": "Herunterfahren", "Reboot now": "Jetzt neu starten", "Reboot later…": "Später neu starten…",
+	"Shut down now": "Jetzt herunterfahren", "Shut down later…": "Später herunterfahren…", "Delay in minutes": "Verzögerung in Minuten",
+	"0 = now": "0 = sofort",
+	// profile tabs
+	"language": "Sprache", "password": "Passwort", "authenticator": "Authenticator", "recovery": "Recovery Codes",
+	"Five wrong entries lock the account for 15 minutes.": "Fünf falsche Eingaben sperren das Konto für 15 Minuten.",
+	"New codes replace all previous ones.":                "Neue Codes ersetzen alle bisherigen.",
+	// network and accounts tabs
+	"network": "Netzwerk", "accounts": "Konten", "Software": "Software", "Interfaces": "Schnittstellen", "MTU": "MTU",
+	"up": "aktiv", "down": "inaktiv", "ethernet": "Ethernet", "wifi": "WLAN", "wireguard": "WireGuard", "tun": "Tunnel",
+	"bridge": "Bridge", "vlan": "VLAN", "bond": "Bond", "virtual": "virtuell", "VPN": "VPN",
+	"WireGuard, OpenVPN, Tailscale, NetBird, Mullvad, NordVPN, ZeroTier, IPsec": "WireGuard, OpenVPN, Tailscale, NetBird, Mullvad, NordVPN, ZeroTier, IPsec",
+	"Client": "Client", "Service": "Dienst", "No VPN client found.": "Kein VPN Client gefunden.", "Scope": "Bereich",
+	"Servers": "Server", "Search domains": "Suchdomänen", "Default gateways": "Standard Gateways", "Family": "Familie",
+	"Gateway": "Gateway", "Metric": "Metrik", "Routes": "Routen", "Destination": "Ziel", "Protocol": "Protokoll",
+	"Addresses, DNS and routes are collected only when the privacy item allows network_info (Library, Privacy).": "Adressen, DNS und Routen werden nur erfasst, wenn das Datenschutz Element network_info erlaubt (Bibliothek, Datenschutz).",
+	"Hide system accounts": "Systemkonten ausblenden", "Show system accounts": "Systemkonten anzeigen",
+	"Resolved through NSS: local files and directory sources such as sssd, LDAP, winbind, systemd-homed and DynamicUser. Sources that disable enumeration only list known entries.": "Über NSS aufgelöst: lokale Dateien und Verzeichnisquellen wie sssd, LDAP, winbind, systemd-homed und DynamicUser. Quellen ohne Aufzählung zeigen nur bekannte Einträge.",
+	"system": "System", "local": "lokal", "directory / NSS": "Verzeichnis / NSS", "Home": "Home",
 }

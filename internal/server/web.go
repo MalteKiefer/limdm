@@ -32,8 +32,9 @@ var pages = map[string]map[string]*template.Template{"en": parsePages("en"), "de
 func parsePages(lang string) map[string]*template.Template {
 	T := func(s string) string { return translate(lang, s) }
 	funcs := template.FuncMap{
-		"t":    T,
-		"lang": func() string { return lang },
+		"t":       T,
+		"lang":    func() string { return lang },
+		"version": func() string { return Version },
 		"ago": func(t *time.Time) string {
 			if t == nil {
 				return T("never")
@@ -63,8 +64,8 @@ func parsePages(lang string) map[string]*template.Template {
 			return t
 		},
 		"actionLabel": func(a string) string {
-			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot in 1 minute",
-				"shutdown": "Shut down in 1 minute", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script"}[a])
+			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot",
+				"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script"}[a])
 		},
 		"join":      strings.Join,
 		"hasPrefix": strings.HasPrefix,
@@ -484,7 +485,14 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		Reasons                        []string
 	}
 	tab := r.URL.Query().Get("tab")
-	if !slices.Contains([]string{"overview", "hardware", "software", "compliance", "declarations", "commands"}, tab) {
+	sub := r.URL.Query().Get("sub")
+	switch {
+	case tab == "software" && sub != "sources":
+		sub = "packages"
+	case tab == "accounts" && sub != "groups":
+		sub = "users"
+	}
+	if !slices.Contains([]string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"}, tab) {
 		tab = "overview"
 	}
 	pkgQ := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
@@ -531,9 +539,10 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
 		"CommandTypes": api.CommandTypes,
-		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab,
+		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
 		"Resolved": res, "Tags": strings.Join(tags, ", "), "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery,
-		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "software", "compliance", "declarations", "commands"},
+		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"},
+		"Sub": sub, "ShowSystem": r.URL.Query().Get("system") == "1", "NetworkInfo": len(data.Inv.DNS)+len(data.Inv.Routes) > 0 || hasIPs(data.Inv.Interfaces),
 	})
 }
 
@@ -543,9 +552,22 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 		http.Error(w, "invalid command", http.StatusBadRequest)
 		return
 	}
-	if typ != "script" {
+	switch {
+	case typ == "reboot" || typ == "shutdown":
+		// payload is the delay in minutes, 0 = now
+		v := strings.TrimSpace(r.FormValue("minutes"))
+		if v == "" {
+			v = "1"
+		}
+		m, err := strconv.Atoi(v)
+		if err != nil || m < 0 || m > 1440 {
+			http.Error(w, "delay must be 0..1440 minutes", http.StatusBadRequest)
+			return
+		}
+		payload = strconv.Itoa(m)
+	case typ != "script":
 		payload = ""
-	} else if sess.Role != "admin" {
+	case sess.Role != "admin":
 		http.Error(w, "scripts require the admin role", http.StatusForbidden)
 		return
 	}
@@ -991,4 +1013,13 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 		cw.Write(out)
 	}
 	cw.Flush()
+}
+
+func hasIPs(nics []api.NIC) bool {
+	for _, n := range nics {
+		if len(n.IPs) > 0 {
+			return true
+		}
+	}
+	return false
 }

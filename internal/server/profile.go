@@ -10,6 +10,7 @@ import (
 	"html/template"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -72,6 +73,7 @@ func qrSVG(text string) template.HTML {
 }
 
 type profileView struct {
+	Tab            string
 	Local          bool
 	Name           string
 	RecoveryLeft   int
@@ -105,8 +107,19 @@ func (s *Server) renderProfile(w http.ResponseWriter, r *http.Request, sess sess
 			v.PendingQR = qrSVG(v.PendingURI)
 		}
 	}
+	tabs := []string{"language"}
+	if local {
+		tabs = append(tabs, "password", "authenticator", "recovery")
+	}
+	tab := v.Tab
+	if tab == "" {
+		tab = r.URL.Query().Get("tab")
+	}
+	if !slices.Contains(tabs, tab) {
+		tab = "language"
+	}
 	w.Header().Set("Cache-Control", "no-store")
-	s.render(w, r, sess, "profile", map[string]any{"P": v, "Msg": msg, "Error": errMsg})
+	s.render(w, r, sess, "profile", map[string]any{"P": v, "Msg": msg, "Error": errMsg, "Tab": tab, "Tabs": tabs})
 }
 
 func (s *Server) localName(w http.ResponseWriter, r *http.Request, sess session) (string, bool) {
@@ -157,11 +170,11 @@ func (s *Server) profilePassword(w http.ResponseWriter, r *http.Request, sess se
 	}
 	pw, again := r.FormValue("new"), r.FormValue("repeat")
 	if len(pw) < 12 || len(pw) > 256 {
-		s.renderProfile(w, r, sess, profileView{}, "", "The new password needs 12 to 256 characters.")
+		s.renderProfile(w, r, sess, profileView{Tab: "password"}, "", "The new password needs 12 to 256 characters.")
 		return
 	}
 	if pw != again {
-		s.renderProfile(w, r, sess, profileView{}, "", "The new passwords do not match.")
+		s.renderProfile(w, r, sess, profileView{Tab: "password"}, "", "The new passwords do not match.")
 		return
 	}
 	ctx := r.Context()
@@ -173,10 +186,10 @@ func (s *Server) profilePassword(w http.ResponseWriter, r *http.Request, sess se
 		return err
 	})
 	if err != nil {
-		s.renderProfile(w, r, sess, profileView{}, "", s.profileErr(ctx, sess, name, r, err))
+		s.renderProfile(w, r, sess, profileView{Tab: "password"}, "", s.profileErr(ctx, sess, name, r, err))
 		return
 	}
-	s.renderProfile(w, r, sess, profileView{}, "Password changed.", "")
+	s.renderProfile(w, r, sess, profileView{Tab: "password"}, "Password changed.", "")
 }
 
 // profileErr records a failed password check outside the rolled back transaction.
@@ -212,10 +225,10 @@ func (s *Server) profileTOTP(w http.ResponseWriter, r *http.Request, sess sessio
 			return err
 		})
 		if err != nil {
-			s.renderProfile(w, r, sess, profileView{}, "", s.profileErr(ctx, sess, name, r, err))
+			s.renderProfile(w, r, sess, profileView{Tab: "authenticator"}, "", s.profileErr(ctx, sess, name, r, err))
 			return
 		}
-		s.renderProfile(w, r, sess, profileView{PendingSecret: secret}, "", "")
+		s.renderProfile(w, r, sess, profileView{Tab: "authenticator", PendingSecret: secret}, "", "")
 	case "confirm":
 		err := s.auditAction(ctx, sess.Email, "profile.totp", sess.Email, "TOTP secret replaced", func(tx pgx.Tx) error {
 			var pending *string
@@ -233,16 +246,16 @@ func (s *Server) profileTOTP(w http.ResponseWriter, r *http.Request, sess sessio
 			return err
 		})
 		if err != nil {
-			s.renderProfile(w, r, sess, profileView{}, "", err.Error())
+			s.renderProfile(w, r, sess, profileView{Tab: "authenticator"}, "", err.Error())
 			return
 		}
-		s.renderProfile(w, r, sess, profileView{}, "Authenticator app replaced.", "")
+		s.renderProfile(w, r, sess, profileView{Tab: "authenticator"}, "Authenticator app replaced.", "")
 	case "cancel":
 		if _, err := s.db.Exec(ctx, `UPDATE local_admins SET totp_pending=NULL WHERE name=$1`, name); err != nil {
 			s.fail(w, err)
 			return
 		}
-		s.renderProfile(w, r, sess, profileView{}, "", "")
+		s.renderProfile(w, r, sess, profileView{Tab: "authenticator"}, "", "")
 	default:
 		http.Error(w, "bad request", http.StatusBadRequest)
 	}
@@ -274,8 +287,8 @@ func (s *Server) profileRecovery(w http.ResponseWriter, r *http.Request, sess se
 		return nil
 	})
 	if err != nil {
-		s.renderProfile(w, r, sess, profileView{}, "", s.profileErr(ctx, sess, name, r, err))
+		s.renderProfile(w, r, sess, profileView{Tab: "recovery"}, "", s.profileErr(ctx, sess, name, r, err))
 		return
 	}
-	s.renderProfile(w, r, sess, profileView{NewCodes: codes}, "", "")
+	s.renderProfile(w, r, sess, profileView{Tab: "recovery", NewCodes: codes}, "", "")
 }

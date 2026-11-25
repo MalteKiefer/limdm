@@ -442,22 +442,31 @@ type Inventory struct {
 	BIOSVersion string `json:"bios_version,omitempty"`
 	BootTime    int64  `json:"boot_time"`
 	// Desktop environment and display manager, empty on servers.
-	Desktop        string    `json:"desktop,omitempty"`
-	DisplayManager string    `json:"display_manager,omitempty"`
-	Disks          []Disk    `json:"disks,omitempty"`
-	Volumes        []Volume  `json:"volumes,omitempty"`
-	Accounts       []Account `json:"accounts,omitempty"`        // local login accounts and admin rights
-	Repos          []Repo    `json:"repos,omitempty"`           // configured package sources
-	Interfaces     []NIC     `json:"interfaces,omitempty"`      // only with privacy.network_info
-	IPs            []string  `json:"ips,omitempty"`             // only with privacy.network_info
-	Users          []string  `json:"logged_in_users,omitempty"` // only with privacy.logged_in_users
+	Desktop        string      `json:"desktop,omitempty"`
+	DisplayManager string      `json:"display_manager,omitempty"`
+	Disks          []Disk      `json:"disks,omitempty"`
+	Volumes        []Volume    `json:"volumes,omitempty"`
+	Accounts       []Account   `json:"accounts,omitempty"`   // local login accounts and admin rights
+	Repos          []Repo      `json:"repos,omitempty"`      // configured package sources
+	Interfaces     []NIC       `json:"interfaces,omitempty"` // addresses only with privacy.network_info
+	DNS            []DNSConfig `json:"dns,omitempty"`        // only with privacy.network_info
+	Routes         []Route     `json:"routes,omitempty"`     // only with privacy.network_info
+	VPNs           []VPN       `json:"vpns,omitempty"`
+	Groups         []Group     `json:"groups,omitempty"`
+	IPs            []string    `json:"ips,omitempty"`             // only with privacy.network_info
+	Users          []string    `json:"logged_in_users,omitempty"` // only with privacy.logged_in_users
 }
 
 type Account struct {
-	Name  string `json:"name"`
-	UID   int    `json:"uid"`
-	Shell string `json:"shell,omitempty"`
-	Admin bool   `json:"admin"` // uid 0 or member of sudo, wheel or admin
+	Name   string `json:"name"`
+	UID    int    `json:"uid"`
+	GID    int    `json:"gid,omitempty"`
+	Home   string `json:"home,omitempty"`
+	Gecos  string `json:"gecos,omitempty"`
+	Source string `json:"source,omitempty"` // local (/etc/passwd) or nss (sssd, LDAP, systemd-homed, DynamicUser, winbind)
+	System bool   `json:"system,omitempty"` // service account: uid below 1000 or no login shell
+	Shell  string `json:"shell,omitempty"`
+	Admin  bool   `json:"admin"` // uid 0 or member of sudo, wheel or admin
 	// SSO: centrally managed account; LastSSO is its last SSO confirmation.
 	SSO       bool       `json:"sso,omitempty"`
 	LastSSO   *time.Time `json:"last_sso,omitempty"`
@@ -494,9 +503,45 @@ type Volume struct {
 }
 
 type NIC struct {
-	Name string   `json:"name"`
-	MAC  string   `json:"mac,omitempty"`
-	IPs  []string `json:"ips,omitempty"`
+	Name  string   `json:"name"`
+	MAC   string   `json:"mac,omitempty"`
+	IPs   []string `json:"ips,omitempty"`
+	Kind  string   `json:"kind,omitempty"`  // ethernet, wifi, wireguard, tun, bridge, vlan, virtual
+	State string   `json:"state,omitempty"` // up, down, unknown
+	MTU   int      `json:"mtu,omitempty"`
+	VPN   string   `json:"vpn,omitempty"` // provider when the interface belongs to a VPN client
+}
+
+// DNSConfig is one resolver scope: "global" or a link name.
+type DNSConfig struct {
+	Scope   string   `json:"scope"`
+	Servers []string `json:"servers,omitempty"`
+	Domains []string `json:"domains,omitempty"`
+}
+
+type Route struct {
+	Dst     string `json:"dst"` // "default" for the default route
+	Gateway string `json:"gateway,omitempty"`
+	Dev     string `json:"dev,omitempty"`
+	Proto   string `json:"proto,omitempty"`
+	Metric  int    `json:"metric,omitempty"`
+	Family  string `json:"family"` // inet, inet6
+}
+
+// VPN is an installed or running VPN client.
+type VPN struct {
+	Name      string `json:"name"` // WireGuard, OpenVPN, Tailscale, NetBird, Mullvad, ...
+	Service   string `json:"service,omitempty"`
+	Active    bool   `json:"active"`
+	Interface string `json:"interface,omitempty"`
+}
+
+type Group struct {
+	Name    string   `json:"name"`
+	GID     int      `json:"gid"`
+	Members []string `json:"members,omitempty"`
+	Source  string   `json:"source"` // local (/etc/group) or nss (sssd, LDAP, systemd, winbind, ...)
+	System  bool     `json:"system,omitempty"`
 }
 
 type Package struct {

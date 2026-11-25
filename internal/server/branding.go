@@ -17,6 +17,9 @@ import (
 
 const maxLogo = 256 << 10
 
+// Version is set at build time and shown in the console.
+var Version = "dev"
+
 func validLogo(b []byte) error {
 	if len(b) == 0 {
 		return nil

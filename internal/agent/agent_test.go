@@ -224,11 +224,23 @@ func TestDesktopVersionParsing(t *testing.T) {
 }
 
 func TestAccounts(t *testing.T) {
-	passwd := "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1::/:/usr/sbin/nologin\nadmin:x:5001:5001::/home/admin:/usr/bin/fish\nanna:x:1001:1001::/home/anna:/bin/bash\nsvc:x:1002:1002::/:/usr/sbin/nologin\n"
-	group := "sudo:x:27:admin\nwheel:x:10:\nusers:x:100:anna\n"
-	got := accounts(passwd, group)
-	if len(got) != 3 || got[0].Name != "root" || !got[0].Admin || !got[1].Admin || got[2].Name != "anna" || got[2].Admin {
-		t.Fatalf("accounts: %+v", got)
+	local := "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1::/:/usr/sbin/nologin\nadmin:x:5001:5001::/home/admin:/usr/bin/fish\nanna:x:1001:1001:Anna A,,,:/home/anna:/bin/bash\n"
+	nss := local + "jdoe:*:70001:70001:John Doe:/home/jdoe:/bin/bash\nsystemd-dyn:x:61234:61234::/:/usr/sbin/nologin\n"
+	localGroup := "sudo:x:27:admin\nwheel:x:10:\nusers:x:100:anna\n"
+	nssGroup := localGroup + "engineers:*:70100:jdoe,anna\n"
+	users, groups := parseAccounts(nss, nssGroup, local, localGroup)
+	byName := map[string]api.Account{}
+	for _, u := range users {
+		byName[u.Name] = u
+	}
+	if len(users) != 6 || !byName["root"].Admin || !byName["admin"].Admin || byName["anna"].Admin || byName["anna"].Gecos != "Anna A" {
+		t.Fatalf("users: %+v", users)
+	}
+	if byName["jdoe"].Source != "nss" || byName["anna"].Source != "local" || !byName["daemon"].System || !byName["systemd-dyn"].System || byName["jdoe"].System {
+		t.Fatalf("sources: %+v", users)
+	}
+	if len(groups) != 4 || groups[3].Name != "engineers" || groups[3].Source != "nss" || len(groups[3].Members) != 2 {
+		t.Fatalf("groups: %+v", groups)
 	}
 }
 

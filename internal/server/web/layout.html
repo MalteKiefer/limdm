@@ -29,18 +29,22 @@
       <a href="/settings" {{if eq .Page "settings"}}class="on" aria-current="page"{{end}}>{{t "Settings"}}</a>
       {{end}}
     </nav>
-    <form class="who" method="post" action="/logout">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <a class="name" href="/profile" title="{{t "Profile"}}: {{.Sess.Email}}">{{.Sess.Email}}</a>
-      <div class="role">{{t .Sess.Role}}</div>
-      <button>{{t "Sign out"}}</button>
-    </form>
-    <div class="langs" aria-label="{{t "Language"}}"><a href="/lang/de" {{if eq lang "de"}}aria-current="true"{{end}}>DE</a><a href="/lang/en" {{if eq lang "en"}}aria-current="true"{{end}}>EN</a></div>
+    <div class="who">
+      <a class="who-user {{if eq .Page "profile"}}on{{end}}" href="/profile" title="{{t "Profile"}}">
+        <span class="avatar" aria-hidden="true">{{slice .Sess.Email 0 1}}</span>
+        <span class="who-text"><span class="name">{{.Sess.Email}}</span><span class="role">{{t .Sess.Role}}</span></span>
+      </a>
+      <div class="who-row">
+        <div class="langs" aria-label="{{t "Language"}}"><a href="/lang/de" {{if eq lang "de"}}aria-current="true"{{end}}>DE</a><a href="/lang/en" {{if eq lang "en"}}aria-current="true"{{end}}>EN</a></div>
+        <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="link">{{t "Sign out"}}</button></form>
+      </div>
+      <div class="version">LiMDM {{version}}</div>
+    </div>
   </aside>
   <main class="main">{{template "content" .}}</main>
 </div>
 {{else}}
-<main class="login-shell">{{template "content" .}}<div class="langs"><a href="/lang/de" {{if eq lang "de"}}aria-current="true"{{end}}>DE</a><a href="/lang/en" {{if eq lang "en"}}aria-current="true"{{end}}>EN</a></div></main>
+<main class="login-shell">{{template "content" .}}<div class="login-foot"><span class="version">LiMDM {{version}}</span><div class="langs"><a href="/lang/de" {{if eq lang "de"}}aria-current="true"{{end}}>DE</a><a href="/lang/en" {{if eq lang "en"}}aria-current="true"{{end}}>EN</a></div></div></main>
 {{end}}
 </body>
 </html>

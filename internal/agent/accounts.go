@@ -1,10 +1,7 @@
 package agent
 
 import (
-	"os"
 	"path/filepath"
-	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/maltekiefer/limdm/internal/api"
@@ -12,39 +9,6 @@ import (
 
 // adminGroups grant root via sudo on Debian, Ubuntu (sudo, admin) and Fedora (wheel).
 var adminGroups = []string{"sudo", "wheel", "admin"}
-
-// accounts lists root and every login capable human account with its admin
-// rights. Admin rights are security relevant (ISO 27001 A.8.2), so this is
-// always collected; who is logged in stays behind the privacy declaration.
-func accounts(passwd, group string) []api.Account {
-	admins := map[string]bool{}
-	for _, line := range strings.Split(group, "\n") {
-		f := strings.Split(line, ":")
-		if len(f) == 4 && slices.Contains(adminGroups, f[0]) && f[3] != "" {
-			for _, m := range strings.Split(f[3], ",") {
-				admins[m] = true
-			}
-		}
-	}
-	var out []api.Account
-	for _, line := range strings.Split(passwd, "\n") {
-		f := strings.Split(line, ":")
-		if len(f) < 7 {
-			continue
-		}
-		uid, err := strconv.Atoi(f[2])
-		if err != nil {
-			continue
-		}
-		shell := f[6]
-		human := uid >= 1000 && uid < 60000 && !strings.HasSuffix(shell, "nologin") && !strings.HasSuffix(shell, "false")
-		if uid != 0 && !human {
-			continue
-		}
-		out = append(out, api.Account{Name: f[0], UID: uid, Shell: shell, Admin: uid == 0 || admins[f[0]]})
-	}
-	return out
-}
 
 // repos reads apt sources (one line .list and deb822 .sources) or dnf .repo files.
 func (h *host) repos() []api.Repo {
@@ -166,12 +130,6 @@ func parseYumRepo(content, file string) []api.Repo {
 	}
 	flush()
 	return out
-}
-
-func readPasswdGroup() (string, string) {
-	p, _ := os.ReadFile("/etc/passwd")
-	g, _ := os.ReadFile("/etc/group")
-	return string(p), string(g)
 }
 
 // keyPath returns a Signed-By value when it names a file (it may also be an inline key).

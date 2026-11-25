@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -96,7 +95,7 @@ func osqueryVersion() string {
 
 // enrichFromOsquery overlays the native inventory with osquery data. Each
 // section falls back to the native value when its query fails.
-func enrichFromOsquery(inv *api.Inventory, priv api.Privacy) {
+func enrichFromOsquery(inv *api.Inventory) {
 	if !hasOsquery() {
 		return
 	}
@@ -136,27 +135,6 @@ func enrichFromOsquery(inv *api.Inventory, priv api.Privacy) {
 		}
 		if disks != nil {
 			inv.Disks = disks
-		}
-	}
-	{
-		if r, err := osq("SELECT d.interface, d.mac, a.address FROM interface_details d LEFT JOIN interface_addresses a USING (interface) WHERE d.interface <> 'lo'"); err == nil {
-			byName := map[string]*api.NIC{}
-			var order []string
-			for _, row := range r {
-				n := byName[row["interface"]]
-				if n == nil {
-					n = &api.NIC{Name: row["interface"], MAC: row["mac"]}
-					byName[row["interface"]] = n
-					order = append(order, row["interface"])
-				}
-				if a := row["address"]; priv.NetworkInfo && a != "" && !strings.HasPrefix(a, "fe80:") && !slices.Contains(n.IPs, a) {
-					n.IPs = append(n.IPs, a)
-				}
-			}
-			inv.Interfaces = nil
-			for _, name := range order {
-				inv.Interfaces = append(inv.Interfaces, *byName[name])
-			}
 		}
 	}
 }

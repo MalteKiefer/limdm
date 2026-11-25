@@ -398,27 +398,11 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 		}
 	}
 	inv.Disks, inv.Volumes = nativeDisks(), nativeVolumes()
-	inv.Accounts = accounts(readPasswdGroup())
+	inv.Accounts, inv.Groups = nssAccounts()
 	annotateSSO(inv.Accounts)
 	inv.Repos = h.repos()
 	inv.Desktop, inv.DisplayManager = desktop()
-	// interfaces and MACs are hardware inventory; addresses only with consent
-	if addrs, err := net.Interfaces(); err == nil {
-		for _, ifc := range addrs {
-			if ifc.Flags&net.FlagLoopback != 0 {
-				continue
-			}
-			n := api.NIC{Name: ifc.Name, MAC: ifc.HardwareAddr.String()}
-			if as, err := ifc.Addrs(); err == nil && priv.NetworkInfo {
-				for _, a := range as {
-					if ipn, ok := a.(*net.IPNet); ok && !ipn.IP.IsLinkLocalUnicast() {
-						n.IPs = append(n.IPs, ipn.IP.String())
-					}
-				}
-			}
-			inv.Interfaces = append(inv.Interfaces, n)
-		}
-	}
+	inv.Interfaces, inv.DNS, inv.Routes, inv.VPNs = network(priv)
 	if out, err := run(30*time.Second, "who"); err == nil && priv.LoggedInUsers {
 		seen := map[string]bool{}
 		for _, line := range strings.Split(out, "\n") {
@@ -428,7 +412,7 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 			}
 		}
 	}
-	enrichFromOsquery(&inv, priv)
+	enrichFromOsquery(&inv)
 	return inv
 }
 

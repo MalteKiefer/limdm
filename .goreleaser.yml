@@ -37,7 +37,9 @@ builds:
     goarch: [amd64, arm64]
     flags: [-trimpath]
     mod_timestamp: "{{ .CommitTimestamp }}"
-    ldflags: [-s -w]
+    ldflags:
+      - -s -w
+      - -X github.com/maltekiefer/limdm/internal/server.Version={{ .Version }}
 
 archives:
   - id: agent

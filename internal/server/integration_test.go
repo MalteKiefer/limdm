@@ -297,9 +297,10 @@ func TestIntegration(t *testing.T) {
 
 	// every admin page renders
 	pages := []string{"/", "/devices", "/devices?status=non-compliant&q=laptop", "/compliance", "/compliance?state=failing&level=1&framework=iso&sort=fail&q=luks", "/blueprints", "/blueprints/" + bpID, "/blueprints/new", "/library", "/library/new?type=com.limdm.packages", "/library/" + itemID("Debian tools"), "/tokens", "/audit"}
-	for _, tab := range []string{"overview", "hardware", "software", "compliance", "declarations", "commands"} {
+	for _, tab := range []string{"overview", "hardware", "network", "software", "software&sub=sources", "accounts", "accounts&sub=groups&system=1", "compliance", "declarations", "commands&type=reboot"} {
 		pages = append(pages, "/devices/"+er.DeviceID+"?tab="+tab+"&q=open&page=2")
 	}
+	pages = append(pages, "/profile", "/profile?tab=password", "/profile?tab=recovery")
 	for _, p := range pages {
 		if code, body := ui("GET", p, nil, auditor); code != 200 {
 			t.Fatalf("GET %s: %d %s", p, code, body)
@@ -577,6 +578,15 @@ func TestIntegration(t *testing.T) {
 	help := session{Email: "help@firma.de", Role: "helpdesk", IAT: time.Now(), Last: time.Now()}
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"reboot"}}, help); code != http.StatusSeeOther {
 		t.Fatalf("helpdesk command: %d", code)
+	}
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"shutdown"}, "minutes": {"5000"}}, help); code != http.StatusBadRequest {
+		t.Fatalf("delay out of range accepted: %d", code)
+	}
+	var pl string
+	ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"reboot"}, "minutes": {"0"}}, help)
+	db.QueryRow(ctx, `SELECT payload FROM commands WHERE type='reboot' ORDER BY id DESC LIMIT 1`).Scan(&pl)
+	if pl != "0" {
+		t.Fatalf("reboot now payload %q", pl)
 	}
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"script"}, "payload": {"id"}}, help); code != http.StatusForbidden {
 		t.Fatalf("helpdesk script must be refused: %d", code)
