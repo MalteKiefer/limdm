@@ -13,6 +13,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 	"strconv"
@@ -89,7 +90,8 @@ func parsePages(lang, layout string) map[string]*template.Template {
 		"actionLabel": func(a string) string {
 			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot",
 				"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script",
-				"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour", "message": "Message"}[a])
+				"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour", "message": "Message",
+				"app_install": "Install app", "app_remove": "Remove app"}[a])
 		},
 		"join":      strings.Join,
 		"hasPrefix": strings.HasPrefix,
@@ -196,6 +198,7 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", s.page(s.overview))
 	mux.HandleFunc("GET /devices", s.page(s.devices))
 	mux.HandleFunc("GET /devices/{id}", s.page(s.device))
+	mux.HandleFunc("POST /devices/bulk", s.helpdeskPage(s.devicesBulk))
 	mux.HandleFunc("POST /devices/{id}/command", s.helpdeskPage(s.deviceCommand))
 	mux.HandleFunc("POST /devices/{id}/agent-update", s.page(s.deviceAgentUpdate))
 	mux.HandleFunc("POST /devices/{id}/recovery", s.helpdeskPage(s.recoveryView))
@@ -254,6 +257,7 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 
 type deviceRow struct {
 	ID, Hostname, OS, AgentVersion, Blueprints string
+	Tags                                       []string
 	Desktop                                    string
 	MemoryMB                                   uint64
 	GraceUntil                                 *time.Time
@@ -287,23 +291,49 @@ func (s *Server) status(d *deviceRow) {
 }
 
 func (s *Server) listDevices(ctx context.Context) ([]deviceRow, error) {
+	return s.listDevicesWhere(ctx, "TRUE")
+}
+
+// listDevicesWhere lists devices matching a condition on d (devices).
+func (s *Server) listDevicesWhere(ctx context.Context, where string, args ...any) ([]deviceRow, error) {
 	rows, err := s.db.Query(ctx, `SELECT d.id, d.hostname, d.os_name, d.agent_version,
-		coalesce(b.name, 'default') || coalesce(' · ' || nullif(array_to_string(d.tags, ', '), ''), ''),
+		coalesce(b.name, 'default'), d.tags,
 		d.desktop, d.memory_mb, d.failing, d.checks_count, d.last_seen, d.retired, d.grace_until, d.auto_locked
-		FROM devices d LEFT JOIN blueprints b ON b.id = d.blueprint_id ORDER BY d.retired, d.hostname`)
+		FROM devices d LEFT JOIN blueprints b ON b.id = d.blueprint_id WHERE `+where+` ORDER BY d.retired, d.hostname`, args...)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (deviceRow, error) {
 		var d deviceRow
-		err := row.Scan(&d.ID, &d.Hostname, &d.OS, &d.AgentVersion, &d.Blueprints, &d.Desktop, &d.MemoryMB, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &d.GraceUntil, &d.AutoLocked)
+		err := row.Scan(&d.ID, &d.Hostname, &d.OS, &d.AgentVersion, &d.Blueprints, &d.Tags, &d.Desktop, &d.MemoryMB, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &d.GraceUntil, &d.AutoLocked)
 		s.status(&d)
 		return d, err
 	})
 }
 
+// deviceFilters are the device list filters other pages link to; each is
+// a condition on d with the value as $1.
+var deviceFilters = []struct{ Key, Label, Where string }{
+	{"tag", "Tag", `$1 = ANY(d.tags)`},
+	{"app", "Catalog app installed", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.inventory->'apps', '[]'::jsonb)) a WHERE a->>'id' = $1 AND (a->>'installed')::boolean)`},
+	{"flatpak", "Flatpak installed", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.inventory->'flatpaks', '[]'::jsonb)) f WHERE f->>'id' = $1)`},
+	{"remote", "Flatpak remote", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.inventory->'flatpak_remotes', '[]'::jsonb)) r WHERE r->>'name' = $1)`},
+	{"blueprint", "Blueprint", `coalesce((SELECT name FROM blueprints WHERE id = d.blueprint_id), 'default') = $1`},
+	{"agent", "Agent version", `d.agent_version = $1`},
+	{"failing", "Failing check", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.checks, '[]'::jsonb)) c WHERE c->>'id' = $1 AND c->>'status' = 'fail')`},
+}
+
 func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
-	list, err := s.listDevices(r.Context())
+	ctx := r.Context()
+	where, args := "TRUE", []any{}
+	var filter, filterKey, filterVal string
+	for _, f := range deviceFilters {
+		if v := strings.TrimSpace(r.URL.Query().Get(f.Key)); v != "" && len(v) <= 200 {
+			where, args, filter, filterKey, filterVal = f.Where, []any{v}, f.Label, f.Key, v
+			break
+		}
+	}
+	list, err := s.listDevicesWhere(ctx, where, args...)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -316,13 +346,118 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 		if status != "" && d.Status != status {
 			continue
 		}
-		if q != "" && !strings.Contains(strings.ToLower(d.Hostname+" "+d.OS+" "+d.ID+" "+d.Blueprints), q) {
+		if q != "" && !strings.Contains(strings.ToLower(d.Hostname+" "+d.OS+" "+d.ID+" "+d.Blueprints+" "+strings.Join(d.Tags, " ")), q) {
 			continue
 		}
 		shown = append(shown, d)
 	}
+	var tags []string
+	if err := s.db.QueryRow(ctx, `SELECT coalesce(array_agg(DISTINCT t ORDER BY t), '{}') FROM devices, unnest(tags) t WHERE NOT retired`).Scan(&tags); err != nil {
+		s.fail(w, err)
+		return
+	}
+	apps, err := s.catalogApps(ctx, s.db, `WHERE enabled`)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	keep := url.Values{}
+	if filterKey != "" {
+		keep.Set(filterKey, filterVal)
+	}
+	if q != "" {
+		keep.Set("q", q)
+	}
 	s.render(w, r, sess, "devices", map[string]any{"Devices": shown, "Total": len(list), "Counts": counts, "Q": q, "Status": status,
-		"Statuses": []string{"compliant", "in grace", "non-compliant", "stale", "pending", "retired"}})
+		"Statuses": []string{"compliant", "in grace", "non-compliant", "stale", "pending", "retired"},
+		"Filter":   filter, "FilterKey": filterKey, "FilterVal": filterVal, "Keep": keep.Encode(), "Tags": tags, "Apps": apps,
+		"Back": r.URL.RequestURI()})
+}
+
+// devicesBulk runs one action on the selected devices: a command, an
+// agent update, or adding and removing a tag. Destructive commands (lost
+// mode, wipe) and scripts stay single device actions.
+func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess session) {
+	ctx := r.Context()
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	ids := slices.Compact(slices.Sorted(slices.Values(r.Form["id"])))
+	if len(ids) == 0 || len(ids) > 1000 {
+		http.Error(w, "select 1 to 1000 devices", http.StatusBadRequest)
+		return
+	}
+	var known int
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM devices WHERE id = ANY($1) AND NOT retired`, ids).Scan(&known); err != nil || known != len(ids) {
+		http.Error(w, "unknown or retired device selected", http.StatusBadRequest)
+		return
+	}
+	op, typ, _ := strings.Cut(r.FormValue("action"), ":")
+	switch op {
+	case "tag-add", "tag-remove":
+		if sess.Role != "admin" {
+			http.Error(w, "this action requires the admin role", http.StatusForbidden)
+			return
+		}
+		tags, err := parseTags(r.FormValue("tag"))
+		if err != nil || len(tags) != 1 {
+			http.Error(w, "one tag: up to 32 letters, digits, dot, dash, underscore", http.StatusBadRequest)
+			return
+		}
+		sql := `UPDATE devices SET tags = array_append(tags, $2) WHERE id = $1 AND NOT $2 = ANY(tags)`
+		if op == "tag-remove" {
+			sql = `UPDATE devices SET tags = array_remove(tags, $2) WHERE id = $1`
+		}
+		for _, id := range ids {
+			if err := s.auditAction(ctx, sess.Email, "device."+op, id, tags[0], func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, sql, id, tags[0])
+				return err
+			}); err != nil {
+				s.fail(w, err)
+				return
+			}
+		}
+	case "agent-update":
+		if sess.Role != "admin" {
+			http.Error(w, "this action requires the admin role", http.StatusForbidden)
+			return
+		}
+		for _, id := range ids {
+			if err := s.auditAction(ctx, sess.Email, "agent_update.request", id, "", func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, `UPDATE devices SET update_requested=true, update_target='' WHERE id=$1`, id)
+				return err
+			}); err != nil {
+				s.fail(w, err)
+				return
+			}
+		}
+	case "command":
+		if typ == "lost" || typ == "wipe" || typ == "script" {
+			http.Error(w, "lost mode, wipe and scripts are sent to one device at a time", http.StatusBadRequest)
+			return
+		}
+		payload, code, msg := s.commandPayload(r, sess, ids[0], typ)
+		if code != 0 {
+			http.Error(w, msg, code)
+			return
+		}
+		for _, id := range ids {
+			if err := s.queueCommand(ctx, sess.Email, id, typ, payload); err != nil {
+				s.fail(w, err)
+				return
+			}
+		}
+	default:
+		http.Error(w, "unknown action", http.StatusBadRequest)
+		return
+	}
+	// back to the list with its filters; only the query is taken over
+	back := "/devices"
+	if u, err := url.Parse(r.FormValue("back")); err == nil && u.Path == "/devices" && len(u.Query()) > 0 {
+		back += "?" + u.Query().Encode()
+	}
+	http.Redirect(w, r, back, http.StatusSeeOther)
 }
 
 // overview is the landing page: fleet state, OS mix, weakest controls, recent activity.
@@ -644,17 +779,50 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
 		"CommandTypes": commandTypesFor(sess.Role),
 		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
-		"Resolved": res, "Tags": strings.Join(tags, ", "), "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery, "Tampered": tampered, "Events": events,
+		"Resolved": res, "Tags": strings.Join(tags, ", "), "TagList": tags, "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery, "Tampered": tampered, "Events": events,
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"},
 		"Sub": sub, "ShowSystem": r.URL.Query().Get("system") == "1", "NetworkInfo": len(data.Inv.DNS)+len(data.Inv.Routes) > 0 || hasIPs(data.Inv.Interfaces),
 	})
 }
 
 func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess session) {
-	id, typ, payload := r.PathValue("id"), r.FormValue("type"), r.FormValue("payload")
-	if !slices.Contains(api.CommandTypes, typ) || len(payload) > 64<<10 {
-		http.Error(w, "invalid command", http.StatusBadRequest)
+	id, typ := r.PathValue("id"), r.FormValue("type")
+	payload, code, msg := s.commandPayload(r, sess, id, typ)
+	if code != 0 {
+		http.Error(w, msg, code)
 		return
+	}
+	if err := s.queueCommand(r.Context(), sess.Email, id, typ, payload); err != nil {
+		s.fail(w, err)
+		return
+	}
+	back := "/devices/" + id
+	if typ == "app_install" || typ == "app_remove" {
+		back += "?tab=software&sub=catalog"
+	}
+	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
+// queueCommand stores a command for a device and audits it.
+func (s *Server) queueCommand(ctx context.Context, actor, id, typ, payload string) error {
+	return s.auditAction(ctx, actor, "command."+typ, id, truncate(payload, 2000), func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO commands(device_id, type, payload, created_by) VALUES ($1,$2,$3,$4)`, id, typ, payload, actor); err != nil {
+			return err
+		}
+		if typ == "unlock" || typ == "lock" { // a manual action takes over from the compliance policy
+			_, err := tx.Exec(ctx, `UPDATE devices SET auto_locked=false WHERE id=$1`, id)
+			return err
+		}
+		return nil
+	})
+}
+
+// commandPayload checks a command from the form and builds its payload; a
+// non zero status rejects it with msg.
+func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (string, int, string) {
+	payload := r.FormValue("payload")
+	if !slices.Contains(api.CommandTypes, typ) || len(payload) > 64<<10 {
+		return "", http.StatusBadRequest, "invalid command"
 	}
 	switch {
 	case typ == "reboot" || typ == "shutdown":
@@ -665,30 +833,26 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 		}
 		m, err := strconv.Atoi(v)
 		if err != nil || m < 0 || m > 1440 {
-			http.Error(w, "delay must be 0..1440 minutes", http.StatusBadRequest)
-			return
+			return "", http.StatusBadRequest, "delay must be 0..1440 minutes"
 		}
 		payload = strconv.Itoa(m)
 	case typ == "lost" || typ == "wipe" || typ == "found" || typ == "allow_uninstall":
 		// protective actions: admins only, lost and wipe confirmed by typing the host name
 		if sess.Role != "admin" {
-			http.Error(w, "this action requires the admin role", http.StatusForbidden)
-			return
+			return "", http.StatusForbidden, "this action requires the admin role"
 		}
 		if typ == "lost" || typ == "wipe" {
 			var host string
 			if err := s.db.QueryRow(r.Context(), `SELECT hostname FROM devices WHERE id=$1`, id).Scan(&host); err != nil ||
 				!strings.EqualFold(strings.TrimSpace(r.FormValue("confirm")), host) {
-				http.Error(w, "type the host name to confirm", http.StatusBadRequest)
-				return
+				return "", http.StatusBadRequest, "type the host name to confirm"
 			}
 		}
 		payload = ""
 		if typ == "lost" {
 			msg := strings.TrimSpace(r.FormValue("message"))
 			if len(msg) > 500 || strings.ContainsAny(msg, "\x00\r") {
-				http.Error(w, "message: up to 500 characters", http.StatusBadRequest)
-				return
+				return "", http.StatusBadRequest, "message: up to 500 characters"
 			}
 			b, _ := json.Marshal(api.LostMode{Message: msg})
 			payload = string(b)
@@ -696,32 +860,26 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 	case typ == "message":
 		title, text := strings.TrimSpace(r.FormValue("title")), strings.TrimSpace(r.FormValue("text"))
 		if text == "" || len(text) > 1000 || len(title) > 100 || strings.ContainsAny(title+text, "\x00\r") {
-			http.Error(w, "message: text up to 1000 characters, title up to 100", http.StatusBadRequest)
-			return
+			return "", http.StatusBadRequest, "message: text up to 1000 characters, title up to 100"
 		}
 		b, _ := json.Marshal(api.Message{Title: title, Text: text})
 		payload = string(b)
+	case typ == "app_install" || typ == "app_remove":
+		if sess.Role != "admin" {
+			return "", http.StatusForbidden, "this action requires the admin role"
+		}
+		var ok bool
+		app := r.FormValue("app")
+		if err := s.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM catalog_apps WHERE slug=$1)`, app).Scan(&ok); err != nil || !ok {
+			return "", http.StatusBadRequest, "unknown catalog app"
+		}
+		payload = app
 	case typ != "script":
 		payload = ""
 	case sess.Role != "admin":
-		http.Error(w, "scripts require the admin role", http.StatusForbidden)
-		return
+		return "", http.StatusForbidden, "scripts require the admin role"
 	}
-	err := s.auditAction(r.Context(), sess.Email, "command."+typ, id, truncate(payload, 2000), func(tx pgx.Tx) error {
-		if _, err := tx.Exec(r.Context(), `INSERT INTO commands(device_id, type, payload, created_by) VALUES ($1,$2,$3,$4)`, id, typ, payload, sess.Email); err != nil {
-			return err
-		}
-		if typ == "unlock" || typ == "lock" { // a manual action takes over from the compliance policy
-			_, err := tx.Exec(r.Context(), `UPDATE devices SET auto_locked=false WHERE id=$1`, id)
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/devices/"+id, http.StatusSeeOther)
+	return payload, 0, ""
 }
 
 func parseUsers(text string) ([]api.User, error) {

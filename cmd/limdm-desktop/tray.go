@@ -87,26 +87,36 @@ var (
 )
 
 type tray struct {
-	open, status, checkin, sync, recovery, logs *systray.MenuItem
-	last                                        agent.DesktopResponse
+	header, status, checkin                                 *systray.MenuItem
+	open, software, compliance, sync, recovery, logs, about *systray.MenuItem
+	last                                                    agent.DesktopResponse
 }
 
+// Menu after the GNOME HIG for status menus: who manages the device and its
+// state on top (not clickable), then the actions, then details and version.
 func runTray() {
 	systray.Run(func() {
 		t := &tray{}
 		systray.SetIcon(iconWarn)
 		systray.SetTitle("LiMDM")
-		t.open = systray.AddMenuItem(tr("Open LiMDM", "LiMDM öffnen"), "")
-		systray.AddSeparator()
+		t.header = systray.AddMenuItem("LiMDM", "")
+		t.header.Disable()
 		t.status = systray.AddMenuItem(tr("Checking status…", "Status wird geprüft…"), "")
 		t.status.Disable()
 		t.checkin = systray.AddMenuItem("", "")
 		t.checkin.Disable()
 		systray.AddSeparator()
-		t.sync = systray.AddMenuItem(tr("Check In Now", "Jetzt synchronisieren"), "")
+		t.open = systray.AddMenuItem(tr("Open LiMDM…", "LiMDM öffnen…"), "")
+		t.software = systray.AddMenuItem(tr("Install Software…", "Software installieren…"), "")
+		t.compliance = systray.AddMenuItem(tr("Compliance…", "Compliance…"), "")
 		t.recovery = systray.AddMenuItem(tr("Set Up Recovery Key…", "Wiederherstellungsschlüssel einrichten…"), "")
 		t.recovery.Hide()
-		t.logs = systray.AddMenuItem(tr("Agent Log", "Agent Protokoll"), "")
+		systray.AddSeparator()
+		t.sync = systray.AddMenuItem(tr("Check In Now", "Jetzt synchronisieren"), "")
+		t.logs = systray.AddMenuItem(tr("Agent Log…", "Agent Protokoll…"), "")
+		systray.AddSeparator()
+		t.about = systray.AddMenuItem(tr("Agent version unknown", "Agent Version unbekannt"), "")
+		t.about.Disable()
 		go t.loop()
 		go reminders()
 	}, func() {})
@@ -122,6 +132,10 @@ func (t *tray) loop() {
 			t.refresh()
 		case <-t.open.ClickedCh:
 			go openApp("overview", t.last, showDetails)
+		case <-t.software.ClickedCh:
+			go openApp("software", t.last, showDetails)
+		case <-t.compliance.ClickedCh:
+			go openApp("compliance", t.last, showDetails)
 		case <-t.sync.ClickedCh:
 			resp, err := call(agent.DesktopRequest{Op: "sync"})
 			d := dialogsFor(t.last)
@@ -153,12 +167,17 @@ func (t *tray) refresh() {
 	if err != nil || resp.Status == nil {
 		systray.SetIcon(iconBad)
 		systray.SetTooltip(tr("LiMDM agent not reachable", "LiMDM Agent nicht erreichbar"))
-		t.status.SetTitle(tr("Agent not reachable", "Agent nicht erreichbar"))
+		t.status.SetTitle("● " + tr("Agent not reachable", "Agent nicht erreichbar"))
 		t.checkin.SetTitle("")
+		t.about.SetTitle(tr("Agent version unknown", "Agent Version unbekannt"))
 		return
 	}
 	t.last = resp
 	st := resp.Status
+	if resp.Company != "" {
+		t.header.SetTitle(fmt.Sprintf(tr("Managed by %s", "Verwaltet von %s"), resp.Company))
+	}
+	t.about.SetTitle(fmt.Sprintf(tr("LiMDM agent %s", "LiMDM Agent %s"), st.Version))
 	icon, line := iconOK, tr("Device is compliant", "Gerät ist konform")
 	switch {
 	case st.Locked:
@@ -169,8 +188,8 @@ func (t *tray) refresh() {
 		icon, line = iconWarn, fmt.Sprintf(tr("%d checks failing", "%d Prüfungen fehlgeschlagen"), len(st.Failing))
 	}
 	systray.SetIcon(icon)
-	systray.SetTooltip(resp.Company + ": " + line)
-	t.status.SetTitle(line)
+	systray.SetTooltip(resp.Company + ": " + line + " · " + tr("agent", "Agent") + " " + st.Version)
+	t.status.SetTitle("● " + line)
 	if st.LastCheckin != nil {
 		t.checkin.SetTitle(tr("Last check in ", "Letzte Synchronisierung ") + st.LastCheckin.Local().Format("15:04"))
 	} else {

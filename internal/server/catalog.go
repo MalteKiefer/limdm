@@ -65,6 +65,29 @@ var defaultCatalog = []api.CatalogApp{
 //go:embed vendorkeys
 var vendorKeys embed.FS
 
+// vendorIcons are icons of seeded apps that are not on Flathub, named by slug.
+//
+//go:embed vendoricons
+var vendorIcons embed.FS
+
+// seedVendorIcons sets them where the app has no icon yet (migration 8).
+func seedVendorIcons(ctx context.Context, tx pgx.Tx) error {
+	files, err := vendorIcons.ReadDir("vendoricons")
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		png, err := vendorIcons.ReadFile("vendoricons/" + f.Name())
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE catalog_apps SET icon=$2 WHERE slug=$1 AND icon IS NULL`, strings.TrimSuffix(f.Name(), ".png"), png); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func vendorKey(name string) string {
 	b, err := vendorKeys.ReadFile("vendorkeys/" + name + ".asc")
 	if err != nil {
@@ -319,8 +342,12 @@ func (s *Server) iconLoop(ctx context.Context) {
 	}
 }
 
+// fetchIcons completes catalog apps from Flathub's appstream data: icon,
+// and summary and category when empty (taken over Flatpaks, older
+// entries). Admins' own texts and icons stay. Each app is tried once a day.
 func (s *Server) fetchIcons(ctx context.Context) {
-	apps, err := s.catalogApps(ctx, s.db, `WHERE icon IS NULL AND (icon_tried IS NULL OR icon_tried < now() - interval '1 day')`)
+	apps, err := s.catalogApps(ctx, s.db, `WHERE (icon IS NULL OR summary = '' OR category = '')
+		AND (icon_tried IS NULL OR icon_tried < now() - interval '1 day')`)
 	if err != nil {
 		s.log.Warn("catalog icons", "err", err)
 		return
@@ -330,11 +357,20 @@ func (s *Server) fetchIcons(ctx context.Context) {
 			if src.Kind != "flatpak" {
 				continue
 			}
-			png, err := getBytes(ctx, "https://dl.flathub.org/repo/appstream/x86_64/icons/128x128/"+src.Flatpak+".png", maxLogo)
-			if err == nil && validLogo(png) == nil {
-				_, _ = s.db.Exec(ctx, `UPDATE catalog_apps SET icon=$2, icon_tried=now() WHERE slug=$1 AND icon IS NULL`, a.ID, png)
-				break
+			meta, icon, err := s.flathubApp(ctx, src.Flatpak)
+			if err != nil { // not on Flathub with metadata; the icon may still be in the repository
+				meta = api.CatalogApp{}
+				if png, err := getBytes(ctx, "https://dl.flathub.org/repo/appstream/x86_64/icons/128x128/"+src.Flatpak+".png", maxLogo); err == nil && validLogo(png) == nil {
+					icon = png
+				}
 			}
+			if icon == nil && meta.Summary == "" && meta.Category == "" {
+				continue
+			}
+			_, _ = s.db.Exec(ctx, `UPDATE catalog_apps SET icon = coalesce(icon, $2),
+				summary = CASE WHEN summary = '' THEN $3 ELSE summary END,
+				category = CASE WHEN category = '' THEN $4 ELSE category END WHERE slug = $1`, a.ID, icon, meta.Summary, meta.Category)
+			break
 		}
 		_, _ = s.db.Exec(ctx, `UPDATE catalog_apps SET icon_tried=now() WHERE slug=$1`, a.ID)
 	}

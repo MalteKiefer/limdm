@@ -499,6 +499,13 @@ func (a *Agent) storeAction(op, id, user, note string) DesktopResponse {
 	if !a.store.start(id, op) {
 		return DesktopResponse{Error: "already in progress"}
 	}
+	a.runStoreJob(app, op, user)
+	return DesktopResponse{OK: true}
+}
+
+// runStoreJob installs or removes an app in the background; the job
+// table keeps the state for the desktop app.
+func (a *Agent) runStoreJob(app api.CatalogApp, op, who string) {
 	go func() {
 		accts, _ := nssAccounts()
 		apps, _ := flatpakInventory(accts)
@@ -508,15 +515,27 @@ func (a *Agent) storeAction(op, id, user, note string) DesktopResponse {
 		} else {
 			err = a.removeApp(app, installedFlatpaks(apps))
 		}
-		a.store.finish(id, err)
+		a.store.finish(app.ID, err)
 		if err != nil {
-			a.event("%s of %s requested by %s failed: %v", op, app.Name, user, err)
+			a.event("%s of %s requested by %s failed: %v", op, app.Name, who, err)
 		} else {
-			a.event("%s of %s requested by %s", op, app.Name, user)
+			a.event("%s of %s requested by %s", op, app.Name, who)
 		}
 		a.kickCheckin() // report the new state
 	}()
-	return DesktopResponse{OK: true}
+}
+
+// appCommand runs an install or removal IT sent from the console.
+func (a *Agent) appCommand(op, id string) (string, error) {
+	app, ok := a.catalogApp(id)
+	if !ok {
+		return "", fmt.Errorf("%s is not in this device's catalog", id)
+	}
+	if !a.store.start(id, op) {
+		return "", errors.New("already in progress")
+	}
+	a.runStoreJob(app, op, "IT")
+	return op + " of " + app.Name + " started", nil
 }
 
 func (a *Agent) kickCheckin() {

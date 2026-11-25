@@ -39,12 +39,12 @@
   const sync = () => { field.value = JSON.stringify(tree, null, 2); };
   const rerender = () => { sync(); render(); };
 
-  function itemSelect(onPick) {
+  function itemSelect(onPick, taken) {
     const s = el("select", "small");
     s.setAttribute("aria-label", "Add library item");
     s.appendChild(new Option("Add library item…", ""));
     const groups = {};
-    for (const it of items) (groups[it.type] = groups[it.type] || []).push(it);
+    for (const it of items) if (!taken.includes(it.id)) (groups[it.type] = groups[it.type] || []).push(it);
     for (const type of Object.keys(groups).sort()) {
       const g = document.createElement("optgroup");
       g.label = type.replace("com.limdm.", "");
@@ -52,6 +52,7 @@
       s.appendChild(g);
     }
     s.addEventListener("change", () => { if (s.value) onPick(Number(s.value)); });
+    if (s.options.length === 1) { s.options[0].text = "All library items assigned"; s.disabled = true; }
     return s;
   }
 
@@ -121,7 +122,7 @@
         chips.appendChild(chip);
       });
       if (!n.items.length) chips.appendChild(el("span", "muted", "No items yet."));
-      card.append(chips, itemSelect((id) => { if (!n.items.includes(id)) n.items.push(id); rerender(); }));
+      card.append(chips, itemSelect((id) => { if (!n.items.includes(id)) n.items.push(id); rerender(); }, n.items));
       return card;
     }
     n.branches.forEach((b, k) => {

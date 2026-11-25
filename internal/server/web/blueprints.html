@@ -10,6 +10,6 @@
   <tbody>{{$names := .Names}}{{range .Blueprints}}<tr>
     <td><a class="rowlink" href="/blueprints/{{.ID}}">{{.Name}}</a>{{if .Desc}}<span class="sub">{{.Desc}}</span>{{end}}</td>
     <td>{{if .Parent}}{{index $names (deref .Parent)}}{{else}}<span class="muted">{{t "none"}}</span>{{end}}</td>
-    <td class="num">{{.Devices}}</td><td>{{fmtTime .Updated}}</td></tr>{{end}}</tbody>
+    <td class="num">{{if .Devices}}<a class="count" href="/devices?blueprint={{.Name}}">{{.Devices}}</a>{{else}}<span class="muted">0</span>{{end}}</td><td>{{fmtTime .Updated}}</td></tr>{{end}}</tbody>
 </table></div></div>
 {{end}}

@@ -1,34 +1,70 @@
 {{define "title"}}{{t "Devices · LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>{{t "Devices"}}</h1><div class="meta"><span>{{.Total}} {{t "enrolled"}}</span><span>{{len .Devices}} {{t "shown"}}</span></div></div>
+  <div><h1>{{t "Devices"}}</h1><div class="meta"><span>{{.Total}} {{if .Filter}}{{t "match"}}{{else}}{{t "enrolled"}}{{end}}</span><span>{{len .Devices}} {{t "shown"}}</span></div></div>
   <div class="actions"><a class="button secondary" href="/export/inventory.csv">{{t "Inventory CSV"}}</a><a class="button" href="/tokens">{{t "Enroll device"}}</a></div>
 </div>
 <form class="filters" method="get" action="/devices">
-  <input type="search" name="q" value="{{.Q}}" placeholder="{{t "Search host, OS, ID, blueprint"}}" aria-label="{{t "Search devices"}}">
+  <input type="search" name="q" value="{{.Q}}" placeholder="{{t "Search host, OS, ID, blueprint, tag"}}" aria-label="{{t "Search devices"}}">
   {{if .Status}}<input type="hidden" name="status" value="{{.Status}}">{{end}}
+  {{if and .FilterKey (ne .FilterKey "tag")}}<input type="hidden" name="{{.FilterKey}}" value="{{.FilterVal}}">{{end}}
+  {{if .Tags}}<select name="tag" aria-label="{{t "Tag"}}" data-autosubmit><option value="">{{t "All tags"}}</option>{{$ft := ""}}{{if eq .FilterKey "tag"}}{{$ft = .FilterVal}}{{end}}{{range .Tags}}<option value="{{.}}" {{if eq . $ft}}selected{{end}}>#{{.}}</option>{{end}}</select>{{end}}
   <button class="secondary">{{t "Search"}}</button>
   <div class="chips">
-    <a href="/devices{{if .Q}}?q={{.Q}}{{end}}" {{if not .Status}}class="on"{{end}}>{{t "All"}}<span class="n">{{.Total}}</span></a>
-    {{$q := .Q}}{{$cur := .Status}}{{$counts := .Counts}}
-    {{range .Statuses}}<a href="/devices?status={{.}}{{if $q}}&amp;q={{$q}}{{end}}" {{if eq $cur .}}class="on"{{end}}>{{t .}}<span class="n">{{index $counts .}}</span></a>{{end}}
+    {{$keep := .Keep}}
+    <a href="/devices{{if $keep}}?{{$keep}}{{end}}" {{if not .Status}}class="on"{{end}}>{{t "All"}}<span class="n">{{.Total}}</span></a>
+    {{$cur := .Status}}{{$counts := .Counts}}
+    {{range .Statuses}}<a href="/devices?status={{.}}{{if $keep}}&amp;{{$keep}}{{end}}" {{if eq $cur .}}class="on"{{end}}>{{t .}}<span class="n">{{index $counts .}}</span></a>{{end}}
   </div>
 </form>
+{{if .Filter}}<div class="active-filter"><span>{{t .Filter}}: <strong class="mono">{{.FilterVal}}</strong></span><a class="clear" href="/devices{{if .Q}}?q={{.Q}}{{end}}" aria-label="{{t "Remove filter"}}">×</a></div>{{end}}
+
+{{$admin := eq .Sess.Role "admin"}}
+<form id="bulk" method="post" action="/devices/bulk" class="bulkbar" data-bulk>
+  <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="back" value="{{.Back}}">
+  <span class="bulk-count"><strong data-bulk-count>0</strong> {{t "selected"}}</span>
+  <details class="menu"><summary class="button small">{{t "Run"}}</summary>
+    <div class="menu-list left" role="menu">
+      <button role="menuitem" class="menu-item" name="action" value="command:sync">{{t "Sync now"}}</button>
+      <button role="menuitem" class="menu-item" name="action" value="command:update">{{t "Install all updates"}}</button>
+      {{if $admin}}<button role="menuitem" class="menu-item" name="action" value="agent-update">{{t "Update agent to the newest version"}}</button>{{end}}
+      <button role="menuitem" class="menu-item" name="action" value="command:reboot" data-confirm="{{t "Reboot the selected devices now?"}}">{{t "Reboot now"}}</button>
+      <button role="menuitem" class="menu-item warn" name="action" value="command:lock" data-confirm="{{t "Lock the selected devices?"}}">{{t "Lock device"}}</button>
+      <button role="menuitem" class="menu-item" name="action" value="command:unlock">{{t "Unlock device"}}</button>
+    </div></details>
+  {{if $admin}}
+  <details class="menu"><summary class="button small">{{t "Software"}}</summary>
+    <div class="menu-list left menu-form" role="menu">
+      <label>{{t "Catalog app"}}<select name="app">{{range .Apps}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+      <div class="menu-row"><button class="small" name="action" value="command:app_install">{{t "Install"}}</button>
+        <button class="small secondary" name="action" value="command:app_remove" data-confirm="{{t "Remove the app from the selected devices?"}}">{{t "Remove"}}</button></div>
+    </div></details>
+  <details class="menu"><summary class="button small">{{t "Tags"}}</summary>
+    <div class="menu-list left menu-form" role="menu">
+      <label>{{t "Tag"}}<input name="tag" list="known-tags" maxlength="32" placeholder="{{t "finance"}}" spellcheck="false"></label>
+      <datalist id="known-tags">{{range .Tags}}<option value="{{.}}">{{end}}</datalist>
+      <div class="menu-row"><button class="small" name="action" value="tag-add">{{t "Add tag"}}</button>
+        <button class="small secondary" name="action" value="tag-remove">{{t "Remove tag"}}</button></div>
+    </div></details>
+  {{end}}
+</form>
+
 <div class="tablecard"><div class="scroll"><table>
-  <thead><tr><th>{{t "Device"}}</th><th>{{t "Status"}}</th><th class="num">{{t "Failing"}}</th><th>{{t "System"}}</th><th>{{t "Memory"}}</th><th>{{t "Blueprints"}}</th><th>{{t "Agent"}}</th><th>{{t "Last seen"}}</th></tr></thead>
+  <thead><tr><th class="sel"><input type="checkbox" data-select-all="bulk" aria-label="{{t "Select all"}}"></th><th>{{t "Device"}}</th><th>{{t "Status"}}</th><th class="num">{{t "Failing"}}</th><th>{{t "System"}}</th><th>{{t "Memory"}}</th><th>{{t "Blueprint"}}</th><th>{{t "Agent"}}</th><th>{{t "Last seen"}}</th></tr></thead>
   <tbody>
   {{range .Devices}}
   <tr>
-    <td><a class="rowlink" href="/devices/{{.ID}}">{{.Hostname}}</a><span class="sub mono">{{.ID}}</span></td>
+    <td class="sel">{{if not .Retired}}<input type="checkbox" form="bulk" name="id" value="{{.ID}}" aria-label="{{.Hostname}}">{{end}}</td>
+    <td><a class="rowlink" href="/devices/{{.ID}}">{{.Hostname}}</a><span class="sub mono">{{.ID}}</span>{{if .Tags}}<span class="tagrow">{{range .Tags}}<a class="tag" href="/devices?tag={{.}}">#{{.}}</a>{{end}}</span>{{end}}</td>
     <td><span class="pill {{.Class}}">{{t .Status}}</span></td>
     <td class="num">{{if .Failing}}<span class="pill fail">{{.Failing}}</span>{{else}}<span class="muted">0</span>{{end}}</td>
     <td>{{.OS}}{{if .Desktop}}<span class="sub">{{.Desktop}}</span>{{end}}</td>
     <td>{{gib .MemoryMB}}</td>
-    <td>{{if .Blueprints}}{{.Blueprints}}{{else}}<span class="muted">{{t "default"}}</span>{{end}}</td>
-    <td class="mono">{{.AgentVersion}}</td>
+    <td><a href="/devices?blueprint={{.Blueprints}}">{{.Blueprints}}</a></td>
+    <td class="mono"><a href="/devices?agent={{.AgentVersion}}">{{.AgentVersion}}</a></td>
     <td>{{ago .LastSeen}}</td>
   </tr>
-  {{else}}<tr><td colspan="8" class="empty">{{t "No devices match. Create an enrollment token to add the first one."}}</td></tr>{{end}}
+  {{else}}<tr><td colspan="9" class="empty">{{if .Filter}}{{t "No devices match this filter."}}{{else}}{{t "No devices match. Create an enrollment token to add the first one."}}{{end}}</td></tr>{{end}}
   </tbody>
 </table></div></div>
 {{end}}
