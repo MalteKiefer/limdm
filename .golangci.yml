@@ -19,6 +19,11 @@ linters:
         - (*os.File).Close
         - os.Remove
         - os.RemoveAll
+        - (net.Conn).Close
+        - (*net.conn).Close
+        - (net.Listener).Close
+        - (net.Conn).SetDeadline
+        - (*net.conn).SetDeadline
         - (net/http.ResponseWriter).Write
         - (*encoding/json.Encoder).Encode
         - (*encoding/csv.Writer).Write

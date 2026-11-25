@@ -230,18 +230,19 @@ Local report without changes: `limdm-agent check --level 2`.
 ### Disk recovery keys
 
 With `com.limdm.diskencryption` and `escrow` the agent reports every LUKS volume without an
-escrowed key and reminds logged in desktop users once a day. Only the user knows a current
-passphrase, so the user runs
+escrowed key. Only the user knows a current passphrase, so the desktop helper
+`limdm-desktop` (XDG autostart, runs as the user) shows a dialog with the company name and
+logo from the console settings, at login and then once a day, and on demand from the
+applications menu entry "Disk recovery key". It uses zenity (GNOME) or kdialog (KDE); no
+terminal is needed.
 
-```sh
-pkexec limdm-agent recovery-key
-```
-
-(authorized by a polkit action with the user's own password). The agent adds a generated
-recovery key in the systemd format, verifies it and sends it over mTLS. The server stores it
-sealed with AES-256-GCM; admins and helpdesk can reveal it on the device page, every view is
-audited. With `rotate_after_view` the device replaces a viewed key at its next check in and
-removes the old one only after the server confirmed the new key.
+The helper talks to the agent over `/run/limdm/agent.sock`. The agent checks the caller's
+peer credentials, answers only users with an active local session and allows five wrong
+passphrases per 15 minutes. It adds a generated recovery key in the systemd format, verifies
+it and sends it over mTLS. The server stores it sealed with AES-256-GCM; admins and helpdesk
+can reveal it on the device page, every view is audited. With `rotate_after_view` the device
+replaces a viewed key at its next check in and removes the old one only after the server
+confirmed the new key. Administrators can also run `sudo limdm-agent recovery-key`.
 
 ### Desktop login
 

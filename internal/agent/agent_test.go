@@ -234,12 +234,12 @@ func TestAccounts(t *testing.T) {
 func TestRepoParsers(t *testing.T) {
 	list := "# comment\ndeb [arch=amd64 signed-by=/k.asc] https://a.example/deb stable main\ndeb http://b.example/ bookworm main contrib\ndeb-src http://c/ x y\n"
 	r := parseAptList(list, "/etc/apt/sources.list")
-	if len(r) != 2 || !r[0].Signed || r[1].Signed || r[1].Suites != "bookworm main contrib" {
+	if len(r) != 2 || !r[0].Signed || r[1].Signed || r[1].Suites != "bookworm" || r[1].Components != "main contrib" {
 		t.Fatalf("list: %+v", r)
 	}
 	d822 := "Types: deb deb-src\nURIs: https://deb.debian.org/debian\nSuites: trixie trixie-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: https://x/\nSuites: s\nEnabled: no\n"
 	r = parseDeb822(d822, "/etc/apt/sources.list.d/debian.sources")
-	if len(r) != 2 || !r[0].Signed || r[0].Suites != "trixie trixie-updates main" || r[1].Enabled {
+	if len(r) != 2 || !r[0].Signed || r[0].Suites != "trixie trixie-updates" || r[0].Components != "main" || r[1].Enabled {
 		t.Fatalf("deb822: %+v", r)
 	}
 	yum := "[fedora]\nname=Fedora\nmetalink=https://mirrors/x\nenabled=1\ngpgcheck=1\n[beta]\nbaseurl=https://b/\nenabled=0\ngpgcheck=0\n"
@@ -280,5 +280,45 @@ func TestPolkitAndSudoRendering(t *testing.T) {
 	line := sudoLine(api.SudoRule{Principals: []string{"%dev", "alice"}, Commands: []string{"/usr/bin/apt-get update", "/usr/bin/systemctl restart nginx"}, NoPasswd: true})
 	if line != "%dev, alice ALL=(root) NOPASSWD: /usr/bin/apt-get update, /usr/bin/systemctl restart nginx\n" {
 		t.Fatalf("sudo line: %q", line)
+	}
+}
+
+func TestDesktopServer(t *testing.T) {
+	a := &Agent{kick: make(chan struct{}, 1)}
+	d := &desktopServer{a: a, queued: map[string]bool{"u2": true}, failures: map[uint32][]time.Time{}}
+	d.info.Store(&desktopInfo{Company: "ACME", Need: []luksVolume{{"/dev/sda3", "u1"}, {"/dev/sdb1", "u2"}}})
+	st := d.serve(1000, DesktopRequest{Op: "status"})
+	if st.Company != "ACME" || len(st.Need) != 1 || st.Need[0].UUID != "u1" {
+		t.Fatalf("status: %+v", st)
+	}
+	if r := d.serve(1000, DesktopRequest{Op: "escrow", UUID: "u2", Passphrase: "x"}); r.OK || r.Error == "" {
+		t.Fatal("queued volume accepted again")
+	}
+	if r := d.serve(1000, DesktopRequest{Op: "escrow", UUID: "u1"}); r.OK {
+		t.Fatal("empty passphrase accepted")
+	}
+	for range 5 {
+		d.recordFailure(1000)
+	}
+	if r := d.serve(1000, DesktopRequest{Op: "escrow", UUID: "u1", Passphrase: "x"}); !strings.Contains(r.Error, "too many") {
+		t.Fatalf("rate limit: %+v", r)
+	}
+	if !d.allowAttempt(1001) {
+		t.Fatal("rate limit must be per user")
+	}
+}
+
+func TestDisableRepoContent(t *testing.T) {
+	list := disableRepoContent("x.list", "# comment\ndeb https://a/ stable main\n")
+	if r := parseAptList(list, "x.list"); len(r) != 1 || r[0].Enabled {
+		t.Fatalf("list: %q %+v", list, r)
+	}
+	src := disableRepoContent("d.sources", "Types: deb\nURIs: https://a/\nSuites: s\nEnabled: yes\n\nTypes: deb\nURIs: https://b/\nSuites: t\n")
+	if r := parseDeb822(src, "d.sources"); len(r) != 2 || r[0].Enabled || r[1].Enabled {
+		t.Fatalf("deb822: %q %+v", src, r)
+	}
+	repo := disableRepoContent("f.repo", "[a]\nname=a\nbaseurl=https://a/\nenabled=1\n[b]\nbaseurl=https://b/\n")
+	if r := parseYumRepo(repo, "f.repo"); len(r) != 2 || r[0].Enabled || r[1].Enabled {
+		t.Fatalf("repo: %q %+v", repo, r)
 	}
 }

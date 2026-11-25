@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Disk recovery key
+Name[de]=Wiederherstellungsschlüssel
+Comment=Create the recovery key for your disk encryption requested by IT
+Comment[de]=Den von der IT angeforderten Wiederherstellungsschlüssel für die Festplattenverschlüsselung erstellen
+Exec=/usr/bin/limdm-desktop --now
+Icon=drive-harddisk-encrypted
+Categories=System;Security;
+Terminal=false

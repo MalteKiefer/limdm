@@ -119,14 +119,14 @@
     <tbody>{{range .Recovery}}<tr><td class="mono">{{.Device}}</td><td class="mono">{{.UUID}}</td><td>{{fmtTime .Escrowed}}</td>
       <td>{{if .ViewedAt}}{{fmtTime (derefTime .ViewedAt)}}{{if .ViewedBy}} · {{deref2 .ViewedBy}}{{end}}{{if .Rotate}} <span class="pill warn">{{t "rotation pending"}}</span>{{end}}{{else}}<span class="muted">{{t "never"}}</span>{{end}}</td>
       <td>{{if ne $.Sess.Role "auditor"}}<form method="post" action="/devices/{{$id}}/recovery"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="uuid" value="{{.UUID}}"><button class="secondary small">{{t "Show key"}}</button></form>{{end}}</td></tr>
-    {{else}}<tr><td colspan="5" class="empty">{{t "No recovery key escrowed. Declare disk encryption recovery; the user then runs pkexec limdm-agent recovery-key."}}</td></tr>{{end}}</tbody>
+    {{else}}<tr><td colspan="5" class="empty">{{t "No recovery key escrowed. Declare disk encryption recovery; the user is then asked on the desktop."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 <section class="tablecard">
-  <div class="card-head"><h2>{{t "Network"}}</h2><span class="muted">{{t "collected only with privacy network_info"}}</span></div>
+  <div class="card-head"><h2>{{t "Network"}}</h2><span class="muted">{{t "addresses only with privacy option network_info"}}</span></div>
   <div class="scroll"><table>
     <thead><tr><th>{{t "Interface"}}</th><th>{{t "MAC"}}</th><th>{{t "Addresses"}}</th></tr></thead>
-    <tbody>{{range .Inv.Interfaces}}<tr><td class="mono">{{.Name}}</td><td class="mono">{{.MAC}}</td><td>{{range .IPs}}<span class="tag">{{.}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="3" class="empty">{{t "Not collected on this device."}}</td></tr>{{end}}</tbody>
+    <tbody>{{range .Inv.Interfaces}}<tr><td class="mono">{{.Name}}</td><td class="mono">{{.MAC}}</td><td>{{range .IPs}}<span class="tag">{{.}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="3" class="empty">{{t "No interfaces reported."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 {{end}}
@@ -155,10 +155,11 @@
 <section class="tablecard">
   <div class="card-head"><h2>{{t "Package sources"}}</h2><span class="muted">{{len .Inv.Repos}} {{t "configured"}}</span></div>
   <div class="scroll"><table>
-    <thead><tr><th>{{t "Source"}}</th><th>{{t "URL"}}</th><th>{{t "Suites"}}</th><th>{{t "State"}}</th><th>{{t "Signature"}}</th></tr></thead>
-    <tbody>{{range .Inv.Repos}}<tr><td>{{.Name}}<span class="sub mono">{{.File}}</span></td><td class="mono">{{.URL}}</td><td>{{.Suites}}</td>
+    <thead><tr><th>{{t "Source"}}</th><th>{{t "URL"}}</th><th>{{t "Suites"}}</th><th>{{t "State"}}</th><th>{{t "Signature"}}</th>{{if eq $.Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
+    <tbody>{{range .Inv.Repos}}<tr><td>{{.Name}}<span class="sub mono">{{.File}}</span></td><td class="mono">{{.URL}}</td><td>{{.Suites}}{{if .Components}} <span class="muted">{{.Components}}</span>{{end}}</td>
       <td>{{if .Enabled}}<span class="pill ok">{{t "enabled"}}</span>{{else}}<span class="pill">{{t "disabled"}}</span>{{end}}</td>
-      <td>{{if .Signed}}<span class="pill ok">{{t "pinned key"}}</span>{{else}}<span class="pill warn">{{t "global keyring"}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="5" class="empty">{{t "No package sources reported."}}</td></tr>{{end}}</tbody>
+      <td>{{if .Signed}}<span class="pill ok">{{t "pinned key"}}</span>{{else}}<span class="pill warn">{{t "global keyring"}}</span>{{end}}</td>
+      {{if eq $.Sess.Role "admin"}}<td class="row-actions">{{if hasPrefix .Name "limdm-"}}<span class="muted">{{t "managed"}}</span>{{else}}<a href="/library/new?from={{$id}}&amp;file={{.File}}&amp;mode=edit">{{t "Edit"}}</a> <a href="/library/new?from={{$id}}&amp;file={{.File}}&amp;mode=disable">{{t "Disable"}}</a>{{end}}</td>{{end}}</tr>{{else}}<tr><td colspan="6" class="empty">{{t "No package sources reported."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 <section class="tablecard">

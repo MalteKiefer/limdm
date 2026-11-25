@@ -1,0 +1,58 @@
+{{define "title"}}{{t "Profile"}} · LiMDM{{end}}
+{{define "content"}}
+<div class="page-head"><div><h1>{{t "Profile"}}</h1><div class="meta"><span class="mono">{{.Sess.Email}}</span><span>{{t .Sess.Role}}</span></div></div></div>
+{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+{{if .Msg}}<div class="notice ok" role="status">{{t .Msg}}</div>{{end}}
+<div class="grid two">
+  <section class="card">
+    <h2>{{t "Language"}}</h2>
+    <p class="muted">{{t "Stored in this browser."}}</p>
+    <div class="actions"><a class="button {{if ne lang "de"}}secondary{{end}}" href="/lang/de">Deutsch</a><a class="button {{if ne lang "en"}}secondary{{end}}" href="/lang/en">English</a></div>
+  </section>
+  {{if .P.Local}}
+  <form class="card" method="post" action="/profile/password">
+    <h2>{{t "Password"}}</h2>
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="username" value="{{.P.Name}}" autocomplete="username">
+    <label>{{t "Current password"}}<input type="password" name="current" required autocomplete="current-password"></label>
+    <label>{{t "New password"}} <span class="hint">{{t "at least 12 characters"}}</span><input type="password" name="new" required minlength="12" autocomplete="new-password"></label>
+    <label>{{t "Repeat new password"}}<input type="password" name="repeat" required minlength="12" autocomplete="new-password"></label>
+    <button>{{t "Change password"}}</button>
+  </form>
+  <section class="card">
+    <h2>{{t "Authenticator app (TOTP)"}}</h2>
+    {{if .P.PendingSecret}}
+      <p>{{t "Scan the code with the new app, then confirm with a code it shows. Until then the current app stays valid."}}</p>
+      <div class="qr-wrap">{{.P.PendingQR}}</div>
+      <p class="muted">{{t "Secret for manual entry:"}} <span class="fp">{{.P.PendingSecret}}</span></p>
+      <form method="post" action="/profile/totp"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="confirm">
+        <label>{{t "Code from the new app"}}<input name="code" required inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code"></label>
+        <button>{{t "Confirm"}}</button></form>
+      <form method="post" action="/profile/totp"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="cancel"><button class="secondary">{{t "Cancel"}}</button></form>
+    {{else}}
+      <p class="muted">{{t "Moves the sign in codes to a new authenticator app."}}</p>
+      <form method="post" action="/profile/totp"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="start">
+        <label>{{t "Current password"}}<input type="password" name="current" required autocomplete="current-password"></label>
+        <button>{{t "Set up a new app"}}</button></form>
+    {{end}}
+  </section>
+  <section class="card">
+    <h2>{{t "Recovery codes"}}</h2>
+    {{if .P.NewCodes}}
+      <div class="notice" role="status">{{t "Store these codes safely. They are shown only now; each works once instead of a TOTP code."}}</div>
+      <ol class="codes mono">{{range .P.NewCodes}}<li>{{.}}</li>{{end}}</ol>
+    {{else}}
+      <p>{{.P.RecoveryLeft}} {{t "unused codes left."}} <span class="muted">{{t "Codes are stored as hashes and cannot be shown again."}}</span></p>
+    {{end}}
+    <form method="post" action="/profile/recovery"><input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label>{{t "Current password"}}<input type="password" name="current" required autocomplete="current-password"></label>
+      <button>{{if .P.RecoveryLeft}}{{t "Replace recovery codes"}}{{else}}{{t "Generate recovery codes"}}{{end}}</button></form>
+  </section>
+  {{else}}
+  <section class="card">
+    <h2>{{t "Sign in"}}</h2>
+    <p class="muted">{{t "Password and second factor of this account are managed by your identity provider."}}</p>
+  </section>
+  {{end}}
+</div>
+{{end}}

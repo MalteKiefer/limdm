@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -905,5 +906,83 @@ func TestRecoveryEscrow(t *testing.T) {
 	db.QueryRow(ctx, `SELECT rotate, viewed_at FROM recovery_keys`).Scan(&rotate, &viewed)
 	if rotate || viewed != nil {
 		t.Fatal("rotation not cleared")
+	}
+	// package source templates from the inventory
+	db.Exec(ctx, `UPDATE devices SET inventory=$1 WHERE id='d1'`, `{"repos":[
+		{"type":"deb","name":"debian.sources","url":"http://deb.debian.org/debian/","suites":"trixie trixie-updates","components":"main","key_file":"/usr/share/keyrings/debian-archive-keyring.gpg","enabled":true,"signed":true,"file":"/etc/apt/sources.list.d/debian.sources"},
+		{"type":"deb","name":"debian.sources","url":"http://deb.debian.org/debian-security/","suites":"trixie-security","components":"main","key_file":"/usr/share/keyrings/debian-archive-keyring.gpg","enabled":true,"signed":true,"file":"/etc/apt/sources.list.d/debian.sources"},
+		{"type":"deb","name":"limdm-osquery.sources","url":"https://pkg.osquerypackages.com/deb","file":"/etc/apt/sources.list.d/limdm-osquery.sources"}]}`)
+	for _, mode := range []string{"disable", "edit"} {
+		it, err := s.sourceTemplate(ctx, "d1", "/etc/apt/sources.list.d/debian.sources", mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := it.Validate(); err != nil {
+			t.Fatalf("%s template invalid: %v\n%s", mode, err, it.Payload)
+		}
+		if mode == "edit" && !strings.Contains(string(it.Payload), `"debian-2"`) {
+			t.Fatalf("edit must keep both entries: %s", it.Payload)
+		}
+	}
+	if _, err := s.sourceTemplate(ctx, "d1", "/etc/apt/sources.list.d/limdm-osquery.sources", "disable"); err == nil {
+		t.Fatal("managed source offered")
+	}
+}
+
+func TestRecoveryCodeLogin(t *testing.T) {
+	dsn := os.Getenv("LIMDM_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("LIMDM_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{db: db, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	tx, _ := db.Begin(ctx)
+	creds, err := localAdd(ctx, tx, "alice", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := newRecoveryCode()
+	tx.Exec(ctx, `INSERT INTO local_recovery_codes(name, hash) VALUES ('alice', $1)`, hashCode(code))
+	tx.Commit(ctx)
+	var pw string
+	for _, l := range strings.Split(creds, "\n") {
+		if v, ok := strings.CutPrefix(l, "password: "); ok {
+			pw = strings.TrimSpace(v)
+		}
+	}
+	if role, err := s.checkLocal(ctx, "alice", pw, strings.ToUpper(code), "127.0.0.1"); err != nil || role != "admin" {
+		t.Fatalf("recovery code login: %q %v", role, err)
+	}
+	if _, err := s.checkLocal(ctx, "alice", pw, code, "127.0.0.1"); err == nil {
+		t.Fatal("recovery code worked twice")
+	}
+	if _, err := s.checkLocal(ctx, "alice", "wrong", newRecoveryCode(), "127.0.0.1"); err == nil {
+		t.Fatal("wrong password accepted")
+	}
+	// the profile password check honours the lockout
+	for range maxFailures {
+		tx, _ := db.Begin(ctx)
+		s.checkCurrent(ctx, tx, "alice", "wrong")
+		tx.Commit(ctx)
+	}
+	tx, _ = db.Begin(ctx)
+	err = s.checkCurrent(ctx, tx, "alice", pw)
+	tx.Rollback(ctx)
+	if !errors.Is(err, errLocked) {
+		t.Fatalf("locked account accepted the password: %v", err)
+	}
+	if !strings.Contains(string(qrSVG(totpURI("alice", newTOTPSecret()))), "<path") {
+		t.Fatal("no QR code")
 	}
 }

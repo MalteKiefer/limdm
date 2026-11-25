@@ -66,8 +66,9 @@ func parsePages(lang string) map[string]*template.Template {
 			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot in 1 minute",
 				"shutdown": "Shut down in 1 minute", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script"}[a])
 		},
-		"join":    strings.Join,
-		"fmtTime": func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") },
+		"join":      strings.Join,
+		"hasPrefix": strings.HasPrefix,
+		"fmtTime":   func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") },
 		"gib": func(mb uint64) string {
 			if mb == 0 {
 				return T("n/a")
@@ -123,7 +124,7 @@ func (s *Server) pageFor(h handler, postRole string) http.HandlerFunc {
 		}
 		if r.Method == http.MethodPost {
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-			if sess.Role != "admin" && (postRole != "helpdesk" || sess.Role != "helpdesk") {
+			if sess.Role != "admin" && postRole != "self" && (postRole != "helpdesk" || sess.Role != "helpdesk") {
 				http.Error(w, "your role cannot change this", http.StatusForbidden)
 				return
 			}
@@ -155,6 +156,8 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, na
 	data["Sess"] = sess
 	data["CSRF"] = s.csrfToken(sess)
 	data["Page"] = name
+	b := s.branding()
+	data["Brand"] = map[string]any{"Name": b.Name, "Logo": len(b.Logo) > 0, "V": b.Hash}
 	var buf bytes.Buffer
 	if err := pages[requestLang(r)][name].Execute(&buf, data); err != nil {
 		s.fail(w, err)
@@ -176,6 +179,10 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /directory/google", s.page(s.googleConfigure))
 	mux.HandleFunc("POST /directory/google/sync", s.page(s.googleSyncNow))
 	mux.HandleFunc("GET /users", s.page(s.adminOrAuditor(s.usersPage)))
+	mux.HandleFunc("GET /profile", s.selfPage(s.profile))
+	mux.HandleFunc("POST /profile/password", s.selfPage(s.profilePassword))
+	mux.HandleFunc("POST /profile/totp", s.selfPage(s.profileTOTP))
+	mux.HandleFunc("POST /profile/recovery", s.selfPage(s.profileRecovery))
 	mux.HandleFunc("POST /users", s.page(s.userAdd))
 	mux.HandleFunc("POST /users/update", s.page(s.userUpdate))
 	mux.HandleFunc("POST /users/reset", s.page(s.userReset))

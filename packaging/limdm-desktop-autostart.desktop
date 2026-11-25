@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=LiMDM desktop helper
+Name[de]=LiMDM Desktop Helfer
+Comment=Asks for what your IT department needs from you, such as a disk recovery key
+Comment[de]=Fragt nach dem, was Ihre IT von Ihnen benötigt, etwa einen Wiederherstellungsschlüssel
+Exec=/usr/bin/limdm-desktop
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

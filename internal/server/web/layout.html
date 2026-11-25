@@ -11,7 +11,7 @@
 {{if .Sess.Email}}
 <div class="shell">
   <aside class="side">
-    <div class="brand"><img src="/static/logo.svg" alt=""> {{t "LiMDM"}}</div>
+    <div class="brand">{{if .Brand.Logo}}<img src="/branding/logo.png?v={{.Brand.V}}" alt="">{{else}}<img src="/static/logo.svg" alt="">{{end}} {{if .Brand.Name}}{{.Brand.Name}}{{else}}{{t "LiMDM"}}{{end}}</div>
     <nav class="nav" aria-label="{{t "Main"}}">
       <a href="/" {{if eq .Page "overview"}}class="on" aria-current="page"{{end}}>{{t "Overview"}}</a>
       <a href="/devices" {{if or (eq .Page "devices") (eq .Page "device")}}class="on" aria-current="page"{{end}}>{{t "Devices"}}</a>
@@ -31,7 +31,7 @@
     </nav>
     <form class="who" method="post" action="/logout">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <div class="name" title="{{.Sess.Email}}">{{.Sess.Email}}</div>
+      <a class="name" href="/profile" title="{{t "Profile"}}: {{.Sess.Email}}">{{.Sess.Email}}</a>
       <div class="role">{{t .Sess.Role}}</div>
       <button>{{t "Sign out"}}</button>
     </form>

@@ -20,6 +20,15 @@ builds:
       - -s -w
       - -X github.com/maltekiefer/limdm/internal/agent.Version={{ .Version }}
       - -X github.com/maltekiefer/limdm/internal/agent.UpdatePubKey={{ envOrDefault "UPDATE_PUBKEY" "" }}
+  - id: desktop
+    main: ./cmd/limdm-desktop
+    binary: limdm-desktop
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags: [-s -w]
   - id: server
     main: ./cmd/limdm-server
     binary: limdm-server
@@ -32,7 +41,7 @@ builds:
 
 archives:
   - id: agent
-    ids: [agent]
+    ids: [agent, desktop]
     formats: [tar.gz]
     name_template: "limdm-agent_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files: [LICENSE, README.md, packaging/limdm-agent.service, scripts/install-agent.sh]
@@ -44,7 +53,7 @@ archives:
 
 nfpms:
   - id: agent
-    ids: [agent]
+    ids: [agent, desktop]
     package_name: limdm-agent
     # osquery is the inventory source; scripts/install-agent.sh adds its repository first
     dependencies: [osquery]
@@ -57,8 +66,12 @@ nfpms:
     contents:
       - src: packaging/limdm-agent.service
         dst: /usr/lib/systemd/system/limdm-agent.service
-      - src: packaging/com.limdm.recovery-key.policy
-        dst: /usr/share/polkit-1/actions/com.limdm.recovery-key.policy
+      - src: packaging/limdm-desktop-autostart.desktop
+        dst: /etc/xdg/autostart/limdm-desktop.desktop
+        file_info:
+          mode: 0o644
+      - src: packaging/limdm-recovery-key.desktop
+        dst: /usr/share/applications/limdm-recovery-key.desktop
         file_info:
           mode: 0o644
       - dst: /etc/limdm
@@ -72,9 +85,9 @@ nfpms:
       preremove: packaging/agent-preremove.sh
     overrides:
       deb:
-        recommends: [unattended-upgrades, ufw, libpam-pwquality, auditd]
+        recommends: [unattended-upgrades, ufw, libpam-pwquality, auditd, zenity]
       rpm:
-        recommends: [firewalld, audit, dnf-plugins-core]
+        recommends: [firewalld, audit, dnf-plugins-core, zenity]
   - id: server
     ids: [server]
     package_name: limdm-server

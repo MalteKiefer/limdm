@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -138,7 +139,7 @@ func enrichFromOsquery(inv *api.Inventory, priv api.Privacy) {
 			inv.Disks = disks
 		}
 	}
-	if priv.NetworkInfo {
+	{
 		if r, err := osq("SELECT d.interface, d.mac, a.address FROM interface_details d LEFT JOIN interface_addresses a USING (interface) WHERE d.interface <> 'lo'"); err == nil {
 			byName := map[string]*api.NIC{}
 			var order []string
@@ -149,7 +150,7 @@ func enrichFromOsquery(inv *api.Inventory, priv api.Privacy) {
 					byName[row["interface"]] = n
 					order = append(order, row["interface"])
 				}
-				if a := row["address"]; a != "" && !strings.HasPrefix(a, "fe80:") {
+				if a := row["address"]; priv.NetworkInfo && a != "" && !strings.HasPrefix(a, "fe80:") && !slices.Contains(n.IPs, a) {
 					n.IPs = append(n.IPs, a)
 				}
 			}

@@ -73,25 +73,34 @@ func parseAptList(content, file string) []api.Repo {
 	var out []api.Repo
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
+		enabled := true
+		if l, ok := strings.CutPrefix(line, disabledLine); ok { // switched off by LiMDM
+			line, enabled = l, false
+		}
 		if !strings.HasPrefix(line, "deb ") {
 			continue // comments, deb-src
 		}
 		rest := strings.TrimSpace(strings.TrimPrefix(line, "deb"))
-		signed := false
+		signed, keyFile := false, ""
 		if strings.HasPrefix(rest, "[") {
 			end := strings.Index(rest, "]")
 			if end < 0 {
 				continue
 			}
 			signed = strings.Contains(rest[:end], "signed-by=")
+			for _, o := range strings.Fields(rest[1:end]) {
+				if v, ok := strings.CutPrefix(o, "signed-by="); ok && strings.HasPrefix(v, "/") {
+					keyFile = v
+				}
+			}
 			rest = strings.TrimSpace(rest[end+1:])
 		}
 		f := strings.Fields(rest)
 		if len(f) < 2 {
 			continue
 		}
-		out = append(out, api.Repo{Type: "deb", Name: filepath.Base(file), URL: f[0], Suites: strings.Join(f[1:], " "),
-			Enabled: true, Signed: signed, File: file})
+		out = append(out, api.Repo{Type: "deb", Name: filepath.Base(file), URL: f[0], Suites: f[1], Components: strings.Join(f[2:], " "),
+			Enabled: enabled, Signed: signed, KeyFile: keyFile, File: file})
 	}
 	return out
 }
@@ -113,8 +122,8 @@ func parseDeb822(content, file string) []api.Repo {
 			continue
 		}
 		out = append(out, api.Repo{Type: "deb", Name: filepath.Base(file), URL: kv["uris"],
-			Suites: strings.TrimSpace(kv["suites"] + " " + kv["components"]), Enabled: !strings.EqualFold(kv["enabled"], "no"),
-			Signed: kv["signed-by"] != "", File: file})
+			Suites: kv["suites"], Components: kv["components"], Enabled: !strings.EqualFold(kv["enabled"], "no"),
+			Signed: kv["signed-by"] != "", KeyFile: keyPath(kv["signed-by"]), File: file})
 	}
 	return out
 }
@@ -145,6 +154,12 @@ func parseYumRepo(content, file string) []api.Repo {
 			}
 		case "enabled":
 			cur.Enabled = strings.TrimSpace(v) != "0"
+		case "gpgkey":
+			if f := strings.Fields(v); len(f) > 0 {
+				if p, ok := strings.CutPrefix(f[0], "file://"); ok {
+					cur.KeyFile = p
+				}
+			}
 		case "gpgcheck":
 			cur.Signed = strings.TrimSpace(v) == "1"
 		}
@@ -157,4 +172,12 @@ func readPasswdGroup() (string, string) {
 	p, _ := os.ReadFile("/etc/passwd")
 	g, _ := os.ReadFile("/etc/group")
 	return string(p), string(g)
+}
+
+// keyPath returns a Signed-By value when it names a file (it may also be an inline key).
+func keyPath(v string) string {
+	if strings.HasPrefix(v, "/") && !strings.ContainsAny(v, " \n") {
+		return v
+	}
+	return ""
 }
