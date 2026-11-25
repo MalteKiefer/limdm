@@ -974,3 +974,11 @@ func TestDisableDeb822KeepsCommentStanzas(t *testing.T) {
 		t.Fatalf("deb822 disable:\n%s", out)
 	}
 }
+
+func TestTTYName(t *testing.T) {
+	for nr, want := range map[string]string{"1025": "tty1", "34816": "pts/0", "34821": "pts/5", "0": "", "1088": ""} {
+		if got := ttyName(nr); got != want {
+			t.Errorf("%s: %q want %q", nr, got, want)
+		}
+	}
+}

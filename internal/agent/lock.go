@@ -224,13 +224,14 @@ func endTTYs() []string {
 	return ended
 }
 
-// procTTYs maps the terminals that processes of people run on to the user,
-// from the standard input of each process. Graphical sessions stay (they are
-// locked, not ended): a virtual console running a verified compositor or X
-// server, and pseudo terminals whose processes descend from one (terminal
-// emulators). Every other terminal ends, SSH included. Names and parents a
-// user can fake are not trusted: only the executable a process runs, when it
-// is a root owned file in a system directory.
+// procTTYs maps the terminals people's sessions control to the user, from
+// /proc: musl systems keep no utmp. Graphical sessions stay (they are locked,
+// not ended): a virtual console a verified compositor or X server runs on,
+// and a pseudo terminal only when every session on it was started by such a
+// compositor (terminal emulators). Every other terminal ends, SSH included.
+// Per session leader, not per process: a process a user hangs onto an SSH
+// terminal from the desktop does not make it graphical. Names and parents a
+// user can fake are not trusted, only verified compositor binaries.
 func procTTYs(people []string) map[string]string {
 	uids := map[uint32]string{}
 	for _, p := range people {
@@ -241,8 +242,8 @@ func procTTYs(people []string) map[string]string {
 		}
 	}
 	type ttyInfo struct {
-		user      string
-		graphical bool
+		user                string
+		compositor, foreign bool // compositor on this VT; a session not started by one
 	}
 	ttys := map[string]*ttyInfo{}
 	dirs, _ := filepath.Glob("/proc/[0-9]*")
@@ -255,12 +256,13 @@ func procTTYs(people []string) map[string]string {
 		if !ok {
 			continue
 		}
-		t, err := os.Readlink(d + "/fd/0")
-		if err != nil {
+		pid := filepath.Base(d)
+		f := strings.Fields(afterComm(readFile(d + "/stat")))
+		if len(f) < 5 {
 			continue
 		}
-		tty, ok := strings.CutPrefix(t, "/dev/")
-		if !ok || !strings.HasPrefix(tty, "pts/") && (!strings.HasPrefix(tty, "tty") || tty == "tty") {
+		tty := ttyName(f[4]) // controlling terminal
+		if tty == "" {
 			continue
 		}
 		info := ttys[tty]
@@ -268,17 +270,37 @@ func procTTYs(people []string) map[string]string {
 			info = &ttyInfo{user: name}
 			ttys[tty] = info
 		}
-		if underCompositor(filepath.Base(d)) {
-			info.graphical = true
+		if !strings.HasPrefix(tty, "pts/") && verifiedCompositor(pid) {
+			info.compositor = true
+		}
+		if f[3] == pid && !underCompositor(pid) { // a session leader on its own
+			info.foreign = true
 		}
 	}
 	out := map[string]string{}
 	for tty, info := range ttys {
-		if !info.graphical {
+		if strings.HasPrefix(tty, "pts/") && info.foreign || !strings.HasPrefix(tty, "pts/") && !info.compositor {
 			out[tty] = info.user
 		}
 	}
 	return out
+}
+
+// ttyName turns the tty_nr of /proc/PID/stat into ttyN or pts/N; "" when
+// the process has no controlling terminal or another kind.
+func ttyName(nr string) string {
+	n, err := strconv.ParseUint(nr, 10, 32)
+	if err != nil || n == 0 {
+		return ""
+	}
+	major, minor := (n>>8)&0xfff, (n&0xff)|((n>>12)&0xfff00)
+	switch {
+	case major == 4 && minor >= 1 && minor < 64:
+		return "tty" + strconv.FormatUint(minor, 10)
+	case major >= 136 && major <= 143:
+		return "pts/" + strconv.FormatUint((major-136)*256+minor, 10)
+	}
+	return ""
 }
 
 // underCompositor reports whether pid or one of its ancestors runs a
