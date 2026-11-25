@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
@@ -57,6 +58,9 @@ type Config struct {
 	Server       string `json:"server"`
 	DeviceID     string `json:"device_id"`
 	AllowScripts bool   `json:"allow_scripts"` // remote scripts are opt in per device
+	// NoFallbackDNS turns off asking Cloudflare and Google (DNS over HTTPS)
+	// when the system resolver cannot reach the server.
+	NoFallbackDNS bool `json:"no_fallback_dns,omitempty"`
 }
 
 // State survives restarts. Declarations are kept so enforcement continues offline.
@@ -73,6 +77,7 @@ type State struct {
 
 	PendingKeys    []pendingKey         `json:"pending_keys,omitempty"` // recovery keys not yet escrowed
 	Escrowed       map[string]time.Time `json:"escrowed,omitempty"`     // LUKS UUID: escrowed at
+	CommandKey     string               `json:"command_key,omitempty"`  // pinned public key commands are signed with
 	EscrowNotified time.Time            `json:"escrow_notified"`
 	Company        string               `json:"company,omitempty"`
 	BrandingHash   string               `json:"branding_hash,omitempty"`
@@ -143,7 +148,7 @@ func pinnedTLS(caPEM []byte, withIdentity bool) (*tls.Config, error) {
 
 func newClient(tc *tls.Config) *http.Client {
 	return &http.Client{Timeout: 2 * time.Minute, Transport: &http.Transport{
-		TLSClientConfig: tc, Proxy: http.ProxyFromEnvironment, ForceAttemptHTTP2: true}}
+		TLSClientConfig: tc, Proxy: http.ProxyFromEnvironment, ForceAttemptHTTP2: true, DialContext: fallbackDial()}}
 }
 
 func newCSR() (keyPEM []byte, csrPEM string, err error) {
@@ -311,6 +316,7 @@ func New(log *slog.Logger) (*Agent, error) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, err
 	}
+	fallbackDNS = !cfg.NoFallbackDNS
 	a := &Agent{cfg: cfg, client: newClient(tc), host: h, log: log}
 	if b, err := os.ReadFile(stateFile); err == nil {
 		if err := json.Unmarshal(b, &a.state); err != nil {
@@ -550,6 +556,7 @@ func (a *Agent) cycle(ctx context.Context) {
 		a.syncNow = true
 	}
 	a.compose()
+	a.pinCommandKey(resp.CommandKey)
 	a.runCommands(resp.Commands)
 	if u := resp.AgentUpdate; u != nil && u.Version != a.failedUpdate {
 		if err := a.installUpdate(ctx, *u); err != nil {
@@ -701,7 +708,7 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = a.unlockDevice()
 		a.syncPasswordLocks()
 	case "lost":
-		out, err = a.lostMode(c.Payload)
+		out, err = a.lostMode(c.Payload, c.Keys)
 	case "found":
 		out, err = a.foundMode()
 	case "wipe":
@@ -990,6 +997,11 @@ func (a *Agent) runCommands(cmds []api.Command) {
 		}
 		a.state.DoneCommands[c.ID] = time.Now() // before running: a reboot must not repeat after restart
 		a.saveState()
+		if err := a.verifyCommand(c); err != nil {
+			a.event("command %d (%s) refused: %v", c.ID, c.Type, err)
+			a.state.Results = append(a.state.Results, api.CommandResult{ID: c.ID, Output: "not executed: " + err.Error()})
+			continue
+		}
 		a.state.Results = append(a.state.Results, a.execute(c))
 		a.syncNow = true
 	}
@@ -1013,4 +1025,32 @@ func (a *Agent) getBytes(path string, limit int64, out *[]byte) error {
 	}
 	*out, err = io.ReadAll(io.LimitReader(resp.Body, limit))
 	return err
+}
+
+// pinCommandKey keeps the first command key the server sends (over the
+// pinned CA and mTLS). A different key later is refused, not adopted.
+func (a *Agent) pinCommandKey(hexKey string) {
+	switch {
+	case hexKey == "" || hexKey == a.state.CommandKey:
+	case a.state.CommandKey == "":
+		if b, err := hex.DecodeString(hexKey); err == nil && len(b) == ed25519.PublicKeySize {
+			a.state.CommandKey = hexKey
+			a.event("command signing key pinned; unsigned commands are refused from now on")
+		}
+	default:
+		a.event("the server sent a different command signing key; keeping the pinned one")
+	}
+}
+
+// verifyCommand checks a command's signature once a key is pinned. Before
+// that (servers without signing) commands run as before.
+func (a *Agent) verifyCommand(c api.Command) error {
+	if a.state.CommandKey == "" {
+		return nil
+	}
+	pub, err := hex.DecodeString(a.state.CommandKey)
+	if err != nil {
+		return err
+	}
+	return api.VerifyCommand(ed25519.PublicKey(pub), a.cfg.DeviceID, c)
 }

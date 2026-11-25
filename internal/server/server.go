@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
@@ -182,6 +183,7 @@ type Server struct {
 	cfg    Config
 	db     *pgxpool.Pool
 	ca     *deviceCA
+	cmdKey ed25519.PrivateKey // signs commands (command.key next to the CA)
 	log    *slog.Logger
 	limit  limiter
 	rt     atomic.Pointer[runtimeState] // settings editable in the UI and the OIDC client built from them
@@ -231,7 +233,11 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	}
 
 	log.Info("device CA ready", "fingerprint", ca.Fingerprint())
-	s := &Server{cfg: cfg, db: db, ca: ca, log: log, geoSem: make(chan struct{}, 1)}
+	cmdKey, err := loadOrCreateCommandKey(cfg.CADir)
+	if err != nil {
+		return nil, fmt.Errorf("command key: %w", err)
+	}
+	s := &Server{cfg: cfg, db: db, ca: ca, cmdKey: cmdKey, log: log, geoSem: make(chan struct{}, 1)}
 	if err := s.seedConsoleUsers(ctx); err != nil {
 		return nil, err
 	}
@@ -623,7 +629,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			Console: s.cfg.PublicURL + "/devices/" + id}
 	}
 
-	resp := api.CheckinResponse{ServerTime: time.Now().UTC(),
+	resp := api.CheckinResponse{ServerTime: time.Now().UTC(), CommandKey: hex.EncodeToString(s.cmdKey.Public().(ed25519.PublicKey)),
 		NeedStatus: statusHash != req.StatusHash, NeedPackages: pkgHash != req.PackagesHash}
 	res, err := resolveDevice(ctx, tx, id)
 	if err != nil {
@@ -700,14 +706,14 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := tx.Query(ctx, `UPDATE commands SET status='sent', updated_at=now() WHERE device_id=$1 AND status IN ('pending','sent')
-		RETURNING id, type, payload, created_at`, id)
+		RETURNING id, type, payload, created_at, signature`, id)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	resp.Commands, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (api.Command, error) {
 		var c api.Command
-		return c, row.Scan(&c.ID, &c.Type, &c.Payload, &c.CreatedAt)
+		return c, row.Scan(&c.ID, &c.Type, &c.Payload, &c.CreatedAt, &c.Signature)
 	})
 	if err != nil {
 		s.fail(w, err)

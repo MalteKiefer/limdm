@@ -69,3 +69,21 @@ func SumsEntry(sums, name string) (string, error) {
 func PackageName(version, arch, format string) string {
 	return "limdm-agent_" + version + "_linux_" + arch + "." + format
 }
+
+// CommandSigned is the byte string a command signature covers: the device,
+// the command's ID, type, creation time and payload.
+func CommandSigned(deviceID string, c Command) []byte {
+	return fmt.Appendf(nil, "limdm-command-v1\n%s\n%d\n%s\n%d\n%s", deviceID, c.ID, c.Type, c.CreatedAt.UnixMicro(), c.Payload)
+}
+
+func SignCommand(key ed25519.PrivateKey, deviceID string, c Command) string {
+	return hex.EncodeToString(ed25519.Sign(key, CommandSigned(deviceID, c)))
+}
+
+func VerifyCommand(pub ed25519.PublicKey, deviceID string, c Command) error {
+	sig, err := hex.DecodeString(c.Signature)
+	if err != nil || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(pub, CommandSigned(deviceID, c), sig) {
+		return errors.New("command signature invalid")
+	}
+	return nil
+}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/hmac"
 	"crypto/rand"
@@ -64,7 +65,7 @@ func TestIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{db: db, ca: ca, log: slog.New(slog.NewTextHandler(io.Discard, nil)), cfg: Config{
+	s := &Server{db: db, cmdKey: testCmdKey, ca: ca, log: slog.New(slog.NewTextHandler(io.Discard, nil)), cfg: Config{
 		PublicURL: "https://mdm.test", AgentURL: "https://127.0.0.1:8444", StaleAfter: 24 * time.Hour,
 		SessionKey: bytes.Repeat([]byte{7}, 32), Admins: []string{"admin@firma.de"}, Auditors: []string{"audit@firma.de"}, LocalLogin: true,
 	}}
@@ -805,7 +806,7 @@ func TestCompliancePolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, failing) VALUES ('d1', 's', now(), 'pc1', 2)`)
-	s := &Server{db: db, log: slog.New(slog.NewTextHandler(io.Discard, nil)), cfg: Config{PublicURL: "https://mdm.test", SessionKey: bytes.Repeat([]byte{1}, 32)}}
+	s := &Server{db: db, cmdKey: testCmdKey, log: slog.New(slog.NewTextHandler(io.Discard, nil)), cfg: Config{PublicURL: "https://mdm.test", SessionKey: bytes.Repeat([]byte{1}, 32)}}
 	pol := api.Compliance{Level: 1, GraceHours: 1, Notify: true, LockAfterHours: 2, UnlockWhenCompliant: true}
 	t0 := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
 	step := func(at time.Time) *webhookEvent {
@@ -929,7 +930,7 @@ func TestHistory(t *testing.T) {
 	}
 	db.Exec(ctx, `UPDATE device_metrics SET at = at - interval '1 hour'`)
 	rec(&api.Metrics{MemUsedMB: 2000, MemTotalMB: 4000, RootUsedPct: 41, Load1: 0.7})
-	s := &Server{db: db, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s := &Server{db: db, cmdKey: testCmdKey, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	charts, err := s.deviceCharts(ctx, "d1")
 	if err != nil || len(charts) != 3 || !strings.Contains(string(charts[0]), "<polyline") {
 		t.Fatalf("device charts: %v %d", err, len(charts))
@@ -962,7 +963,7 @@ func TestRecoveryEscrow(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname) VALUES ('d1', 's', now(), 'pc1')`)
-	s := &Server{db: db, log: slog.New(slog.NewTextHandler(io.Discard, nil)), cfg: Config{SessionKey: bytes.Repeat([]byte{7}, 32)}}
+	s := &Server{db: db, cmdKey: testCmdKey, log: slog.New(slog.NewTextHandler(io.Discard, nil)), cfg: Config{SessionKey: bytes.Repeat([]byte{7}, 32)}}
 	k := api.RecoveryKey{UUID: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0", Device: "/dev/sda3", Key: api.NewRecoveryKey()}
 	tx, _ := db.Begin(ctx)
 	if err := s.escrowKeys(ctx, tx, "d1", []api.RecoveryKey{k}); err != nil {
@@ -1012,8 +1013,26 @@ func TestRecoveryEscrow(t *testing.T) {
 	err = s.attachRecoveryKeys(ctx, tx, "d1", cmds)
 	tx.Rollback(ctx)
 	var lm api.LostMode
-	if err != nil || json.Unmarshal([]byte(cmds[0].Payload), &lm) != nil || lm.Message != "call +49 1" || len(lm.Keys) != 1 || !lm.Keys[0].Valid() || cmds[1].Payload != "" {
-		t.Fatalf("lost mode payload: %v %s", err, cmds[0].Payload)
+	if err != nil || json.Unmarshal([]byte(cmds[0].Payload), &lm) != nil || lm.Message != "call +49 1" || len(lm.Keys) != 0 ||
+		len(cmds[0].Keys) != 1 || !cmds[0].Keys[0].Valid() || len(cmds[1].Keys) != 0 {
+		t.Fatalf("lost mode keys beside the signed payload: %v %s %d", err, cmds[0].Payload, len(cmds[0].Keys))
+	}
+	// commands are signed with the command key over what was created
+	tx, _ = db.Begin(ctx)
+	if err := s.insertCommand(ctx, tx, "d1", "lock", "", "admin@firma.de"); err != nil {
+		t.Fatal(err)
+	}
+	var signed api.Command
+	tx.QueryRow(ctx, `SELECT id, type, payload, created_at, signature FROM commands WHERE device_id='d1' ORDER BY id DESC LIMIT 1`).Scan(&signed.ID, &signed.Type, &signed.Payload, &signed.CreatedAt, &signed.Signature)
+	tx.Rollback(ctx)
+	pub := testCmdKey.Public().(ed25519.PublicKey)
+	if err := api.VerifyCommand(pub, "d1", signed); err != nil {
+		t.Fatalf("signature: %v %+v", err, signed)
+	}
+	forged := signed
+	forged.Type = "wipe"
+	if api.VerifyCommand(pub, "d1", forged) == nil || api.VerifyCommand(pub, "d2", signed) == nil {
+		t.Fatal("a changed command or another device verified")
 	}
 	// package source templates from the inventory
 	db.Exec(ctx, `UPDATE devices SET inventory=$1 WHERE id='d1'`, `{"repos":[
@@ -1077,7 +1096,7 @@ func TestRecoveryCodeLogin(t *testing.T) {
 	if err := migrate(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{db: db, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s := &Server{db: db, cmdKey: testCmdKey, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	tx, _ := db.Begin(ctx)
 	creds, err := localAdd(ctx, tx, "alice", "admin")
 	if err != nil {
@@ -1143,7 +1162,7 @@ func TestAgentUpdates(t *testing.T) {
 	if err := migrate(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{db: db, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s := &Server{db: db, cmdKey: testCmdKey, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	for i, id := range []string{"d1", "d2", "d3", "d4"} {
 		tags := "{}"
 		if i == 0 {
@@ -1492,3 +1511,5 @@ func TestAgentUpdates(t *testing.T) {
 		}
 	}
 }
+
+var testCmdKey = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{9}, ed25519.SeedSize))

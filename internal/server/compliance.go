@@ -47,7 +47,7 @@ func (s *Server) enforceCompliance(ctx context.Context, tx pgx.Tx, deviceID stri
 	}
 	if locked && c.LockAfterHours == 0 {
 		// the lock action was removed from the policy: lift the automatic lock
-		if err := queuePolicyCommand(ctx, tx, deviceID, "unlock", false); err != nil {
+		if err := s.queuePolicyCommand(ctx, tx, deviceID, "unlock", false); err != nil {
 			return nil, err
 		}
 		if err := audit(ctx, tx, "policy", "compliance.unlock", deviceID, "lock action no longer declared"); err != nil {
@@ -63,7 +63,7 @@ func (s *Server) enforceCompliance(ctx context.Context, tx pgx.Tx, deviceID stri
 			return nil, err
 		}
 		if locked && c.UnlockWhenCompliant {
-			if err := queuePolicyCommand(ctx, tx, deviceID, "unlock", false); err != nil {
+			if err := s.queuePolicyCommand(ctx, tx, deviceID, "unlock", false); err != nil {
 				return nil, err
 			}
 			if err := audit(ctx, tx, "policy", "compliance.unlock", deviceID, "compliant again"); err != nil {
@@ -92,7 +92,7 @@ func (s *Server) enforceCompliance(ctx context.Context, tx pgx.Tx, deviceID stri
 			Console: s.cfg.PublicURL + "/devices/" + deviceID}
 	}
 	if c.LockAfterHours > 0 && !locked && !now.Before(since.Add(time.Duration(c.LockAfterHours)*time.Hour)) {
-		if err := queuePolicyCommand(ctx, tx, deviceID, "lock", true); err != nil {
+		if err := s.queuePolicyCommand(ctx, tx, deviceID, "lock", true); err != nil {
 			return nil, err
 		}
 		if err := audit(ctx, tx, "policy", "compliance.lock", deviceID, fmt.Sprintf("non-compliant for %d h", c.LockAfterHours)); err != nil {
@@ -102,8 +102,8 @@ func (s *Server) enforceCompliance(ctx context.Context, tx pgx.Tx, deviceID stri
 	return ev, nil
 }
 
-func queuePolicyCommand(ctx context.Context, tx pgx.Tx, deviceID, typ string, locked bool) error {
-	if _, err := tx.Exec(ctx, `INSERT INTO commands(device_id, type, created_by) VALUES ($1,$2,'policy')`, deviceID, typ); err != nil {
+func (s *Server) queuePolicyCommand(ctx context.Context, tx pgx.Tx, deviceID, typ string, locked bool) error {
+	if err := s.insertCommand(ctx, tx, deviceID, typ, "", "policy"); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE devices SET auto_locked=$2 WHERE id=$1`, deviceID, locked)
@@ -169,4 +169,16 @@ func (s *Server) sendWebhook(ev *webhookEvent) {
 var webhookClient = &http.Client{
 	Timeout:       10 * time.Second,
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+// insertCommand stores a command with its signature: the ID and creation
+// time come from the insert, the signature covers them with the payload.
+func (s *Server) insertCommand(ctx context.Context, tx pgx.Tx, deviceID, typ, payload, by string) error {
+	c := api.Command{Type: typ, Payload: payload}
+	if err := tx.QueryRow(ctx, `INSERT INTO commands(device_id, type, payload, created_by, created_at) VALUES ($1,$2,$3,$4, date_trunc('microseconds', now()))
+		RETURNING id, created_at`, deviceID, typ, payload, by).Scan(&c.ID, &c.CreatedAt); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `UPDATE commands SET signature=$2 WHERE id=$1`, c.ID, api.SignCommand(s.cmdKey, deviceID, c))
+	return err
 }

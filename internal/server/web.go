@@ -839,7 +839,7 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 // queueCommand stores a command for a device and audits it.
 func (s *Server) queueCommand(ctx context.Context, actor, id, typ, payload string) error {
 	return s.auditAction(ctx, actor, "command."+typ, id, truncate(payload, 2000), func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO commands(device_id, type, payload, created_by) VALUES ($1,$2,$3,$4)`, id, typ, payload, actor); err != nil {
+		if err := s.insertCommand(ctx, tx, id, typ, payload, actor); err != nil {
 			return err
 		}
 		if typ == "unlock" || typ == "lock" { // a manual action takes over from the compliance policy

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
@@ -775,5 +776,26 @@ func TestScriptInterpreter(t *testing.T) {
 		if got := strings.Join(scriptInterpreter(body), " "); got != want {
 			t.Errorf("%q: %q", body, got)
 		}
+	}
+}
+
+func TestVerifyCommand(t *testing.T) {
+	pub, key, _ := ed25519.GenerateKey(nil)
+	a := &Agent{cfg: Config{DeviceID: "d1"}}
+	c := api.Command{ID: 7, Type: "lock", CreatedAt: time.Now().Truncate(time.Microsecond)}
+	if a.verifyCommand(c) != nil {
+		t.Fatal("before a key is pinned commands run as before")
+	}
+	a.state.CommandKey = hex.EncodeToString(pub)
+	if a.verifyCommand(c) == nil {
+		t.Fatal("unsigned command accepted after pinning")
+	}
+	c.Signature = api.SignCommand(key, "d1", c)
+	if err := a.verifyCommand(c); err != nil {
+		t.Fatal(err)
+	}
+	c.Payload = "rm -rf /"
+	if a.verifyCommand(c) == nil {
+		t.Fatal("changed payload accepted")
 	}
 }

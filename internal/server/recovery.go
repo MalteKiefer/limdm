@@ -178,13 +178,9 @@ func (s *Server) attachRecoveryKeys(ctx context.Context, tx pgx.Tx, deviceID str
 			if err != nil {
 				return err
 			}
-			lm.Keys = append(lm.Keys, api.RecoveryKey{UUID: k.UUID, Device: k.Path, Key: plain})
+			cmds[i].Keys = append(cmds[i].Keys, api.RecoveryKey{UUID: k.UUID, Device: k.Path, Key: plain})
 		}
-		b, err := json.Marshal(lm)
-		if err != nil {
-			return err
-		}
-		cmds[i].Payload = string(b)
+		// the payload stays as signed; the keys travel beside it
 	}
 	return nil
 }

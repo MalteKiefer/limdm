@@ -168,6 +168,9 @@ func (l loginSession) person() bool {
 // graphicalSessions lists running graphical login sessions of people, one
 // entry per session.
 func graphicalSessions() []graphicalSession {
+	if !hasCmd("loginctl") {
+		return procSessions() // systems without systemd-logind
+	}
 	var res []graphicalSession
 	for _, l := range loginSessions() {
 		if !l.person() || (l.Type != "x11" && l.Type != "wayland") {
@@ -184,6 +187,43 @@ func graphicalSessions() []graphicalSession {
 		if env != nil {
 			res = append(res, graphicalSession{id: l.ID, user: l.User, uid: l.UID, kind: l.Type, env: env, locked: l.Locked})
 		}
+	}
+	return res
+}
+
+// procSessions finds graphical sessions without logind: one per person
+// with a process that has a display, its environment from that process.
+func procSessions() []graphicalSession {
+	var res []graphicalSession
+	seen := map[string]bool{}
+	dirs, _ := filepath.Glob("/proc/[0-9]*")
+	for _, d := range dirs {
+		var st syscall.Stat_t
+		if syscall.Stat(d, &st) != nil || st.Uid < 1000 || st.Uid >= 60000 {
+			continue
+		}
+		uid := strconv.FormatUint(uint64(st.Uid), 10)
+		if seen[uid] {
+			continue
+		}
+		env := graphicalEnv(uid, "")
+		if env == nil {
+			continue
+		}
+		seen[uid] = true
+		name := uid
+		for _, l := range strings.Split(readFile("/etc/passwd"), "\n") {
+			if f := strings.Split(l, ":"); len(f) > 2 && f[2] == uid {
+				name = f[0]
+			}
+		}
+		kind := "x11"
+		for _, kv := range env {
+			if strings.HasPrefix(kv, "WAYLAND_DISPLAY=") {
+				kind = "wayland"
+			}
+		}
+		res = append(res, graphicalSession{id: "proc-" + uid, user: name, uid: uid, kind: kind, env: env})
 	}
 	return res
 }

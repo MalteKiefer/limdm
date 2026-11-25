@@ -83,11 +83,12 @@ func keepOnlyKey(dev, key string) error {
 	})
 }
 
-func (a *Agent) lostMode(payload string) (string, error) {
+func (a *Agent) lostMode(payload string, attached []api.RecoveryKey) (string, error) {
 	var lm api.LostMode
 	if err := json.Unmarshal([]byte(payload), &lm); err != nil {
 		return "", err
 	}
+	lm.Keys = append(lm.Keys, attached...) // sent beside the signed payload
 	text := lostPrefix
 	if m := strings.TrimSpace(lm.Message); m != "" {
 		text += m + "\n"
@@ -102,6 +103,13 @@ func (a *Agent) lostMode(payload string) (string, error) {
 		report = append(report, "local passwords of "+strings.Join(locked, ", ")+" locked")
 	}
 	// end running sessions of people; root, greeters and system users stay
+	if !hasCmd("loginctl") { // without logind: end every process of people's accounts
+		for _, u := range peopleAccounts() {
+			if _, err := sh("pkill", "-KILL", "-u", u); err == nil {
+				report = append(report, "processes of "+u+" ended")
+			}
+		}
+	}
 	for _, l := range loginSessions() {
 		if l.person() {
 			if _, err := sh("loginctl", "terminate-session", l.ID); err == nil {

@@ -622,6 +622,12 @@ type Command struct {
 	Type      string    `json:"type"` // see CommandTypes
 	Payload   string    `json:"payload,omitempty"`
 	CreatedAt time.Time `json:"created_at,omitzero"` // when the admin sent it; delays count from here
+	// Signature is the server's Ed25519 signature over the command as it was
+	// created (CommandSigned), made with a key outside the database.
+	Signature string `json:"signature,omitempty"`
+	// Keys are the escrowed recovery keys a lost mode command carries; they
+	// are added when the command is sent, so they are not signed.
+	Keys []RecoveryKey `json:"keys,omitempty"`
 }
 
 // CommandTypes are the one off actions an admin can send.
@@ -686,6 +692,9 @@ type Metrics struct {
 }
 
 type CheckinResponse struct {
+	// CommandKey is the public key commands are signed with (hex); the agent
+	// pins it on first sight and runs only commands signed with it.
+	CommandKey        string        `json:"command_key,omitempty"`
 	DeclarationsToken string        `json:"declarations_token"`
 	Declarations      []Declaration `json:"declarations,omitempty"` // only when the token differs
 	Users             []User        `json:"users"`

@@ -141,6 +141,9 @@ func consoleSession(l loginSession) bool {
 // endConsoleSessions ends terminal and SSH sessions of people; they have
 // no screen locker.
 func endConsoleSessions() []string {
+	if !hasCmd("loginctl") {
+		return endTTYs() // systems without systemd-logind
+	}
 	var ended []string
 	for _, l := range loginSessions() {
 		if !consoleSession(l) {
@@ -149,6 +152,29 @@ func endConsoleSessions() []string {
 		if _, err := sh("loginctl", "terminate-session", l.ID); err == nil {
 			ended = append(ended, l.User+" (session "+l.ID+")")
 		}
+	}
+	return ended
+}
+
+// endTTYs ends people's terminal and SSH logins from utmp (who): every
+// process on their terminal gets SIGHUP, then SIGKILL.
+func endTTYs() []string {
+	out, err := sh("who")
+	if err != nil {
+		return nil
+	}
+	var ended []string
+	for _, l := range strings.Split(out, "\n") {
+		f := strings.Fields(l)
+		if len(f) < 2 || f[0] == "root" || !userRe.MatchString(f[0]) || !(strings.HasPrefix(f[1], "pts/") || strings.HasPrefix(f[1], "tty")) {
+			continue
+		}
+		if !slices.Contains(peopleAccounts(), f[0]) {
+			continue
+		}
+		_, _ = sh("pkill", "-HUP", "-t", f[1])
+		_, _ = sh("pkill", "-KILL", "-t", f[1])
+		ended = append(ended, f[0]+" ("+f[1]+")")
 	}
 	return ended
 }
@@ -164,8 +190,10 @@ func (a *Agent) lockSessions() int {
 	if len(sessions) == 0 {
 		return 0
 	}
-	_, _ = sh("loginctl", "lock-sessions")
-	time.Sleep(3 * time.Second) // lockers set LockedHint once they show
+	if hasCmd("loginctl") {
+		_, _ = sh("loginctl", "lock-sessions")
+		time.Sleep(3 * time.Second) // lockers set LockedHint once they show
+	}
 	locked := map[string]bool{}
 	for _, l := range loginSessions() {
 		locked[l.ID] = l.Locked

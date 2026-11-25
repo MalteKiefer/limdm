@@ -176,3 +176,27 @@ func (ca *deviceCA) signCSR(csrPEM, deviceID string) (certPEM string, serialHex 
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})), sn.Text(16), notAfter, nil
 }
+
+// loadOrCreateCommandKey is the Ed25519 key commands are signed with. It
+// lives next to the CA key, never in the database: whoever can only write
+// to the database cannot make devices run commands.
+func loadOrCreateCommandKey(dir string) (ed25519.PrivateKey, error) {
+	path := filepath.Join(dir, "command.key")
+	if b, err := os.ReadFile(path); err == nil {
+		blk, _ := pem.Decode(b)
+		if blk == nil || blk.Type != "ED25519 PRIVATE KEY" || len(blk.Bytes) != ed25519.SeedSize {
+			return nil, errors.New("command.key: not an Ed25519 key")
+		}
+		return ed25519.NewKeyFromSeed(blk.Bytes), nil
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "ED25519 PRIVATE KEY", Bytes: key.Seed()}), 0o600); err != nil {
+		return nil, err
+	}
+	return key, nil
+}
