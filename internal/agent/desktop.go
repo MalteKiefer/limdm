@@ -75,7 +75,7 @@ func (a *Agent) applyBranding(b *api.Branding) {
 	}
 	var err error
 	if len(b.Logo) > 0 && len(b.Logo) <= 256<<10 && bytes.HasPrefix(b.Logo, []byte("\x89PNG\r\n\x1a\n")) {
-		if err = os.MkdirAll(brandingDir, 0o755); err == nil { //nolint:gosec // logo must be readable by the user's session
+		if err = errors.Join(os.MkdirAll(brandingDir, 0o755), os.Chmod(brandingDir, 0o755)); err == nil { //nolint:gosec // logo must be readable by the user's session
 			_, err = writeIfChanged(brandingLogo, string(b.Logo), 0o644)
 		}
 	} else {
@@ -111,7 +111,8 @@ func (a *Agent) publishDesktop() {
 }
 
 func (a *Agent) serveDesktop(ctx context.Context) {
-	if err := os.MkdirAll(filepath.Dir(desktopSocket), 0o755); err != nil { //nolint:gosec // socket directory must be reachable by users
+	// explicit chmod: the service runs with UMask=0077
+	if err := errors.Join(os.MkdirAll(filepath.Dir(desktopSocket), 0o755), os.Chmod(filepath.Dir(desktopSocket), 0o755)); err != nil { //nolint:gosec // socket directory must be reachable by users
 		a.log.Error("desktop socket", "err", err)
 		return
 	}

@@ -278,4 +278,11 @@ var deCatalog = map[string]string{
 	"The new passwords do not match.":                     "Die neuen Passwörter stimmen nicht überein.", "the current password is wrong": "das aktuelle Passwort ist falsch",
 	"no new secret pending": "kein neues Geheimnis ausstehend", "the code does not match the new secret": "der Code passt nicht zum neuen Geheimnis",
 	"at least one active administrator must remain": "mindestens ein aktiver Administrator muss bleiben",
+	// deployment
+	"It is shown only once.": "Es wird nur einmal angezeigt.", "Deploy the agent": "Agent ausrollen",
+	"Always installs the newest release from":                        "Installiert immer das neueste Release von",
+	", including osquery. Debian, Ubuntu and Fedora (amd64, arm64).": ", einschließlich osquery. Debian, Ubuntu und Fedora (amd64, arm64).",
+	"Single device": "Einzelnes Gerät", "Mass deployment": "Massenrollout",
+	"Distribute this file with Ansible, Puppet or a golden image as /etc/limdm/enroll.conf (mode 0600), then install the limdm-agent package or run the script without LIMDM_TOKEN. The agent enrolls on installation and deletes the file. Use a token with enough uses.": "Verteile diese Datei per Ansible, Puppet oder Golden Image als /etc/limdm/enroll.conf (Modus 0600) und installiere dann das Paket limdm-agent oder führe das Skript ohne LIMDM_TOKEN aus. Der Agent registriert sich bei der Installation und löscht die Datei. Nutze ein Token mit ausreichend Verwendungen.",
+	"Other systems: use the tar.gz release and": "Andere Systeme: nutze das tar.gz Release und",
 }

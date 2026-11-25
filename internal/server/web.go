@@ -679,7 +679,7 @@ func (s *Server) tokenPage(w http.ResponseWriter, r *http.Request, sess session,
 		return
 	}
 	s.render(w, r, sess, "tokens", map[string]any{"Tokens": list, "Blueprints": bps, "Created": created,
-		"AgentURL": s.cfg.AgentURL, "Fingerprint": s.ca.Fingerprint()})
+		"AgentURL": s.cfg.AgentURL, "Fingerprint": s.ca.Fingerprint(), "PublicURL": s.cfg.PublicURL, "Repo": s.cfg.ReleaseRepo})
 }
 
 func (s *Server) tokenCreate(w http.ResponseWriter, r *http.Request, sess session) {

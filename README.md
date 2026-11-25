@@ -201,29 +201,35 @@ Publish an agent self update (signature made offline, directory copied to the se
 limdm-server release -key release.key -version 1.0.1 -dir releases amd64=dist/limdm-agent-linux-amd64 arm64=dist/limdm-agent-linux-arm64
 ```
 
-### Installing the agent
+### Installing and enrolling the agent
 
-osquery is a hard dependency and comes from the official osquery repository.
-`install-agent.sh` (attached to every release) adds that repository, trusting only
-the embedded signing key `1484 120A C4E9 F8A1 A577 AEEE 97A8 0C63 C9D8 B80B`, then
-installs osquery and the agent package:
+Every release ships `limdm-agent` as deb and rpm (amd64, arm64). The Enrollment page in
+the console shows ready commands that always use the newest release:
 
 ```sh
-sudo sh install-agent.sh ./limdm-agent_<version>_amd64.deb
+# one device: installs osquery and the agent, then enrolls
+curl -fsSL https://mdm.example.com/install.sh | sudo LIMDM_TOKEN=lmt_... sh
 ```
 
-If osquery is removed later, the agent reinstalls it from the same repository
-(retried hourly) and reports `agent.osquery` as failing until it is back. Only
-`osqueryi` is used; no osquery daemon is enabled.
+For mass deployment, distribute `/etc/limdm/enroll.conf` (mode 0600) with Ansible,
+Puppet or a golden image and install the package (or run the script without
+`LIMDM_TOKEN`). The agent enrolls during installation and deletes the file:
 
-### Enrolling a device
-
-Create a token on the Enrollment page, then on the device as root:
-
-```sh
-limdm-agent enroll --server https://mdm.example.com:8444 --fingerprint <CA SHA-256> --token lmt_...
-systemctl enable --now limdm-agent
+```toml
+server = "https://mdm.example.com:8444"
+fingerprint = "<device CA SHA-256>"
+token = "lmt_..."
+allow_scripts = false
 ```
+
+The script verifies the package against the release checksums and adds the official
+osquery repository, trusting only the signing key
+`1484 120A C4E9 F8A1 A577 AEEE 97A8 0C63 C9D8 B80B`. `LIMDM_RELEASE_REPO` (default
+`MalteKiefer/limdm`) selects the GitHub repository. Other systems use the tar.gz release,
+`scripts/install-agent.sh` and `limdm-agent enroll --config /etc/limdm/enroll.conf`.
+
+If osquery is removed later, the agent reinstalls it (retried hourly) and reports
+`agent.osquery` as failing until it is back. Only `osqueryi` is used.
 
 Local report without changes: `limdm-agent check --level 2`.
 

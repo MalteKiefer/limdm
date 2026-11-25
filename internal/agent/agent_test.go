@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -320,5 +321,17 @@ func TestDisableRepoContent(t *testing.T) {
 	repo := disableRepoContent("f.repo", "[a]\nname=a\nbaseurl=https://a/\nenabled=1\n[b]\nbaseurl=https://b/\n")
 	if r := parseYumRepo(repo, "f.repo"); len(r) != 2 || r[0].Enabled || r[1].Enabled {
 		t.Fatalf("repo: %q %+v", repo, r)
+	}
+}
+
+func TestEnrollConfigErrors(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "enroll.conf")
+	os.WriteFile(f, []byte("# c\nserver = \"https://mdm.example.com:8444\"\nfingerprint = 'ab'\n"), 0o600)
+	if err := EnrollFromConfig(f); err == nil || !strings.Contains(err.Error(), "token is missing") {
+		t.Fatalf("want missing token, got %v", err)
+	}
+	os.WriteFile(f, []byte("garbage\n"), 0o600)
+	if err := EnrollFromConfig(f); err == nil {
+		t.Fatal("garbage accepted")
 	}
 }

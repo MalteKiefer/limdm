@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -158,5 +159,23 @@ func TestValidLogo(t *testing.T) {
 	png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 4000, 10)))
 	if validLogo(buf.Bytes()) == nil {
 		t.Fatal("oversized logo accepted")
+	}
+}
+
+func TestInstallScript(t *testing.T) {
+	var b strings.Builder
+	if err := installTmpl.Execute(&b, map[string]string{"Console": "https://mdm.example.com", "Server": "https://mdm.example.com:8444",
+		"Fingerprint": strings.Repeat("ab", 32), "Repo": "MalteKiefer/limdm", "OsqueryKey": "KEYDATA"}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "-n")
+	cmd.Stdin = strings.NewReader(b.String())
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("syntax: %v %s", err, out)
+	}
+	for _, want := range []string{"SERVER='https://mdm.example.com:8444'", "limdm_${ver}_SHA256SUMS", "sha256sum -c", "KEYDATA"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("script lacks %q", want)
+		}
 	}
 }

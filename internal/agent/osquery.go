@@ -22,8 +22,7 @@ import (
 // same key for deb and rpm). Enforcement and remediation stay in the agent;
 // osquery is only queried with osqueryi, no osqueryd daemon is enabled.
 
-//go:embed osquery.asc
-var osqueryKey string
+var osqueryKey = api.OsqueryKey
 
 const (
 	OsqueryKeyFingerprint = "1484120AC4E9F8A1A577AEEE97A80C63C9D8B80B"

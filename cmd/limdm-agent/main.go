@@ -18,6 +18,7 @@ import (
 
 const usage = `usage:
   limdm-agent enroll --server https://mdm.example.com:8444 --fingerprint SHA256 --token TOKEN [--allow-scripts]
+  limdm-agent enroll --config /etc/limdm/enroll.conf
   limdm-agent run                 run the agent (systemd service)
   limdm-agent check [--level 2]   print local compliance report, changes nothing
   limdm-agent recovery-key [--all] create and escrow LUKS recovery keys (asks for the passphrase)
@@ -48,7 +49,14 @@ func main() {
 		token := fs.String("token", "", "enrollment token")
 		fp := fs.String("fingerprint", "", "SHA-256 fingerprint of the device CA")
 		scripts := fs.Bool("allow-scripts", false, "allow remote shell scripts on this device")
+		conf := fs.String("config", "", "enroll with a config file (server, fingerprint, token, allow_scripts)")
 		fs.Parse(os.Args[2:])
+		if *conf != "" {
+			if err = agent.EnrollFromConfig(*conf); err == nil {
+				fmt.Println("enrolled. start the agent: systemctl enable --now limdm-agent")
+			}
+			break
+		}
 		if *server == "" || *token == "" || *fp == "" {
 			err = errors.New("--server, --fingerprint and --token are required")
 			break
@@ -58,6 +66,14 @@ func main() {
 		}
 	case "run":
 		log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+		if !agent.Enrolled() {
+			if _, serr := os.Stat(agent.EnrollConfig); serr == nil {
+				if err = agent.EnrollFromConfig(agent.EnrollConfig); err != nil {
+					break
+				}
+				log.Info("enrolled from " + agent.EnrollConfig)
+			}
+		}
 		var a *agent.Agent
 		if a, err = agent.New(log); err == nil {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
