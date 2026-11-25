@@ -86,7 +86,33 @@ func recordSSO(user string, at time.Time) error {
 // ssoDue reports whether user needs an SSO confirmation before the local password works.
 func ssoDue(p pamPolicy, user string, now time.Time) bool {
 	t, ok := readSSO()[user]
-	return !p.LocalPassword || !ok || now.Sub(t) > time.Duration(p.ReverifyHours)*time.Hour
+	return ssoDueAt(p, t, ok, serverOffline(now), now)
+}
+
+// ssoDueAt: a confirmation is due without one, after ReverifyHours, and
+// offline (the server unreachable) only after the grace period on top, so
+// travellers and login screens without network are not locked out.
+func ssoDueAt(p pamPolicy, last time.Time, confirmed, offline bool, now time.Time) bool {
+	if !p.LocalPassword || !confirmed {
+		return true
+	}
+	age, reverify := now.Sub(last), time.Duration(p.ReverifyHours)*time.Hour
+	if age <= reverify {
+		return false
+	}
+	return !offline || age > reverify+p.Grace()
+}
+
+// serverOffline: the agent has not reached the LiMDM server for 30 minutes.
+func serverOffline(now time.Time) bool {
+	var st struct {
+		LastContact time.Time `json:"last_contact"`
+	}
+	b, err := os.ReadFile(stateFile)
+	if err != nil || json.Unmarshal(b, &st) != nil || st.LastContact.IsZero() {
+		return false // unknown: no grace
+	}
+	return now.Sub(st.LastContact) > 30*time.Minute
 }
 
 // lastContactOverdue reads the agent state; used by the hook before the agent

@@ -28,6 +28,11 @@ confirmation.
 
    `allowed_domain` restricts sign in to the Google `hd` claim or the email domain.
    `reverify_hours` (1 to 2160) is required with `local_password`.
+   `offline_grace_hours` (default 72, at most 720): when the device cannot reach the LiMDM
+   server for 30 minutes, a due SSO confirmation waits this long on top of
+   `reverify_hours`, and the local password keeps working on the login and lock screen
+   (travel, no network before login). Once the device is online again the confirmation is
+   required at the next login. The offline lock (`offline_lock_hours`) still applies.
 3. Optional offline lock in `com.limdm.agent`: `"offline_lock_hours": 72`.
 4. On the device page, list the **Desktop users**, one per line: `username email [admin]`.
    The agent creates the accounts (home directory, `/bin/bash`), adds `admin` users to

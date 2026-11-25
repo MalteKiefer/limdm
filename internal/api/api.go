@@ -162,6 +162,19 @@ type Login struct {
 	// ReverifyHours have passed; then SSO is required again.
 	LocalPassword bool `json:"local_password,omitempty"`
 	ReverifyHours int  `json:"reverify_hours,omitempty"`
+	// OfflineGraceHours: while the device cannot reach the LiMDM server, a
+	// due SSO confirmation waits this long beyond ReverifyHours and the local
+	// password keeps working (travel, login screen without network). 0 means
+	// the default of 72 hours; the offline lock (offline_lock_hours) still applies.
+	OfflineGraceHours int `json:"offline_grace_hours,omitempty"`
+}
+
+// Grace is the offline grace period.
+func (l Login) Grace() time.Duration {
+	if l.OfflineGraceHours <= 0 {
+		return 72 * time.Hour
+	}
+	return time.Duration(l.OfflineGraceHours) * time.Hour
 }
 
 // Privacy controls which personal data leaves the device. Without a privacy
@@ -322,6 +335,9 @@ func (d Declaration) apply(p *Policy) error {
 		}
 		if p.Login.LocalPassword && (p.Login.ReverifyHours < 1 || p.Login.ReverifyHours > 2160) {
 			bad("local_password needs reverify_hours 1..2160")
+		}
+		if p.Login.OfflineGraceHours < 0 || p.Login.OfflineGraceHours > 720 {
+			bad("offline_grace_hours: 0..720")
 		}
 	case TypePrivacy:
 		if err := strict(d.Payload, &p.Privacy); err != nil {

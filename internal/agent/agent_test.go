@@ -865,3 +865,24 @@ func TestEncryptionParsing(t *testing.T) {
 		t.Fatal(d)
 	}
 }
+
+func TestSSOOfflineGrace(t *testing.T) {
+	p := pamPolicy{Login: api.Login{Enabled: true, LocalPassword: true, ReverifyHours: 24}}
+	now := time.Now()
+	for _, c := range []struct {
+		age     time.Duration
+		offline bool
+		due     bool
+	}{{time.Hour, false, false}, {30 * time.Hour, false, true}, {30 * time.Hour, true, false}, {24*time.Hour + 73*time.Hour, true, true}} {
+		if got := ssoDueAt(p, now.Add(-c.age), true, c.offline, now); got != c.due {
+			t.Errorf("age %v offline %v: due %v", c.age, c.offline, got)
+		}
+	}
+	if !ssoDueAt(p, time.Time{}, false, true, now) {
+		t.Fatal("never confirmed: due even offline")
+	}
+	p.OfflineGraceHours = 10
+	if !ssoDueAt(p, now.Add(-35*time.Hour), true, true, now) {
+		t.Fatal("configured grace of 10 hours exceeded")
+	}
+}
