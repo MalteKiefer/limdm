@@ -377,10 +377,9 @@ func ownLockerRuns(s graphicalSession) bool {
 	return true
 }
 
-// idleSessions lists graphical sessions of compositors and window managers
-// without a screen locker of their own, and whether the agent's locker runs.
-func idleSessions() []idleSession {
-	procs := map[string]map[string]bool{} // uid -> process names
+// userProcs maps uid to the names of its running processes.
+func userProcs() map[string]map[string]bool {
+	procs := map[string]map[string]bool{}
 	dirs, _ := filepath.Glob("/proc/[0-9]*")
 	for _, d := range dirs {
 		comm, err := os.ReadFile(d + "/comm")
@@ -397,6 +396,13 @@ func idleSessions() []idleSession {
 		}
 		procs[uid][strings.TrimSpace(string(comm))] = true
 	}
+	return procs
+}
+
+// idleSessions lists graphical sessions of compositors and window managers
+// without a screen locker of their own, and whether the agent's locker runs.
+func idleSessions() []idleSession {
+	procs := userProcs()
 	var res []idleSession
 	for _, s := range graphicalSessions() {
 		p := procs[s.uid]

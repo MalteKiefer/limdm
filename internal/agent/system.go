@@ -277,14 +277,33 @@ func (h *host) upgrade(securityOnly bool) (string, error) {
 			}
 			return run(2*time.Hour, "unattended-upgrade", "-v")
 		}
-		return run(2*time.Hour, "apt-get", "upgrade", "-y", "-q", "--with-new-pkgs",
+		// wait for dpkg instead of failing while unattended-upgrades or PackageKit holds it
+		out, err := run(2*time.Hour, "apt-get", "upgrade", "-y", "-q", "--with-new-pkgs", "-o", "DPkg::Lock::Timeout=900",
 			"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold")
+		return out + flatpakUpgrade(), err
 	}
 	args := []string{"upgrade", "-y", "-q", "--refresh"}
 	if securityOnly {
 		args = append(args, "--security")
 	}
-	return run(2*time.Hour, "dnf", args...)
+	out, err := run(2*time.Hour, "dnf", args...)
+	if !securityOnly {
+		out += flatpakUpgrade()
+	}
+	return out, err
+}
+
+// flatpakUpgrade updates system wide Flatpak apps and runtimes too, so
+// "install all updates" means all; its errors are reported, not fatal.
+func flatpakUpgrade() string {
+	if !hasCmd("flatpak") {
+		return ""
+	}
+	out, err := run(time.Hour, "flatpak", "update", "-y", "--noninteractive", "--system")
+	if err != nil {
+		return "\nflatpak: " + err.Error()
+	}
+	return "\n" + lastLines(out, 10)
 }
 
 // pendingUpdates counts available updates; cached for an hour because it hits the mirrors.

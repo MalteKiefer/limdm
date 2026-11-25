@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Remote lock on every desktop.
@@ -62,47 +63,6 @@ func (a *Agent) lockDevice() (string, error) {
 	n := a.lockSessions()
 	return "logins blocked, local passwords of " + strings.Join(locked, ", ") + " locked, " + strconv.Itoa(n) +
 		" sessions locked, terminal and SSH sessions ended: " + strings.Join(ended, ", "), err
-}
-
-// consoleSession: a logind session of a person that is not graphical
-// (Type tty or unspecified, or Remote=yes as with SSH). props is the
-// output of loginctl show-session -p Type -p Remote -p Class -p User.
-func consoleSession(props string) bool {
-	kv := map[string]string{}
-	for _, l := range strings.Split(props, "\n") {
-		if k, v, ok := strings.Cut(strings.TrimSpace(l), "="); ok {
-			kv[k] = v
-		}
-	}
-	uid, err := strconv.Atoi(kv["User"])
-	if err != nil || uid < 1000 || kv["Class"] != "user" {
-		return false // root, system users, greeters and user managers stay
-	}
-	return kv["Remote"] == "yes" || kv["Type"] == "tty" || kv["Type"] == "unspecified"
-}
-
-// endConsoleSessions ends terminal and SSH sessions of people; they have
-// no screen locker.
-func endConsoleSessions() []string {
-	out, err := sh("loginctl", "list-sessions", "--no-legend")
-	if err != nil {
-		return nil
-	}
-	var ended []string
-	for _, l := range strings.Split(out, "\n") {
-		f := strings.Fields(l)
-		if len(f) < 3 {
-			continue
-		}
-		props, err := sh("loginctl", "show-session", f[0], "-p", "Type", "-p", "Remote", "-p", "Class", "-p", "User")
-		if err != nil || !consoleSession(props) {
-			continue
-		}
-		if _, err := sh("loginctl", "terminate-session", f[0]); err == nil {
-			ended = append(ended, f[2]+" (session "+f[0]+")")
-		}
-	}
-	return ended
 }
 
 func (a *Agent) unlockDevice() (string, error) {
@@ -161,34 +121,6 @@ func (a *Agent) releasePasswords() ([]string, error) {
 	return released, errors.Join(errs...)
 }
 
-// lockSessions locks every running graphical session and returns how many
-// compositor or window manager sessions needed a locker of their own.
-func (a *Agent) lockSessions() int {
-	_, _ = sh("loginctl", "lock-sessions") // desktop environments
-	n := 0
-	for _, s := range idleSessions() {
-		if s.screenLocked {
-			continue
-		}
-		var argv []string
-		switch {
-		case s.kind == "wayland" && hasCmd("swaylock"):
-			argv = []string{"swaylock", "-f", "-c", "000000"}
-		case s.kind == "x11" && hasCmd("i3lock"):
-			argv = []string{"i3lock", "-c", "000000"}
-		default:
-			a.event("cannot lock the %s session of %s: no screen locker installed", s.kind, s.user)
-			continue
-		}
-		if _, err := startInSession(0, s.user, s.env, argv[0], argv[1:]...); err != nil {
-			a.event("locking the session of %s failed: %v", s.user, err)
-			continue
-		}
-		n++
-	}
-	return n
-}
-
 // enforceDeviceLock keeps sessions locked while the device is locked; run
 // every minute, so ending the locker does not help.
 func (a *Agent) enforceDeviceLock() {
@@ -198,6 +130,69 @@ func (a *Agent) enforceDeviceLock() {
 		}
 		a.lockSessions()
 	}
+}
+
+// consoleSession: a person's session without a screen to lock (terminal,
+// or remote as with SSH).
+func consoleSession(l loginSession) bool {
+	return l.person() && (l.Remote || l.Type == "tty" || l.Type == "unspecified")
+}
+
+// endConsoleSessions ends terminal and SSH sessions of people; they have
+// no screen locker.
+func endConsoleSessions() []string {
+	var ended []string
+	for _, l := range loginSessions() {
+		if !consoleSession(l) {
+			continue
+		}
+		if _, err := sh("loginctl", "terminate-session", l.ID); err == nil {
+			ended = append(ended, l.User+" (session "+l.ID+")")
+		}
+	}
+	return ended
+}
+
+// lockSessions locks every graphical session: through logind first (the
+// desktop's own locker), then, where after a few seconds neither logind
+// reports the session locked nor a locker process runs (compositors and
+// window managers without a logind aware locker, LXQt, LXDE …), with
+// swaylock or i3lock started in the session. Returns the sessions locked
+// that way.
+func (a *Agent) lockSessions() int {
+	sessions := graphicalSessions()
+	if len(sessions) == 0 {
+		return 0
+	}
+	_, _ = sh("loginctl", "lock-sessions")
+	time.Sleep(3 * time.Second) // lockers set LockedHint once they show
+	locked := map[string]bool{}
+	for _, l := range loginSessions() {
+		locked[l.ID] = l.Locked
+	}
+	procs := userProcs()
+	n := 0
+	for _, s := range sessions {
+		if locked[s.id] || lockerRunning(procs[s.uid]) {
+			continue
+		}
+		var argv []string
+		switch {
+		case s.kind == "wayland" && hasCmd("swaylock"):
+			argv = []string{"swaylock", "-f", "-c", "000000"}
+		case s.kind == "x11" && hasCmd("i3lock"):
+			argv = []string{"i3lock", "-c", "000000"}
+		default:
+			a.event("cannot lock the %s session of %s: no logind aware locker and no swaylock or i3lock", s.kind, s.user)
+			continue
+		}
+		if _, err := startInSession(0, s.user, s.env, argv[0], argv[1:]...); err != nil {
+			a.event("locking the session of %s failed: %v", s.user, err)
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 // lockerRunning: a screen locker process of the session's user.

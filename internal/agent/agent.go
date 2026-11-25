@@ -736,20 +736,34 @@ const (
 	nologinText = "This device is locked by IT (LiMDM). Contact your administrator.\n"
 )
 
+// runScript runs a script IT sent. A shebang line picks the interpreter
+// (bash, python …); without one it runs with /bin/sh.
 func runScript(body string) (string, error) {
 	f, err := os.CreateTemp(stateDir, "script-*")
 	if err != nil {
 		return "", err
 	}
 	defer os.Remove(f.Name())
-	_, err = f.WriteString(body)
+	_, err = f.WriteString(strings.ReplaceAll(body, "\r\n", "\n")) // pasted from Windows editors
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
 	if err != nil {
 		return "", err
 	}
-	return run(30*time.Minute, "/bin/sh", f.Name())
+	argv := append(scriptInterpreter(body), f.Name())
+	return run(30*time.Minute, argv[0], argv[1:]...)
+}
+
+// scriptInterpreter reads the shebang ("#!/usr/bin/env python3",
+// "#!/bin/bash -e"); the file itself is never executed, so a noexec
+// /var/lib (CIS hardening) does not matter.
+func scriptInterpreter(body string) []string {
+	first, _, _ := strings.Cut(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	if f := strings.Fields(strings.TrimPrefix(first, "#!")); strings.HasPrefix(first, "#!") && len(f) > 0 {
+		return f
+	}
+	return []string{"/bin/sh"}
 }
 
 // collectAuthEvents ships desktop login events written by pam-auth.

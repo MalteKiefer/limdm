@@ -14,6 +14,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"math/big"
 	"net"
 	"net/http"
@@ -700,17 +701,79 @@ func TestParsePeople(t *testing.T) {
 }
 
 func TestConsoleSession(t *testing.T) {
-	for props, want := range map[string]bool{
-		"Type=tty\nRemote=no\nClass=user\nUser=1000":            true,
-		"Type=unspecified\nRemote=yes\nClass=user\nUser=1001":   true,
-		"Type=wayland\nRemote=no\nClass=user\nUser=1000":        false,
-		"Type=x11\nRemote=no\nClass=user\nUser=1000":            false,
-		"Type=tty\nRemote=yes\nClass=user\nUser=0":              false,
-		"Type=wayland\nRemote=no\nClass=greeter\nUser=42":       false,
-		"Type=unspecified\nRemote=no\nClass=manager\nUser=1000": false,
+	props := `Id=3
+Name=malte
+User=1000
+Type=tty
+Class=user
+State=active
+Remote=no
+LockedHint=no
+Audit=3
+
+Id=4
+Name=malte
+User=1000
+Type=wayland
+Class=user
+State=active
+Remote=no
+LockedHint=yes
+Audit=4
+
+Id=5
+Name=anna
+User=1001
+Type=unspecified
+Class=user
+State=active
+Remote=yes
+LockedHint=no
+Audit=5
+
+Id=6
+Name=root
+User=0
+Type=tty
+Class=user
+State=active
+Remote=yes
+
+Id=c1
+Name=gdm
+User=42
+Type=wayland
+Class=greeter
+State=online
+
+Id=7
+Name=malte
+User=1000
+Type=unspecified
+Class=manager
+State=active`
+	got := map[string]bool{}
+	for _, l := range parseSessions(props) {
+		got[l.ID] = consoleSession(l)
+	}
+	want := map[string]bool{"3": true, "4": false, "5": true, "6": false, "c1": false, "7": false}
+	if !maps.Equal(got, want) {
+		t.Fatalf("console sessions: %v", got)
+	}
+	if s := parseSessions(props); !s[1].Locked || s[1].Type != "wayland" || s[1].Audit != "4" {
+		t.Fatalf("parsed: %+v", s[1])
+	}
+}
+
+func TestScriptInterpreter(t *testing.T) {
+	for body, want := range map[string]string{
+		"echo hi":                           "/bin/sh",
+		"#!/bin/bash -e\necho hi":           "/bin/bash -e",
+		"#!/usr/bin/env python3\r\nprint()": "/usr/bin/env python3",
+		"#!\necho":                          "/bin/sh",
 	} {
-		if got := consoleSession(props); got != want {
-			t.Errorf("%q: %v", props, got)
+		if got := strings.Join(scriptInterpreter(body), " "); got != want {
+			t.Errorf("%q: %q", body, got)
 		}
 	}
 }

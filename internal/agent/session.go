@@ -22,8 +22,11 @@ var sessionVars = []string{"WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY", "XDG_CURR
 
 // graphicalEnv returns the display environment of a running graphical
 // program of uid, read from /proc. Works for every desktop and compositor,
-// including those without XDG autostart such as sway or Hyprland.
-func graphicalEnv(uid string) []string {
+// including those without XDG autostart such as sway or Hyprland. With an
+// audit session ID only processes of that login session count, so a
+// second or stale session of the same user, or an SSH shell with DISPLAY,
+// is never taken for this one.
+func graphicalEnv(uid, audit string) []string {
 	n, err := strconv.Atoi(uid)
 	if err != nil {
 		return nil
@@ -32,6 +35,9 @@ func graphicalEnv(uid string) []string {
 	for _, d := range dirs {
 		var st syscall.Stat_t
 		if syscall.Stat(d, &st) != nil || int(st.Uid) != n {
+			continue
+		}
+		if audit != "" && strings.TrimSpace(readFile(d+"/sessionid")) != audit {
 			continue
 		}
 		raw, err := os.ReadFile(d + "/environ")
@@ -48,7 +54,11 @@ func graphicalEnv(uid string) []string {
 		if vars["WAYLAND_DISPLAY"] == "" && vars["DISPLAY"] == "" {
 			continue
 		}
-		env := []string{"XDG_RUNTIME_DIR=/run/user/" + uid, "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/" + uid + "/bus"}
+		bus := vars["DBUS_SESSION_BUS_ADDRESS"] // a session's own bus (dbus-launch) wins over the user bus
+		if bus == "" || strings.ContainsAny(bus, "\x00\n") {
+			bus = "unix:path=/run/user/" + uid + "/bus"
+		}
+		env := []string{"XDG_RUNTIME_DIR=/run/user/" + uid, "DBUS_SESSION_BUS_ADDRESS=" + bus}
 		for _, k := range sessionVars {
 			if v := vars[k]; v != "" && !strings.ContainsAny(v, "\x00\n") {
 				env = append(env, k+"="+v)
@@ -95,29 +105,84 @@ func (a *Agent) company() string {
 }
 
 type graphicalSession struct {
-	user, uid string
-	env       []string
+	id, user, uid, kind string // kind: x11 or wayland
+	env                 []string
+	locked              bool // logind's LockedHint: the desktop's locker shows
 }
 
-// graphicalSessions lists the users with a running graphical session.
-func graphicalSessions() []graphicalSession {
+// loginSession is a logind session with what the agent needs from it.
+type loginSession struct {
+	ID, User, UID, Type, Class, State, Audit string
+	Remote, Locked                           bool
+}
+
+// loginSessions lists logind sessions in one loginctl call.
+func loginSessions() []loginSession {
 	out, err := sh("loginctl", "list-sessions", "--no-legend")
 	if err != nil {
 		return nil
 	}
-	var res []graphicalSession
-	seen := map[string]bool{}
+	var ids []string
 	for _, l := range strings.Split(out, "\n") {
-		f := strings.Fields(l)
-		if len(f) < 3 || seen[f[1]] || !userRe.MatchString(f[2]) {
+		if f := strings.Fields(l); len(f) > 0 {
+			ids = append(ids, f[0])
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	props, err := sh("loginctl", append(append([]string{"show-session"}, ids...),
+		"-p", "Id", "-p", "Name", "-p", "User", "-p", "Type", "-p", "Class", "-p", "State", "-p", "Remote", "-p", "LockedHint", "-p", "Audit")...)
+	if err != nil {
+		return nil
+	}
+	return parseSessions(props)
+}
+
+// parseSessions reads loginctl show-session output: blocks of key=value
+// lines separated by blank lines.
+func parseSessions(props string) []loginSession {
+	var res []loginSession
+	for _, block := range strings.Split(strings.TrimSpace(props), "\n\n") {
+		kv := map[string]string{}
+		for _, l := range strings.Split(block, "\n") {
+			if k, v, ok := strings.Cut(strings.TrimSpace(l), "="); ok {
+				kv[k] = v
+			}
+		}
+		if kv["Id"] == "" {
 			continue
 		}
-		if uid, err := strconv.Atoi(f[1]); err != nil || uid < 1000 {
-			continue // display manager greeters (gdm, sddm) and system users
+		res = append(res, loginSession{ID: kv["Id"], User: kv["Name"], UID: kv["User"], Type: kv["Type"], Class: kv["Class"],
+			State: kv["State"], Audit: kv["Audit"], Remote: kv["Remote"] == "yes", Locked: kv["LockedHint"] == "yes"})
+	}
+	return res
+}
+
+// person: a session of a person's account (not root, a greeter or a user manager).
+func (l loginSession) person() bool {
+	uid, err := strconv.Atoi(l.UID)
+	return err == nil && uid >= 1000 && l.Class == "user" && userRe.MatchString(l.User) && l.State != "closing"
+}
+
+// graphicalSessions lists running graphical login sessions of people, one
+// entry per session.
+func graphicalSessions() []graphicalSession {
+	var res []graphicalSession
+	for _, l := range loginSessions() {
+		if !l.person() || (l.Type != "x11" && l.Type != "wayland") {
+			continue
 		}
-		seen[f[1]] = true
-		if env := graphicalEnv(f[1]); env != nil {
-			res = append(res, graphicalSession{user: f[2], uid: f[1], env: env})
+		audit := l.Audit
+		if audit == "0" || audit == "4294967295" {
+			audit = "" // no audit session: fall back to the user's processes
+		}
+		env := graphicalEnv(l.UID, audit)
+		if env == nil && audit != "" {
+			env = graphicalEnv(l.UID, "")
+		}
+		if env != nil {
+			res = append(res, graphicalSession{id: l.ID, user: l.User, uid: l.UID, kind: l.Type, env: env, locked: l.Locked})
 		}
 	}
 	return res
@@ -160,6 +225,9 @@ func (a *Agent) showMessage(payload string) (string, error) {
 		if launchInSession(s.user, s.env, "/usr/bin/limdm-desktop", "--message-title="+m.Title, "--message="+m.Text) == nil {
 			shown = append(shown, s.user)
 		}
+	}
+	if len(shown) == 0 {
+		return "", errors.New("the message dialog could not be started in any session (limdm-desktop missing?); a notification was sent")
 	}
 	return "shown to " + strings.Join(shown, ", "), nil
 }

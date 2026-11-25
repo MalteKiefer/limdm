@@ -249,6 +249,20 @@ focus.
   river, niri, Wayfire, i3 and others) get swaylock or i3lock started directly, again every
   minute while the device stays locked.
 
+Whether a session is locked is checked: logind's LockedHint or a running locker; only
+where neither shows after a few seconds does the agent start swaylock or i3lock itself.
+Sessions are found through logind, one by one (also several sessions of one user), and
+each gets the display and D-Bus environment of its own processes.
+
+Other commands:
+
+* **Install all updates**: apt (waits up to 15 minutes for a dpkg lock held by
+  unattended-upgrades or PackageKit) or dnf, then system wide Flatpaks.
+* **Run script**: a shebang (`#!/bin/bash`, `#!/usr/bin/env python3`) picks the
+  interpreter, otherwise `/bin/sh`; works on hardened systems with a noexec `/var`.
+* **Send message**: a notification and a dialog in every graphical session; the command
+  fails when no dialog could be shown.
+
 After unlocking, users unlock their screen with their usual password. Lost mode locks the
 passwords the same way and ends the sessions. The device page shows the latest lock,
 unlock, lost mode, wipe and uninstall release with who sent it and whether the device

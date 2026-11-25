@@ -101,13 +101,11 @@ func (a *Agent) lostMode(payload string) (string, error) {
 	} else if len(locked) > 0 {
 		report = append(report, "local passwords of "+strings.Join(locked, ", ")+" locked")
 	}
-	// end running sessions of everybody but root
-	if out, err := sh("loginctl", "list-users", "--no-legend"); err == nil {
-		for _, l := range strings.Split(out, "\n") {
-			if f := strings.Fields(l); len(f) >= 2 && f[0] != "0" && userRe.MatchString(f[1]) {
-				if _, err := sh("loginctl", "terminate-user", f[1]); err == nil {
-					report = append(report, "session of "+f[1]+" ended")
-				}
+	// end running sessions of people; root, greeters and system users stay
+	for _, l := range loginSessions() {
+		if l.person() {
+			if _, err := sh("loginctl", "terminate-session", l.ID); err == nil {
+				report = append(report, "session "+l.ID+" of "+l.User+" ended")
 			}
 		}
 	}
