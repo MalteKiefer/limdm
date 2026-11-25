@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"mime"
+	"mime/quotedprintable"
 	"net"
 	"net/http"
 	"net/mail"
@@ -22,6 +23,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -149,21 +151,32 @@ func discordBody(n notice) ([]byte, error) {
 	return json.Marshal(map[string]any{"embeds": []any{embed}, "allowed_mentions": map[string]any{"parse": []string{}}})
 }
 
-// emailMessage builds an RFC 5322 message; header values are encoded, so a
-// host name cannot inject headers.
+// emailMessage builds an RFC 5322 message. Header values are encoded and
+// the body is quoted-printable with control characters removed, so text
+// from devices (host names, command output) cannot add headers or SMTP lines.
 func emailMessage(from string, to []string, n notice) []byte {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nMIME-Version: 1.0\r\n",
-		from, strings.Join(to, ", "), mime.QEncoding.Encode("utf-8", "[LiMDM] "+n.Title), n.At.Format(time.RFC1123Z))
-	b.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
-	body := n.Text
+		from, strings.Join(to, ", "), mime.QEncoding.Encode("utf-8", "[LiMDM] "+cleanText(n.Title)), n.At.Format(time.RFC1123Z))
+	b.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n")
+	body := cleanText(n.Text)
 	if n.URL != "" {
-		body += "\n\n" + n.URL
+		body += "\n\n" + cleanText(n.URL)
 	}
-	for _, l := range strings.Split(strings.ReplaceAll(body, "\r", ""), "\n") {
-		b.WriteString(l + "\r\n") // dot stuffing is done by the SMTP data writer
-	}
+	qp := quotedprintable.NewWriter(&b)
+	_, _ = qp.Write([]byte(strings.ReplaceAll(body, "\n", "\r\n")))
+	_ = qp.Close()
 	return b.Bytes()
+}
+
+// cleanText keeps printable text, line feeds and tabs.
+func cleanText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' || (r >= 0x20 && r != 0x7f && !unicode.IsControl(r)) {
+			return r
+		}
+		return -1
+	}, s)
 }
 
 // ---- delivery ----
