@@ -179,8 +179,12 @@ well.
 
 **LiMDM** in the applications menu (or **Open LiMDM** in the tray) opens a window in the
 style of GNOME Settings (GTK 4, libadwaita 1.4): a sidebar with Overview (state, last check
-in, check in now), Compliance (every check with its result), Disk Encryption (store a recovery
-key right there), Agent Log and About. It runs as the user and talks only to the agent socket.
+in, check in now), Compliance (every check with its result), Profiles (every declaration in
+force with its settings, secrets masked, like the profiles list on macOS), Certificates (CA
+certificates IT installed, with subject, issuer, validity and fingerprint), Disk Encryption
+(store a recovery key right there), Agent Log (every journal entry, optionally only warnings
+and errors) and About. It shows the company logo, or the LiMDM logo, and follows the system's
+light or dark style; the button next to the logo switches between system, dark and light. It runs as the user and talks only to the agent socket.
 Without GTK 4 and libadwaita 1.4 (Ubuntu 22.04) the tray falls back to simple dialogs.
 
 `limdm-desktop` shows a tray icon (the LiMDM logo with a status dot) with the device state: green (compliant), amber (checks

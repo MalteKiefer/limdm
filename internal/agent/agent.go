@@ -457,7 +457,9 @@ func (a *Agent) cycle(ctx context.Context) {
 	a.lastChecks = checks
 	a.collectAuthEvents()
 
-	status := api.Status{Inventory: a.host.inventory(a.pol.Privacy), Checks: checks, Declarations: a.declarationStatus()}
+	inv := a.host.inventory(a.pol.Privacy)
+	inv.Certificates = certInfo(a.pol.Extra.Certificates)
+	status := api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus()}
 	sb, _ := json.Marshal(status)
 	sum := sha256.Sum256(sb)
 	statusHash := hex.EncodeToString(sum[:])

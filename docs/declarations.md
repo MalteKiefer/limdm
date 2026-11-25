@@ -123,7 +123,12 @@ Absolute, clean paths; merged by path.
 {"certificates": [{"name": "corp-root", "pem": "-----BEGIN CERTIFICATE-----..."}]}
 ```
 
-CA certificates only, added to the system trust store.
+CA certificates only, added to the system trust store (`/usr/local/share/ca-certificates` with
+`update-ca-certificates`, `/etc/pki/ca-trust/source/anchors` with `update-ca-trust`); removed
+when no longer declared. In the library editor, **Add certificate file** takes a PEM or CRT
+file (also a bundle) and appends its certificates to the list. The device page
+(**Declarations**) and the desktop app (**Certificates**) show subject, issuer, validity and
+SHA-256 fingerprint of what is installed.
 
 ### `com.limdm.sysctl` (list), `com.limdm.kernelmodules` (list)
 

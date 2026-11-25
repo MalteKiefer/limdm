@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"io"
@@ -515,5 +516,33 @@ func TestPowerDelay(t *testing.T) {
 		if got := powerDelay(c.m, c.sent, now); got != c.want {
 			t.Errorf("powerDelay(%d, -%v) = %d, want %d", c.m, now.Sub(c.sent), got, c.want)
 		}
+	}
+}
+
+func TestMaskSecrets(t *testing.T) {
+	var v any
+	json.Unmarshal([]byte(`{"issuer":"https://accounts.google.com","client_secret":"s3cret","nested":[{"password":"x","name":"n"}],"empty_secret":"",
+		"scripts":[{"name":"s","body":"curl -H 'Authorization: abc'"}],"http":"http://bob:pw123@proxy:3128","wifi":{"psk":"wpa"},"api_key":"k1","otp_seed":["a"]}`), &v)
+	b, _ := json.Marshal(maskSecrets(v))
+	s := string(b)
+	for _, leak := range []string{"s3cret", `"password":"x"`, "Authorization", "pw123", "wpa", "k1", `"a"`} {
+		if strings.Contains(s, leak) {
+			t.Fatalf("leaked %q: %s", leak, s)
+		}
+	}
+	if !strings.Contains(s, "accounts.google.com") || !strings.Contains(s, `"name":"n"`) || !strings.Contains(s, "proxy:3128") {
+		t.Fatalf("masked: %s", s)
+	}
+}
+
+func TestCertInfo(t *testing.T) {
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Corp Root"}, IsCA: true, BasicConstraintsValid: true,
+		NotBefore: time.Now(), NotAfter: time.Now().Add(time.Hour)}
+	der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	p := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	info := certInfo([]api.Certificate{{Name: "corp", PEM: p}, {Name: "broken", PEM: "nope"}})
+	if len(info) != 1 || info[0].Subject != "CN=Corp Root" || len(info[0].SHA256) != 64 {
+		t.Fatalf("cert info: %+v", info)
 	}
 }

@@ -331,6 +331,14 @@
 {{end}}
 
 {{if eq .Tab "declarations"}}
+{{if .Inv.Certificates}}<section class="tablecard">
+  <div class="card-head"><h2>{{t "Certificates"}}</h2><span class="muted">{{t "CA certificates installed by LiMDM"}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Name"}}</th><th>{{t "Subject"}}</th><th>{{t "Issuer"}}</th><th>{{t "Valid until"}}</th><th>{{t "SHA-256"}}</th></tr></thead>
+    <tbody>{{range .Inv.Certificates}}<tr><td>{{.Name}}</td><td class="mono">{{.Subject}}</td><td class="mono">{{.Issuer}}</td>
+      <td class="nowrap">{{fmtTime .NotAfter}}</td><td class="mono" title="{{.SHA256}}">{{slice .SHA256 0 16}}…</td></tr>{{end}}</tbody>
+  </table></div>
+</section>{{end}}
 <section class="card">
   <div class="card-head"><h2>{{t "Resolved configuration"}}</h2><span class="muted">{{range $i, $b := .Resolved.Chain}}{{if $i}} → {{end}}<a href="/blueprints/{{$b.ID}}">{{$b.Name}}</a>{{end}}</span></div>
   <div class="scroll"><table>
