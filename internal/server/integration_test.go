@@ -1512,6 +1512,19 @@ func TestAgentUpdates(t *testing.T) {
 	if n != 2 {
 		t.Fatalf("app install commands: %d", n)
 	}
+	// installs from the console: busy until the device reports the app, then a note
+	db.Exec(ctx, `DELETE FROM commands WHERE device_id='d5' AND type LIKE 'app_%'`)
+	db.Exec(ctx, `INSERT INTO commands(device_id, type, payload, created_by, status) VALUES ('d5','app_install','firefox','admin','ok'),('d5','app_remove','vlc','admin','failed')`)
+	db.Exec(ctx, `UPDATE commands SET output='vlc: not installed' WHERE device_id='d5' AND payload='vlc'`)
+	names = map[string]string{"firefox": "Firefox", "vlc": "VLC"}
+	busy, notes, err := s.appProgress(ctx, "d5", []api.AppState{{ID: "firefox"}}, names)
+	if err != nil || busy["firefox"] != "install" || len(notes) != 1 || notes[0].OK || notes[0].Error != "vlc: not installed" {
+		t.Fatalf("progress while installing: %v %v %+v", err, busy, notes)
+	}
+	busy, notes, _ = s.appProgress(ctx, "d5", []api.AppState{{ID: "firefox", Installed: true}}, names)
+	if len(busy) != 0 || len(notes) != 2 || !slices.ContainsFunc(notes, func(n appNote) bool { return n.App == "Firefox" && n.OK }) {
+		t.Fatalf("progress done: %v %+v", busy, notes)
+	}
 	// a new local user's password never reaches the audit log
 	if err := s.queueCommand(ctx, "admin@firma.de", "d3", "user_create", `{"username":"anna","password":"correct horse battery"}`); err != nil {
 		t.Fatal(err)

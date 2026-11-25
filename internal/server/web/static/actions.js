@@ -196,6 +196,17 @@
   document.addEventListener('mouseover', placeSub, { passive: true });
   document.addEventListener('focusin', placeSub);
 
+  // pages with running work reload until it is done ([data-refresh] seconds),
+  // but not while the user types or a dialog or menu is open
+  const refresh = document.querySelector('[data-refresh]');
+  if (refresh) {
+    setTimeout(function reload() {
+      const busy = document.querySelector('dialog[open], details.menu[open]') || document.activeElement?.matches('input, textarea, select');
+      if (busy) { setTimeout(reload, 2000); return; }
+      location.reload();
+    }, Number(refresh.dataset.refresh || 5) * 1000);
+  }
+
   // dialogs marked data-autoopen open on page load (results of a form post)
   for (const d of document.querySelectorAll('dialog[data-autoopen]')) d.showModal && d.showModal();
   bulkSync();
