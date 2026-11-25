@@ -642,3 +642,27 @@ func TestIdleLockRespectsRemediation(t *testing.T) {
 		t.Fatal("remediation off must not start lockers")
 	}
 }
+
+func TestStoreHelpers(t *testing.T) {
+	f := flathubFilterContent([]string{"org.mozilla.firefox", "com.slack.Slack", "org.mozilla.firefox"})
+	if !strings.Contains(f, "deny *\nallow runtime/*\n") || strings.Count(f, "allow app/org.mozilla.firefox") != 1 || !strings.Contains(f, "allow app/com.slack.Slack") {
+		t.Fatalf("filter: %q", f)
+	}
+	m := installedFlatpaks([]api.FlatpakApp{{ID: "a", Installation: "bob"}, {ID: "a", Installation: "system"}, {ID: "b", Installation: "alice"}})
+	if m["a"] != "system" || m["b"] != "alice" {
+		t.Fatalf("installed flatpaks: %v", m)
+	}
+	src := api.AppSource{Kind: "package", Debian: "firefox-esr", Fedora: "firefox"}
+	if p := familyPackages(src, "debian"); len(p) != 1 || p[0] != "firefox-esr" {
+		t.Fatal(p)
+	}
+	var st store
+	st.jobs = map[string]*appJob{}
+	if !st.start("x", "install") || st.start("x", "install") {
+		t.Fatal("a running job must not start twice")
+	}
+	st.finish("x", errors.New("boom"))
+	if j := st.job("x"); j == nil || j.Err != "boom" || !st.start("x", "install") {
+		t.Fatal("a failed job can start again")
+	}
+}

@@ -187,7 +187,19 @@
   <a href="/devices/{{$id}}?tab=software&amp;sub=packages" {{if eq .Sub "packages"}}class="on" aria-current="page"{{end}}>{{t "Packages"}} <span class="n">{{.PackageCount}}</span></a>
   <a href="/devices/{{$id}}?tab=software&amp;sub=sources" {{if eq .Sub "sources"}}class="on" aria-current="page"{{end}}>{{t "Package sources"}} <span class="n">{{len .Inv.Repos}}</span></a>
   <a href="/devices/{{$id}}?tab=software&amp;sub=flatpak" {{if eq .Sub "flatpak"}}class="on" aria-current="page"{{end}}>{{t "Flatpak"}} <span class="n">{{len .Inv.Flatpaks}}</span></a>
+  <a href="/devices/{{$id}}?tab=software&amp;sub=catalog" {{if eq .Sub "catalog"}}class="on" aria-current="page"{{end}}>{{t "Catalog"}} <span class="n">{{len .Inv.Apps}}</span></a>
 </nav>
+{{if eq .Sub "catalog"}}
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "Software catalog"}}</h2><a class="button secondary small" href="/software">{{t "Manage catalog"}}</a></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "App"}}</th><th>{{t "State"}}</th><th>{{t "Installed as"}}</th><th>{{t "Last error"}}</th></tr></thead>
+    <tbody>{{range .Inv.Apps}}<tr><td>{{with index $.AppNames .ID}}{{.}}{{else}}{{.ID}}{{end}}</td>
+      <td>{{if .Installed}}<span class="pill ok">{{t "installed"}}</span>{{else}}<span class="pill">{{t "not installed"}}</span>{{end}}</td>
+      <td>{{if eq .Via "flatpak"}}Flatpak{{else if eq .Via "package"}}{{t "system package"}}{{end}}</td><td class="muted">{{.Error}}</td></tr>{{else}}<tr><td colspan="4" class="empty">{{t "The device has not reported its catalog yet."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+{{end}}
 {{if eq .Sub "flatpak"}}
 <section class="tablecard">
   <div class="card-head"><h2>{{t "Flatpak remotes"}}</h2>{{if eq $.Sess.Role "admin"}}<a class="button secondary small" href="/library/new?type=com.limdm.flatpak">{{t "Add remote…"}}</a>{{end}}</div>

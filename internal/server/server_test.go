@@ -230,3 +230,24 @@ func TestAddUploadedCerts(t *testing.T) {
 		t.Fatalf("uploaded certificates must validate: %v", st[0].Reasons)
 	}
 }
+
+func TestDefaultCatalogValid(t *testing.T) {
+	if len(defaultCatalog) != 25 {
+		t.Fatalf("%d default apps", len(defaultCatalog))
+	}
+	seen := map[string]bool{}
+	for _, a := range defaultCatalog {
+		a.Mode = api.AppAvailable
+		if err := a.Validate(); err != nil {
+			t.Error(err)
+		}
+		if seen[a.ID] {
+			t.Errorf("duplicate %s", a.ID)
+		}
+		seen[a.ID] = true
+	}
+	bad := api.CatalogApp{ID: "x", Name: "X", Mode: api.AppAvailable, Sources: []api.AppSource{{Kind: "package", Debian: "rm -rf /"}}}
+	if bad.Validate() == nil {
+		t.Fatal("invalid package list accepted")
+	}
+}

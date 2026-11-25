@@ -76,6 +76,8 @@ type State struct {
 	EscrowNotified time.Time            `json:"escrow_notified"`
 	Company        string               `json:"company,omitempty"`
 	BrandingHash   string               `json:"branding_hash,omitempty"`
+	Catalog        *api.Catalog         `json:"catalog,omitempty"`      // software catalog for the desktop app
+	AppRequests    []api.AppRequest     `json:"app_requests,omitempty"` // requests not yet sent
 	LastContact    time.Time            `json:"last_contact"`
 	DoneCommands   map[int64]time.Time  `json:"done_commands,omitempty"`  // executed command IDs: the server redelivers until it has the result
 	RemovePending  map[string]bool      `json:"remove_pending,omitempty"` // removed users whose account lock still has to succeed
@@ -92,7 +94,8 @@ type Agent struct {
 
 	pol        api.Policy
 	desktop    *desktopServer
-	evMu       sync.Mutex // guards state.Events: the desktop socket logs from its own goroutines
+	evMu       sync.Mutex // guards state.Events and state.AppRequests: the desktop socket works from its own goroutines
+	store      store
 	kick       chan struct{}
 	declStatus []api.DeclarationStatus
 	users      []api.User
@@ -103,9 +106,10 @@ type Agent struct {
 	osqueryTried                time.Time // last osquery install attempt
 	syncNow                     bool
 	// for the desktop tray
-	lastCheckin *time.Time
-	lastError   string
-	lastChecks  []api.CheckResult
+	lastCheckin  *time.Time
+	lastError    string
+	lastChecks   []api.CheckResult
+	lastFlatpaks []api.FlatpakApp // from the last inventory, for the desktop catalog
 }
 
 func validServerURL(s string) error {
@@ -383,6 +387,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	defer signal.Stop(wake)
 	a.kick = make(chan struct{}, 1)
 	a.desktop = &desktopServer{a: a, queued: map[string]bool{}, inflight: map[string]bool{}, failures: map[uint32][]time.Time{}}
+	a.store.jobs = map[string]*appJob{}
 	go a.serveDesktop(ctx)
 	go a.pollLoop(ctx)
 	a.enforceOffline(false) // before anything else: the device may have been off for a long time
@@ -459,6 +464,9 @@ func (a *Agent) cycle(ctx context.Context) {
 
 	inv := a.host.inventory(a.pol.Privacy)
 	inv.Certificates = certInfo(a.pol.Extra.Certificates)
+	a.applyCatalog(inv.Flatpaks)
+	inv.Apps = a.catalogStates(inv.Flatpaks)
+	a.lastFlatpaks = inv.Flatpaks
 	status := api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus()}
 	sb, _ := json.Marshal(status)
 	sum := sha256.Sum256(sb)
@@ -466,6 +474,12 @@ func (a *Agent) cycle(ctx context.Context) {
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
 		StatusHash: statusHash, Results: a.state.Results, Events: a.pendingEvents(), Metrics: metrics(), BrandingHash: a.state.BrandingHash,
 		UpdateResult: a.state.UpdateResult}
+	if a.state.Catalog != nil {
+		req.CatalogHash = a.state.Catalog.Hash
+	}
+	a.evMu.Lock()
+	req.AppRequests = slices.Clone(a.state.AppRequests)
+	a.evMu.Unlock()
 	// an invalid key would make the server reject every check in
 	a.state.PendingKeys = slices.DeleteFunc(a.state.PendingKeys, func(k pendingKey) bool { return !k.Valid() })
 	sentKeys := slices.Clone(a.state.PendingKeys)
@@ -498,6 +512,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	a.state.Results = a.state.Results[len(req.Results):]
 	a.evMu.Lock()
 	a.state.Events = a.state.Events[len(req.Events):]
+	a.state.AppRequests = a.state.AppRequests[len(req.AppRequests):]
 	a.evMu.Unlock()
 	if len(sentKeys) > 0 {
 		a.escrowConfirmed(sentKeys)
@@ -506,6 +521,9 @@ func (a *Agent) cycle(ctx context.Context) {
 		a.state.UpdateResult = nil // reported
 	}
 	a.applyBranding(resp.Branding)
+	if resp.Catalog != nil {
+		a.state.Catalog = resp.Catalog
+	}
 	if len(resp.RecoveryRotate) > 0 {
 		a.rotateRecovery(resp.RecoveryRotate)
 	}
@@ -978,4 +996,24 @@ func (a *Agent) runCommands(cmds []api.Command) {
 		a.state.Results = append(a.state.Results, a.execute(c))
 		a.syncNow = true
 	}
+}
+
+// getBytes fetches a small file from the server over mTLS.
+func (a *Agent) getBytes(path string, limit int64, out *[]byte) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.cfg.Server+path, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s: %s", path, resp.Status)
+	}
+	*out, err = io.ReadAll(io.LimitReader(resp.Body, limit))
+	return err
 }
