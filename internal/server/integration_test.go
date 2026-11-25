@@ -98,6 +98,28 @@ func TestIntegration(t *testing.T) {
 	if code, _ := ui("POST", "/tokens", bad, adminSess); code != 200 {
 		t.Fatal("sanity")
 	}
+	// a browser form post carries the real Origin; it must pass
+	okReq := url.Values{"uses": {"1"}, "days": {"1"}, "csrf": {s.csrfToken(adminSess)}}
+	req0, _ := http.NewRequest("POST", admin.URL+"/tokens", strings.NewReader(okReq.Encode()))
+	req0.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req0.Header.Set("Origin", s.cfg.PublicURL)
+	req0.AddCookie(&http.Cookie{Name: sessionCookie, Value: s.seal(adminSess)})
+	resp0, err := http.DefaultClient.Do(req0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp0.Body.Close()
+	if resp0.StatusCode != 200 {
+		t.Fatalf("form post with matching Origin rejected: %d", resp0.StatusCode)
+	}
+	hr, err := http.Get(admin.URL + "/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hr.Body.Close()
+	if hr.Header.Get("Referrer-Policy") == "no-referrer" {
+		t.Fatal("no-referrer makes browsers send Origin: null and breaks every form")
+	}
 	bad.Set("csrf", "wrong")
 	req, _ := http.NewRequest("POST", admin.URL+"/tokens", strings.NewReader(bad.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -212,6 +234,9 @@ func TestIntegration(t *testing.T) {
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/assign", url.Values{"blueprint": {bpID}, "users": {"mm max@firma.de admin"}}, adminSess); code != http.StatusSeeOther {
 		t.Fatalf("assign: %d", code)
 	}
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"rm -rf"}}, adminSess); code != http.StatusBadRequest {
+		t.Fatalf("unknown command type accepted: %d", code)
+	}
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"sync"}}, adminSess); code != http.StatusSeeOther {
 		t.Fatalf("command: %d", code)
 	}
@@ -225,9 +250,9 @@ func TestIntegration(t *testing.T) {
 		Results: []api.CommandResult{{ID: cr.Commands[0].ID, OK: true, Output: "ok"}}, Events: []string{"remediated kernel.aslr"}}, nil)
 
 	// every admin page renders
-	pages := []string{"/", "/devices", "/devices?status=non-compliant&q=laptop", "/compliance", "/blueprints", "/blueprints/" + bpID, "/blueprints/new", "/tokens", "/audit"}
+	pages := []string{"/", "/devices", "/devices?status=non-compliant&q=laptop", "/compliance", "/compliance?state=failing&level=1&framework=iso&sort=fail&q=luks", "/blueprints", "/blueprints/" + bpID, "/blueprints/new", "/tokens", "/audit"}
 	for _, tab := range []string{"overview", "hardware", "software", "compliance", "declarations", "commands"} {
-		pages = append(pages, "/devices/"+er.DeviceID+"?tab="+tab+"&q=open")
+		pages = append(pages, "/devices/"+er.DeviceID+"?tab="+tab+"&q=open&page=2")
 	}
 	for _, p := range pages {
 		if code, body := ui("GET", p, nil, auditor); code != 200 {

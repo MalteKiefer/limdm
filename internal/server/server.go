@@ -40,8 +40,9 @@ type Config struct {
 	PublicURL     string // admin UI URL, used for the OIDC redirect
 	TLSCert       string // admin UI certificate (public CA); without it the UI binds to loopback only
 	TLSKey        string
-	AgentListen   string // agent API, mTLS terminated here, never by a proxy
-	AgentURL      string // URL agents use, its host goes into the server certificate
+	AgentListen   string   // agent API, mTLS terminated here, never by a proxy
+	AgentURL      string   // URL agents use, its host goes into the server certificate
+	AgentHosts    []string // additional names/IPs for the agent certificate, e.g. the IP older agents enrolled with
 	CADir         string
 	LocalLogin    bool // local admin accounts with password and TOTP
 	OIDCIssuer    string
@@ -81,6 +82,7 @@ func ConfigFromEnv() (Config, error) {
 		Auditors:      split(os.Getenv("LIMDM_AUDITORS")),
 		ReleaseDir:    os.Getenv("LIMDM_RELEASE_DIR"),
 		LocalLogin:    os.Getenv("LIMDM_LOCAL_LOGIN") == "true",
+		AgentHosts:    split(os.Getenv("LIMDM_AGENT_HOSTS")),
 	}
 	c.Listen = os.Getenv("LIMDM_LISTEN")
 	if c.Listen == "" {
@@ -266,7 +268,7 @@ func (s *Server) AgentHandler() http.Handler {
 // expired certificate.
 func (s *Server) AgentTLSConfig() (*tls.Config, error) {
 	u, _ := url.Parse(s.cfg.AgentURL)
-	cert, err := s.ca.serverCert([]string{u.Hostname()})
+	cert, err := s.ca.serverCert(append([]string{u.Hostname()}, s.cfg.AgentHosts...))
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +286,9 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "no-referrer")
+		// same-origin, not no-referrer: with no-referrer browsers send "Origin: null"
+		// on form posts, which the CSRF origin check must reject.
+		h.Set("Referrer-Policy", "same-origin")
 		h.Set("Cache-Control", "no-store")
 		h.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 		next.ServeHTTP(w, r)

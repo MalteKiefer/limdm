@@ -581,6 +581,12 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		a.state.LastUpdateRun = time.Now()
 	case "reboot":
 		out, err = sh("shutdown", "-r", "+1", "LiMDM: reboot requested by administrator in 1 minute")
+	case "shutdown":
+		out, err = sh("shutdown", "-h", "+1", "LiMDM: shutdown requested by administrator in 1 minute")
+	case "lock":
+		out, err = lockDevice()
+	case "unlock":
+		out, err = unlockDevice()
 	case "script":
 		if !a.cfg.AllowScripts {
 			err = errors.New("remote scripts are disabled on this device (allow_scripts)")
@@ -597,6 +603,32 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		r.Output += "\n" + err.Error()
 	}
 	return r
+}
+
+// nologinFile makes pam_nologin refuse every login except root's.
+const (
+	nologinFile = "/etc/nologin"
+	nologinText = "This device is locked by IT (LiMDM). Contact your administrator.\n"
+)
+
+// lockDevice blocks new logins and locks running desktop sessions. The agent
+// keeps checking in, so the device can be unlocked remotely.
+func lockDevice() (string, error) {
+	if _, err := writeIfChanged(nologinFile, nologinText, 0o644); err != nil {
+		return "", err
+	}
+	out, _ := sh("loginctl", "lock-sessions") // no sessions on servers is fine
+	return "logins blocked, sessions locked " + out, nil
+}
+
+func unlockDevice() (string, error) {
+	if readFile(nologinFile) != nologinText {
+		return "not locked by LiMDM, nothing changed", nil
+	}
+	if err := os.Remove(nologinFile); err != nil {
+		return "", err
+	}
+	return "logins allowed again", nil
 }
 
 func runScript(body string) (string, error) {

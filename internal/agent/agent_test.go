@@ -221,3 +221,30 @@ func TestDesktopVersionParsing(t *testing.T) {
 		t.Fatalf("firstNonEmpty: %q", got)
 	}
 }
+
+func TestAccounts(t *testing.T) {
+	passwd := "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1::/:/usr/sbin/nologin\nadmin:x:5001:5001::/home/admin:/usr/bin/fish\nanna:x:1001:1001::/home/anna:/bin/bash\nsvc:x:1002:1002::/:/usr/sbin/nologin\n"
+	group := "sudo:x:27:admin\nwheel:x:10:\nusers:x:100:anna\n"
+	got := accounts(passwd, group)
+	if len(got) != 3 || got[0].Name != "root" || !got[0].Admin || !got[1].Admin || got[2].Name != "anna" || got[2].Admin {
+		t.Fatalf("accounts: %+v", got)
+	}
+}
+
+func TestRepoParsers(t *testing.T) {
+	list := "# comment\ndeb [arch=amd64 signed-by=/k.asc] https://a.example/deb stable main\ndeb http://b.example/ bookworm main contrib\ndeb-src http://c/ x y\n"
+	r := parseAptList(list, "/etc/apt/sources.list")
+	if len(r) != 2 || !r[0].Signed || r[1].Signed || r[1].Suites != "bookworm main contrib" {
+		t.Fatalf("list: %+v", r)
+	}
+	d822 := "Types: deb deb-src\nURIs: https://deb.debian.org/debian\nSuites: trixie trixie-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: https://x/\nSuites: s\nEnabled: no\n"
+	r = parseDeb822(d822, "/etc/apt/sources.list.d/debian.sources")
+	if len(r) != 2 || !r[0].Signed || r[0].Suites != "trixie trixie-updates main" || r[1].Enabled {
+		t.Fatalf("deb822: %+v", r)
+	}
+	yum := "[fedora]\nname=Fedora\nmetalink=https://mirrors/x\nenabled=1\ngpgcheck=1\n[beta]\nbaseurl=https://b/\nenabled=0\ngpgcheck=0\n"
+	r = parseYumRepo(yum, "/etc/yum.repos.d/fedora.repo")
+	if len(r) != 2 || !r[0].Signed || !r[0].Enabled || r[1].Enabled || r[1].Signed || r[1].URL != "https://b/" {
+		t.Fatalf("yum: %+v", r)
+	}
+}

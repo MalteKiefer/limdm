@@ -367,6 +367,8 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 		}
 	}
 	inv.Disks, inv.Volumes = nativeDisks(), nativeVolumes()
+	inv.Accounts = accounts(readPasswdGroup())
+	inv.Repos = h.repos()
 	inv.Desktop, inv.DisplayManager = desktop()
 	if addrs, err := net.Interfaces(); err == nil && priv.NetworkInfo {
 		for _, ifc := range addrs {

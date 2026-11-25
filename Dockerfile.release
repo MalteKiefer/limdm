@@ -1,0 +1,10 @@
+# Used by GoReleaser: copies the already built, attested static binary.
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/limdm-server /usr/bin/limdm-server
+ENV LIMDM_CA_DIR=/var/lib/limdm-server/ca
+VOLUME ["/var/lib/limdm-server"]
+EXPOSE 8080 8444
+USER 65532:65532
+ENTRYPOINT ["/usr/bin/limdm-server"]
+CMD ["serve"]
