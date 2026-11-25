@@ -121,9 +121,14 @@ func (s *Server) localName(w http.ResponseWriter, r *http.Request, sess session)
 func (s *Server) checkCurrent(ctx context.Context, tx pgx.Tx, name, password string) error {
 	var hash string
 	var failures int
-	if err := tx.QueryRow(ctx, `SELECT password_hash, failures FROM local_admins WHERE name=$1 AND NOT disabled FOR UPDATE`, name).
-		Scan(&hash, &failures); err != nil {
+	var lockedUntil *time.Time
+	if err := tx.QueryRow(ctx, `SELECT password_hash, failures, locked_until FROM local_admins WHERE name=$1 AND NOT disabled FOR UPDATE`, name).
+		Scan(&hash, &failures, &lockedUntil); err != nil {
 		return err
+	}
+	if lockedUntil != nil && time.Now().Before(*lockedUntil) {
+		checkPassword(dummyHash, password) // same timing as a real check
+		return errLocked
 	}
 	if checkPassword(hash, password) {
 		return nil
@@ -140,7 +145,10 @@ func (s *Server) checkCurrent(ctx context.Context, tx pgx.Tx, name, password str
 	return errWrongPassword
 }
 
-var errWrongPassword = errors.New("the current password is wrong")
+var (
+	errWrongPassword = errors.New("the current password is wrong")
+	errLocked        = errors.New("too many attempts, try again later")
+)
 
 func (s *Server) profilePassword(w http.ResponseWriter, r *http.Request, sess session) {
 	name, ok := s.localName(w, r, sess)

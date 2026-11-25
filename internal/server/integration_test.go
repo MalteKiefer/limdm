@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -968,6 +969,18 @@ func TestRecoveryCodeLogin(t *testing.T) {
 	}
 	if _, err := s.checkLocal(ctx, "alice", "wrong", newRecoveryCode(), "127.0.0.1"); err == nil {
 		t.Fatal("wrong password accepted")
+	}
+	// the profile password check honours the lockout
+	for range maxFailures {
+		tx, _ := db.Begin(ctx)
+		s.checkCurrent(ctx, tx, "alice", "wrong")
+		tx.Commit(ctx)
+	}
+	tx, _ = db.Begin(ctx)
+	err = s.checkCurrent(ctx, tx, "alice", pw)
+	tx.Rollback(ctx)
+	if !errors.Is(err, errLocked) {
+		t.Fatalf("locked account accepted the password: %v", err)
 	}
 	if !strings.Contains(string(qrSVG(totpURI("alice", newTOTPSecret()))), "<path") {
 		t.Fatal("no QR code")
