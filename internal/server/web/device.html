@@ -208,15 +208,18 @@
   <a href="/devices/{{$id}}?tab=software&amp;sub=catalog" {{if eq .Sub "catalog"}}class="on" aria-current="page"{{end}}>{{t "Catalog"}} <span class="n">{{len .Inv.Apps}}</span></a>
 </nav>
 {{if eq .Sub "catalog"}}
-<section class="tablecard">
+{{range .AppNotes}}<div class="notice {{if .OK}}ok{{else}}error{{end}} state-notice" role="status">
+  <strong>{{.App}}</strong> <span>{{if .OK}}{{if eq .Type "install"}}{{t "installed"}}{{else}}{{t "removed"}}{{end}}{{else}}{{if eq .Type "install"}}{{t "installation failed"}}{{else}}{{t "removal failed"}}{{end}}: {{.Error}}{{end}}</span>
+  <span class="muted">{{fmtTime .At}}</span></div>{{end}}
+<section class="tablecard"{{if .AppBusy}} data-refresh="5"{{end}}>
   <div class="card-head"><h2>{{t "Software catalog"}}</h2><a class="button secondary small" href="/software">{{t "Manage catalog"}}</a></div>
   <div class="scroll"><table>
     <thead><tr><th>{{t "App"}}</th><th>{{t "State"}}</th><th>{{t "Installed as"}}</th><th>{{t "Last error"}}</th>{{if $admin}}<th></th>{{end}}</tr></thead>
     <tbody>{{range .Inv.Apps}}<tr><td>{{with index $.AppNames .ID}}{{.}}{{else}}{{.ID}}{{end}}</td>
       <td>{{if .Installed}}<span class="pill ok">{{t "installed"}}</span>{{else}}<span class="pill">{{t "not installed"}}</span>{{end}}</td>
       <td>{{if eq .Via "flatpak"}}Flatpak{{else if eq .Via "package"}}{{t "system package"}}{{end}}</td><td class="muted">{{.Error}}</td>
-      {{if $admin}}<td class="row-actions"><form method="post" action="/devices/{{$id}}/command">{{template "csrf" $.CSRF}}<input type="hidden" name="app" value="{{.ID}}">
-        {{if .Installed}}<button class="secondary small" name="type" value="app_remove" data-confirm="{{t "Remove the app from this device?"}}">{{t "Remove"}}</button>{{else}}<button class="small" name="type" value="app_install">{{t "Install"}}</button>{{end}}</form></td>{{end}}</tr>{{else}}<tr><td colspan="5" class="empty">{{t "The device has not reported its catalog yet."}}</td></tr>{{end}}</tbody>
+      {{if $admin}}<td class="row-actions">{{with index $.AppBusy .ID}}<span class="busy" role="status"><span class="spinner" aria-hidden="true"></span>{{if eq . "install"}}{{t "Installing…"}}{{else}}{{t "Removing…"}}{{end}}</span>{{else}}<form method="post" action="/devices/{{$id}}/command">{{template "csrf" $.CSRF}}<input type="hidden" name="app" value="{{.ID}}">
+        {{if .Installed}}<button class="secondary small" name="type" value="app_remove" data-confirm="{{t "Remove the app from this device?"}}">{{t "Remove"}}</button>{{else}}<button class="small" name="type" value="app_install">{{t "Install"}}</button>{{end}}</form>{{end}}</td>{{end}}</tr>{{else}}<tr><td colspan="5" class="empty">{{t "The device has not reported its catalog yet."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 {{else if eq .Sub "flatpak"}}

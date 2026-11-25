@@ -802,14 +802,20 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 			}
 		}
 	}
+	var appBusy map[string]string // app → "install" | "remove" while it runs
+	var appNotes []appNote
 	if tab == "software" && sub == "catalog" {
 		if apps, err := s.catalogApps(ctx, s.db, ""); err == nil {
 			for _, a := range apps {
 				appNames[a.ID] = a.Name
 			}
 		}
+		if appBusy, appNotes, err = s.appProgress(ctx, id, data.Inv.Apps, appNames); err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
-	s.render(w, r, sess, "device", map[string]any{"EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames, "CatalogFlatpaks": catalogFlatpaks,
+	s.render(w, r, sess, "device", map[string]any{"EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames, "AppBusy": appBusy, "AppNotes": appNotes, "CatalogFlatpaks": catalogFlatpaks,
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
@@ -1504,4 +1510,57 @@ func commandTypesFor(role string) []string {
 	return slices.DeleteFunc(slices.Clone(api.CommandTypes), func(t string) bool {
 		return t == "script" || t == "lost" || t == "found" || t == "wipe" || t == "allow_uninstall"
 	})
+}
+
+// appNote is the outcome of an install or removal sent from the console.
+type appNote struct {
+	App, Type, Error string
+	OK               bool
+	At               time.Time
+}
+
+// appProgress follows installs and removals sent in the last hour: an app is
+// busy until the device reports the new state (the command only starts the
+// job), then a note says whether it worked.
+func (s *Server) appProgress(ctx context.Context, id string, states []api.AppState, names map[string]string) (map[string]string, []appNote, error) {
+	rows, err := s.db.Query(ctx, `SELECT DISTINCT ON (payload) payload, type, status, output, created_at FROM commands
+		WHERE device_id=$1 AND type IN ('app_install','app_remove') AND created_at > now() - interval '1 hour'
+		ORDER BY payload, id DESC`, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	state := map[string]api.AppState{}
+	for _, a := range states {
+		state[a.ID] = a
+	}
+	busy := map[string]string{}
+	var notes []appNote
+	for rows.Next() {
+		var app, typ, status, output string
+		var at time.Time
+		if err := rows.Scan(&app, &typ, &status, &output, &at); err != nil {
+			return nil, nil, err
+		}
+		op := strings.TrimPrefix(typ, "app_")
+		st := state[app]
+		name := firstNonEmpty(names[app], app)
+		done := (op == "install" && st.Installed) || (op == "remove" && !st.Installed)
+		switch {
+		case status == "failed" || status == "expired":
+			notes = append(notes, appNote{App: name, Type: op, Error: lastLine(output), At: at})
+		case status == "ok" && done:
+			notes = append(notes, appNote{App: name, Type: op, OK: true, At: at})
+		case status == "ok" && st.Error != "":
+			notes = append(notes, appNote{App: name, Type: op, Error: st.Error, At: at})
+		default: // waiting for the device, or its job still runs
+			busy[app] = op
+		}
+	}
+	return busy, notes, rows.Err()
+}
+
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return lines[len(lines)-1]
 }
