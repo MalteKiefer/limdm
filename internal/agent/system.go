@@ -114,8 +114,11 @@ func writeIfChanged(path, content string, mode os.FileMode) (bool, error) {
 		}
 		return false, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // system config dirs (/etc/*.d) are world readable by design
-		return false, err
+	if dir := filepath.Dir(path); !exists(dir) {
+		// explicit chmod: the service runs with UMask=0077, apt and polkitd read these as other users
+		if err := errors.Join(os.MkdirAll(dir, 0o755), os.Chmod(dir, 0o755)); err != nil { //nolint:gosec // system config dirs (/etc/*.d) are world readable by design
+			return false, err
+		}
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".limdm-*")
 	if err != nil {
