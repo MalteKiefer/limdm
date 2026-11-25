@@ -64,6 +64,12 @@ func network(priv api.Privacy) (nics []api.NIC, dns []api.DNSConfig, routes []ap
 		}
 		n := api.NIC{Name: ifc.Name, MAC: ifc.HardwareAddr.String(), Kind: ifaceKind(ifc.Name), MTU: ifc.MTU,
 			State: strings.TrimSpace(readFile("/sys/class/net/" + ifc.Name + "/operstate"))}
+		if n.State == "unknown" || n.State == "" { // tunnels report "unknown"
+			n.State = "down"
+			if ifc.Flags&net.FlagUp != 0 {
+				n.State = "up"
+			}
+		}
 		if n.Kind == "tun" || n.Kind == "wireguard" {
 			n.MAC = "" // no hardware address
 		}
