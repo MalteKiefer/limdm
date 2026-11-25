@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -808,7 +809,11 @@ func (s *Server) consoleFilter(next http.Handler) http.Handler {
 			return
 		}
 		if rt := s.rt.Load(); rt != nil && !consoleAllowed(rt, clientIP(r)) {
-			s.log.Warn("console request refused by network list", "ip", clientIP(r), "path", p)
+			ip := "invalid"
+			if a, err := netip.ParseAddr(clientIP(r)); err == nil {
+				ip = a.String() // parsed, never the raw header text
+			}
+			s.log.Warn("console request refused by network list", "ip", ip)
 			http.Error(w, "access from this network is not allowed", http.StatusForbidden)
 			return
 		}
