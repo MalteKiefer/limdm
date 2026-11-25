@@ -82,6 +82,19 @@ func (s *Server) directoryPage(w http.ResponseWriter, r *http.Request, sess sess
 	s.renderDirectory(w, r, sess, "", "", "")
 }
 
+// dirTab picks the tab of the directory page. Results of the connection
+// forms show on the settings tab.
+func dirTab(r *http.Request, sess session, fromSettings bool) string {
+	tab := r.FormValue("tab")
+	if r.Method == http.MethodPost && fromSettings && tab == "" {
+		tab = "settings"
+	}
+	if tab == "groups" || (tab == "settings" && sess.Role == "admin") {
+		return tab
+	}
+	return "people"
+}
+
 func (s *Server) renderDirectory(w http.ResponseWriter, r *http.Request, sess session, token, msg, errMsg string) {
 	ctx := r.Context()
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
@@ -118,7 +131,7 @@ func (s *Server) renderDirectory(w http.ResponseWriter, r *http.Request, sess se
 	}
 	s.render(w, r, sess, "directory", map[string]any{"Users": users, "Groups": groups, "Blueprints": bps, "Q": q,
 		"Token": token, "Msg": msg, "Error": errMsg, "SCIMSet": scimSet, "SCIMURL": s.cfg.PublicURL + "/scim/v2",
-		"Google": gs, "GoogleConfigured": gs.KeyEnc != ""})
+		"Google": gs, "GoogleConfigured": gs.KeyEnc != "", "Tab": dirTab(r, sess, token != "" || msg != "" || errMsg != "")})
 }
 
 func (s *Server) dirGroups(ctx context.Context) ([]dirGroup, error) {
@@ -157,7 +170,7 @@ func (s *Server) groupAssign(w http.ResponseWriter, r *http.Request, sess sessio
 		s.renderDirectory(w, r, sess, "", "", err.Error())
 		return
 	}
-	http.Redirect(w, r, "/directory#groups", http.StatusSeeOther)
+	http.Redirect(w, r, "/directory?tab=groups", http.StatusSeeOther)
 }
 
 // scimToken creates a new SCIM bearer token; only its hash is stored.

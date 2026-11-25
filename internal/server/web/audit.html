@@ -6,8 +6,18 @@
 </div>
 {{if .BrokenAt}}<div class="notice error" role="alert"><strong>{{t "Integrity failure."}}</strong> {{t "The hash chain breaks at entry"}} {{.BrokenAt}}{{t "; the log was modified outside LiMDM."}}</div>
 {{else}}<div class="notice ok" role="status">{{t "Hash chain verified end to end: the log is intact."}}</div>{{end}}
+<form class="filters audit-filters" method="get" action="/audit">
+  <input type="search" name="q" value="{{.F.q}}" placeholder="{{t "Search all fields"}}" aria-label="{{t "Search the audit log"}}">
+  <input name="actor" value="{{.F.actor}}" placeholder="{{t "Actor"}}" aria-label="{{t "Actor"}}">
+  <select name="action" aria-label="{{t "Action"}}"><option value="">{{t "All actions"}}</option>{{range .Actions}}<option {{if eq . $.F.action}}selected{{end}}>{{.}}</option>{{end}}</select>
+  <input name="target" value="{{.F.target}}" placeholder="{{t "Target"}}" aria-label="{{t "Target"}}">
+  <input type="date" name="from" value="{{.F.from}}" aria-label="{{t "From"}}">
+  <input type="date" name="to" value="{{.F.to}}" aria-label="{{t "To"}}">
+  <button class="secondary">{{t "Filter"}}</button>
+  {{if or .F.q .F.actor .F.action .F.target .F.from .F.to}}<a class="button secondary" href="/audit">{{t "Reset"}}</a>{{end}}
+</form>
 <div class="tablecard"><div class="scroll"><table>
   <thead><tr><th class="num">#</th><th>{{t "Time"}}</th><th>{{t "Actor"}}</th><th>{{t "Action"}}</th><th>{{t "Target"}}</th><th>{{t "Detail"}}</th></tr></thead>
-  <tbody>{{range .Entries}}<tr><td class="num muted">{{.ID}}</td><td>{{fmtTime .At}}</td><td>{{.Actor}}</td><td class="mono">{{.Action}}</td><td class="mono">{{.Target}}</td><td><pre>{{.Detail}}</pre></td></tr>{{end}}</tbody>
+  <tbody>{{range .Entries}}<tr><td class="num muted">{{.ID}}</td><td>{{fmtTime .At}}</td><td><a href="/audit?actor={{.Actor}}">{{.Actor}}</a></td><td class="mono"><a href="/audit?action={{.Action}}">{{.Action}}</a></td><td class="mono"><a href="/audit?target={{.Target}}">{{.Target}}</a></td><td><pre>{{.Detail}}</pre></td></tr>{{end}}</tbody>
 </table></div></div>
 {{end}}

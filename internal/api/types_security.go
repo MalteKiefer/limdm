@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -24,8 +25,21 @@ const (
 )
 
 type DiskEncryption struct {
-	Escrow          bool `json:"escrow"`            // every LUKS volume needs a recovery key stored on the server
-	RotateAfterView bool `json:"rotate_after_view"` // replace a key once someone viewed it in the console
+	Escrow          bool     `json:"escrow"`                // every LUKS volume needs a recovery key stored on the server
+	RotateAfterView bool     `json:"rotate_after_view"`     // replace a key once someone viewed it in the console
+	RequireAll      bool     `json:"require_all,omitempty"` // every local volume must be on LUKS, not only /
+	Exclude         []string `json:"exclude,omitempty"`     // mount points exempt from require_all, e.g. /boot
+}
+
+// Excluded reports whether mount is exempt from require_all. An entry
+// also covers the mount points below it ("/boot" covers "/boot/efi").
+func (d *DiskEncryption) Excluded(mount string) bool {
+	for _, e := range d.Exclude {
+		if mount == e || strings.HasPrefix(mount, strings.TrimSuffix(e, "/")+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 type PolkitRule struct {
@@ -77,7 +91,7 @@ var (
 )
 
 func init() {
-	Types[TypeDiskEncryption] = `{"escrow": true, "rotate_after_view": true}`
+	Types[TypeDiskEncryption] = `{"escrow": true, "rotate_after_view": true, "require_all": true, "exclude": ["/boot"]}`
 	Types[TypePolkit] = `{"rules": [{"name": "network", "actions": ["org.freedesktop.NetworkManager.*"], "groups": ["netdev"], "result": "yes", "local_active_only": true}, {"name": "printers", "actions": ["org.opensuse.cupspkhelper.mechanism.*"], "groups": [], "result": "auth_self_keep", "local_active_only": true}]}`
 	Types[TypeSudo] = `{"rules": [{"name": "developers", "principals": ["%developers"], "run_as": "", "commands": ["/usr/bin/apt-get update", "/usr/bin/systemctl restart nginx"], "nopasswd": false}], "timestamp_timeout": 5}`
 	Types[TypeBootloader] = `{"superuser": "bootadmin", "password": "replace with a new password, stored as PBKDF2 hash", "unrestricted": true}`
@@ -146,6 +160,11 @@ func (d Declaration) applySecurity(p *Policy) (bool, error) {
 		var v DiskEncryption
 		if err := strict(d.Payload, &v); err != nil {
 			return true, err
+		}
+		for _, e := range v.Exclude {
+			if !strings.HasPrefix(e, "/") || e == "/" || len(e) > 256 || strings.ContainsAny(e, "\x00\n") || path.Clean(e) != e {
+				bad("exclude %q: an absolute mount point other than /", e)
+			}
 		}
 		p.Extra.DiskEncryption = &v
 	case TypePolkit:

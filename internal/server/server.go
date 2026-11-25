@@ -263,6 +263,7 @@ func (s *Server) AdminHandler() http.Handler {
 	s.scimRoutes(mux)
 	mux.HandleFunc("GET /login", s.loginPage)
 	mux.HandleFunc("GET /lang/{lang}", s.setLang)
+	mux.HandleFunc("GET /datefmt/{format}", s.setDateFormat)
 	mux.HandleFunc("GET /branding/logo.png", s.logo)
 	mux.HandleFunc("GET /install.sh", s.installScript)
 	mux.HandleFunc("GET /login/oidc", s.login)

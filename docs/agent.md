@@ -8,7 +8,8 @@ osquery is a hard dependency and comes from the official osquery repository.
 
 **Enrollment** in the console creates tokens with a note, an optional blueprint, a number of
 uses (1 to 10000) and a validity (1 to 90 days). The token is shown once. The page shows the
-commands below with the token filled in.
+commands below with the token filled in. **Revoke** ends a token at once (audit
+`token.revoke`); devices already enrolled with it are not affected.
 
 ## One device: install script
 
