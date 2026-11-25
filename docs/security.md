@@ -33,6 +33,12 @@
 
 ## Console
 
+* **Network lists.** **Settings**, **Console access by network** limits the console to
+  allowed networks (addresses or CIDR ranges) and refuses blocked ones, even when allowed.
+  Loopback is always allowed, saving a list that would lock out your own address is
+  refused, and the agent API, health check, SCIM and the install script are not affected.
+  Behind a reverse proxy on the same host the address comes from X-Forwarded-For.
+
 * HTTPS only. Without its own certificate the console binds to loopback and runs behind a
   local TLS proxy such as Caddy.
 * OIDC with PKCE, nonce, `email_verified` and domain checks. Roles are read from the

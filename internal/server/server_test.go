@@ -288,3 +288,21 @@ func TestFlathubIconURL(t *testing.T) {
 		t.Fatal("category mapping")
 	}
 }
+
+func TestConsoleNetworks(t *testing.T) {
+	if _, err := parseNets([]string{"10.0.0.0/8", "nonsense"}); err == nil {
+		t.Fatal("invalid entry accepted")
+	}
+	allow, _ := parseNets([]string{"10.0.0.0/8", "2001:db8::/32", "198.51.100.7"})
+	block, _ := parseNets([]string{"10.66.0.0/16"})
+	rt := &runtimeState{allow: allow, block: block}
+	for ip, want := range map[string]bool{"10.1.2.3": true, "10.66.1.1": false, "198.51.100.7": true, "198.51.100.8": false,
+		"2001:db8::1": true, "127.0.0.1": true, "::1": true, "::ffff:10.1.2.3": true, "garbage": false} {
+		if got := consoleAllowed(rt, ip); got != want {
+			t.Errorf("%s: %v", ip, got)
+		}
+	}
+	if !consoleAllowed(&runtimeState{}, "203.0.113.9") {
+		t.Fatal("empty lists must allow every network")
+	}
+}

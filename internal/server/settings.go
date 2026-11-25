@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strconv"
@@ -31,6 +32,11 @@ type Settings struct {
 	WebhookURL       string `json:"webhook_url"`
 	CompanyName      string `json:"company_name,omitempty"` // shown in the console and on devices
 	Logo             []byte `json:"logo_png,omitempty"`     // PNG, at most 256 KiB and 1024 px
+	// ConsoleAllow limits the console to these networks (CIDR or address);
+	// empty allows every network. ConsoleBlock refuses networks always.
+	// Loopback is always allowed, so the host itself can repair a mistake.
+	ConsoleAllow []string `json:"console_allow,omitempty"`
+	ConsoleBlock []string `json:"console_block,omitempty"`
 }
 
 // storedSettings is the database form; the client secret is AES-GCM sealed.
@@ -41,8 +47,10 @@ type storedSettings struct {
 
 type runtimeState struct {
 	set      Settings
-	auth     *oidcAuth    // nil when OIDC is not configured
-	branding api.Branding // derived from set once, sent to agents and shown in the console
+	allow    []netip.Prefix // parsed ConsoleAllow
+	block    []netip.Prefix // parsed ConsoleBlock
+	auth     *oidcAuth      // nil when OIDC is not configured
+	branding api.Branding   // derived from set once, sent to agents and shown in the console
 }
 
 func (s *Server) settings() Settings { return s.rt.Load().set }
@@ -99,6 +107,14 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 	if err := validLogo(set.Logo); err != nil {
 		return nil, err
 	}
+	allow, err := parseNets(set.ConsoleAllow)
+	if err != nil {
+		return nil, fmt.Errorf("allowed networks: %w", err)
+	}
+	block, err := parseNets(set.ConsoleBlock)
+	if err != nil {
+		return nil, fmt.Errorf("blocked networks: %w", err)
+	}
 	var auth *oidcAuth
 	if cur := s.rt.Load(); cur != nil && set.OIDCIssuer != "" && cur.set.OIDCIssuer == set.OIDCIssuer &&
 		cur.set.OIDCClientID == set.OIDCClientID && cur.set.OIDCClientSecret == set.OIDCClientSecret {
@@ -117,7 +133,61 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 	if auth == nil && !set.LocalLogin {
 		return nil, errors.New("enable at least one login method: OIDC or local accounts")
 	}
-	return &runtimeState{set: set, auth: auth, branding: computeBranding(set)}, nil
+	return &runtimeState{set: set, auth: auth, branding: computeBranding(set), allow: allow, block: block}, nil
+}
+
+// parseNets reads CIDRs or single addresses (one per entry).
+func parseNets(list []string) ([]netip.Prefix, error) {
+	var res []netip.Prefix
+	for _, v := range list {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if !strings.Contains(v, "/") {
+			a, err := netip.ParseAddr(v)
+			if err != nil {
+				return nil, fmt.Errorf("%q is no address or CIDR", v)
+			}
+			res = append(res, netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen()))
+			continue
+		}
+		p, err := netip.ParsePrefix(v)
+		if err != nil {
+			return nil, fmt.Errorf("%q is no address or CIDR", v)
+		}
+		res = append(res, p.Masked())
+	}
+	if len(res) > 200 {
+		return nil, errors.New("at most 200 entries")
+	}
+	return res, nil
+}
+
+// consoleAllowed decides by the client address (clientIP).
+func consoleAllowed(rt *runtimeState, ip string) bool {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return false
+	}
+	a = a.Unmap()
+	if a.IsLoopback() {
+		return true
+	}
+	for _, p := range rt.block {
+		if p.Contains(a) {
+			return false
+		}
+	}
+	if len(rt.allow) == 0 {
+		return true
+	}
+	for _, p := range rt.allow {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
 }
 
 // ---- settings page ----
@@ -134,7 +204,7 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 	if !slices.Contains(settingsTabs, tab) {
 		tab = "general"
 	}
-	s.render(w, r, sess, "settings", map[string]any{"Set": set, "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
+	s.render(w, r, sess, "settings", map[string]any{"Set": set, "ClientIP": clientIP(r), "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
 		"Tab": tab, "Tabs": settingsTabLabels,
 		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": s.webhookSecretHex()})
 }
@@ -161,6 +231,8 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		set.AllowedDomain = strings.ToLower(strings.TrimSpace(r.FormValue("allowed_domain")))
 	case "monitoring":
 		set.WebhookURL = strings.TrimSpace(r.FormValue("webhook_url"))
+	case "network":
+		set.ConsoleAllow, set.ConsoleBlock = strings.Fields(r.FormValue("console_allow")), strings.Fields(r.FormValue("console_block"))
 	case "branding":
 		set.CompanyName = strings.TrimSpace(r.FormValue("company_name"))
 	default:
@@ -184,6 +256,11 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 	}
 	if r.FormValue("clear_secret") == "on" {
 		set.OIDCClientSecret = ""
+	}
+	// never lock the admin who saves out of the console
+	if rt, err := (&Server{}).netsOnly(set); err == nil && !consoleAllowed(rt, clientIP(r)) {
+		s.renderSettings(w, r, sess, set, "", "Your own address would be refused; add it to the allowed networks first.")
+		return
 	}
 	// never lock everybody out
 	if !set.LocalLogin {
@@ -227,4 +304,17 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 	}
 	s.rt.Store(rt) // only what is stored and audited becomes active
 	s.renderSettings(w, r, sess, set, "Settings saved and active.", "")
+}
+
+// netsOnly parses the network lists of settings for the self lockout check.
+func (*Server) netsOnly(set Settings) (*runtimeState, error) {
+	allow, err := parseNets(set.ConsoleAllow)
+	if err != nil {
+		return nil, err
+	}
+	block, err := parseNets(set.ConsoleBlock)
+	if err != nil {
+		return nil, err
+	}
+	return &runtimeState{allow: allow, block: block}, nil
 }

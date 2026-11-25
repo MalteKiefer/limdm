@@ -279,7 +279,7 @@ func (s *Server) AdminHandler() http.Handler {
 	mux.HandleFunc("POST /logout", s.logout)
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	s.webRoutes(mux)
-	return securityHeaders(mux)
+	return securityHeaders(s.consoleFilter(mux))
 }
 
 // AgentHandler serves the agent API. Everything except fetching the CA and
@@ -794,4 +794,24 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "\n[truncated]"
+}
+
+// consoleFilter refuses console requests from networks outside the allowed
+// list or in the blocked list. Health checks, SCIM (bearer token, the
+// identity provider's addresses) and the install script for devices stay
+// reachable.
+func (s *Server) consoleFilter(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if p == "/healthz" || p == "/install.sh" || strings.HasPrefix(p, "/scim/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if rt := s.rt.Load(); rt != nil && !consoleAllowed(rt, clientIP(r)) {
+			s.log.Warn("console request refused by network list", "ip", clientIP(r), "path", p)
+			http.Error(w, "access from this network is not allowed", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

@@ -17,6 +17,14 @@
   <dl class="kv"><dt>{{t "Public URL"}}</dt><dd class="mono">{{.PublicURL}}</dd></dl>
   {{if $admin}}<div class="form-foot"><span class="muted">{{t "Local accounts can only be switched off while an OIDC administrator exists."}}</span><button>{{t "Save"}}</button></div>{{end}}
 </form>
+<form class="card" method="post" action="/settings">
+  {{template "csrf" .CSRF}}<input type="hidden" name="section" value="network">
+  <h2>{{t "Console access by network"}}</h2>
+  <p class="muted">{{t "Addresses or CIDR ranges, separated by spaces or lines. The agent API is not affected; this host (loopback) is always allowed. Your address:"}} <span class="mono">{{.ClientIP}}</span></p>
+  <label>{{t "Allowed networks"}} <span class="hint">{{t "empty: every network"}}</span><textarea name="console_allow" rows="3" class="code" placeholder="10.0.0.0/8 2001:db8::/32">{{join .Set.ConsoleAllow "\n"}}</textarea></label>
+  <label>{{t "Blocked networks"}} <span class="hint">{{t "refused even when allowed above"}}</span><textarea name="console_block" rows="3" class="code" placeholder="203.0.113.0/24">{{join .Set.ConsoleBlock "\n"}}</textarea></label>
+  {{if $admin}}<div class="form-foot"><span class="muted">{{t "Saving is refused when your own address would be locked out."}}</span><button>{{t "Save"}}</button></div>{{end}}
+</form>
 {{else if eq .Tab "sso"}}
 <form class="card" method="post" action="/settings">
   {{template "csrf" .CSRF}}<input type="hidden" name="section" value="sso">
