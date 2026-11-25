@@ -449,13 +449,15 @@ type Account struct {
 
 // Repo is one package source. Signed reports signed-by (apt) or gpgcheck=1 (dnf).
 type Repo struct {
-	Type    string `json:"type"` // deb | rpm
-	Name    string `json:"name"`
-	URL     string `json:"url"`
-	Suites  string `json:"suites,omitempty"`
-	Enabled bool   `json:"enabled"`
-	Signed  bool   `json:"signed"`
-	File    string `json:"file"`
+	Type       string `json:"type"` // deb | rpm
+	Name       string `json:"name"`
+	URL        string `json:"url"`
+	Suites     string `json:"suites,omitempty"`
+	Components string `json:"components,omitempty"`
+	KeyFile    string `json:"key_file,omitempty"` // keyring the source is pinned to
+	Enabled    bool   `json:"enabled"`
+	Signed     bool   `json:"signed"`
+	File       string `json:"file"`
 }
 
 type Disk struct {

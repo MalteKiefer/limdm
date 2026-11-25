@@ -305,3 +305,5 @@ button.ghost.danger { color: var(--bad); }
 .page-head form.actions { align-items: stretch; flex-wrap: nowrap; }
 .page-head form.actions select { width: auto; min-width: 220px; margin: 0; }
 .page-head form.actions button { margin: 0; white-space: nowrap; }
+.row-actions { white-space: nowrap; }
+.row-actions a + a { margin-left: 12px; }

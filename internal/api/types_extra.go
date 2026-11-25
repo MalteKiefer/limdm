@@ -35,7 +35,8 @@ type Repository struct {
 	URL        string `json:"url"`
 	Suites     string `json:"suites,omitempty"`     // apt
 	Components string `json:"components,omitempty"` // apt
-	Key        string `json:"key"`                  // ASCII armored signing key, required
+	Key        string `json:"key,omitempty"`        // ASCII armored signing key
+	KeyFile    string `json:"key_file,omitempty"`   // or a keyring already on the device (distribution keys)
 }
 
 type Certificate struct {
@@ -84,6 +85,7 @@ type Proxy struct {
 // ExtraPolicy holds the additional sections of the effective policy.
 type ExtraPolicy struct {
 	Repositories  []Repository      `json:"repositories,omitempty"`
+	RepoDisable   []string          `json:"repo_disable,omitempty"` // source files to switch off
 	Certificates  []Certificate     `json:"certificates,omitempty"`
 	Sysctl        map[string]string `json:"sysctl,omitempty"`
 	KernelModules []string          `json:"kernel_modules,omitempty"`
@@ -138,6 +140,8 @@ var (
 	hostRe     = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,252}[A-Za-z0-9])?$`)
 	suiteRe    = regexp.MustCompile(`^[A-Za-z0-9._/ -]{0,200}$`)
 	sshValRe   = regexp.MustCompile(`^[A-Za-z0-9 ,@._:/*-]{1,200}$`)
+	repoFileRe = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9._-]{0,100}\.(list|sources|repo)|sources\.list)$`)
+	keyFileRe  = regexp.MustCompile(`^(/usr/share/keyrings|/etc/apt/keyrings|/etc/pki/rpm-gpg)/[A-Za-z0-9][A-Za-z0-9._-]{0,100}$`)
 )
 
 // sshAllowed are sshd options that cannot weaken the compliance baseline.
@@ -176,10 +180,17 @@ func (d Declaration) applyExtra(p *Policy) (bool, error) {
 	case TypeRepositories:
 		var v struct {
 			Repositories []Repository `json:"repositories"`
+			Disable      []string     `json:"disable,omitempty"`
 		}
 		if err := strict(d.Payload, &v); err != nil {
 			return true, err
 		}
+		for _, f := range v.Disable {
+			if !repoFileRe.MatchString(f) || strings.HasPrefix(f, "limdm-") {
+				bad("disable: %q must be a source file name (.list, .sources, .repo) not managed by LiMDM", f)
+			}
+		}
+		p.Extra.RepoDisable = v.Disable
 		for _, r := range v.Repositories {
 			if r.Name == "osquery" {
 				bad("repository name osquery is reserved for the agent's own osquery source")
@@ -190,8 +201,9 @@ func (d Declaration) applyExtra(p *Policy) (bool, error) {
 			if !suiteRe.MatchString(r.Suites) || !suiteRe.MatchString(r.Components) || (r.Family == "debian" && r.Suites == "") {
 				bad("repository %q: invalid suites or components", r.Name)
 			}
-			if !strings.Contains(r.Key, "BEGIN PGP PUBLIC KEY BLOCK") || len(r.Key) > 64<<10 {
-				bad("repository %q: an armored signing key is required, unsigned repositories are not allowed", r.Name)
+			armored := strings.Contains(r.Key, "BEGIN PGP PUBLIC KEY BLOCK") && len(r.Key) <= 64<<10
+			if armored == (r.KeyFile != "") || (r.KeyFile != "" && !keyFileRe.MatchString(r.KeyFile)) {
+				bad("repository %q: either an armored signing key or a key_file in /usr/share/keyrings, /etc/apt/keyrings or /etc/pki/rpm-gpg is required; unsigned repositories are not allowed", r.Name)
 			}
 		}
 		p.Extra.Repositories = v.Repositories
@@ -381,7 +393,25 @@ func mergeExtra(typ string, a, b json.RawMessage) (json.RawMessage, bool, error)
 	var err error
 	switch typ {
 	case TypeRepositories:
-		out, err = byName("repositories")
+		if out, err = byName("repositories"); err == nil {
+			var x, y, o map[string]json.RawMessage
+			var dx, dy []string
+			err = errors.Join(json.Unmarshal(a, &x), json.Unmarshal(b, &y), json.Unmarshal(out, &o))
+			if err == nil {
+				for _, src := range []struct {
+					raw json.RawMessage
+					dst *[]string
+				}{{x["disable"], &dx}, {y["disable"], &dy}} {
+					if len(src.raw) > 0 && err == nil {
+						err = json.Unmarshal(src.raw, src.dst)
+					}
+				}
+				if d := union(dx, dy); len(d) > 0 && err == nil {
+					o["disable"], _ = json.Marshal(d)
+				}
+				out, err = json.Marshal(o)
+			}
+		}
 	case TypeCertificates:
 		out, err = byName("certificates")
 	case TypeScripts:

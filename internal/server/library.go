@@ -395,6 +395,12 @@ func (s *Server) libraryEdit(w http.ResponseWriter, r *http.Request, sess sessio
 			http.NotFound(w, r)
 			return
 		}
+	} else if q := r.URL.Query(); q.Get("from") != "" {
+		var err error
+		if it, err = s.sourceTemplate(r.Context(), q.Get("from"), q.Get("file"), q.Get("mode")); err != nil {
+			http.NotFound(w, r)
+			return
+		}
 	} else if ex, ok := api.Types[it.Type]; ok {
 		it.Payload = json.RawMessage(ex)
 	} else {

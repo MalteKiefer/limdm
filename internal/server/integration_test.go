@@ -906,4 +906,24 @@ func TestRecoveryEscrow(t *testing.T) {
 	if rotate || viewed != nil {
 		t.Fatal("rotation not cleared")
 	}
+	// package source templates from the inventory
+	db.Exec(ctx, `UPDATE devices SET inventory=$1 WHERE id='d1'`, `{"repos":[
+		{"type":"deb","name":"debian.sources","url":"http://deb.debian.org/debian/","suites":"trixie trixie-updates","components":"main","key_file":"/usr/share/keyrings/debian-archive-keyring.gpg","enabled":true,"signed":true,"file":"/etc/apt/sources.list.d/debian.sources"},
+		{"type":"deb","name":"debian.sources","url":"http://deb.debian.org/debian-security/","suites":"trixie-security","components":"main","key_file":"/usr/share/keyrings/debian-archive-keyring.gpg","enabled":true,"signed":true,"file":"/etc/apt/sources.list.d/debian.sources"},
+		{"type":"deb","name":"limdm-osquery.sources","url":"https://pkg.osquerypackages.com/deb","file":"/etc/apt/sources.list.d/limdm-osquery.sources"}]}`)
+	for _, mode := range []string{"disable", "edit"} {
+		it, err := s.sourceTemplate(ctx, "d1", "/etc/apt/sources.list.d/debian.sources", mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := it.Validate(); err != nil {
+			t.Fatalf("%s template invalid: %v\n%s", mode, err, it.Payload)
+		}
+		if mode == "edit" && !strings.Contains(string(it.Payload), `"debian-2"`) {
+			t.Fatalf("edit must keep both entries: %s", it.Payload)
+		}
+	}
+	if _, err := s.sourceTemplate(ctx, "d1", "/etc/apt/sources.list.d/limdm-osquery.sources", "disable"); err == nil {
+		t.Fatal("managed source offered")
+	}
 }

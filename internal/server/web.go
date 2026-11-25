@@ -66,8 +66,9 @@ func parsePages(lang string) map[string]*template.Template {
 			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot in 1 minute",
 				"shutdown": "Shut down in 1 minute", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script"}[a])
 		},
-		"join":    strings.Join,
-		"fmtTime": func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") },
+		"join":      strings.Join,
+		"hasPrefix": strings.HasPrefix,
+		"fmtTime":   func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") },
 		"gib": func(mb uint64) string {
 			if mb == 0 {
 				return T("n/a")

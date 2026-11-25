@@ -56,6 +56,7 @@ func (a *Agent) applyExtra() {
 		}
 	}
 	run(api.TypeRepositories, a.applyRepositories(x.Repositories))
+	run(api.TypeRepositories, a.applyRepoDisable(x.RepoDisable))
 	run(api.TypeCertificates, a.applyCertificates(x.Certificates))
 	run(api.TypeSysctl, applySysctlCustom(x.Sysctl))
 	run(api.TypeKernelModules, applyModulesCustom(x.KernelModules))
@@ -79,15 +80,23 @@ func (a *Agent) applyRepositories(repos []api.Repository) error {
 			continue
 		}
 		if a.host.family == "debian" {
-			key := "limdm-" + r.Name + ".asc"
-			keys[key] = r.Key
+			keyPath := r.KeyFile
+			if keyPath == "" {
+				key := "limdm-" + r.Name + ".asc"
+				keys[key] = r.Key
+				keyPath = "/etc/apt/keyrings/" + key
+			}
 			sources["limdm-"+r.Name+".sources"] = managedHeader + "Types: deb\nURIs: " + r.URL + "\nSuites: " + r.Suites +
-				"\nComponents: " + r.Components + "\nSigned-By: /etc/apt/keyrings/" + key + "\n"
+				"\nComponents: " + r.Components + "\nSigned-By: " + keyPath + "\n"
 		} else {
-			key := "RPM-GPG-KEY-limdm-" + r.Name
-			keys[key] = r.Key
+			keyPath := r.KeyFile
+			if keyPath == "" {
+				key := "RPM-GPG-KEY-limdm-" + r.Name
+				keys[key] = r.Key
+				keyPath = "/etc/pki/rpm-gpg/" + key
+			}
 			sources["limdm-"+r.Name+".repo"] = managedHeader + "[limdm-" + r.Name + "]\nname=" + r.Name + "\nbaseurl=" + r.URL +
-				"\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=0\ngpgkey=file:///etc/pki/rpm-gpg/" + key + "\n"
+				"\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=0\ngpgkey=file://" + keyPath + "\n"
 		}
 	}
 	var c1, c2 bool

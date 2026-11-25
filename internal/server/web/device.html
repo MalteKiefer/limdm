@@ -155,10 +155,11 @@
 <section class="tablecard">
   <div class="card-head"><h2>{{t "Package sources"}}</h2><span class="muted">{{len .Inv.Repos}} {{t "configured"}}</span></div>
   <div class="scroll"><table>
-    <thead><tr><th>{{t "Source"}}</th><th>{{t "URL"}}</th><th>{{t "Suites"}}</th><th>{{t "State"}}</th><th>{{t "Signature"}}</th></tr></thead>
-    <tbody>{{range .Inv.Repos}}<tr><td>{{.Name}}<span class="sub mono">{{.File}}</span></td><td class="mono">{{.URL}}</td><td>{{.Suites}}</td>
+    <thead><tr><th>{{t "Source"}}</th><th>{{t "URL"}}</th><th>{{t "Suites"}}</th><th>{{t "State"}}</th><th>{{t "Signature"}}</th>{{if eq $.Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
+    <tbody>{{range .Inv.Repos}}<tr><td>{{.Name}}<span class="sub mono">{{.File}}</span></td><td class="mono">{{.URL}}</td><td>{{.Suites}}{{if .Components}} <span class="muted">{{.Components}}</span>{{end}}</td>
       <td>{{if .Enabled}}<span class="pill ok">{{t "enabled"}}</span>{{else}}<span class="pill">{{t "disabled"}}</span>{{end}}</td>
-      <td>{{if .Signed}}<span class="pill ok">{{t "pinned key"}}</span>{{else}}<span class="pill warn">{{t "global keyring"}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="5" class="empty">{{t "No package sources reported."}}</td></tr>{{end}}</tbody>
+      <td>{{if .Signed}}<span class="pill ok">{{t "pinned key"}}</span>{{else}}<span class="pill warn">{{t "global keyring"}}</span>{{end}}</td>
+      {{if eq $.Sess.Role "admin"}}<td class="row-actions">{{if hasPrefix .Name "limdm-"}}<span class="muted">{{t "managed"}}</span>{{else}}<a href="/library/new?from={{$id}}&amp;file={{.File}}&amp;mode=edit">{{t "Edit"}}</a> <a href="/library/new?from={{$id}}&amp;file={{.File}}&amp;mode=disable">{{t "Disable"}}</a>{{end}}</td>{{end}}</tr>{{else}}<tr><td colspan="6" class="empty">{{t "No package sources reported."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 <section class="tablecard">
