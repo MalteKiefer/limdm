@@ -361,9 +361,9 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 		// jitter spreads the fleet: after a blueprint change every device would
 		// otherwise check in at the same moment
-		wait += time.Duration(mrand.Int64N(int64(wait/10) + 1))
+		wait += time.Duration(mrand.Int64N(int64(wait/10) + 1)) //nolint:gosec // scheduling jitter, not a secret
 		if a.syncNow {
-			a.syncNow, wait = false, 5*time.Second+time.Duration(mrand.Int64N(int64(55*time.Second)))
+			a.syncNow, wait = false, 5*time.Second+time.Duration(mrand.Int64N(int64(55*time.Second))) //nolint:gosec // scheduling jitter
 		}
 		select {
 		case <-ctx.Done():
