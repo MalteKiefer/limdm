@@ -21,6 +21,7 @@
       <a href="/directory" {{if eq .Page "directory"}}class="on" aria-current="page"{{end}}>{{t "Directory"}}</a>
       <a href="/blueprints" {{if or (eq .Page "blueprints") (eq .Page "blueprint")}}class="on" aria-current="page"{{end}}>{{t "Blueprints"}}</a>
       <a href="/tokens" {{if eq .Page "tokens"}}class="on" aria-current="page"{{end}}>{{t "Enrollment"}}</a>
+      {{if ne .Sess.Role "helpdesk"}}<a href="/agents" {{if eq .Page "agents"}}class="on" aria-current="page"{{end}}>{{t "Agents"}}</a>{{end}}
       <span class="group">{{t "Evidence"}}</span>
       <a href="/audit" {{if eq .Page "audit"}}class="on" aria-current="page"{{end}}>{{t "Audit log"}}</a>
       {{if ne .Sess.Role "helpdesk"}}

@@ -3,8 +3,8 @@ package api
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -64,16 +64,25 @@ func TestVersions(t *testing.T) {
 	}
 }
 
-func TestReleaseSignature(t *testing.T) {
+func TestReleaseSums(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	r := Release{Version: "1.2.0", Arch: "amd64", File: "f", SHA256: "abc"}
-	r.Sig = hex.EncodeToString(ed25519.Sign(priv, r.SignedBytes()))
-	if r.Verify(pub) != nil {
+	sum := strings.Repeat("ab", 32)
+	sums := sum + "  limdm-agent_0.8.0_linux_amd64.deb\n" + strings.Repeat("cd", 32) + "  limdm-server_0.8.0_linux_amd64.deb\n"
+	sig := SignSums(priv, sums)
+	if VerifySums(pub, sums, sig) != nil {
 		t.Fatal("valid signature rejected")
 	}
-	r.SHA256 = "abd"
-	if r.Verify(pub) == nil {
-		t.Fatal("tampered release accepted")
+	if VerifySums(pub, sums+"x", sig) == nil || VerifySums(pub, sums, "") == nil {
+		t.Fatal("tampered or unsigned sums accepted")
+	}
+	if got, err := SumsEntry(sums, PackageName("0.8.0", "amd64", "deb")); err != nil || got != sum {
+		t.Fatalf("entry: %q %v", got, err)
+	}
+	if _, err := SumsEntry(sums, "limdm-agent_0.8.0_linux_arm64.rpm"); err == nil {
+		t.Fatal("missing entry found")
+	}
+	if !PackageRe.MatchString("limdm-agent_0.8.0_linux_arm64.rpm") || PackageRe.MatchString("../x.deb") {
+		t.Fatal("package name pattern")
 	}
 }
 
@@ -90,5 +99,16 @@ func TestFilesRejectsDangerousTargets(t *testing.T) {
 	}
 	if err := (LibraryItem{Name: "x", Type: TypeFiles, Payload: json.RawMessage(`{"files":[{"path":"/etc/issue","content":"x","mode":"0644"}]}`)}).Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPrivacyDefault(t *testing.T) {
+	p, _ := Compose(nil)
+	if !p.Privacy.NetworkInfo || !p.Privacy.LoggedInUsers {
+		t.Fatal("without a privacy declaration everything is collected")
+	}
+	p, _ = Compose([]Declaration{{Identifier: "p", Type: TypePrivacy, Payload: []byte(`{"network_info":false}`)}})
+	if p.Privacy.NetworkInfo || !p.Privacy.LoggedInUsers {
+		t.Fatalf("declaration switches only network_info off: %+v", p.Privacy)
 	}
 }

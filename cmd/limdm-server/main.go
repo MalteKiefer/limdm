@@ -6,19 +6,15 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -39,12 +35,12 @@ func main() {
 		err = serve(log)
 	case "keygen":
 		err = keygen(os.Args[2:])
-	case "release":
-		err = release(os.Args[2:])
+	case "sign":
+		err = sign(os.Args[2:])
 	case "local-admin":
 		err = localAdmin(os.Args[2:])
 	default:
-		err = errors.New(`usage: limdm-server [serve | keygen -out FILE | release -key FILE -version V -dir DIR ARCH=BINARY...
+		err = errors.New(`usage: limdm-server [serve | keygen -out FILE | sign -key FILE SHA256SUMS
                      | local-admin [-env FILE] [-role admin|auditor] [-out FILE] add|reset|disable|enable|list [NAME]]`)
 	}
 	if err != nil {
@@ -182,64 +178,32 @@ func keygen(args []string) error {
 	return nil
 }
 
-// release copies agent binaries into the release dir and writes a signed manifest.
-func release(args []string) error {
-	fs := flag.NewFlagSet("release", flag.ExitOnError)
-	keyFile := fs.String("key", "release.key", "private key file")
-	version := fs.String("version", "", "agent version, e.g. 1.2.0")
-	dir := fs.String("dir", "", "release dir (LIMDM_RELEASE_DIR of the server)")
+// sign writes the hex Ed25519 signature of a release's SHA256SUMS file. The
+// private key comes from a file or, in CI, from an environment variable.
+func sign(args []string) error {
+	fs := flag.NewFlagSet("sign", flag.ExitOnError)
+	keyFile := fs.String("key", "", "private key file (limdm-server keygen)")
+	keyEnv := fs.String("key-env", "", "environment variable holding the hex private key")
 	fs.Parse(args)
-	if *version == "" || *dir == "" || fs.NArg() == 0 {
-		return errors.New("need -version, -dir and ARCH=BINARY arguments")
+	if fs.NArg() != 1 {
+		return errors.New("usage: limdm-server sign -key FILE|-key-env VAR SHA256SUMS")
 	}
-	raw, err := os.ReadFile(*keyFile)
-	if err != nil {
-		return err
-	}
-	key, err := hex.DecodeString(strings.TrimSpace(string(raw)))
-	if err != nil || len(key) != ed25519.PrivateKeySize {
-		return errors.New("invalid private key")
-	}
-	if err := os.MkdirAll(*dir, 0o755); err != nil { //nolint:gosec // served read only by the server
-		return err
-	}
-	var rels []api.Release
-	for _, a := range fs.Args() {
-		arch, bin, ok := strings.Cut(a, "=")
-		if !ok {
-			return fmt.Errorf("argument %q is not ARCH=BINARY", a)
-		}
-		name := fmt.Sprintf("limdm-agent-%s-%s", *version, arch)
-		sum, err := copyHash(bin, filepath.Join(*dir, name))
+	raw := os.Getenv(*keyEnv)
+	if *keyFile != "" {
+		b, err := os.ReadFile(*keyFile)
 		if err != nil {
 			return err
 		}
-		r := api.Release{Version: *version, Arch: arch, File: name, SHA256: sum}
-		r.Sig = hex.EncodeToString(ed25519.Sign(key, r.SignedBytes()))
-		rels = append(rels, r)
+		raw = string(b)
 	}
-	b, _ := json.MarshalIndent(rels, "", "  ")
-	tmp := filepath.Join(*dir, ".manifest.json.tmp")
-	if err := os.WriteFile(tmp, b, 0o644); err != nil { //nolint:gosec // public signed manifest
+	key, err := hex.DecodeString(strings.TrimSpace(raw))
+	if err != nil || len(key) != ed25519.PrivateKeySize {
+		return errors.New("invalid private key")
+	}
+	sums, err := os.ReadFile(fs.Arg(0))
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, filepath.Join(*dir, "manifest.json"))
-}
-
-func copyHash(src, dst string) (string, error) {
-	in, err := os.Open(src)
-	if err != nil {
-		return "", err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644) //nolint:gosec // public signed binary
-	if err != nil {
-		return "", err
-	}
-	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(out, h), in); err != nil {
-		out.Close()
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), out.Close()
+	fmt.Println(api.SignSums(key, string(sums)))
+	return nil
 }

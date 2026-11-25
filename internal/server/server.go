@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,6 +45,7 @@ type Config struct {
 	AgentURL      string   // URL agents use, its host goes into the server certificate
 	AgentHosts    []string // additional names/IPs for the agent certificate, e.g. the IP older agents enrolled with
 	ReleaseRepo   string   // GitHub owner/name the install script downloads agent packages from
+	GeoIPURL      string   // location lookup for device addresses, the IP is appended; "" disables
 	CADir         string
 	LocalLogin    bool // local admin accounts with password and TOTP
 	OIDCIssuer    string
@@ -83,10 +83,14 @@ func ConfigFromEnv() (Config, error) {
 		AllowedDomain: strings.ToLower(os.Getenv("LIMDM_OIDC_ALLOWED_DOMAIN")),
 		Admins:        split(os.Getenv("LIMDM_ADMINS")),
 		Auditors:      split(os.Getenv("LIMDM_AUDITORS")),
-		ReleaseDir:    os.Getenv("LIMDM_RELEASE_DIR"),
+		ReleaseDir:    envOr("LIMDM_RELEASE_DIR", "/var/lib/limdm-server/agent-releases"),
 		LocalLogin:    os.Getenv("LIMDM_LOCAL_LOGIN") == "true",
 		AgentHosts:    split(os.Getenv("LIMDM_AGENT_HOSTS")),
 		ReleaseRepo:   os.Getenv("LIMDM_RELEASE_REPO"),
+		GeoIPURL:      envOr("LIMDM_GEOIP_URL", "https://ipwho.is/"),
+	}
+	if c.GeoIPURL == "off" {
+		c.GeoIPURL = ""
 	}
 	if c.ReleaseRepo == "" {
 		c.ReleaseRepo = "MalteKiefer/limdm"
@@ -175,21 +179,19 @@ func requireDBTLS(pc *pgxpool.Config) error {
 }
 
 type Server struct {
-	cfg   Config
-	db    *pgxpool.Pool
-	ca    *deviceCA
-	log   *slog.Logger
-	limit limiter
-	rt    atomic.Pointer[runtimeState] // settings editable in the UI and the OIDC client built from them
-	hooks *http.Client                 // webhook client; nil uses http.DefaultClient (tests inject one)
+	cfg    Config
+	db     *pgxpool.Pool
+	ca     *deviceCA
+	log    *slog.Logger
+	limit  limiter
+	rt     atomic.Pointer[runtimeState] // settings editable in the UI and the OIDC client built from them
+	hooks  *http.Client                 // webhook client; nil uses http.DefaultClient (tests inject one)
+	geoSem chan struct{}                // one location lookup at a time
 
 	saveMu sync.Mutex // serializes settings saves
 	fleet  atomic.Pointer[fleetCache]
 	// first broken audit entry found by the last full verification, 0 = intact
 	auditBroken atomic.Int64
-	relMu       sync.Mutex // release manifest, reloaded when its modification time changes
-	relMod      time.Time
-	rels        []api.Release
 }
 
 func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
@@ -229,7 +231,7 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	}
 
 	log.Info("device CA ready", "fingerprint", ca.Fingerprint())
-	s := &Server{cfg: cfg, db: db, ca: ca, log: log}
+	s := &Server{cfg: cfg, db: db, ca: ca, log: log, geoSem: make(chan struct{}, 1)}
 	if err := s.seedConsoleUsers(ctx); err != nil {
 		return nil, err
 	}
@@ -245,6 +247,7 @@ func (s *Server) Close() { s.db.Close() }
 func (s *Server) Background(ctx context.Context) {
 	go s.googleSyncLoop(ctx)
 	go s.historyLoop(ctx)
+	go s.releaseLoop(ctx)
 }
 
 // AdminHandler serves the web UI.
@@ -282,7 +285,7 @@ func (s *Server) AgentHandler() http.Handler {
 	mux.HandleFunc("POST /api/v1/enroll", s.enroll)
 	mux.HandleFunc("POST /api/v1/renew", s.deviceAuth(s.renew, true))
 	mux.HandleFunc("POST /api/v1/checkin", s.deviceAuth(s.checkin, false))
-	mux.HandleFunc("GET /api/v1/releases/{file}", s.deviceAuth(s.release, false))
+	mux.HandleFunc("GET /api/v1/agent-packages/{version}/{file}", s.deviceAuth(s.agentPackage, false))
 	return securityHeaders(mux)
 }
 
@@ -493,8 +496,11 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 
 	var users []byte
 	var statusHash, pkgHash string
-	err = tx.QueryRow(ctx, `UPDATE devices SET agent_version=$2, last_seen=now() WHERE id=$1 RETURNING users, status_hash, packages_hash`,
-		id, truncate(req.AgentVersion, 32)).Scan(&users, &statusHash, &pkgHash)
+	var relocate bool
+	ip := remoteIP(r)
+	err = tx.QueryRow(ctx, `UPDATE devices SET agent_version=$2, last_seen=now(), external_ip=$3 WHERE id=$1
+		RETURNING users, status_hash, packages_hash, $3 <> '' AND geo->>'ip' IS DISTINCT FROM $3 AND (geo_at IS NULL OR geo_at < now() - interval '1 hour')`,
+		id, truncate(req.AgentVersion, 32), ip).Scan(&users, &statusHash, &pkgHash, &relocate)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -612,6 +618,14 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	if b := s.branding(); b.Hash != req.BrandingHash {
 		resp.Branding = &b
 	}
+	if err := s.recordUpdateResult(ctx, tx, id, req.UpdateResult); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if resp.AgentUpdate, err = s.offerUpdate(ctx, tx, id, req.AgentVersion); err != nil {
+		s.fail(w, err)
+		return
+	}
 	if resp.RecoveryRotate, err = s.rotations(ctx, tx, id); err != nil {
 		s.fail(w, err)
 		return
@@ -645,50 +659,12 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	if relocate {
+		go s.locate(id, ip) //nolint:gosec // G118: the lookup outlives the request on purpose
+	}
 	s.sendWebhook(event)
 	s.sendWebhook(tamperEvent)
-	if rel, ok := s.releaseFor(req.Arch); ok && api.NewerVersion(rel.Version, req.AgentVersion) {
-		resp.AgentUpdate = &rel
-	}
 	writeJSON(w, resp)
-}
-
-// ---- releases ----
-
-// manifest.json in ReleaseDir is written by `limdm-server release`.
-func (s *Server) releaseFor(arch string) (api.Release, bool) {
-	if s.cfg.ReleaseDir == "" {
-		return api.Release{}, false
-	}
-	path := filepath.Join(s.cfg.ReleaseDir, "manifest.json")
-	st, err := os.Stat(path)
-	if err != nil {
-		return api.Release{}, false
-	}
-	s.relMu.Lock()
-	if !st.ModTime().Equal(s.relMod) {
-		var rels []api.Release
-		if b, err := os.ReadFile(path); err == nil && json.Unmarshal(b, &rels) == nil {
-			s.rels, s.relMod = rels, st.ModTime()
-		}
-	}
-	rels := s.rels
-	s.relMu.Unlock()
-	for _, r := range rels {
-		if r.Arch == arch {
-			return r, true
-		}
-	}
-	return api.Release{}, false
-}
-
-func (s *Server) release(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("file")
-	if s.cfg.ReleaseDir == "" || name != filepath.Base(name) || strings.HasPrefix(name, ".") || name == "manifest.json" {
-		http.NotFound(w, r)
-		return
-	}
-	http.ServeFile(w, r, filepath.Join(s.cfg.ReleaseDir, name))
 }
 
 // ---- audit ----

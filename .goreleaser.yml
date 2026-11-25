@@ -78,6 +78,10 @@ nfpms:
         dst: /usr/lib/systemd/system/limdm-watchdog.timer
         file_info:
           mode: 0o644
+      - src: packaging/limdm-watchdog.sh
+        dst: /usr/lib/limdm/limdm-watchdog.sh
+        file_info:
+          mode: 0o755
       - src: packaging/limdm-pam-config
         dst: /usr/share/pam-configs/limdm
         packager: deb

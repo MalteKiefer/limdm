@@ -21,6 +21,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -1099,5 +1100,113 @@ func TestRecoveryCodeLogin(t *testing.T) {
 	}
 	if !strings.Contains(string(qrSVG(totpURI("alice", newTOTPSecret()))), "<path") {
 		t.Fatal("no QR code")
+	}
+}
+
+func TestAgentUpdates(t *testing.T) {
+	dsn := os.Getenv("LIMDM_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("LIMDM_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{db: db, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	for i, id := range []string{"d1", "d2", "d3", "d4"} {
+		tags := "{}"
+		if i == 0 {
+			tags = "{pilot}"
+		}
+		if _, err := db.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, tags) VALUES ($1, $1, now(), $1, $2)`, id, tags); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sums := strings.Repeat("a", 64) + "  " + api.PackageName("1.1.0", "amd64", "deb") + "\n"
+	db.Exec(ctx, `INSERT INTO agent_releases(version, published_at, sums) VALUES ('1.1.0', now(), $1), ('1.2.0', now(), $1)`, sums)
+	offer := func(id string) *api.AgentUpdate {
+		t.Helper()
+		tx, _ := db.Begin(ctx)
+		defer tx.Rollback(ctx)
+		u, err := s.offerUpdate(ctx, tx, id, "1.0.0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx.Commit(ctx)
+		return u
+	}
+	db.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('agent_updates', '{"auto":true,"delay_days":7,"pilot_tag":"pilot"}')`)
+	if u := offer("d1"); u != nil {
+		t.Fatalf("unapproved version offered: %+v", u)
+	}
+	db.Exec(ctx, `UPDATE agent_releases SET approved_at=now() WHERE version='1.1.0'`)
+	if u := offer("d1"); u == nil || u.Version != "1.1.0" {
+		t.Fatalf("pilot device: %+v", u)
+	}
+	if u := offer("d2"); u != nil {
+		t.Fatal("delay ignored")
+	}
+	db.Exec(ctx, `UPDATE devices SET update_requested=true WHERE id='d2'`)
+	if u := offer("d2"); u == nil {
+		t.Fatal("requested update not offered")
+	}
+	db.Exec(ctx, `UPDATE agent_releases SET approved_at=now() - interval '8 days' WHERE version='1.1.0'`)
+	if u := offer("d3"); u == nil {
+		t.Fatal("due update not offered")
+	}
+
+	report := func(id string, res api.UpdateResult) {
+		t.Helper()
+		tx, _ := db.Begin(ctx)
+		defer tx.Rollback(ctx)
+		if err := s.recordUpdateResult(ctx, tx, id, &res); err != nil {
+			t.Fatal(err)
+		}
+		tx.Commit(ctx)
+	}
+	report("d1", api.UpdateResult{From: "1.0.0", To: "1.1.0", RolledBack: true})
+	report("d2", api.UpdateResult{From: "1.0.0", To: "1.1.0", RolledBack: true})
+	var blocked, requested bool
+	db.QueryRow(ctx, `SELECT blocked FROM agent_releases WHERE version='1.1.0'`).Scan(&blocked)
+	db.QueryRow(ctx, `SELECT update_requested FROM devices WHERE id='d2'`).Scan(&requested)
+	if blocked || requested {
+		t.Fatalf("blocked=%v requested=%v after two failures", blocked, requested)
+	}
+	report("d3", api.UpdateResult{From: "1.0.0", To: "1.1.0", Detail: "dpkg failed"})
+	db.QueryRow(ctx, `SELECT blocked FROM agent_releases WHERE version='1.1.0'`).Scan(&blocked)
+	if !blocked {
+		t.Fatal("version not blocked after three failures")
+	}
+	if u := offer("d4"); u != nil {
+		t.Fatalf("blocked version offered: %+v", u)
+	}
+
+	// package download: only approved versions and files listed in the sums
+	s.cfg.ReleaseDir = t.TempDir()
+	db.Exec(ctx, `UPDATE agent_releases SET blocked=false WHERE version='1.1.0'`)
+	os.MkdirAll(filepath.Join(s.cfg.ReleaseDir, "1.1.0"), 0o755)
+	os.WriteFile(filepath.Join(s.cfg.ReleaseDir, "1.1.0", api.PackageName("1.1.0", "amd64", "deb")), []byte("pkg"), 0o644)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /p/{version}/{file}", s.agentPackage)
+	for path, want := range map[string]int{
+		"/p/1.1.0/" + api.PackageName("1.1.0", "amd64", "deb"): 200,
+		"/p/1.1.0/" + api.PackageName("1.1.0", "arm64", "deb"): 404, // not in sums
+		"/p/1.2.0/" + api.PackageName("1.2.0", "amd64", "deb"): 404, // not approved
+		"/p/1.1.0/" + api.PackageName("1.2.0", "amd64", "deb"): 404, // version mismatch
+		"/p/1.1.0/limdm-server_1.1.0_linux_amd64.deb":          404,
+	} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if rec.Code != want {
+			t.Errorf("%s: %d, want %d", path, rec.Code, want)
+		}
 	}
 }

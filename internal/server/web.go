@@ -175,6 +175,7 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /devices", s.page(s.devices))
 	mux.HandleFunc("GET /devices/{id}", s.page(s.device))
 	mux.HandleFunc("POST /devices/{id}/command", s.helpdeskPage(s.deviceCommand))
+	mux.HandleFunc("POST /devices/{id}/agent-update", s.page(s.deviceAgentUpdate))
 	mux.HandleFunc("POST /devices/{id}/recovery", s.helpdeskPage(s.recoveryView))
 	mux.HandleFunc("GET /directory", s.page(s.adminOrAuditor(s.directoryPage)))
 	mux.HandleFunc("POST /directory/groups", s.page(s.groupAssign))
@@ -182,6 +183,10 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /directory/google", s.page(s.googleConfigure))
 	mux.HandleFunc("POST /directory/google/sync", s.page(s.googleSyncNow))
 	mux.HandleFunc("GET /users", s.page(s.adminOrAuditor(s.usersPage)))
+	mux.HandleFunc("GET /agents", s.page(s.adminOrAuditor(s.agentsPage)))
+	mux.HandleFunc("POST /agents/policy", s.page(s.agentsPolicy))
+	mux.HandleFunc("POST /agents/fetch", s.page(s.agentsFetch))
+	mux.HandleFunc("POST /agents/{version}/{op}", s.page(s.agentsRelease))
 	mux.HandleFunc("GET /profile", s.selfPage(s.profile))
 	mux.HandleFunc("POST /profile/password", s.selfPage(s.profilePassword))
 	mux.HandleFunc("POST /profile/totp", s.selfPage(s.profileTOTP))
@@ -216,6 +221,10 @@ type deviceRow struct {
 	MemoryMB                                   uint64
 	GraceUntil                                 *time.Time
 	AutoLocked                                 bool
+	UpdateState, UpdateVersion                 string
+	UpdateRequested                            bool
+	ExternalIP                                 string
+	Geo                                        *Geo
 	Failing                                    int
 	Checks                                     int
 	LastSeen                                   *time.Time
@@ -392,8 +401,10 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 	var enrolled, certExp time.Time
 	var since *time.Time
 	err := s.db.QueryRow(ctx, `SELECT id, hostname, agent_version, failing, jsonb_array_length(checks), last_seen, retired,
-		inventory, checks, decl_status, users, packages, enrolled_at, cert_not_after, grace_until, auto_locked, noncompliant_since FROM devices WHERE id=$1`, id).
-		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &pkgs, &enrolled, &certExp, &d.GraceUntil, &d.AutoLocked, &since)
+		inventory, checks, decl_status, users, packages, enrolled_at, cert_not_after, grace_until, auto_locked, noncompliant_since,
+		update_state, update_version, update_requested, external_ip, geo FROM devices WHERE id=$1`, id).
+		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &pkgs, &enrolled, &certExp, &d.GraceUntil, &d.AutoLocked, &since,
+			&d.UpdateState, &d.UpdateVersion, &d.UpdateRequested, &d.ExternalIP, &d.Geo)
 	if err != nil {
 		http.NotFound(w, r)
 		return

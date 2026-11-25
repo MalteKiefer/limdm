@@ -33,8 +33,10 @@ and actions. Details: [compliance.md](compliance.md).
 {"network_info": false, "logged_in_users": false}
 ```
 
-Default for both is off. `network_info` adds IP addresses to the inventory (interfaces and
-MAC addresses are always collected), `logged_in_users` reports active sessions.
+Without this declaration everything is collected; assign it to switch items off.
+`network_info` covers IP addresses, DNS and routes (interfaces and MAC addresses are always
+collected), `logged_in_users` reports active sessions. The public address and its location
+are recorded by the server and are not affected ([security.md](security.md#privacy)).
 
 ## Software
 

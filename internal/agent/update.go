@@ -1,0 +1,196 @@
+package agent
+
+import (
+	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"time"
+
+	"github.com/maltekiefer/limdm/internal/api"
+)
+
+// Agent updates with rollback.
+//
+// The server offers an approved version with the release's SHA256SUMS. The
+// agent checks the signature when it was built with a release key, downloads
+// the package for its distribution and architecture over mTLS, verifies the
+// checksum, keeps a copy of the running binary and writes a marker. The
+// package is installed in a transient unit outside the agent's cgroup (the
+// package scripts restart the agent). The new agent confirms the update with
+// its first start. If it does not, the watchdog script restores the copy
+// after 15 minutes and records the rollback (packaging/limdm-watchdog.sh).
+
+const (
+	updateMarker = stateDir + "/update-pending.json"
+	updateResult = stateDir + "/update-result.json" // written by the watchdog script after a rollback
+	rollbackDir  = stateDir + "/rollback"
+	updateDir    = stateDir + "/updates"
+)
+
+type pendingUpdate struct {
+	From string    `json:"from"`
+	To   string    `json:"to"`
+	At   time.Time `json:"at"`
+}
+
+// checkUpdateOutcome confirms an update with the running version, or picks up
+// a rollback the watchdog performed.
+func (a *Agent) checkUpdateOutcome() {
+	if b, err := os.ReadFile(updateResult); err == nil {
+		var res api.UpdateResult
+		if json.Unmarshal(b, &res) == nil {
+			a.state.UpdateResult = &res
+			a.event("agent update to %s rolled back to %s", res.To, res.From)
+		}
+		os.Remove(updateResult)
+	}
+	b, err := os.ReadFile(updateMarker)
+	if err != nil {
+		return
+	}
+	var m pendingUpdate
+	if json.Unmarshal(b, &m) != nil {
+		os.Remove(updateMarker)
+		return
+	}
+	if m.To == Version {
+		a.state.UpdateResult = &api.UpdateResult{From: m.From, To: m.To, OK: true}
+		os.Remove(updateMarker) // confirmed: the watchdog will not roll back
+		a.event("agent updated from %s to %s", m.From, m.To)
+	}
+}
+
+func packageFormat(family string) string {
+	if family == "debian" {
+		return "deb"
+	}
+	return "rpm"
+}
+
+func (a *Agent) installUpdate(ctx context.Context, u api.AgentUpdate) error {
+	if !api.NewerVersion(u.Version, Version) {
+		return nil // never downgrade
+	}
+	if exists(updateMarker) {
+		return nil // an update is in progress
+	}
+	if UpdatePubKey != "" {
+		pub, err := hex.DecodeString(UpdatePubKey)
+		if err != nil {
+			return err
+		}
+		if err := api.VerifySums(ed25519.PublicKey(pub), u.Sums, u.SumsSig); err != nil {
+			return err
+		}
+	}
+	file := api.PackageName(u.Version, runtime.GOARCH, packageFormat(a.host.family))
+	if !api.PackageRe.MatchString(file) {
+		return errors.New("invalid package name")
+	}
+	want, err := api.SumsEntry(u.Sums, file)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(updateDir, 0o700); err != nil {
+		return err
+	}
+	pkg := filepath.Join(updateDir, file)
+	if err := a.downloadPackage(ctx, u.Version, file, pkg, want); err != nil {
+		return err
+	}
+	// keep the running binary for the watchdog's rollback
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if exe, err = filepath.EvalSymlinks(exe); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(rollbackDir, 0o700); err != nil {
+		return err
+	}
+	if err := copyFile(exe, filepath.Join(rollbackDir, "limdm-agent"), 0o755); err != nil {
+		return err
+	}
+	b, _ := json.Marshal(pendingUpdate{From: Version, To: u.Version, At: time.Now().UTC()})
+	if err := os.WriteFile(updateMarker, b, 0o600); err != nil {
+		return err
+	}
+	args := []string{"--unit=limdm-agent-update-" + strconv.FormatInt(time.Now().Unix(), 10), "--collect", "--quiet"}
+	if a.host.family == "debian" {
+		args = append(args, "--setenv=DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "-q",
+			"-o", "Dpkg::Options::=--force-confold", "--allow-downgrades", pkg)
+	} else {
+		args = append(args, "dnf", "install", "-y", "-q", pkg)
+	}
+	if out, err := sh("systemd-run", args...); err != nil {
+		os.Remove(updateMarker)
+		return fmt.Errorf("start installation: %s", lastLines(out, 2))
+	}
+	a.event("installing agent %s", u.Version)
+	return nil
+}
+
+func (a *Agent) downloadPackage(ctx context.Context, version, file, dst, wantHex string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.cfg.Server+"/api/v1/agent-packages/"+url.PathEscape(version)+"/"+url.PathEscape(file), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download %s: %s", file, resp.Status)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".dl-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	h := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(resp.Body, 200<<20)); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if got := hex.EncodeToString(h.Sum(nil)); got != wantHex {
+		return fmt.Errorf("%s: checksum mismatch", file)
+	}
+	return os.Rename(tmp.Name(), dst)
+}
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	tmp := dst + ".tmp"
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dst)
+}

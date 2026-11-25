@@ -8,7 +8,6 @@ package api
 
 import (
 	"bytes"
-	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -59,7 +58,7 @@ var Types = map[string]string{
 	TypeOSVersion:  `{"min": {"ubuntu": "22.04", "debian": "12", "fedora": "41"}}`,
 	TypeScreenLock: `{"idle_seconds": 300}`,
 	TypeLogin:      `{"issuer": "https://accounts.google.com", "client_id": "", "client_secret": "", "allowed_domain": "", "local_password": true, "reverify_hours": 168}`,
-	TypePrivacy:    `{"network_info": false, "logged_in_users": false}`,
+	TypePrivacy:    `{"network_info": true, "logged_in_users": true}`,
 }
 
 // Policy is the effective state the agent enforces, composed from declarations.
@@ -151,7 +150,8 @@ type Login struct {
 	ReverifyHours int  `json:"reverify_hours,omitempty"`
 }
 
-// Privacy controls which personal data leaves the device. Default: none of it.
+// Privacy controls which personal data leaves the device. Without a privacy
+// declaration everything is collected; a declaration can switch items off.
 type Privacy struct {
 	NetworkInfo   bool `json:"network_info"`    // IP addresses
 	LoggedInUsers bool `json:"logged_in_users"` // usernames of active sessions
@@ -349,7 +349,7 @@ func DeclarationsToken(decls []Declaration) string {
 // Compose builds the effective policy. Invalid declarations are skipped and
 // reported in the returned status.
 func Compose(decls []Declaration) (Policy, []DeclarationStatus) {
-	var p Policy
+	p := Policy{Privacy: Privacy{NetworkInfo: true, LoggedInUsers: true}}
 	var st []DeclarationStatus
 	for _, d := range decls {
 		s := DeclarationStatus{Identifier: d.Identifier, Type: d.Type, ServerToken: d.Token(), Valid: true, Active: true}
@@ -613,6 +613,7 @@ type CheckinRequest struct {
 	Metrics           *Metrics        `json:"metrics,omitempty"`       // sent every check in, outside the status hash
 	RecoveryKeys      []RecoveryKey   `json:"recovery_keys,omitempty"` // new LUKS recovery keys to escrow
 	BrandingHash      string          `json:"branding_hash,omitempty"`
+	UpdateResult      *UpdateResult   `json:"update_result,omitempty"` // outcome of the last agent update
 	Events            []string        `json:"events,omitempty"`
 }
 
@@ -638,7 +639,7 @@ type CheckinResponse struct {
 	Commands          []Command     `json:"commands,omitempty"`
 	NeedStatus        bool          `json:"need_status"`
 	NeedPackages      bool          `json:"need_packages"`
-	AgentUpdate       *Release      `json:"agent_update,omitempty"`
+	AgentUpdate       *AgentUpdate  `json:"agent_update,omitempty"`
 	ServerTime        time.Time     `json:"server_time"`
 	// RecoveryRotate carries escrowed keys the agent should replace (after
 	// they were viewed); the current key unlocks the slot for the new one.
@@ -648,28 +649,6 @@ type CheckinResponse struct {
 }
 
 // ---- signed agent releases ----
-
-// Release describes a signed agent binary. The signature is made offline with
-// the release key; agents only accept binaries signed by the key compiled into them.
-type Release struct {
-	Version string `json:"version"`
-	Arch    string `json:"arch"`
-	File    string `json:"file"`
-	SHA256  string `json:"sha256"`
-	Sig     string `json:"sig"` // hex ed25519 over SignedBytes()
-}
-
-func (r Release) SignedBytes() []byte {
-	return []byte("limdm-agent\n" + r.Version + "\n" + r.Arch + "\n" + r.SHA256)
-}
-
-func (r Release) Verify(pub ed25519.PublicKey) error {
-	sig, err := hex.DecodeString(r.Sig)
-	if err != nil || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(pub, r.SignedBytes(), sig) {
-		return errors.New("release signature invalid")
-	}
-	return nil
-}
 
 // NewerVersion reports whether a is a higher dotted numeric version than b.
 func NewerVersion(a, b string) bool { return CompareVersions(a, b) > 0 }

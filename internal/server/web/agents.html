@@ -1,0 +1,47 @@
+{{define "title"}}{{t "Agents"}} · LiMDM{{end}}
+{{define "content"}}
+<div class="page-head">
+  <div><h1>{{t "Agents"}}</h1><div class="meta"><span>{{t "Versions from"}} <a href="https://github.com/{{.Repo}}/releases" rel="noopener">github.com/{{.Repo}}</a></span></div></div>
+  {{if eq .Sess.Role "admin"}}<form class="actions" method="post" action="/agents/fetch"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary">{{t "Check for new versions"}}</button></form>{{end}}
+</div>
+{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+{{if .Msg}}<div class="notice ok" role="status">{{t .Msg}}</div>{{end}}
+<div class="grid side-right">
+  <section class="tablecard">
+    <div class="card-head"><h2>{{t "Versions"}}</h2><span class="muted">{{t "packages checked against the release checksums"}}</span></div>
+    <div class="scroll"><table>
+      <thead><tr><th>{{t "Version"}}</th><th>{{t "Published"}}</th><th>{{t "State"}}</th><th class="num">{{t "Devices"}}</th><th class="num">{{t "Failed"}}</th><th>{{t "Signature"}}</th>{{if eq $.Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
+      <tbody>{{range .Releases}}<tr>
+        <td class="mono">{{.Version}}</td><td>{{fmtTime .PublishedAt}}</td>
+        <td>{{if .Blocked}}<span class="pill bad">{{t "blocked"}}</span><span class="sub">{{.BlockedReason}}</span>{{else if .ApprovedAt}}<span class="pill ok">{{t "approved"}}</span><span class="sub">{{fmtTime (derefTime .ApprovedAt)}}</span>{{else}}<span class="pill">{{t "available"}}</span>{{end}}</td>
+        <td class="num">{{.Devices}}</td><td class="num">{{if .Failed}}<span class="pill bad">{{.Failed}}</span>{{else}}0{{end}}</td>
+        <td>{{if .SumsSig}}<span class="pill ok">{{t "signed"}}</span>{{else}}<span class="pill warn">{{t "unsigned"}}</span>{{end}}</td>
+        {{if eq $.Sess.Role "admin"}}<td class="row-actions">
+          {{if or (not .ApprovedAt) .Blocked}}<form method="post" action="/agents/{{.Version}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary small">{{t "Approve"}}</button></form>{{end}}
+          {{if not .Blocked}}<form method="post" action="/agents/{{.Version}}/block"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary small">{{t "Block"}}</button></form>{{end}}
+        </td>{{end}}
+      </tr>{{else}}<tr><td colspan="7" class="empty">{{t "No versions fetched yet. The server checks every six hours."}}</td></tr>{{end}}</tbody>
+    </table></div>
+  </section>
+  <div>
+    {{if eq .Sess.Role "admin"}}
+    <form class="card" method="post" action="/agents/policy">
+      <h2>{{t "Rollout"}}</h2>
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label class="check"><input type="checkbox" name="auto" {{if .Policy.Auto}}checked{{end}}> {{t "update agents automatically"}}</label>
+      <label>{{t "Pilot tag"}} <span class="hint">{{t "devices with this tag get an approved version at once"}}</span><input name="pilot_tag" value="{{.Policy.PilotTag}}"></label>
+      <label>{{t "Delay for all other devices (days)"}}<input name="delay_days" type="number" min="0" max="90" value="{{.Policy.DelayDays}}"></label>
+      <button>{{t "Save"}}</button>
+      <p class="muted">{{t "A device that does not check in within 15 minutes after an update returns to its previous agent. After three failed devices a version is blocked automatically."}}</p>
+    </form>
+    {{end}}
+    <section class="tablecard">
+      <div class="card-head"><h2>{{t "Fleet"}}</h2></div>
+      <div class="scroll"><table>
+        <thead><tr><th>{{t "Agent version"}}</th><th class="num">{{t "Devices"}}</th></tr></thead>
+        <tbody>{{range .Fleet}}<tr><td class="mono">{{.Version}}</td><td class="num">{{.N}}</td></tr>{{else}}<tr><td colspan="2" class="empty">{{t "No devices enrolled."}}</td></tr>{{end}}</tbody>
+      </table></div>
+    </section>
+  </div>
+</div>
+{{end}}

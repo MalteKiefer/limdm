@@ -62,10 +62,15 @@ page (Commands tab). They do not take part in the hash chain.
 
 ## Privacy
 
-* IP addresses and logged in users are only collected when `com.limdm.privacy` allows
-  it. Default: off. Network interfaces and MAC addresses are part of the hardware inventory.
+* By default the agent reports everything, including IP addresses, DNS, routes and logged
+  in users. `com.limdm.privacy` switches items off per blueprint.
+* The server records the public address of every check in (the agent port is never behind
+  a proxy) and looks up its location (country, region, city, provider) at
+  `LIMDM_GEOIP_URL`, default `https://ipwho.is/`. Only the address is sent, and only when it
+  changed. `LIMDM_GEOIP_URL=off` disables the lookup; the address is still shown.
 * Outbound connections: the server talks to the configured OIDC provider, the Google
-  Directory API (if configured) and the webhook URL (if configured). Devices talk to the
+  Directory API (if configured), the webhook URL (if configured), GitHub for agent releases
+  and the location service. Devices talk to the
   LiMDM server, the identity provider during desktop login, their package repositories and
   the osquery repository. `/install.sh` downloads from GitHub.
 

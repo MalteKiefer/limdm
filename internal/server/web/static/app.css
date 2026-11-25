@@ -372,3 +372,9 @@ form:has(select[name=type] option[value=wipe]:checked) .wipe-only,
 form:has(select[name=type] option[value=lost]:checked) .confirm-only,
 form:has(select[name=type] option[value=wipe]:checked) .confirm-only { display: block; }
 .menu-item.danger { color: var(--bad); font-weight: 600; }
+
+/* ---- vertical rhythm: one gap between every stacked block ---- */
+.main > * + *, .grid > div > * + *, .narrow > * + * { margin-top: 20px; }
+.grid { gap: 20px; }
+.grid > * { margin-top: 0; }
+.main > .page-head + *, .main > .tabs + * { margin-top: 0; }

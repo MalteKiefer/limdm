@@ -5,7 +5,7 @@
   <div>
     <div class="eyebrow"><a href="/devices">{{t "Devices"}}</a></div>
     <h1>{{.D.Hostname}} <span class="pill {{.D.Class}}">{{t .D.Status}}</span></h1>
-    <div class="meta"><span>{{.Inv.OSName}}</span><span>{{t "last seen"}} {{ago .D.LastSeen}}</span><span>{{t "agent"}} {{.D.AgentVersion}}</span>{{if .Inv.Source}}<span>{{t "inventory via"}} {{.Inv.Source}}</span>{{end}}</div>
+    <div class="meta"><span>{{.Inv.OSName}}</span><span>{{t "last seen"}} {{ago .D.LastSeen}}</span><span>{{t "agent"}} {{.D.AgentVersion}}{{if .D.UpdateRequested}} · {{t "update requested"}}{{else if .D.UpdateState}} · {{t "update"}} {{.D.UpdateVersion}} {{t .D.UpdateState}}{{end}}</span>{{if .Inv.Source}}<span>{{t "inventory via"}} {{.Inv.Source}}</span>{{end}}{{if .D.ExternalIP}}<span class="mono">{{.D.ExternalIP}}</span>{{end}}{{with .D.Geo}}{{if .Place}}<span title="{{.ISP}}{{if .ASN}} AS{{.ASN}}{{end}}">{{.Place}}</span>{{end}}{{end}}</div>
   </div>
   {{if and (eq .Sess.Role "admin") (ne .D.Status "retired")}}
   <div class="actions">
@@ -34,6 +34,8 @@
         <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="found">
           <button role="menuitem" class="menu-item">{{t "End lost mode"}}</button></form>
         <a role="menuitem" class="menu-item danger" href="/devices/{{$id}}?tab=commands&amp;type=wipe">{{t "Wipe device…"}}</a>
+        <form method="post" action="/devices/{{$id}}/agent-update"><input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <button role="menuitem" class="menu-item">{{t "Update agent now"}}</button></form>
         <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="allow_uninstall">
           <button role="menuitem" class="menu-item">{{t "Allow uninstall for 1 hour"}}</button></form>
       </div>
@@ -184,7 +186,16 @@
 {{end}}
 
 {{if eq .Tab "network"}}
-{{if not .NetworkInfo}}<div class="notice">{{t "Addresses, DNS and routes are collected only when the privacy item allows network_info (Library, Privacy)."}}</div>{{end}}
+{{if not .NetworkInfo}}<div class="notice">{{t "No addresses reported. A privacy item with network_info set to false switches them off."}}</div>{{end}}
+{{if .D.ExternalIP}}<section class="card">
+  <h2>{{t "Public address"}}</h2>
+  <dl class="kv">
+    <dt>{{t "Address"}}</dt><dd class="mono">{{.D.ExternalIP}}</dd>
+    {{with .D.Geo}}{{if .Country}}<dt>{{t "Location"}}</dt><dd>{{.Place}}{{if .Region}} ({{.Region}}){{end}}</dd>{{end}}
+    {{if .ISP}}<dt>{{t "Provider"}}</dt><dd>{{.ISP}}{{if .ASN}} <span class="muted">AS{{.ASN}}</span>{{end}}</dd>{{end}}{{end}}
+  </dl>
+  <p class="muted">{{t "Address of the last check in as the server saw it."}}</p>
+</section>{{end}}
 <section class="tablecard">
   <div class="card-head"><h2>{{t "Interfaces"}}</h2><span class="muted">{{len .Inv.Interfaces}}</span></div>
   <div class="scroll"><table>

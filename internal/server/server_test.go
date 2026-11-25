@@ -179,3 +179,11 @@ func TestInstallScript(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicAddr(t *testing.T) {
+	for ip, want := range map[string]bool{"2.29.138.139": true, "10.0.0.1": false, "127.0.0.1": false, "fd00::1": false, "2a01:4f8::1": true, "": false} {
+		if publicAddr(ip) != want {
+			t.Errorf("%q: %v", ip, !want)
+		}
+	}
+}
