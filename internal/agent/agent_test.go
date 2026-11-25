@@ -886,3 +886,31 @@ func TestSSOOfflineGrace(t *testing.T) {
 		t.Fatal("configured grace of 10 hours exceeded")
 	}
 }
+
+func TestSessionModeLocks(t *testing.T) {
+	p := pamPolicy{Login: api.Login{Enabled: true, Mode: "session", LocalPassword: true, ReverifyHours: 720, GraceHours: 168}}
+	now := time.Now()
+	day := 24 * time.Hour
+	if !sessionLock(p, time.Time{}, false, true, now) {
+		t.Fatal("an account never bound needs SSO at the login screen")
+	}
+	for _, c := range []struct {
+		age     time.Duration
+		offline bool
+		lock    bool
+		due     bool
+	}{
+		{10 * day, false, false, false},
+		{31 * day, false, false, true}, // due: the desktop app asks, the password still works
+		{40 * day, false, true, true},  // beyond the grace period while online: locked
+		{40 * day, true, false, true},  // offline (holiday): never locked for the overdue confirmation
+		{365 * day, true, false, true}, // also after a long time offline
+	} {
+		if got := sessionLock(p, now.Add(-c.age), true, c.offline, now); got != c.lock {
+			t.Errorf("age %v offline %v: lock %v", c.age, c.offline, got)
+		}
+		if got := sessionDue(p, now.Add(-c.age), now); got != c.due {
+			t.Errorf("age %v: due %v", c.age, got)
+		}
+	}
+}

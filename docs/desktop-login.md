@@ -4,10 +4,26 @@ Centrally managed users sign in to their Linux device with their identity provid
 (Google Workspace, Entra ID, Okta, any OIDC provider with the device authorization grant).
 LiMDM supports two modes:
 
-| Mode | `local_password` | Day to day | Offline |
+| Mode | Login screen | Confirmation | Offline |
 |---|---|---|---|
-| **Local password after SSO** (recommended) | `true` | local password, SSO again every `reverify_hours` | yes, within `reverify_hours` |
-| **SSO only** | `false` | SSO at every login and every screen unlock | no |
+| **session** (default, like Apple Platform SSO and Iru Passport) | local password; SSO with MFA only at the first login and after a lock | every `reverify_hours` (default 720, 30 days) in the session: the desktop app asks, the user confirms in the browser | always works; nothing locks while offline |
+| **login** (strict) | SSO every `reverify_hours`, with `local_password` the local password in between | at the login screen | `offline_grace_hours` on top (default 72) |
+
+In **session** mode:
+
+* The first login binds the account: SSO with MFA, and the password typed there becomes the
+  local password.
+* Afterwards the local password works on every login and lock screen, also offline.
+* When a confirmation is due, the tray shows **Confirm Company Account…** and a
+  notification once a day. A click opens the identity provider's page and shows a code;
+  the confirmation happens in the browser with MFA, the session goes on.
+* If nobody confirms within `grace_hours` (default 168, 7 days) after it fell due, and the
+  device is online, the local password locks. The next login then needs SSO at the login
+  screen, which unlocks it again. A device that is offline is never locked for this, so a
+  long flight or a holiday without network changes nothing.
+* Accounts suspended or deleted in the directory (SCIM, Google Workspace sync) are locked
+  at the next poll, within about a minute when online, and their sessions end; this is the
+  counterpart of revoking tokens in Entra ID.
 
 This is not a password synchronisation with the identity provider (Google offers no
 interface to verify a password, except Secure LDAP). The identity provider decides who may
@@ -23,35 +39,27 @@ confirmation.
 
    ```json
    {"issuer": "https://accounts.google.com", "client_id": "...", "client_secret": "...",
-    "allowed_domain": "example.com", "local_password": true, "reverify_hours": 168}
+    "allowed_domain": "example.com", "mode": "session", "reverify_hours": 720, "grace_hours": 168}
    ```
 
    `allowed_domain` restricts sign in to the Google `hd` claim or the email domain.
-   `reverify_hours` (1 to 2160) is required with `local_password`.
-   `offline_grace_hours` (default 72, at most 720): when the device cannot reach the LiMDM
-   server for 30 minutes, a due SSO confirmation waits this long on top of
-   `reverify_hours`, and the local password keeps working on the login and lock screen
-   (travel, no network before login). Once the device is online again the confirmation is
-   required at the next login. The offline lock (`offline_lock_hours`) still applies.
+   Session mode: `reverify_hours` 1 to 8760 (default 720), `grace_hours` 1 to 2160
+   (default 168). Login mode (`"mode": "login"`): `reverify_hours` 1 to 2160 with
+   `local_password`; `offline_grace_hours` (default 72, at most 720) lets a due confirmation
+   wait while the device cannot reach the LiMDM server.
 
 **Switching SSO off** (servers, kiosks): assign a login library item with
 `{"enabled": false}` to that blueprint. Declarations apply from the parent blueprint to the
 child, so it overrides SSO inherited from above; the agent removes its PAM hook and local
 logins work as before.
 
-**Travel and holidays**, how the two offline times work together:
-
-| Situation | What happens | Setting |
-|---|---|---|
-| 18 hour flight, no network | a confirmation that falls due during the flight waits; the local password works | `offline_grace_hours` ≥ 24 (default 72) |
-| 14 days holiday, device offline | the same for two weeks | `offline_grace_hours` 360 |
-| any trip | the device must not lock itself while away | `offline_lock_hours` in the agent item 0 (off) or longer than the trip |
-| online during the trip | nothing special: SSO is confirmed on the phone at the next due login | none |
-
-For single travellers, keep the strict values for everyone and give a **travel** tag a
-blueprint condition that assigns a login item with longer offline times; remove the tag
-after the trip. A device locked by `offline_lock_hours` unlocks at its next check in, so it
-needs network once.
+**Travel and holidays:** in session mode nothing locks while the device is offline, so an
+18 hour flight or 14 days without network need no setting; after the trip the tray asks for
+the confirmation. Only the agent's own offline lock (`offline_lock_hours` in the agent
+item) can lock a device that is away; keep it at 0 (off) or longer than the longest trip.
+In login mode, set `offline_grace_hours` longer than the trip (for example 360 for two
+weeks), or give travellers a **travel** tag whose blueprint condition assigns a login item
+with longer values.
 3. Optional offline lock in `com.limdm.agent`: `"offline_lock_hours": 72`.
 4. On the device page, list the **Desktop users**, one per line: `username email [admin]`.
    The agent creates the accounts (home directory, `/bin/bash`), adds `admin` users to

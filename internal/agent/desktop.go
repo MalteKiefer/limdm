@@ -100,6 +100,21 @@ type DesktopResponse struct {
 	Store    *StoreInfo         `json:"store,omitempty"`
 	Requests []api.RequestState `json:"requests,omitempty"` // catalog: requests for apps outside it
 	Hits     []DesktopHit       `json:"hits,omitempty"`     // search
+	SSO      *SSOStatus         `json:"sso,omitempty"`      // sso-status, sso-confirm
+}
+
+// SSOStatus tells the desktop app whether the user's company account needs a
+// confirmation in the session, and the running confirmation.
+type SSOStatus struct {
+	Managed   bool       `json:"managed"`
+	Email     string     `json:"email,omitempty"`
+	Confirmed *time.Time `json:"confirmed,omitempty"`
+	Due       bool       `json:"due"`
+	Deadline  *time.Time `json:"deadline,omitempty"` // the local password locks after this (when online)
+	URI       string     `json:"uri,omitempty"`      // running confirmation
+	Code      string     `json:"code,omitempty"`
+	Running   bool       `json:"running,omitempty"`
+	Error     string     `json:"error,omitempty"` // of the last confirmation
 }
 
 // StoreInfo tells the desktop app about the store policy.
@@ -120,6 +135,14 @@ type desktopServer struct {
 	failures map[uint32][]time.Time // wrong passphrases per uid
 	lastSync time.Time              // last check in requested from the desktop
 	searches []time.Time            // recent searches, for the rate limit
+	flows    map[string]*ssoFlow    // confirmations in the session, per user
+}
+
+type ssoFlow struct {
+	uri, code string
+	running   bool
+	err       string
+	started   time.Time
 }
 
 // agentLog returns the latest warnings and errors of the agent and its
@@ -301,6 +324,13 @@ func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 			return DesktopResponse{Error: "too many searches, wait a minute"}
 		}
 		return d.a.searchApps(req.Query)
+	case "sso-status", "sso-confirm":
+		name := itoa(uid)
+		u, err := user.LookupId(name)
+		if err != nil {
+			return DesktopResponse{Error: "unknown user"}
+		}
+		return d.ssoOp(u.Username, req.Op == "sso-confirm")
 	case "app-request-new":
 		name := itoa(uid)
 		if u, err := user.LookupId(name); err == nil {
@@ -455,4 +485,65 @@ func (l *limitedReader) Read(p []byte) (int, error) {
 	n, err := l.c.Read(p)
 	l.n -= n
 	return n, err
+}
+
+// ssoOp reports the company account state of a user and, with start, begins
+// a confirmation: the app shows URI and code, the agent waits for the
+// identity provider and records the confirmation.
+func (d *desktopServer) ssoOp(name string, start bool) DesktopResponse {
+	email, managed := readUsers()[name]
+	cfg, ok := readPAMPolicy()
+	if !managed || !ok || !cfg.Enabled {
+		return DesktopResponse{OK: true, SSO: &SSOStatus{}}
+	}
+	st := &SSOStatus{Managed: true, Email: email}
+	now := time.Now()
+	if t, ok := readSSO()[name]; ok {
+		st.Confirmed = &t
+		st.Due = !cfg.Session() || sessionDue(cfg, t, now)
+		if cfg.Session() {
+			dl := t.Add(time.Duration(cfg.ReverifyHours+cfg.GraceHours) * time.Hour)
+			st.Deadline = &dl
+		}
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.flows == nil {
+		d.flows = map[string]*ssoFlow{}
+	}
+	f := d.flows[name]
+	if start && (f == nil || !f.running) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		flow, err := startDeviceFlow(ctx, cfg.Login)
+		if err != nil {
+			cancel()
+			return DesktopResponse{Error: err.Error(), SSO: st}
+		}
+		f = &ssoFlow{uri: flow.URI, code: flow.Code, running: true, started: now}
+		d.flows[name] = f
+		go func() {
+			defer cancel()
+			err := flow.finish(ctx, cfg.Login, email)
+			if err == nil {
+				err = recordSSO(name, time.Now())
+			}
+			d.mu.Lock()
+			f.running = false
+			if err != nil {
+				f.err = err.Error()
+			}
+			d.mu.Unlock()
+			recordAuthEvent(name, email, err)
+			if err == nil {
+				d.a.event("company account of %s confirmed in the session", name)
+			}
+		}()
+	}
+	if f != nil {
+		st.Running, st.Error = f.running, f.err
+		if f.running {
+			st.URI, st.Code = f.uri, f.code
+		}
+	}
+	return DesktopResponse{OK: true, SSO: st}
 }

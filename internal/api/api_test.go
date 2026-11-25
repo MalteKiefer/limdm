@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 )
 
 func decl(id, typ, payload string) Declaration {
@@ -204,14 +203,31 @@ func TestLoginCanBeSwitchedOff(t *testing.T) {
 	on := Declaration{Identifier: "sso", Type: TypeLogin, Payload: []byte(`{"issuer":"https://accounts.google.com","client_id":"x","local_password":true,"reverify_hours":24,"offline_grace_hours":360}`)}
 	off := Declaration{Identifier: "servers", Type: TypeLogin, Payload: []byte(`{"enabled":false}`)}
 	p, st := Compose([]Declaration{on})
-	if !p.Login.Enabled || p.Login.Grace() != 360*time.Hour || !st[0].Valid {
+	if !p.Login.Enabled || !p.Login.Session() || p.Login.GraceHours != 168 || !st[0].Valid {
 		t.Fatalf("on: %+v %+v", p.Login, st)
 	}
 	p, st = Compose([]Declaration{on, off})
 	if p.Login.Enabled || !st[1].Valid {
 		t.Fatalf("off must win: %+v %+v", p.Login, st)
 	}
-	if _, st := Compose([]Declaration{{Identifier: "bad", Type: TypeLogin, Payload: []byte(`{"issuer":"https://a","client_id":"x","offline_grace_hours":9999}`)}}); st[0].Valid {
+	if _, st := Compose([]Declaration{{Identifier: "bad", Type: TypeLogin, Payload: []byte(`{"issuer":"https://a","client_id":"x","mode":"login","offline_grace_hours":9999}`)}}); st[0].Valid {
 		t.Fatal("grace above 720 hours accepted")
+	}
+}
+
+func TestLoginModes(t *testing.T) {
+	d := func(payload string) Declaration {
+		return Declaration{Identifier: "sso", Type: TypeLogin, Payload: []byte(payload)}
+	}
+	p, st := Compose([]Declaration{d(`{"issuer":"https://accounts.google.com","client_id":"x"}`)})
+	if !st[0].Valid || p.Login.Mode != "session" || !p.Login.LocalPassword || p.Login.ReverifyHours != 720 || p.Login.GraceHours != 168 {
+		t.Fatalf("session defaults: %+v %+v", p.Login, st)
+	}
+	if _, st := Compose([]Declaration{d(`{"issuer":"https://a","client_id":"x","mode":"kiosk"}`)}); st[0].Valid {
+		t.Fatal("unknown mode accepted")
+	}
+	p, st = Compose([]Declaration{d(`{"issuer":"https://a","client_id":"x","mode":"login","local_password":true,"reverify_hours":24}`)})
+	if !st[0].Valid || p.Login.Session() {
+		t.Fatalf("login mode: %+v", p.Login)
 	}
 }

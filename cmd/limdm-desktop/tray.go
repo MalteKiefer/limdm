@@ -89,6 +89,8 @@ var (
 type tray struct {
 	header, status, checkin                                 *systray.MenuItem
 	open, software, compliance, sync, recovery, logs, about *systray.MenuItem
+	sso                                                     *systray.MenuItem
+	ssoNotified                                             time.Time
 	last                                                    agent.DesktopResponse
 }
 
@@ -111,6 +113,8 @@ func runTray() {
 		t.compliance = systray.AddMenuItem(tr("Compliance…", "Compliance…"), "")
 		t.recovery = systray.AddMenuItem(tr("Set Up Recovery Key…", "Wiederherstellungsschlüssel einrichten…"), "")
 		t.recovery.Hide()
+		t.sso = systray.AddMenuItem(tr("Confirm Company Account…", "Firmenkonto bestätigen…"), "")
+		t.sso.Hide()
 		systray.AddSeparator()
 		t.sync = systray.AddMenuItem(tr("Check In Now", "Jetzt synchronisieren"), "")
 		t.logs = systray.AddMenuItem(tr("Agent Log…", "Agent Protokoll…"), "")
@@ -156,6 +160,8 @@ func (t *tray) loop() {
 					dialogsFor(last).message(tr("Recovery Key", "Wiederherstellungsschlüssel"), err.Error(), true)
 				}
 			})
+		case <-t.sso.ClickedCh:
+			go confirmAccount(t.last)
 		case <-t.logs.ClickedCh:
 			go openApp("log", t.last, showLog)
 		}
@@ -200,6 +206,7 @@ func (t *tray) refresh() {
 	} else {
 		t.recovery.Hide()
 	}
+	t.refreshSSO()
 }
 
 func dialogsFor(last agent.DesktopResponse) *dialogs {
@@ -290,4 +297,64 @@ func reminders() {
 		}
 		time.Sleep(30 * time.Minute)
 	}
+}
+
+// refreshSSO shows the confirmation entry while the company account needs
+// one, with a notification once a day.
+func (t *tray) refreshSSO() {
+	resp, err := call(agent.DesktopRequest{Op: "sso-status"})
+	if err != nil || resp.SSO == nil || !resp.SSO.Managed || !resp.SSO.Due {
+		t.sso.Hide()
+		return
+	}
+	t.sso.Show()
+	if time.Since(t.ssoNotified) < 24*time.Hour {
+		return
+	}
+	t.ssoNotified = time.Now()
+	body := tr("Confirm your company account to keep using this device.", "Bestätigen Sie Ihr Firmenkonto, um das Gerät weiter zu nutzen.")
+	if dl := resp.SSO.Deadline; dl != nil {
+		body += " " + fmt.Sprintf(tr("Without it the password stops working after %s.", "Ohne Bestätigung funktioniert das Passwort ab %s nicht mehr."), dl.Local().Format("2006-01-02 15:04"))
+	}
+	_ = exec.CommandContext(ctx, "notify-send", "--app-name=LiMDM", "--urgency=normal", tr("Company Account", "Firmenkonto"), body).Run()
+}
+
+// confirmAccount runs the confirmation: the agent starts it, the browser
+// opens the identity provider's page and a dialog shows the code.
+func confirmAccount(last agent.DesktopResponse) {
+	d := dialogsFor(last)
+	resp, err := call(agent.DesktopRequest{Op: "sso-confirm"})
+	switch {
+	case err != nil:
+		d.message(tr("Agent Not Reachable", "Agent nicht erreichbar"), err.Error(), true)
+		return
+	case resp.Error != "" || resp.SSO == nil || resp.SSO.URI == "":
+		d.message(tr("Confirmation Not Started", "Bestätigung nicht gestartet"), firstNonEmpty(resp.Error, tr("The identity provider did not answer.", "Der Identity Provider hat nicht geantwortet.")), true)
+		return
+	}
+	_ = exec.CommandContext(ctx, "xdg-open", resp.SSO.URI).Start()
+	go d.message(tr("Confirm Your Company Account", "Firmenkonto bestätigen"),
+		fmt.Sprintf(tr("Sign in on the page that opened (%s) and enter the code %s.", "Melden Sie sich auf der geöffneten Seite (%s) an und geben Sie den Code %s ein."), resp.SSO.URI, resp.SSO.Code), false)
+	for i := 0; i < 120; i++ { // up to ten minutes
+		time.Sleep(5 * time.Second)
+		st, err := call(agent.DesktopRequest{Op: "sso-status"})
+		if err != nil || st.SSO == nil || st.SSO.Running {
+			continue
+		}
+		if st.SSO.Error != "" {
+			d.message(tr("Confirmation Failed", "Bestätigung fehlgeschlagen"), st.SSO.Error, true)
+		} else {
+			d.message(tr("Company Account Confirmed", "Firmenkonto bestätigt"), tr("Thank you. Nothing else to do.", "Danke. Es ist nichts weiter zu tun."), false)
+		}
+		return
+	}
+}
+
+func firstNonEmpty(v ...string) string {
+	for _, s := range v {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
 }

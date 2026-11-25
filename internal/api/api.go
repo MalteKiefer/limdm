@@ -57,7 +57,7 @@ var Types = map[string]string{
 	TypeFirewall:   `{"enforce": true, "allow": ["22/tcp"]}`,
 	TypeOSVersion:  `{"min": {"ubuntu": "22.04", "debian": "12", "fedora": "41"}}`,
 	TypeScreenLock: `{"idle_seconds": 300}`,
-	TypeLogin:      `{"issuer": "https://accounts.google.com", "client_id": "", "client_secret": "", "allowed_domain": "", "local_password": true, "reverify_hours": 168, "offline_grace_hours": 72}`,
+	TypeLogin:      `{"issuer": "https://accounts.google.com", "client_id": "", "client_secret": "", "allowed_domain": "", "mode": "session", "reverify_hours": 720, "grace_hours": 168}`,
 	TypePrivacy:    `{"network_info": true, "logged_in_users": true}`,
 }
 
@@ -157,19 +157,29 @@ type Login struct {
 	ClientID      string `json:"client_id"`
 	ClientSecret  string `json:"client_secret"`
 	AllowedDomain string `json:"allowed_domain"` // Google "hd" claim, or email domain
-	// LocalPassword: after an SSO confirmation the password typed at that login
-	// becomes the local password, used offline and on the lock screen until
-	// ReverifyHours have passed; then SSO is required again.
+	// Mode "session" (default), like Platform SSO and Passport: the first
+	// login binds the account with SSO and MFA, afterwards the local password
+	// works on every login and lock screen, also offline. Every ReverifyHours
+	// (default 720) the desktop app asks to confirm the company account in the
+	// session; GraceHours (default 168) after that, while online, the local
+	// password locks until SSO is done at the login screen. Accounts disabled
+	// in the directory lock at the next poll.
+	// Mode "login": SSO at the login screen every ReverifyHours (strict).
+	Mode string `json:"mode,omitempty"`
+	// LocalPassword (login mode): after an SSO confirmation the password typed
+	// at that login becomes the local password until ReverifyHours have passed.
 	LocalPassword bool `json:"local_password,omitempty"`
 	ReverifyHours int  `json:"reverify_hours,omitempty"`
-	// OfflineGraceHours: while the device cannot reach the LiMDM server, a
-	// due SSO confirmation waits this long beyond ReverifyHours and the local
-	// password keeps working (travel, login screen without network). 0 means
-	// the default of 72 hours; the offline lock (offline_lock_hours) still applies.
+	GraceHours    int  `json:"grace_hours,omitempty"` // session mode
+	// OfflineGraceHours (login mode): while the device cannot reach the
+	// LiMDM server, a due confirmation waits this long on top (default 72).
 	OfflineGraceHours int `json:"offline_grace_hours,omitempty"`
 }
 
-// Grace is the offline grace period.
+// Session reports the default session mode.
+func (l Login) Session() bool { return l.Mode != "login" }
+
+// Grace is the offline grace period of login mode.
 func (l Login) Grace() time.Duration {
 	if l.OfflineGraceHours <= 0 {
 		return 72 * time.Hour
@@ -342,11 +352,27 @@ func (d Declaration) apply(p *Policy) error {
 		if !strings.HasPrefix(p.Login.Issuer, "https://") || p.Login.ClientID == "" {
 			bad("login needs https issuer and client_id")
 		}
-		if p.Login.LocalPassword && (p.Login.ReverifyHours < 1 || p.Login.ReverifyHours > 2160) {
-			bad("local_password needs reverify_hours 1..2160")
-		}
-		if p.Login.OfflineGraceHours < 0 || p.Login.OfflineGraceHours > 720 {
-			bad("offline_grace_hours: 0..720")
+		switch p.Login.Mode {
+		case "", "session":
+			p.Login.Mode, p.Login.LocalPassword = "session", true
+			if p.Login.ReverifyHours == 0 {
+				p.Login.ReverifyHours = 720
+			}
+			if p.Login.GraceHours == 0 {
+				p.Login.GraceHours = 168
+			}
+			if p.Login.ReverifyHours < 1 || p.Login.ReverifyHours > 8760 || p.Login.GraceHours < 1 || p.Login.GraceHours > 2160 {
+				bad("reverify_hours 1..8760 and grace_hours 1..2160")
+			}
+		case "login":
+			if p.Login.LocalPassword && (p.Login.ReverifyHours < 1 || p.Login.ReverifyHours > 2160) {
+				bad("local_password needs reverify_hours 1..2160")
+			}
+			if p.Login.OfflineGraceHours < 0 || p.Login.OfflineGraceHours > 720 {
+				bad("offline_grace_hours: 0..720")
+			}
+		default:
+			bad("mode is session or login")
 		}
 	case TypePrivacy:
 		if err := strict(d.Payload, &p.Privacy); err != nil {

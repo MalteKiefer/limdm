@@ -1321,6 +1321,18 @@ func TestAgentUpdates(t *testing.T) {
 	if !pollOf("d5") {
 		t.Fatal("an admin request must retry the update")
 	}
+	// a desktop user disabled in the directory makes the device check in at once
+	db.Exec(ctx, `UPDATE devices SET agent_version='1.2.0', update_state='', update_requested=false, users='[{"username":"bob","email":"bob@firma.de"}]', last_seen=now()-interval '1 hour' WHERE id='d3'`)
+	db.Exec(ctx, `UPDATE commands SET status='ok' WHERE device_id='d3'`)
+	if pollOf("d3") {
+		t.Fatal("nothing pending yet")
+	}
+	db.Exec(ctx, `INSERT INTO dir_users(source, user_name, email, active) VALUES ('scim','bob','bob@firma.de',false)`)
+	if !pollOf("d3") {
+		t.Fatal("a disabled directory user must trigger a check in")
+	}
+	db.Exec(ctx, `DELETE FROM dir_users WHERE email='bob@firma.de'`)
+	db.Exec(ctx, `DELETE FROM dir_tombstones WHERE email='bob@firma.de'`)
 
 	// software catalog: 78 seeded apps, scope by blueprint, requests
 	var seeded int
