@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func decl(id, typ, payload string) Declaration {
@@ -196,5 +197,21 @@ func TestUserAndSoftwareCommands(t *testing.T) {
 		if r.Validate() == nil {
 			t.Errorf("accepted %+v", r)
 		}
+	}
+}
+
+func TestLoginCanBeSwitchedOff(t *testing.T) {
+	on := Declaration{Identifier: "sso", Type: TypeLogin, Payload: []byte(`{"issuer":"https://accounts.google.com","client_id":"x","local_password":true,"reverify_hours":24,"offline_grace_hours":360}`)}
+	off := Declaration{Identifier: "servers", Type: TypeLogin, Payload: []byte(`{"enabled":false}`)}
+	p, st := Compose([]Declaration{on})
+	if !p.Login.Enabled || p.Login.Grace() != 360*time.Hour || !st[0].Valid {
+		t.Fatalf("on: %+v %+v", p.Login, st)
+	}
+	p, st = Compose([]Declaration{on, off})
+	if p.Login.Enabled || !st[1].Valid {
+		t.Fatalf("off must win: %+v %+v", p.Login, st)
+	}
+	if _, st := Compose([]Declaration{{Identifier: "bad", Type: TypeLogin, Payload: []byte(`{"issuer":"https://a","client_id":"x","offline_grace_hours":9999}`)}}); st[0].Valid {
+		t.Fatal("grace above 720 hours accepted")
 	}
 }

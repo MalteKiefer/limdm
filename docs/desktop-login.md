@@ -33,6 +33,25 @@ confirmation.
    `reverify_hours`, and the local password keeps working on the login and lock screen
    (travel, no network before login). Once the device is online again the confirmation is
    required at the next login. The offline lock (`offline_lock_hours`) still applies.
+
+**Switching SSO off** (servers, kiosks): assign a login library item with
+`{"enabled": false}` to that blueprint. Declarations apply from the parent blueprint to the
+child, so it overrides SSO inherited from above; the agent removes its PAM hook and local
+logins work as before.
+
+**Travel and holidays**, how the two offline times work together:
+
+| Situation | What happens | Setting |
+|---|---|---|
+| 18 hour flight, no network | a confirmation that falls due during the flight waits; the local password works | `offline_grace_hours` ≥ 24 (default 72) |
+| 14 days holiday, device offline | the same for two weeks | `offline_grace_hours` 360 |
+| any trip | the device must not lock itself while away | `offline_lock_hours` in the agent item 0 (off) or longer than the trip |
+| online during the trip | nothing special: SSO is confirmed on the phone at the next due login | none |
+
+For single travellers, keep the strict values for everyone and give a **travel** tag a
+blueprint condition that assigns a login item with longer offline times; remove the tag
+after the trip. A device locked by `offline_lock_hours` unlocks at its next check in, so it
+needs network once.
 3. Optional offline lock in `com.limdm.agent`: `"offline_lock_hours": 72`.
 4. On the device page, list the **Desktop users**, one per line: `username email [admin]`.
    The agent creates the accounts (home directory, `/bin/bash`), adds `admin` users to

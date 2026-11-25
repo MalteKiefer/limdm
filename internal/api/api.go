@@ -57,7 +57,7 @@ var Types = map[string]string{
 	TypeFirewall:   `{"enforce": true, "allow": ["22/tcp"]}`,
 	TypeOSVersion:  `{"min": {"ubuntu": "22.04", "debian": "12", "fedora": "41"}}`,
 	TypeScreenLock: `{"idle_seconds": 300}`,
-	TypeLogin:      `{"issuer": "https://accounts.google.com", "client_id": "", "client_secret": "", "allowed_domain": "", "local_password": true, "reverify_hours": 168}`,
+	TypeLogin:      `{"issuer": "https://accounts.google.com", "client_id": "", "client_secret": "", "allowed_domain": "", "local_password": true, "reverify_hours": 168, "offline_grace_hours": 72}`,
 	TypePrivacy:    `{"network_info": true, "logged_in_users": true}`,
 }
 
@@ -326,9 +326,18 @@ func (d Declaration) apply(p *Policy) error {
 		p.ScreenLock = ScreenLock{ManageLogin: v.HideUsers != nil || v.AllowAutologin != nil,
 			HideUsers: v.HideUsers != nil && *v.HideUsers, AllowAutologin: v.AllowAutologin == nil || *v.AllowAutologin}
 	case TypeLogin:
-		if err := strict(d.Payload, &p.Login); err != nil {
+		var v struct {
+			Login
+			Enabled *bool `json:"enabled"` // false switches SSO off, e.g. for servers below a desktop blueprint
+		}
+		if err := strict(d.Payload, &v); err != nil {
 			return err
 		}
+		if v.Enabled != nil && !*v.Enabled {
+			p.Login = Login{} // off: the agent removes its PAM hook, local logins work as before
+			break
+		}
+		p.Login = v.Login
 		p.Login.Enabled = true
 		if !strings.HasPrefix(p.Login.Issuer, "https://") || p.Login.ClientID == "" {
 			bad("login needs https issuer and client_id")
