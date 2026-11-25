@@ -74,7 +74,9 @@ Failed local and OIDC sign ins and rejected enrollments are logged with the clie
 * The server records the public address of every check in (the agent port is never behind
   a proxy) and looks up its location (country, region, city, provider) at
   `LIMDM_GEOIP_URL`, default `https://ipwho.is/`. Only the address is sent, and only when it
-  changed. `LIMDM_GEOIP_URL=off` disables the lookup; the address is still shown.
+  changed. `LIMDM_GEOIP_URL=off` disables the lookup; the address is still shown. Devices
+  with `network_info: false` get neither: the server stores no public address or location
+  for them and deletes what was stored.
 * Outbound connections: the server talks to the configured OIDC provider, the Google
   Directory API (if configured), the webhook URL (if configured), GitHub for agent releases
   and the location service. Devices talk to the

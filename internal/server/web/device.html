@@ -16,6 +16,7 @@
         <details class="sub"><summary class="menu-item">{{t "Updates"}}</summary><div class="sub-list">
             <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="update"><button role="menuitem" class="menu-item">{{t "Install all updates"}}</button></form>
             <a role="menuitem" class="menu-item" href="#dlg-agent" data-open="dlg-agent">{{t "Update agent…"}}</a>
+            <a role="menuitem" class="menu-item" href="#dlg-message" data-open="dlg-message">{{t "Send message…"}}</a>
         </div></details>
         <details class="sub"><summary class="menu-item">{{t "Power"}}</summary><div class="sub-list">
             <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="reboot"><input type="hidden" name="minutes" value="0"><button role="menuitem" class="menu-item">{{t "Reboot now"}}</button></form>
@@ -58,6 +59,12 @@
     {{range .AgentVersions}}<option value="{{.}}">{{.}}{{if eq . $.D.AgentVersion}} ({{t "installed"}}){{end}}</option>{{end}}
   </select></label>
   <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Update"}}</button></div></form></dialog>
+<dialog id="dlg-message" class="modal" aria-labelledby="dlg-message-h"><form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="message">
+  <h2 id="dlg-message-h">{{t "Send message"}}</h2>
+  <p class="muted">{{t "Shown as notification and dialog to everyone signed in on the desktop, at the next check in."}}</p>
+  <label>{{t "Title"}} <span class="hint">{{t "optional"}}</span><input name="title" maxlength="100"></label>
+  <label>{{t "Message"}}<textarea name="text" rows="4" maxlength="1000" required></textarea></label>
+  <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Send"}}</button></div></form></dialog>
 <dialog id="dlg-lost" class="modal" aria-labelledby="dlg-lost-h"><form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="lost">
   <h2 id="dlg-lost-h">{{t "Lost mode"}}</h2>
   <p class="notice">{{t "Blocks every login, ends running sessions and shows your message. With an escrowed recovery key, every other disk key slot is removed: after the next power off only IT can open the disk."}}</p>

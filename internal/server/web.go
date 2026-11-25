@@ -86,7 +86,7 @@ func parsePages(lang, layout string) map[string]*template.Template {
 		"actionLabel": func(a string) string {
 			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot",
 				"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script",
-				"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour"}[a])
+				"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour", "message": "Message"}[a])
 		},
 		"join":      strings.Join,
 		"hasPrefix": strings.HasPrefix,
@@ -657,6 +657,14 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 			b, _ := json.Marshal(api.LostMode{Message: msg})
 			payload = string(b)
 		}
+	case typ == "message":
+		title, text := strings.TrimSpace(r.FormValue("title")), strings.TrimSpace(r.FormValue("text"))
+		if text == "" || len(text) > 1000 || len(title) > 100 || strings.ContainsAny(title+text, "\x00\r") {
+			http.Error(w, "message: text up to 1000 characters, title up to 100", http.StatusBadRequest)
+			return
+		}
+		b, _ := json.Marshal(api.Message{Title: title, Text: text})
+		payload = string(b)
 	case typ != "script":
 		payload = ""
 	case sess.Role != "admin":

@@ -1206,6 +1206,39 @@ func TestAgentUpdates(t *testing.T) {
 		t.Fatalf("blocked version offered: %+v", u)
 	}
 
+	// poll: nothing pending, then a queued command
+	pollOf := func(id string) bool {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		s.poll(rec, httptest.NewRequest("POST", "/api/v1/poll", nil).WithContext(context.WithValue(ctx, deviceKey, id)))
+		var pr api.PollResponse
+		if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &pr) != nil {
+			t.Fatalf("poll: %d", rec.Code)
+		}
+		return pr.Pending
+	}
+	if pollOf("d3") {
+		t.Fatal("nothing should be pending")
+	}
+	db.Exec(ctx, `INSERT INTO commands(device_id, type, payload, created_by) VALUES ('d3', 'reboot', '5', 'admin')`)
+	if !pollOf("d3") {
+		t.Fatal("queued command not reported by poll")
+	}
+
+	// privacy: no public address or location without network_info
+	db.Exec(ctx, `UPDATE devices SET external_ip='203.0.113.7', geo='{"ip":"203.0.113.7","country":"Germany"}', geo_at=now() WHERE id='d3'`)
+	tx, _ := db.Begin(ctx)
+	if err := forgetPublicAddress(ctx, tx, "d3"); err != nil {
+		t.Fatal(err)
+	}
+	tx.Commit(ctx)
+	var ip string
+	var geo []byte
+	db.QueryRow(ctx, `SELECT external_ip, geo FROM devices WHERE id='d3'`).Scan(&ip, &geo)
+	if ip != "" || geo != nil {
+		t.Fatalf("public address kept: %q %s", ip, geo)
+	}
+
 	// an admin picks an unapproved version for one device
 	db.Exec(ctx, `UPDATE devices SET update_requested=true, update_target='1.2.0' WHERE id='d4'`)
 	if u := offer("d4"); u == nil || u.Version != "1.2.0" {

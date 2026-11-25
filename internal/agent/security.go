@@ -435,43 +435,13 @@ func (a *Agent) notifyEscrow() {
 		time.Since(a.state.EscrowNotified) < 24*time.Hour {
 		return
 	}
-	out, err := sh("loginctl", "list-sessions", "--no-legend")
-	if err != nil {
-		return
-	}
-	company := a.state.Company
-	if company == "" {
-		company = "IT"
-	}
-	sent := false
-	for _, l := range strings.Split(out, "\n") {
-		f := strings.Fields(l)
-		if len(f) < 3 {
-			continue
-		}
-		uid, user := f[1], f[2]
-		if !userRe.MatchString(user) {
-			continue
-		}
-		if _, err := os.Stat("/run/user/" + uid + "/bus"); err != nil {
-			continue
-		}
-		args := []string{"-u", user, "--", "env", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/" + uid + "/bus",
-			"notify-send", "--urgency=critical", "--app-name=" + company}
-		if _, err := os.Stat(brandingLogo); err == nil {
-			args = append(args, "--icon="+brandingLogo)
-		}
-		args = append(args, "Disk recovery key required",
-			company+" needs a recovery key for your disk encryption. A dialog asks for your disk password; it is also in the applications menu as \"Disk recovery key\".")
-		if _, err := run(15*time.Second, "runuser", args...); err == nil {
+	sent := a.notifyUsers("Disk recovery key required",
+		a.company()+" needs a recovery key for your disk encryption. A dialog asks for your disk password; it is also in the applications menu as \"Disk recovery key\".", "critical")
+	// open the dialog right away: compositors like sway do not run the
+	// helper's XDG autostart entry
+	for _, s := range graphicalSessions() {
+		if launchInSession(s.user, s.env, "/usr/bin/limdm-desktop", "--now") == nil {
 			sent = true
-		}
-		// open the dialog right away: compositors like sway do not run the
-		// helper's XDG autostart entry
-		if env := graphicalEnv(uid); env != nil {
-			if err := launchInSession(user, env, "/usr/bin/limdm-desktop", "--now"); err == nil {
-				sent = true
-			}
 		}
 	}
 	if sent {

@@ -190,7 +190,20 @@ the right one on every device with a desktop and retries daily if that fails. Te
 the session language and fall back to the system locale (English and German). Dialogs
 follow the GNOME HIG: a short heading, one sentence, buttons named after their action.
 
-Desktops with XDG autostart start the helper at login. On compositors without it (sway,
-Hyprland) the agent opens the dialog in the user's session together with the daily
-notification. Manually: `limdm-desktop --now`.
+The helper starts in every graphical session: through the systemd user unit
+`limdm-desktop.service` (enabled for all users, bound to `graphical-session.target`),
+through XDG autostart, and where neither applies (sway or Hyprland without systemd
+integration, i3) the agent starts it on its next cycle. A lock in `$XDG_RUNTIME_DIR` keeps
+one instance per user. Manually: `limdm-desktop --now` asks for a missing recovery key.
+
+Users see a notification when IT schedules a restart or shutdown (with the time), locks the
+device, or needs a recovery key. **Send message…** on a device page shows a notification and
+a dialog to everyone signed in on the desktop.
+
+## Command delivery
+
+Besides the regular check in, the agent asks the server every minute whether commands wait
+(`POST /api/v1/poll`, a single boolean) and checks in at once if so. Restart and shutdown
+delays count from when the command was sent in the console; a command that arrives late
+still gives users at least one minute of warning.
 

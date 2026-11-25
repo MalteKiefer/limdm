@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	mrand "math/rand/v2"
 	"net/http"
 	"net/url"
@@ -383,6 +384,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.kick = make(chan struct{}, 1)
 	a.desktop = &desktopServer{a: a, queued: map[string]bool{}, inflight: map[string]bool{}, failures: map[uint32][]time.Time{}}
 	go a.serveDesktop(ctx)
+	go a.pollLoop(ctx)
 	a.enforceOffline(false) // before anything else: the device may have been off for a long time
 	for {
 		a.cycle(ctx)
@@ -446,6 +448,7 @@ func (a *Agent) declarationStatus() []api.DeclarationStatus {
 func (a *Agent) cycle(ctx context.Context) {
 	defer a.saveState()
 	defer a.publishDesktop()
+	defer a.ensureHelpers()
 	a.renewIdentity(ctx)
 	a.takeEscrowRequests()
 	a.checkUpdateOutcome()
@@ -670,8 +673,9 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = a.host.upgrade(false)
 		a.state.LastUpdateRun = time.Now()
 	case "reboot", "shutdown":
-		out, err = powerAction(c.Type, c.Payload)
+		out, err = a.powerAction(c.Type, c.Payload, c.CreatedAt)
 	case "lock":
+		a.notifyUsers("Device locked", a.company()+" locked this device. Sessions end and new sign ins are blocked until IT unlocks it.", "critical")
 		out, err = lockDevice()
 		a.syncPasswordLocks()
 	case "unlock":
@@ -685,6 +689,8 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = a.wipe()
 	case "allow_uninstall":
 		out, err = allowUninstall()
+	case "message":
+		out, err = a.showMessage(c.Payload)
 	case "script":
 		if !a.cfg.AllowScripts {
 			err = errors.New("remote scripts are disabled on this device (allow_scripts)")
@@ -782,6 +788,30 @@ func (a *Agent) post(ctx context.Context, path string, in, out any) error {
 		return fmt.Errorf("%s: %s", path, resp.Status)
 	}
 	return json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(out)
+}
+
+// pollLoop asks the server every minute whether commands wait, so a reboot,
+// lock or wipe does not wait for the next full check in.
+func (a *Agent) pollLoop(ctx context.Context) {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		var resp api.PollResponse
+		pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		err := a.post(pctx, "/api/v1/poll", struct{}{}, &resp)
+		cancel()
+		if err == nil && resp.Pending {
+			select {
+			case a.kick <- struct{}{}:
+			default:
+			}
+		}
+	}
 }
 
 // renewIdentity rotates key and certificate 30 days before expiry. Key and
@@ -885,9 +915,20 @@ func EnrollFromConfig(path string) error {
 	return os.Remove(path)
 }
 
+// powerDelay is the remaining delay in minutes: the admin's delay counts from
+// when the command was sent, not from the check in that delivered it. A
+// requested delay keeps at least one minute so users get the warning.
+func powerDelay(m int, sent, now time.Time) int {
+	if m == 0 || sent.IsZero() {
+		return m
+	}
+	left := int(math.Round((time.Duration(m)*time.Minute - now.Sub(sent)).Minutes()))
+	return max(left, 1)
+}
+
 // powerAction reboots or shuts down after payload minutes (0 = now, empty = 1 for
-// commands queued by older servers).
-func powerAction(typ, payload string) (string, error) {
+// commands queued by older servers) and tells logged in users when.
+func (a *Agent) powerAction(typ, payload string, sent time.Time) (string, error) {
 	m := 1
 	if payload != "" {
 		var err error
@@ -895,14 +936,18 @@ func powerAction(typ, payload string) (string, error) {
 			return "", errors.New("delay must be 0..1440 minutes")
 		}
 	}
-	flag, word := "-r", "reboot"
+	m = powerDelay(m, sent, time.Now())
+	flag, word, title := "-r", "reboot", "Restart scheduled"
 	if typ == "shutdown" {
-		flag, word = "-h", "shutdown"
+		flag, word, title = "-h", "shutdown", "Shutdown scheduled"
 	}
 	when, text := "now", "LiMDM: "+word+" requested by administrator now"
+	at := time.Now()
 	if m > 0 {
+		at = at.Add(time.Duration(m) * time.Minute)
 		when, text = "+"+strconv.Itoa(m), fmt.Sprintf("LiMDM: %s requested by administrator in %d minutes", word, m)
 	}
+	a.notifyUsers(title, fmt.Sprintf("%s requested a %s at %s. Save your work.", a.company(), word, at.Format("15:04")), "critical")
 	return sh("shutdown", flag, when, text)
 }
 
