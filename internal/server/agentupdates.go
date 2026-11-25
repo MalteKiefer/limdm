@@ -73,8 +73,30 @@ func (s *Server) offerUpdate(ctx context.Context, tx pgx.Tx, deviceID, running s
 	}
 	var tags []string
 	var requested bool
-	if err := tx.QueryRow(ctx, `SELECT tags, update_requested FROM devices WHERE id=$1`, deviceID).Scan(&tags, &requested); err != nil {
+	var target string
+	if err := tx.QueryRow(ctx, `SELECT tags, update_requested, update_target FROM devices WHERE id=$1`, deviceID).Scan(&tags, &requested, &target); err != nil {
 		return nil, err
+	}
+	if requested && target != "" {
+		// a version an admin picked for this device counts as its approval
+		if target == running {
+			_, err := tx.Exec(ctx, `UPDATE devices SET update_requested=false, update_target='' WHERE id=$1`, deviceID)
+			return nil, err
+		}
+		var r agentRelease
+		err := tx.QueryRow(ctx, `SELECT `+agentReleaseCols+` FROM agent_releases WHERE version=$1 AND NOT blocked`, target).
+			Scan(&r.Version, &r.PublishedAt, &r.Sums, &r.SumsSig, &r.ApprovedAt, &r.ApprovedBy, &r.Blocked, &r.BlockedReason)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil // blocked meanwhile
+		}
+		if err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE devices SET update_state='offered', update_version=$2, update_at=now() WHERE id=$1
+			AND (update_state <> 'offered' OR update_version <> $2)`, deviceID, r.Version); err != nil {
+			return nil, err
+		}
+		return &api.AgentUpdate{Version: r.Version, Sums: r.Sums, SumsSig: r.SumsSig}, nil
 	}
 	if !pol.Auto && !requested {
 		return nil, nil
@@ -116,7 +138,7 @@ func (s *Server) recordUpdateResult(ctx context.Context, tx pgx.Tx, deviceID str
 	case res.RolledBack:
 		state = "rolled_back"
 	}
-	if _, err := tx.Exec(ctx, `UPDATE devices SET update_state=$2, update_version=$3, update_at=now(), update_requested=false WHERE id=$1`,
+	if _, err := tx.Exec(ctx, `UPDATE devices SET update_state=$2, update_version=$3, update_at=now(), update_requested=false, update_target='' WHERE id=$1`,
 		deviceID, state, res.To); err != nil {
 		return err
 	}
@@ -150,7 +172,9 @@ func (s *Server) agentPackage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var sums string
-	err := s.db.QueryRow(r.Context(), `SELECT sums FROM agent_releases WHERE version=$1 AND approved_at IS NOT NULL AND NOT blocked`, version).Scan(&sums)
+	device, _ := r.Context().Value(deviceKey).(string)
+	err := s.db.QueryRow(r.Context(), `SELECT sums FROM agent_releases WHERE version=$1 AND NOT blocked
+		AND (approved_at IS NOT NULL OR EXISTS (SELECT 1 FROM devices WHERE id=$2 AND update_target=$1))`, version, device).Scan(&sums)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -452,9 +476,16 @@ func (s *Server) agentsFetch(w http.ResponseWriter, r *http.Request, sess sessio
 // deviceAgentUpdate lets the device take the newest approved version at its
 // next check in, regardless of policy and delay.
 func (s *Server) deviceAgentUpdate(w http.ResponseWriter, r *http.Request, sess session) {
-	id := r.PathValue("id")
-	err := s.auditAction(r.Context(), sess.Email, "agent_update.request", id, "", func(tx pgx.Tx) error {
-		tag, err := tx.Exec(r.Context(), `UPDATE devices SET update_requested=true WHERE id=$1 AND NOT retired`, id)
+	id, target := r.PathValue("id"), strings.TrimSpace(r.FormValue("version"))
+	if target != "" {
+		var ok bool
+		if err := s.db.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM agent_releases WHERE version=$1 AND NOT blocked)`, target).Scan(&ok); err != nil || !ok {
+			http.Error(w, "unknown or blocked version", http.StatusBadRequest)
+			return
+		}
+	}
+	err := s.auditAction(r.Context(), sess.Email, "agent_update.request", id, target, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(r.Context(), `UPDATE devices SET update_requested=true, update_target=$2 WHERE id=$1 AND NOT retired`, id, target)
 		if err == nil && tag.RowsAffected() == 0 {
 			err = errNotFound
 		}
@@ -468,7 +499,11 @@ func (s *Server) deviceAgentUpdate(w http.ResponseWriter, r *http.Request, sess 
 		s.fail(w, err)
 		return
 	}
-	http.Redirect(w, r, "/devices/"+id, http.StatusSeeOther)
+	back := "/devices/" + id
+	if r.FormValue("back") == "agents" {
+		back = "/agents"
+	}
+	http.Redirect(w, r, back, http.StatusSeeOther)
 }
 
 var (

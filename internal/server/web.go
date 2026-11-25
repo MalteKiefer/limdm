@@ -597,7 +597,12 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 			_ = tx.Rollback(ctx)
 		}
 	}
-	s.render(w, r, sess, "device", map[string]any{"EncExcluded": encExcluded,
+	var agentVersions []string
+	if rows, err := s.db.Query(ctx, `SELECT version FROM agent_releases WHERE NOT blocked`); err == nil {
+		agentVersions, _ = pgx.CollectRows(rows, pgx.RowTo[string])
+		slices.SortFunc(agentVersions, func(a, b string) int { return api.CompareVersions(b, a) })
+	}
+	s.render(w, r, sess, "device", map[string]any{"EncExcluded": encExcluded, "AgentVersions": agentVersions,
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),

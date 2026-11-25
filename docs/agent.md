@@ -89,6 +89,14 @@ the token. The key never leaves the device (`/etc/limdm/device.pem`, 0600). From
 every connection is mTLS with TLS 1.3, pinned to that CA. Certificates last 90 days and
 rotate automatically.
 
+## Dependencies
+
+The packages depend on the tools the agent calls (osquery, systemd, util-linux, cryptsetup,
+iproute, procps, kmod, gnupg) and recommend the ones compliance remediation uses (firewall,
+audit, nftables, unattended upgrades or dnf plugins). The agent does not rely on them being
+present: once a day it installs whatever is missing. On devices with a desktop that includes
+zenity (kdialog on KDE Plasma), libnotify and dconf; servers never get desktop packages.
+
 ## Desktop helper
 
 `limdm-desktop` starts with every desktop session (`/etc/xdg/autostart`) as the user and
@@ -126,7 +134,10 @@ Agents are updated from the console, page **Agents**:
 2. An admin **approves** a version. Nothing is installed before that.
 3. Rollout: with **update agents automatically**, devices tagged with the pilot tag get an
    approved version at their next check in, all others after the delay (default 7 days).
-   **Update agent now** on a device page skips policy and delay for that device.
+   **Update agent…** on a device page installs the newest approved version, or any fetched
+   version that is not blocked, on that device only, regardless of policy and delay (also a
+   downgrade). Picking a version counts as its approval for this device. **Outdated agents**
+   on the Agents page updates single devices to the newest approved version.
 4. The agent checks the signature of the checksums (when it was built with a release key),
    downloads the package for its distribution and architecture over mTLS, verifies the
    checksum, keeps a copy of the running binary and installs the package with apt or dnf in

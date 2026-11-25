@@ -1206,6 +1206,14 @@ func TestAgentUpdates(t *testing.T) {
 		t.Fatalf("blocked version offered: %+v", u)
 	}
 
+	// an admin picks an unapproved version for one device
+	db.Exec(ctx, `UPDATE devices SET update_requested=true, update_target='1.2.0' WHERE id='d4'`)
+	if u := offer("d4"); u == nil || u.Version != "1.2.0" {
+		t.Fatalf("picked version not offered: %+v", u)
+	}
+	if u := offer("d3"); u != nil && u.Version == "1.2.0" {
+		t.Fatal("picked version leaked to another device")
+	}
 	// package download: only approved versions and files listed in the sums
 	s.cfg.ReleaseDir = t.TempDir()
 	db.Exec(ctx, `UPDATE agent_releases SET blocked=false WHERE version='1.1.0'`)
@@ -1213,6 +1221,16 @@ func TestAgentUpdates(t *testing.T) {
 	os.WriteFile(filepath.Join(s.cfg.ReleaseDir, "1.1.0", api.PackageName("1.1.0", "amd64", "deb")), []byte("pkg"), 0o644)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /p/{version}/{file}", s.agentPackage)
+	os.MkdirAll(filepath.Join(s.cfg.ReleaseDir, "1.2.0"), 0o755)
+	os.WriteFile(filepath.Join(s.cfg.ReleaseDir, "1.2.0", api.PackageName("1.2.0", "amd64", "deb")), []byte("pkg"), 0o644)
+	db.Exec(ctx, `UPDATE agent_releases SET sums=$1 WHERE version='1.2.0'`, strings.Repeat("b", 64)+"  "+api.PackageName("1.2.0", "amd64", "deb")+"\n")
+	rec := httptest.NewRecorder()
+	mux0 := http.NewServeMux()
+	mux0.HandleFunc("GET /p/{version}/{file}", s.agentPackage)
+	mux0.ServeHTTP(rec, httptest.NewRequest("GET", "/p/1.2.0/"+api.PackageName("1.2.0", "amd64", "deb"), nil).WithContext(context.WithValue(ctx, deviceKey, "d4")))
+	if rec.Code != 200 {
+		t.Fatalf("device with a picked version must get the package: %d", rec.Code)
+	}
 	for path, want := range map[string]int{
 		"/p/1.1.0/" + api.PackageName("1.1.0", "amd64", "deb"): 200,
 		"/p/1.1.0/" + api.PackageName("1.1.0", "arm64", "deb"): 404, // not in sums
@@ -1221,7 +1239,7 @@ func TestAgentUpdates(t *testing.T) {
 		"/p/1.1.0/limdm-server_1.1.0_linux_amd64.deb":          404,
 	} {
 		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		mux.ServeHTTP(rec, httptest.NewRequest("GET", path, nil).WithContext(context.WithValue(ctx, deviceKey, "d3")))
 		if rec.Code != want {
 			t.Errorf("%s: %d, want %d", path, rec.Code, want)
 		}

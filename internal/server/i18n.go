@@ -323,6 +323,8 @@ var deCatalog = map[string]string{
 	"Filter by name, description or blueprint": "Nach Name, Beschreibung oder Blueprint filtern", "Filter library items": "Library Elemente filtern",
 	"Copy": "Kopieren", "Close": "Schließen",
 	"devices": "Geräte", "Outdated agents": "Veraltete Agenten", "older than": "älter als", "Filter by host or version": "Nach Host oder Version filtern", "Filter devices": "Geräte filtern", "All agents are up to date.": "Alle Agenten sind aktuell.",
+	"Update": "Aktualisieren", "Update agent…": "Agent aktualisieren…", "Update agent": "Agent aktualisieren", "Installed:": "Installiert:", "newest approved version": "neueste freigegebene Version", "Update to": "Aktualisieren auf",
+	"The device installs the version at its next check in and returns to the current one if the new agent does not check in within 15 minutes.": "Das Gerät installiert die Version beim nächsten Check in und kehrt zur aktuellen zurück, falls sich der neue Agent nicht innerhalb von 15 Minuten meldet.",
 	"Profile": "Profil", "you": "du", "Stored in this browser.": "In diesem Browser gespeichert.",
 	"Authenticator app (TOTP)": "Authenticator App (TOTP)", "Cancel": "Abbrechen", "Confirm": "Bestätigen",
 	"Change password": "Passwort ändern", "Current password": "Aktuelles Passwort", "New password": "Neues Passwort",

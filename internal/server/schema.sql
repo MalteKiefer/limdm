@@ -300,6 +300,7 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS update_requested BOOLEAN NOT NULL D
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS update_state TEXT NOT NULL DEFAULT '';   -- offered, ok, failed, rolled_back
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS update_version TEXT NOT NULL DEFAULT '';
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS update_at TIMESTAMPTZ;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS update_target TEXT NOT NULL DEFAULT '';  -- version an admin picked for this device
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS external_ip TEXT NOT NULL DEFAULT '';   -- peer address of the last check in
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS geo JSONB;                              -- location of external_ip (geo.go)
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS geo_at TIMESTAMPTZ;
