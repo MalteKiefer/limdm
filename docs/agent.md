@@ -232,6 +232,25 @@ those devices, ready for a bulk action. Tags are also blueprint conditions.
 The action menu on a device page groups actions in submenus that open on hover or keyboard
 focus.
 
+## Lock and unlock
+
+**Lock device** works the same on every desktop:
+
+* `/etc/nologin` refuses new logins (also SSH, except root).
+* The local passwords of all people's accounts (UID 1000 and up with a login shell) are
+  locked, so neither a login screen nor the screen locker accepts them. The agent remembers
+  which accounts it locked; **Unlock device** releases exactly those (SSO rules may keep
+  managed users locked).
+* Running sessions are locked: GNOME, KDE Plasma, Xfce, Cinnamon and MATE through logind,
+  compositors and window managers without a logind aware locker (labwc, sway, Hyprland,
+  river, niri, Wayfire, i3 and others) get swaylock or i3lock started directly, again every
+  minute while the device stays locked.
+
+After unlocking, users unlock their screen with their usual password. Lost mode locks the
+passwords the same way and ends the sessions. The device page shows the latest lock,
+unlock, lost mode, wipe and uninstall release with who sent it and whether the device
+carried it out.
+
 ## Command delivery
 
 Besides the regular check in, the agent asks the server every minute whether something waits

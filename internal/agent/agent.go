@@ -695,10 +695,10 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = a.powerAction(c.Type, c.Payload, c.CreatedAt)
 	case "lock":
 		a.notifyUsers("Device locked", a.company()+" locked this device. Sessions end and new sign ins are blocked until IT unlocks it.", "critical")
-		out, err = lockDevice()
+		out, err = a.lockDevice()
 		a.syncPasswordLocks()
 	case "unlock":
-		out, err = unlockDevice()
+		out, err = a.unlockDevice()
 		a.syncPasswordLocks()
 	case "lost":
 		out, err = a.lostMode(c.Payload)
@@ -735,26 +735,6 @@ const (
 	nologinFile = "/etc/nologin"
 	nologinText = "This device is locked by IT (LiMDM). Contact your administrator.\n"
 )
-
-// lockDevice blocks new logins and locks running desktop sessions. The agent
-// keeps checking in, so the device can be unlocked remotely.
-func lockDevice() (string, error) {
-	if _, err := writeIfChanged(nologinFile, nologinText, 0o644); err != nil {
-		return "", err
-	}
-	out, _ := sh("loginctl", "lock-sessions") // no sessions on servers is fine
-	return "logins blocked, sessions locked " + out, nil
-}
-
-func unlockDevice() (string, error) {
-	if readFile(nologinFile) != nologinText {
-		return "not locked by LiMDM, nothing changed", nil
-	}
-	if err := os.Remove(nologinFile); err != nil {
-		return "", err
-	}
-	return "logins allowed again", nil
-}
 
 func runScript(body string) (string, error) {
 	f, err := os.CreateTemp(stateDir, "script-*")
@@ -822,8 +802,9 @@ func (a *Agent) pollLoop(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		a.ensureHelpers()   // within a minute of a desktop login
-		a.ensureIdleLocks() // compositors without a locker of their own
+		a.ensureHelpers()     // within a minute of a desktop login
+		a.ensureIdleLocks()   // compositors without a locker of their own
+		a.enforceDeviceLock() // a locked device stays locked
 		var resp api.PollResponse
 		pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		err := a.post(pctx, "/api/v1/poll", struct{}{}, &resp)

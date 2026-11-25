@@ -691,3 +691,10 @@ func TestAppRepoFiles(t *testing.T) {
 		t.Fatalf("left: %v", left)
 	}
 }
+
+func TestParsePeople(t *testing.T) {
+	passwd := "root:x:0:0:root:/root:/bin/bash\ngdm:x:42:42::/var/lib/gdm:/sbin/nologin\nmalte:x:1000:1000::/home/malte:/bin/zsh\nsvc:x:1001:1001::/:/usr/sbin/nologin\nnobody:x:65534:65534::/:/bin/false\nanna:x:1002:1002::/home/anna:/bin/bash\n"
+	if got := parsePeople(passwd); !slices.Equal(got, []string{"malte", "anna"}) {
+		t.Fatalf("people: %v", got)
+	}
+}

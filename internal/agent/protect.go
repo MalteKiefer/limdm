@@ -95,8 +95,12 @@ func (a *Agent) lostMode(payload string) (string, error) {
 	if _, err := writeIfChanged(nologinFile, text, 0o644); err != nil {
 		return "", err
 	}
-	a.syncPasswordLocks()
 	var report []string
+	if locked, err := lockPasswords(); err != nil {
+		report = append(report, "locking local passwords: "+err.Error())
+	} else if len(locked) > 0 {
+		report = append(report, "local passwords of "+strings.Join(locked, ", ")+" locked")
+	}
 	// end running sessions of everybody but root
 	if out, err := sh("loginctl", "list-users", "--no-legend"); err == nil {
 		for _, l := range strings.Split(out, "\n") {
@@ -137,7 +141,9 @@ func (a *Agent) foundMode() (string, error) {
 	if err := os.Remove(nologinFile); err != nil {
 		return "", err
 	}
-	a.syncPasswordLocks()
+	if _, err := a.releasePasswords(); err != nil {
+		a.event("releasing local passwords: %v", err)
+	}
 	a.event("lost mode ended")
 	return "logins allowed again; set a new disk passphrase with the recovery key", nil
 }

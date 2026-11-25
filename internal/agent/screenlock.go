@@ -341,7 +341,8 @@ func fixScreenLock(a *Agent) error {
 type idleSession struct {
 	user, uid, kind string // kind: wayland (wlroots style) or x11
 	env             []string
-	locked          bool // the agent's own locker runs in this session
+	locked          bool // the agent's own idle locker runs in this session
+	screenLocked    bool // a screen locker shows right now
 }
 
 // compositors that need an external idle locker
@@ -413,7 +414,7 @@ func idleSessions() []idleSession {
 		if kind == "" {
 			continue // a desktop environment with its own locker, configured above
 		}
-		res = append(res, idleSession{user: s.user, uid: s.uid, kind: kind, env: s.env, locked: ownLockerRuns(s)})
+		res = append(res, idleSession{user: s.user, uid: s.uid, kind: kind, env: s.env, locked: ownLockerRuns(s), screenLocked: lockerRunning(p)})
 	}
 	return res
 }
