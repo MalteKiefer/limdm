@@ -288,8 +288,11 @@ item "Disk encryption on all volumes, /boot excluded" is a ready made start.
 
 ```json
 {"issuer": "https://accounts.google.com", "client_id": "...", "client_secret": "...",
- "allowed_domain": "example.com", "local_password": true, "reverify_hours": 168}
+ "allowed_domain": "example.com", "mode": "session", "reverify_hours": 720, "grace_hours": 168}
 ```
+
+Always name the `mode`. An item without `mode` but with `local_password` counts as written
+before 0.11 and runs in login mode.
 
 Desktop login with SSO. See [desktop-login.md](desktop-login.md).
 

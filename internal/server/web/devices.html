@@ -41,7 +41,7 @@
     </div></details>
   <details class="menu"><summary class="button small">{{t "Tags"}}</summary>
     <div class="menu-list left menu-form" role="menu">
-      <label>{{t "Tag"}}<input name="tag" list="known-tags" maxlength="32" placeholder="{{t "finance"}}" spellcheck="false"></label>
+      <label>{{t "Tag"}}<input name="tag" data-enter="tag-add" list="known-tags" maxlength="32" placeholder="{{t "finance"}}" spellcheck="false"></label>
       <datalist id="known-tags">{{range .Tags}}<option value="{{.}}">{{end}}</datalist>
       <div class="menu-row"><button class="small" name="action" value="tag-add">{{t "Add tag"}}</button>
         <button class="small secondary" name="action" value="tag-remove">{{t "Remove tag"}}</button></div>

@@ -27,7 +27,7 @@
     <thead><tr><th>{{t "Group"}}</th><th>{{t "Source"}}</th><th class="num">{{t "Members"}}</th><th>{{t "Blueprint"}}</th></tr></thead>
     <tbody>{{$s := .}}{{range .Groups}}<tr><td>{{.Name}}</td><td>{{.Source}}</td><td class="num">{{.Members}}</td>
       <td>{{if eq $s.Sess.Role "admin"}}<form class="inline-form" method="post" action="/directory/groups"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="group_id" value="{{.ID}}"><input type="hidden" name="tab" value="groups">
-        <select name="blueprint_id" aria-label="{{t "Blueprint"}}"><option value="0">{{t "none"}}</option>{{$cur := .Blueprint}}{{range $s.Blueprints}}<option value="{{.ID}}" {{if and $cur (eq (deref $cur) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select>
+        <select name="blueprint_id" aria-label="{{t "Blueprint"}}"><option value="0">{{t "None"}}</option>{{$cur := .Blueprint}}{{range $s.Blueprints}}<option value="{{.ID}}" {{if and $cur (eq (deref $cur) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select>
         <input name="priority" type="number" min="0" max="10000" value="{{if .Priority}}{{.Priority}}{{else}}100{{end}}" class="small" aria-label="{{t "Priority"}}">
         <button class="secondary small">{{t "Save"}}</button></form>{{end}}</td></tr>{{else}}<tr><td colspan="4" class="empty">{{t "No groups yet. Connect an identity provider below."}}</td></tr>{{end}}</tbody>
   </table></div>
@@ -47,7 +47,7 @@
       <code>admin.directory.user.readonly</code>, <code>admin.directory.group.readonly</code> and <code>admin.directory.group.member.readonly</code>.</p>
     {{template "csrf" .CSRF}}
     <label>{{t "Admin to impersonate"}}<input name="admin_email" value="{{.Google.AdminEmail}}" placeholder="{{t "admin@example.com"}}"></label>
-    <label>{{t "Service account key"}} <span class="hint">{{if .GoogleConfigured}}{{t "stored encrypted; paste a new JSON key to replace"}}{{else}}{{t "paste the JSON key file"}}{{end}}</span>
+    <label>{{t "Service account key"}} <span class="hint">{{if .GoogleConfigured}}{{t "Stored encrypted; paste a new JSON key to replace"}}{{else}}{{t "Paste the JSON key file"}}{{end}}</span>
       <textarea name="service_account" rows="4" class="code" spellcheck="false" autocomplete="off"></textarea></label>
     <div class="form-foot"><span class="muted">{{if not .Google.LastSync.IsZero}}{{t "Last sync"}} {{fmtTime .Google.LastSync}}: {{.Google.LastResult}}{{else}}{{t "Syncs hourly once configured."}}{{end}}</span><button>{{t "Save and sync"}}</button></div>
   </form>

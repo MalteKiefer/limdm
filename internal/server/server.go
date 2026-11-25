@@ -380,7 +380,8 @@ func (s *Server) AgentTLSConfig() (*tls.Config, error) {
 					s.log.Error("renew agent TLS certificate", "err", err)
 				}
 			}
-			return &cert, nil
+			c := cert // a copy: handshakes read it after the lock is released
+			return &c, nil
 		},
 		ClientAuth: tls.RequestClientCert,
 		ClientCAs:  s.ca.pool(),
@@ -430,7 +431,11 @@ func (s *Server) deviceLimit(n int, next http.HandlerFunc) http.HandlerFunc {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(v); err != nil {
+	enc := json.NewEncoder(w)
+	// no HTML escaping: declaration payloads travel byte for byte, so the
+	// agent's declaration tokens match the server's (scripts with "&&")
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
 		slog.Warn("writing a JSON response failed", "err", err) // the client went away
 	}
 }
@@ -539,7 +544,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		s.failAPI(w, err)
 		return
 	}
-	if err := audit(ctx, tx, "device:"+id, "device.enroll", id, req.Hostname+" cert "+serial); err != nil {
+	if err := audit(ctx, tx, "device:"+id, "device.enroll", id, truncate(req.Hostname, 255)+" cert "+serial); err != nil {
 		s.failAPI(w, err)
 		return
 	}
@@ -626,7 +631,8 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 		// since the last check in: the device locks the account at once
 		if err := s.db.QueryRow(ctx, `SELECT EXISTS (
 			SELECT 1 FROM devices d, jsonb_array_elements(d.users) u
-			WHERE d.id=$1 AND d.last_seen IS NOT NULL AND (
+			WHERE d.id=$1 AND d.last_seen IS NOT NULL
+			AND NOT EXISTS (SELECT 1 FROM dir_users a WHERE a.active AND lower(a.email)=lower(u->>'email')) AND (
 				EXISTS (SELECT 1 FROM dir_users du WHERE (lower(du.email)=lower(u->>'email') OR lower(u->>'email') = ANY(du.previous_emails))
 					AND NOT du.active AND du.updated_at > d.last_seen)
 				OR EXISTS (SELECT 1 FROM dir_tombstones t WHERE t.email=lower(u->>'email') AND t.removed_at > d.last_seen)))`, id).Scan(&pending); err != nil {
@@ -683,7 +689,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	}
 	if st := req.Status; st != nil {
 		if _, err := tx.Exec(ctx, `UPDATE devices SET hostname=$2, inventory=$3, checks=$4, decl_status=$5, failing=$6, status_hash=$7 WHERE id=$1`,
-			id, truncate(st.Inventory.Hostname, 255), jsonb(st.Inventory), jsonb(st.Checks), jsonb(st.Declarations), countFailing(st.Checks), req.StatusHash); err != nil {
+			id, truncate(st.Inventory.Hostname, 255), jsonb(st.Inventory), jsonb(st.Checks), jsonb(st.Declarations), countFailing(st.Checks), truncate(req.StatusHash, 128)); err != nil {
 			s.failAPI(w, err)
 			return
 		}
@@ -698,7 +704,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Packages != nil {
-		if _, err := tx.Exec(ctx, `UPDATE devices SET packages=$2, packages_hash=$3 WHERE id=$1`, id, jsonb(req.Packages), req.PackagesHash); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE devices SET packages=$2, packages_hash=$3 WHERE id=$1`, id, jsonb(req.Packages), truncate(req.PackagesHash, 128)); err != nil {
 			s.failAPI(w, err)
 			return
 		}
@@ -1018,18 +1024,20 @@ func (s *Server) storeEvents(ctx context.Context, tx pgx.Tx, id string, events [
 		if i >= 500 {
 			break
 		}
-		if _, msg, ok := strings.Cut(ev, " tamper: "); ok { // security relevant: chained audit log
-			tamper = append(tamper, msg)
-			if err := audit(ctx, tx, "device:"+id, "agent.tamper", id, truncate(ev, 2000)); err != nil {
-				return nil, err
-			}
-			continue
-		}
 		at, msg := time.Now().UTC(), ev
 		if ts, rest, ok := strings.Cut(ev, " "); ok {
 			if t, err := time.Parse(time.RFC3339, ts); err == nil {
 				at, msg = t, rest
 			}
+		}
+		// only the event itself, not text inside it (script output names
+		// anything): "<time> tamper: <message>"
+		if rest, ok := strings.CutPrefix(msg, "tamper: "); ok { // security relevant: chained audit log
+			tamper = append(tamper, rest)
+			if err := audit(ctx, tx, "device:"+id, "agent.tamper", id, truncate(ev, 2000)); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		evAt, evText = append(evAt, at), append(evText, truncate(msg, 2000))
 	}

@@ -14,7 +14,7 @@
         <td>{{if eq $login $s.Sess.Email}}{{t .Role}} <a class="muted" href="/profile">({{t "you"}})</a>{{else if eq $s.Sess.Role "admin"}}
           <form class="inline-form" method="post" action="/users/update"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="login" value="{{$login}}">
             <select name="role" aria-label="{{t "Role"}}">{{$r := .Role}}{{range $s.Roles}}<option value="{{.}}" {{if eq . $r}}selected{{end}}>{{t .}}</option>{{end}}</select>
-            <label class="check"><input type="checkbox" name="disabled" {{if .Disabled}}checked{{end}}> {{t "disabled"}}</label>
+            <label class="check"><input type="checkbox" name="disabled" {{if .Disabled}}checked{{end}}> {{t "Disabled"}}</label>
             <button class="secondary small">{{t "Save"}}</button></form>
           {{else}}{{t .Role}}{{end}}</td>
         <td>{{ago .LastLogin}}</td>

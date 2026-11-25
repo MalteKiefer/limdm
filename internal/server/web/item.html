@@ -16,7 +16,7 @@
     <label>{{t "Description"}}<input name="description" value="{{.It.Description}}" maxlength="300"></label>
     <label>{{t "Settings"}} <span class="hint">{{t "JSON, validated strictly before saving"}}</span>
       <textarea name="payload" rows="16" class="code" spellcheck="false">{{.Payload}}</textarea></label>
-    <label class="cert-only">{{t "Add certificate file"}} <span class="hint">{{t "PEM or CRT, also bundles; added to the list above when saving"}}</span><input type="file" name="pem_file" accept=".pem,.crt,.cer,application/x-pem-file"></label>
+    <label class="cert-only">{{t "Add certificate file"}}<input type="file" name="pem_file" accept=".pem,.crt,.cer,application/x-pem-file"><small class="field-hint">{{t "PEM or CRT, also bundles; added to the list above when saving"}}</small></label>
     {{if eq .Sess.Role "admin"}}<div class="form-foot"><span class="muted">{{t "Devices pick up changes at their next check in."}}</span><button>{{t "Save item"}}</button></div>{{end}}
   </form>
   <div>

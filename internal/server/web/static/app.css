@@ -147,7 +147,7 @@ label.check { display: flex; align-items: center; gap: 8px; font-weight: 400; co
 label.check input { width: auto; margin: 0; }
 .inline { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
 .inline label { margin: 0; flex: 1 1 160px; }
-.inline label.narrow { flex: 0 1 110px; }
+.inline label.short { flex: 0 1 110px; }
 .filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
 .filters input[type=search] { width: 280px; margin: 0; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -539,6 +539,7 @@ a.pill { text-decoration: none; }
 legend .field-hint { display: inline; margin: 0 0 0 8px; }
 .form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 .form-row:has(.grow) { grid-template-columns: minmax(0, 1fr) 110px 140px; }
+.form-row { align-items: start; }
 @media (max-width: 640px) { .form-row:has(.grow) { grid-template-columns: 1fr; } }
 fieldset.kind-picker, fieldset.event-grid { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
 fieldset.kind-picker legend, fieldset.event-grid legend { font-size: 13px; font-weight: 500; color: var(--text-2); padding: 0; margin-bottom: 8px; }
@@ -548,7 +549,7 @@ fieldset.kind-picker legend { grid-column: 1 / -1; }
   background: var(--surface); cursor: pointer; display: grid; gap: 2px; transition: border-color .12s, background .12s; }
 .kind-picker label:hover { border-color: var(--text-3); }
 .kind-picker label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent) inset; }
-.kind-picker label:has(input:focus-visible) { box-shadow: 0 0 0 3px var(--accent-soft); }
+.kind-picker label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .kind-picker input { position: absolute; opacity: 0; pointer-events: none; }
 .kind-picker strong { color: var(--text); font-size: 14px; }
 .kind-picker span { font-size: 12px; font-weight: 400; color: var(--text-3); }
@@ -566,7 +567,16 @@ table.channels td:first-child { font-weight: 500; }
 .event-tags .tag { font-family: inherit; font-size: 12px; white-space: nowrap; margin: 0; padding: 1px 8px; border-radius: 999px; }
 table.channels td.delivery { min-width: 220px; }
 table.channels td.delivery .sub { max-width: 320px; }
-/* an open row menu must not be clipped by the scrolling table card */
-.tablecard:has(details.menu[open]), .scroll:has(details.menu[open]) { overflow: visible; }
+/* an open row menu must not be clipped by the scrolling table card; on
+   phones it opens as a sheet at the bottom instead, so the table keeps its
+   scroll position */
+@media (min-width: 861px) {
+  .tablecard:has(details.menu[open]), .scroll:has(details.menu[open]) { overflow: visible; }
+}
+@media (max-width: 860px) {
+  td .menu-list { position: fixed; left: 16px; right: 16px; top: auto; bottom: 16px; min-width: 0; z-index: 30; }
+}
 td.row-actions .menu-list form { display: block; }
 td.row-actions .menu-list { text-align: left; }
+.inline:has(.field-hint) { align-items: flex-start; }
+legend .hint, summary .hint { display: block; margin-top: 2px; font-size: 12px; font-weight: 400; color: var(--text-3); }

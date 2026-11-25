@@ -283,6 +283,23 @@ const managedHeader = "# Managed by LiMDM. Local changes are overwritten.\n"
 
 func sysctlPath(key string) string { return "/proc/sys/" + strings.ReplaceAll(key, ".", "/") }
 
+// sysctlAtLeast are keys where a higher value is stricter: CIS accepts
+// ptrace_scope 1, 2 or 3 and syncookies 1 or 2. A stricter value passes and
+// is kept, never lowered to the baseline.
+var sysctlAtLeast = map[string]bool{"kernel.yama.ptrace_scope": true, "net.ipv4.tcp_syncookies": true}
+
+func sysctlOK(key, got, want string) bool {
+	if got == want {
+		return true
+	}
+	if !sysctlAtLeast[key] {
+		return false
+	}
+	g, e1 := strconv.Atoi(got)
+	w, e2 := strconv.Atoi(want)
+	return e1 == nil && e2 == nil && g >= w
+}
+
 func runSysctl(kv map[string]string) (string, string) {
 	var bad []string
 	for _, k := range sortedKeys(kv) {
@@ -290,7 +307,7 @@ func runSysctl(kv map[string]string) (string, string) {
 		if !exists(p) {
 			continue // e.g. IPv6 disabled
 		}
-		if got := readTrim(p); got != kv[k] {
+		if got := readTrim(p); !sysctlOK(k, got, kv[k]) {
 			bad = append(bad, fmt.Sprintf("%s=%s (want %s)", k, got, kv[k]))
 		}
 	}
@@ -305,7 +322,11 @@ func fixSysctl(a *Agent) error {
 	var b strings.Builder
 	b.WriteString(managedHeader)
 	for _, k := range sortedKeys(kv) {
-		fmt.Fprintf(&b, "%s = %s\n", k, kv[k])
+		v := kv[k]
+		if got := readTrim(sysctlPath(k)); got != v && sysctlOK(k, got, v) {
+			v = got // stricter than the baseline: kept
+		}
+		fmt.Fprintf(&b, "%s = %s\n", k, v)
 	}
 	const f = "/etc/sysctl.d/60-limdm-hardening.conf"
 	if _, err := writeIfChanged(f, b.String(), 0o644); err != nil {
@@ -414,18 +435,46 @@ func runSSHD(kv map[string]string) (string, string) {
 	return pass, ""
 }
 
+// sshdHostKeyArgs: sshd -T and -t need a host key; a server that never
+// started (Fedora Workstation, Arch, Alpine) has none yet, so a throwaway key
+// stands in.
+func sshdHostKeyArgs() ([]string, func()) {
+	if keys, _ := filepath.Glob("/etc/ssh/ssh_host_*_key"); len(keys) > 0 || !hasCmd("ssh-keygen") {
+		return nil, func() {}
+	}
+	dir, err := os.MkdirTemp("", "limdm-sshd-")
+	if err != nil {
+		return nil, func() {}
+	}
+	cleanup := func() { os.RemoveAll(dir) }
+	if _, err := sh("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", dir+"/k"); err != nil {
+		return nil, cleanup
+	}
+	return []string{"-h", dir + "/k"}, cleanup
+}
+
 // sshdEffective evaluates the effective server configuration for the global
 // context and, so Match blocks count, for a connection as root and as each
 // person with a local account (up to five). Keys are lower case.
 func sshdEffective(bin string) (map[string]map[string]string, error) {
 	specs := []string{""}
 	users := append([]string{"root"}, peopleAccounts()...)
-	for _, u := range users[:min(len(users), 6)] {
-		specs = append(specs, "user="+u+",host=client.invalid,addr=203.0.113.1,laddr=127.0.0.1,lport=22")
+	for i, u := range users[:min(len(users), 6)] {
+		addrs := []string{"203.0.113.1"}
+		if i < 2 { // Match Address blocks for local networks: root and the first person
+			addrs = append(addrs, "10.0.0.1", "172.16.0.1", "192.168.1.1")
+		}
+		for _, addr := range addrs {
+			specs = append(specs, "user="+u+",host=client.invalid,addr="+addr+",laddr=127.0.0.1,lport=22")
+		}
 	}
+	// sshd -T needs a host key; a server that never started (Fedora
+	// Workstation, Arch, Alpine) has none yet, so a throwaway key stands in
+	extra, cleanup := sshdHostKeyArgs()
+	defer cleanup()
 	res := map[string]map[string]string{}
 	for _, spec := range specs {
-		args := []string{"-T"}
+		args := append([]string{"-T"}, extra...)
 		if spec != "" {
 			args = append(args, "-C", spec)
 		}
@@ -443,8 +492,9 @@ func sshdEffective(bin string) (map[string]map[string]string, error) {
 			}
 		}
 		label := ""
-		if spec != "" {
-			label = " for " + strings.TrimPrefix(strings.Split(spec, ",")[0], "user=")
+		if spec != "" { // user and client address: each Match context is its own entry
+			parts := strings.Split(spec, ",")
+			label = " for " + strings.TrimPrefix(parts[0], "user=") + " from " + strings.TrimPrefix(parts[2], "addr=")
 		}
 		res[label] = got
 	}
@@ -552,7 +602,10 @@ func fixSSHCrypto(a *Agent) error {
 	if err != nil || !changed {
 		return err
 	}
-	if _, err := sh(bin, "-t"); err != nil {
+	keyArgs, cleanup := sshdHostKeyArgs()
+	_, err = sh(bin, append([]string{"-t"}, keyArgs...)...)
+	cleanup()
+	if err != nil {
 		if readErr == nil {
 			err = errors.Join(err, os.WriteFile(sshCryptoDropin, old, 0o600)) //nolint:gosec // constant path, restoring the previous file
 		} else {
@@ -601,7 +654,10 @@ func fixSSHD(a *Agent) error {
 	if err != nil || !changed {
 		return err
 	}
-	if _, err := sh(bin, "-t"); err != nil {
+	keyArgs, cleanup := sshdHostKeyArgs()
+	_, err = sh(bin, append([]string{"-t"}, keyArgs...)...)
+	cleanup()
+	if err != nil {
 		// never leave sshd with a config it cannot load
 		if readErr == nil {
 			err = errors.Join(err, os.WriteFile(sshDropin, old, 0o600)) //nolint:gosec // constant path, restoring the previous file
@@ -651,7 +707,7 @@ func runRebootPending(a *Agent) (string, string) {
 		return pass, ""
 	}
 	if a.state.RebootSince.IsZero() {
-		a.state.RebootSince = time.Now()
+		a.state.RebootSince = time.Now().Round(0)
 	}
 	since := time.Since(a.state.RebootSince)
 	detail := fmt.Sprintf("reboot required for %s", since.Round(time.Hour))
@@ -953,8 +1009,11 @@ func runSSO(a *Agent) (string, string) {
 	return pass, fmt.Sprintf("%s, %d users", a.pol.Login.Issuer, len(a.users))
 }
 
+// timeDaemons are the time synchronisation services in use on Linux.
+var timeDaemons = []string{"chronyd", "chrony", "systemd-timesyncd", "ntpsec", "ntpd", "ntp", "openntpd"}
+
 func runTimeSync(a *Agent) (string, string) {
-	for _, u := range []string{"chronyd", "chrony", "systemd-timesyncd"} {
+	for _, u := range timeDaemons {
 		if unitActive(u) {
 			return pass, u + " active"
 		}
@@ -963,6 +1022,26 @@ func runTimeSync(a *Agent) (string, string) {
 }
 
 func fixTimeSync(a *Agent) error {
+	// an installed daemon is started instead of installing another one: on
+	// Debian, systemd-timesyncd conflicts with ntpsec and apt would remove it
+	if !a.host.isInstalled("chrony") {
+		// unit names differ by distribution (Arch and Fedora: ntpd)
+		for _, d := range []struct {
+			pkg   string
+			units []string
+		}{{"ntpsec", []string{"ntpsec", "ntpd"}}, {"ntp", []string{"ntp", "ntpd"}}, {"openntpd", []string{"openntpd"}}} {
+			if a.host.isInstalled(d.pkg) {
+				for _, u := range d.units {
+					if svc("enable-now", u) == nil {
+						return nil
+					}
+				}
+			}
+		}
+		if a.host.family == "alpine" {
+			return svc("enable-now", "ntpd") // busybox ntpd, always there
+		}
+	}
 	if a.host.isInstalled("chrony") {
 		unit := "chronyd"
 		if a.host.family == "debian" {

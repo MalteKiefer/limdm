@@ -49,7 +49,7 @@ func (h *host) ensureOsquery() error {
 		if _, err := writeIfChanged("/etc/apt/sources.list.d/limdm-osquery.sources", src, 0o644); err != nil {
 			return err
 		}
-		h.aptUpdated = time.Time{} // pick up the new repository
+		h.aptStale.Store(true) // pick up the new repository
 	} else {
 		const key = "/etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery"
 		if _, err := writeIfChanged(key, osqueryKey, 0o644); err != nil {

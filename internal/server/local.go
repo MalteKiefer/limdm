@@ -149,6 +149,11 @@ func (l *limiter) sweep(now time.Time) {
 			delete(l.hits, k)
 		}
 	}
+	// still that many live keys: a flood from many networks. Start over
+	// rather than scan the whole map at every request.
+	if len(l.hits) >= 50000 {
+		clear(l.hits)
+	}
 }
 
 // rateKey is the client's address for rate limits: IPv6 clients by their
@@ -232,11 +237,11 @@ func (s *Server) renderLogin(w http.ResponseWriter, r *http.Request, msg string)
 	// double submit token against login CSRF
 	http.SetCookie(w, &http.Cookie{Name: loginCookie, Value: tok, Path: "/login", HttpOnly: true, Secure: true,
 		SameSite: http.SameSiteStrictMode, MaxAge: 600})
-	s.render(w, r, session{}, "login", map[string]any{"OIDC": s.oidc() != nil, "Local": s.settings().LocalLogin, "LoginCSRF": tok, "Error": msg})
+	s.render(w, r, session{}, "login", map[string]any{"OIDC": s.oidc() != nil, "Local": s.localAllowed(), "LoginCSRF": tok, "Error": msg})
 }
 
 func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
-	if !s.settings().LocalLogin {
+	if !s.localAllowed() {
 		http.NotFound(w, r)
 		return
 	}
@@ -346,9 +351,13 @@ func (s *Server) auditActionFn(ctx context.Context, fn func(pgx.Tx) (actor, acti
 	return tx.Commit(ctx)
 }
 
+// generatedPassword: 32 random characters plus one of each character
+// class, so it meets any password policy short of a longer minimum.
+func generatedPassword() string { return randToken(24) + "-aA7" }
+
 // localAdd creates a local account with generated credentials and returns them.
 func localAdd(ctx context.Context, tx pgx.Tx, name, role string) (string, error) {
-	pw, secret := randToken(24), newTOTPSecret()
+	pw, secret := generatedPassword(), newTOTPSecret()
 	tag, err := tx.Exec(ctx, `INSERT INTO local_admins(name, role, password_hash, totp_secret) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
 		name, role, hashPassword(pw), secret)
 	if err == nil && tag.RowsAffected() == 0 {
@@ -362,7 +371,7 @@ func localAdd(ctx context.Context, tx pgx.Tx, name, role string) (string, error)
 
 // localReset replaces password and TOTP secret and clears a lockout.
 func localReset(ctx context.Context, tx pgx.Tx, name string) (string, error) {
-	pw, secret := randToken(24), newTOTPSecret()
+	pw, secret := generatedPassword(), newTOTPSecret()
 	var role string
 	err := tx.QueryRow(ctx, `UPDATE local_admins SET password_hash=$2, totp_secret=$3, totp_last_step=0, session_gen=session_gen+1, failures=0, locked_until=NULL
 		WHERE name=$1 RETURNING role`, name, hashPassword(pw), secret).Scan(&role)

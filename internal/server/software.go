@@ -366,7 +366,11 @@ func (s *Server) requestDecide(w http.ResponseWriter, r *http.Request, sess sess
 		} else if err != nil {
 			return "", "", "", "", err
 		} else if op == "approve-all" {
-			if _, err := tx.Exec(ctx, `UPDATE catalog_apps SET mode='available', enabled=true, updated_at=now() WHERE slug=$1`, app); err != nil {
+			// "on request" opens up; a required app stays required
+			// "on request" opens up; a required app stays required, and a
+			// paused required app stays paused (enabling it would force-install it)
+			if _, err := tx.Exec(ctx, `UPDATE catalog_apps SET mode=CASE WHEN mode='request' THEN 'available' ELSE mode END,
+				enabled = enabled OR mode<>'required', updated_at=now() WHERE slug=$1`, app); err != nil {
 				return "", "", "", "", err
 			}
 		}
@@ -412,7 +416,7 @@ func (s *Server) fleetFlatpaks(ctx context.Context) ([]fleetFlatpak, error) {
 		FROM devices d, jsonb_array_elements(coalesce(d.inventory->'flatpaks', '[]'::jsonb)) f
 		WHERE NOT d.retired AND f->>'id' IS NOT NULL
 		  AND NOT EXISTS (SELECT 1 FROM catalog_apps a, jsonb_array_elements(a.sources) src WHERE src->>'flatpak' = f->>'id')
-		GROUP BY 1 ORDER BY 3 DESC, 2`)
+		GROUP BY 1 ORDER BY 4 DESC, 2`)
 	if err != nil {
 		return nil, err
 	}
@@ -499,7 +503,7 @@ func (s *Server) appImport(w http.ResponseWriter, r *http.Request, sess session)
 // on devices, as allowed or blocked).
 func (s *Server) remoteSave(w http.ResponseWriter, r *http.Request, sess session) {
 	rem := api.CatalogRemote{Name: strings.TrimSpace(r.FormValue("name")), URL: strings.TrimSpace(r.FormValue("url")),
-		Title: strings.TrimSpace(r.FormValue("title")), State: r.FormValue("state"), CatalogOnly: r.FormValue("catalog_only") == "on"}
+		Title: truncate(strings.TrimSpace(r.FormValue("title")), 80), State: r.FormValue("state"), CatalogOnly: r.FormValue("catalog_only") == "on"}
 	if rem.State == "" {
 		rem.State = "allowed"
 	}
@@ -526,7 +530,8 @@ func (s *Server) remoteSave(w http.ResponseWriter, r *http.Request, sess session
 func (s *Server) remoteOp(w http.ResponseWriter, r *http.Request, sess session) {
 	name, op := r.PathValue("name"), r.PathValue("op")
 	q := map[string]string{
-		"allow":    `UPDATE catalog_remotes SET state='allowed', updated_at=now() WHERE name=$1`,
+		// only https remotes may be allowed; a blocked one may have any URL
+		"allow":    `UPDATE catalog_remotes SET state='allowed', updated_at=now() WHERE name=$1 AND (url LIKE 'https://%' OR url LIKE 'oci+https://%')`,
 		"block":    `UPDATE catalog_remotes SET state='blocked', updated_at=now() WHERE name=$1`,
 		"filter":   `UPDATE catalog_remotes SET catalog_only=NOT catalog_only, updated_at=now() WHERE name=$1`,
 		"unmanage": `DELETE FROM catalog_remotes WHERE name=$1`,
@@ -534,6 +539,15 @@ func (s *Server) remoteOp(w http.ResponseWriter, r *http.Request, sess session) 
 	if q == "" {
 		http.NotFound(w, r)
 		return
+	}
+	if op == "allow" {
+		var u string
+		if err := s.db.QueryRow(r.Context(), `SELECT url FROM catalog_remotes WHERE name=$1`, name).Scan(&u); err == nil &&
+			!strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "oci+https://") {
+			r.Form.Set("tab", "remotes")
+			s.renderSoftware(w, r, sess, "", "Only remotes with an https URL can be allowed.")
+			return
+		}
 	}
 	err := s.auditAction(r.Context(), sess.Email, "catalog.remote."+op, name, "", func(tx pgx.Tx) error {
 		tag, err := tx.Exec(r.Context(), q, name)

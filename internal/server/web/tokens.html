@@ -26,7 +26,7 @@ allow_scripts = false</pre>
     <div class="card-head"><h2>{{t "Active tokens"}}</h2></div>
     <div class="scroll"><table>
       <thead><tr><th>{{t "Note"}}</th><th>{{t "Blueprint"}}</th><th class="num">{{t "Uses left"}}</th><th>{{t "Expires"}}</th><th>{{t "Created by"}}</th>{{if eq $.Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
-      <tbody>{{range .Tokens}}<tr><td>{{.Note}}</td><td>{{.Blueprint}}</td><td class="num">{{.Uses}}</td><td>{{fmtTime .Expires}}</td><td>{{.By}}</td>{{if eq $.Sess.Role "admin"}}<td class="row-actions"><form method="post" action="/tokens/{{.ID}}/revoke">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Revoke"}}</button></form></td>{{end}}</tr>{{else}}<tr><td colspan="6" class="empty">{{t "No active tokens."}}</td></tr>{{end}}</tbody>
+      <tbody>{{range .Tokens}}<tr><td>{{.Note}}</td><td>{{.Blueprint}}</td><td class="num">{{.Uses}}</td><td>{{fmtTime .Expires}}</td><td>{{.By}}</td>{{if eq $.Sess.Role "admin"}}<td class="row-actions"><form method="post" action="/tokens/{{.ID}}/revoke">{{template "csrf" $.CSRF}}<button class="secondary small" data-confirm="{{t "Revoke this enrollment token?"}}">{{t "Revoke"}}</button></form></td>{{end}}</tr>{{else}}<tr><td colspan="6" class="empty">{{t "No active tokens."}}</td></tr>{{end}}</tbody>
     </table></div>
   </section>
   <div>
@@ -41,7 +41,7 @@ allow_scripts = false</pre>
       <h2>{{t "New token"}}</h2>
       {{template "csrf" .CSRF}}
       <label>{{t "Note"}}<input name="note" maxlength="200" placeholder="{{t "e.g. laptops batch 12"}}"></label>
-      <label>{{t "Blueprint"}}<select name="blueprint_id"><option value="0">{{t "default only"}}</option>{{range .Blueprints}}{{if ne .Name "default"}}<option value="{{.ID}}">{{.Name}}</option>{{end}}{{end}}</select></label>
+      <label>{{t "Blueprint"}}<select name="blueprint_id"><option value="0">{{t "Default only"}}</option>{{range .Blueprints}}{{if ne .Name "default"}}<option value="{{.ID}}">{{.Name}}</option>{{end}}{{end}}</select></label>
       <div class="inline">
         <label>{{t "Uses"}}<input name="uses" type="number" value="1" min="1" max="10000"></label>
         <label>{{t "Valid for days"}}<input name="days" type="number" value="7" min="1" max="90"></label>

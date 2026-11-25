@@ -1,7 +1,14 @@
 # Used by GoReleaser: copies the already built, attested static binary.
+# The state directory is created owned by nonroot: a named volume takes the
+# ownership from the image, so the server can create its CA on first start.
+# runs on the build platform: no emulation needed for the arm64 image
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS dirs
+RUN mkdir -p /out/var/lib/limdm-server/ca
+
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 ARG TARGETPLATFORM
 COPY $TARGETPLATFORM/limdm-server /usr/bin/limdm-server
+COPY --from=dirs --chown=65532:65532 /out/var/lib/limdm-server /var/lib/limdm-server
 ENV LIMDM_CA_DIR=/var/lib/limdm-server/ca
 VOLUME ["/var/lib/limdm-server"]
 EXPOSE 8080 8444

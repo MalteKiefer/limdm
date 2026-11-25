@@ -2,6 +2,28 @@
 
 All notable changes, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## 0.14.0
+
+### Added
+- Settings, Security: a password policy (minimum length, character classes, no user name) for passwords set in the console, on devices and for local console accounts.
+
+### Changed
+- Hints sit below their fields and start with a capital letter; option labels too. The email kind reads "E-Mail (SMTP)" in German.
+
+### Fixed
+- Login items without `mode` from before 0.11 (they carry `local_password`) keep login mode instead of turning into sessions.
+- Firewall rules with ports outside 1..65535 or reversed ranges are rejected; declaration tokens match for payloads with `&`, `<` or `>`.
+- Agent: commands older than 8 days are refused, a reused command ID after a database restore runs, re-enrollment forgets the previous server's key and command IDs.
+- Agent: maintenance windows, reboot checks and script intervals count suspended time; tamper reports are never dropped from a full queue, and text inside other events no longer counts as tamper.
+- Agent: the desktop socket works without logind, package manager calls run one at a time, a broken renewed certificate keeps the current one, terminals are ended on Alpine without utmp, a stuck update on OpenRC is reported and offered again.
+- Checks: dnf5 security advisories counted, deb822 comment stanzas left intact when a source is disabled, SDDM and LightDM drop-ins checked for autologin, sshd checks without host keys, Match Address blocks for local networks, installed NTP daemons kept, stricter `ptrace_scope` and `tcp_syncookies` kept.
+- Console: blueprints from directory groups show in the device list, filter and counts; helpdesk sees no audit details; insecure remotes can be blocked; Enter in the bulk tag field adds the tag; Retire, Remove from catalog and Revoke ask first; "Approve for everyone" keeps a required app required.
+- Docker: the state volume belongs to the nonroot user; fail2ban bans rejected enrollments on port 8444.
+- Review of the 0.13 fixes: Google sync survives duplicate rows from older versions and address clashes; app request texts are sanitized (a NUL from the desktop socket blocked check ins); an address an active person holds is never treated as disabled; deleting a user whose current address is also a previous one works; a lock sent in lost mode stays after Found; IT locked accounts stay locked on unlock.
+- Agent: the desktop socket without logind admits only users on a virtual console; device locks end SSH terminals but keep console started compositors; Arch PAM line goes before pam_systemd_home; re-enrollment is detected at start; users.json survives switching the login off; dnf totals and EPEL advisories are counted; SSH Match Address contexts are evaluated separately; unreadable dconf databases fail the check; NTP unit names per distribution; successful scripts with background children no longer fail; declaration tokens ignore HTML escapes.
+- Server: OIDC outage at start keeps local login and settings usable; proxies without a port and proxy only DNS work for notifications; the agent TLS certificate copy is race free; the rate limiter stays bounded; SCIM PUT is serialized with PATCH; insecure remotes cannot be allowed; console items saved under 0.12 with a broken signature are marked in the library.
+- Console: row menus open as a bottom sheet on phones; channel errors stay on the Integrations tab; more German texts; focus ring on the kind picker; helpdesk sees no dead links and no empty column.
+
 ## 0.13.0
 
 ### Added

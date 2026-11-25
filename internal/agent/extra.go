@@ -133,7 +133,7 @@ func (a *Agent) applyRepositories(repos []api.Repository) error {
 		c2, err2 = syncManaged(srcDir, "limdm-", ".repo", sources, append(srcKeep, "limdm-osquery.repo")...)
 	}
 	if c1 || c2 {
-		a.host.aptUpdated = time.Time{} // refresh package lists with the new sources
+		a.host.aptStale.Store(true) // refresh package lists with the new sources
 		a.event("package sources updated")
 	}
 	return errors.Join(err1, err2)
@@ -171,7 +171,7 @@ func (a *Agent) setAppRepos(src api.AppSource, remove bool) error {
 		c, err := writeOrRemove(filepath.Join(srcDir, sn), s, 0o644)
 		errs = append(errs, err)
 		if c && !remove {
-			a.host.aptUpdated = time.Time{}
+			a.host.aptStale.Store(true)
 			a.event("added package source %s", r.Name)
 		}
 	}
@@ -460,7 +460,7 @@ func (a *Agent) applyScripts(scripts []api.Script) error {
 		if time.Since(a.state.ScriptRuns[sc.Name]) < time.Duration(sc.IntervalHours)*time.Hour {
 			continue
 		}
-		a.state.ScriptRuns[sc.Name] = time.Now()
+		a.state.ScriptRuns[sc.Name] = time.Now().Round(0) // wall clock, suspend included
 		out, err := runScript(sc.Body)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", sc.Name, err))

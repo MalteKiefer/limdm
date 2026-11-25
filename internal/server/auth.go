@@ -211,7 +211,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) (session, bool)
 	}
 	// Role is re-evaluated on every request: disabling a user in the console
 	// takes effect immediately, removing someone from LIMDM_ADMINS at restart.
-	if strings.HasPrefix(sess.Email, localPrefix) && !s.settings().LocalLogin || !strings.HasPrefix(sess.Email, localPrefix) && s.oidc() == nil {
+	if strings.HasPrefix(sess.Email, localPrefix) && !s.localAllowed() || !strings.HasPrefix(sess.Email, localPrefix) && s.oidc() == nil {
 		return sess, false
 	}
 	role, gen := s.account(r.Context(), sess.Email)

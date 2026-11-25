@@ -317,10 +317,10 @@ func recordAppRequests(ctx context.Context, tx pgx.Tx, deviceID string, reqs []a
 			continue
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO catalog_requests(device_id, app, username, note) VALUES ($1,$2,$3,$4)`,
-			deviceID, r.App, r.User, r.Note); err != nil {
+			deviceID, truncate(r.App, 120), truncate(r.User, 64), truncate(r.Note, 500)); err != nil {
 			return err
 		}
-		if err := audit(ctx, tx, "device:"+deviceID, "catalog.request", deviceID, r.App+" for "+r.User+": "+truncate(r.Note, 200)); err != nil {
+		if err := audit(ctx, tx, "device:"+deviceID, "catalog.request", deviceID, truncate(r.App, 120)+" for "+truncate(r.User, 64)+": "+truncate(r.Note, 200)); err != nil {
 			return err
 		}
 	}
@@ -443,8 +443,8 @@ func recordNewAppRequest(ctx context.Context, tx pgx.Tx, deviceID string, r api.
 		name = r.Flatpak
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO catalog_requests(device_id, flatpak, remote, app_name, username, note) VALUES ($1,$2,$3,$4,$5,$6)`,
-		deviceID, r.Flatpak, remote, name, r.User, r.Note); err != nil {
+		deviceID, truncate(r.Flatpak, 255), truncate(remote, 64), truncate(name, 120), truncate(r.User, 64), truncate(r.Note, 500)); err != nil {
 		return err
 	}
-	return audit(ctx, tx, "device:"+deviceID, "catalog.request", deviceID, r.Flatpak+" ("+remote+") for "+r.User+": "+truncate(r.Note, 200))
+	return audit(ctx, tx, "device:"+deviceID, "catalog.request", deviceID, truncate(r.Flatpak, 255)+" ("+truncate(remote, 64)+") for "+truncate(r.User, 64)+": "+truncate(r.Note, 200))
 }

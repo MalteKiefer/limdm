@@ -147,10 +147,15 @@ func (a *Agent) foundMode() (string, error) {
 	if err := os.Remove(nologinFile); err != nil {
 		return "", err
 	}
+	a.event("lost mode ended")
+	if exists(lockAfterLost) { // locked meanwhile (by IT or the compliance policy): stays locked
+		_ = os.Remove(lockAfterLost)
+		out, err := a.lockDevice()
+		return "lost mode ended; the device stays locked as requested meanwhile: " + out, err
+	}
 	if _, err := a.releasePasswords(); err != nil {
 		a.event("releasing local passwords: %v", err)
 	}
-	a.event("lost mode ended")
 	return "logins allowed again; set a new disk passphrase with the recovery key", nil
 }
 

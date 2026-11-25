@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -37,6 +39,69 @@ type Settings struct {
 	// Loopback is always allowed, so the host itself can repair a mistake.
 	ConsoleAllow []string `json:"console_allow,omitempty"`
 	ConsoleBlock []string `json:"console_block,omitempty"`
+	// Password rules for passwords chosen in the console: local accounts on
+	// devices (create, reset) and local console accounts.
+	Password PasswordPolicy `json:"password_policy"`
+}
+
+// PasswordPolicy: the minimum length (12..128, 12 when unset) and the
+// character classes a password needs.
+type PasswordPolicy struct {
+	MinLength int  `json:"min_length,omitempty"`
+	Upper     bool `json:"upper,omitempty"`
+	Lower     bool `json:"lower,omitempty"`
+	Digit     bool `json:"digit,omitempty"`
+	Symbol    bool `json:"symbol,omitempty"`
+	NoName    bool `json:"no_name,omitempty"` // must not contain the user name
+}
+
+// Min is the effective minimum length.
+func (p PasswordPolicy) Min() int { return max(p.MinLength, 12) }
+
+// passwordErrors are the messages of Check; the device page shows them by
+// index after a redirect, so no free text travels in the URL.
+var passwordErrors = []string{
+	"The password is shorter than the password policy requires.",
+	"The password is too long (at most 256 characters).",
+	"The password needs an uppercase letter.",
+	"The password needs a lowercase letter.",
+	"The password needs a digit.",
+	"The password needs a special character.",
+	"The password must not contain the user name.",
+}
+
+// Check returns the first rule pw breaks, as a message for the console.
+func (p PasswordPolicy) Check(pw, user string) string {
+	var upper, lower, digit, symbol bool
+	for _, r := range pw {
+		switch {
+		case unicode.IsUpper(r):
+			upper = true
+		case unicode.IsLower(r):
+			lower = true
+		case unicode.IsDigit(r):
+			digit = true
+		case !unicode.IsSpace(r):
+			symbol = true
+		}
+	}
+	switch {
+	case utf8.RuneCountInString(pw) < p.Min():
+		return "The password is shorter than the password policy requires."
+	case len(pw) > 256:
+		return "The password is too long (at most 256 characters)."
+	case p.Upper && !upper:
+		return "The password needs an uppercase letter."
+	case p.Lower && !lower:
+		return "The password needs a lowercase letter."
+	case p.Digit && !digit:
+		return "The password needs a digit."
+	case p.Symbol && !symbol:
+		return "The password needs a special character."
+	case p.NoName && len(user) >= 3 && strings.Contains(strings.ToLower(pw), strings.ToLower(user)):
+		return "The password must not contain the user name."
+	}
+	return ""
 }
 
 // storedSettings is the database form; the client secret is AES-GCM sealed.
@@ -101,6 +166,13 @@ func (s *Server) loadSettings(ctx context.Context) error {
 	return nil
 }
 
+// localAllowed: local accounts are on, or OIDC is configured but its
+// provider could not be reached since the start (the fallback local accounts
+// exist for).
+func (s *Server) localAllowed() bool {
+	return s.settings().LocalLogin || s.rediscover.Load() && s.oidc() == nil
+}
+
 // errDiscovery marks a failed OIDC discovery (network, provider down).
 var errDiscovery = errors.New("OIDC discovery failed")
 
@@ -124,12 +196,18 @@ func (s *Server) rediscoverLoop(ctx context.Context) {
 		if err != nil {
 			continue
 		}
-		next := *cur
-		next.auth = auth
-		if s.rt.CompareAndSwap(cur, &next) {
+		// under saveMu: a settings save loads, prepares and stores the runtime
+		// in one step and would otherwise overwrite this with auth=nil
+		s.saveMu.Lock()
+		if now := s.rt.Load(); now.auth == nil && now.set.OIDCIssuer == set.OIDCIssuer &&
+			now.set.OIDCClientID == set.OIDCClientID && now.set.OIDCClientSecret == set.OIDCClientSecret {
+			next := *now
+			next.auth = auth
+			s.rt.Store(&next)
 			s.log.Info("OIDC discovery succeeded")
-			s.rediscover.Store(false)
 		}
+		s.rediscover.Store(false)
+		s.saveMu.Unlock()
 	}
 }
 
@@ -143,6 +221,9 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 		if u, err := url.Parse(set.WebhookURL); err != nil || u.Scheme != "https" || u.Host == "" {
 			return nil, errors.New("webhook URL must be https")
 		}
+	}
+	if n := set.Password.MinLength; n != 0 && (n < 12 || n > 128) {
+		return nil, errors.New("minimum password length: 12 to 128")
 	}
 	if len(set.CompanyName) > 80 || strings.ContainsAny(set.CompanyName, "\x00\n\r\t") {
 		return nil, errors.New("company name: up to 80 characters on one line")
@@ -160,8 +241,11 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 	}
 	var auth *oidcAuth
 	if cur := s.rt.Load(); cur != nil && set.OIDCIssuer != "" && cur.set.OIDCIssuer == set.OIDCIssuer &&
-		cur.set.OIDCClientID == set.OIDCClientID && cur.set.OIDCClientSecret == set.OIDCClientSecret {
-		auth = cur.auth // unchanged provider: no new discovery when another tab is saved
+		cur.set.OIDCClientID == set.OIDCClientID && cur.set.OIDCClientSecret == set.OIDCClientSecret &&
+		(cur.auth != nil || s.rediscover.Load()) {
+		// unchanged provider: no new discovery when another tab is saved (also
+		// while the startup discovery is still being retried)
+		auth = cur.auth
 	} else if set.OIDCIssuer != "" {
 		if !strings.HasPrefix(set.OIDCIssuer, "https://") || set.OIDCClientID == "" {
 			return nil, errors.New("OIDC needs an https issuer and a client ID")
@@ -173,7 +257,7 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 			return nil, fmt.Errorf("%w: %w", errDiscovery, err)
 		}
 	}
-	if auth == nil && !set.LocalLogin {
+	if auth == nil && !set.LocalLogin && (!s.rediscover.Load() || set.OIDCIssuer == "") {
 		return nil, errors.New("enable at least one login method: OIDC or local accounts")
 	}
 	return &runtimeState{set: set, auth: auth, branding: computeBranding(set), allow: allow, block: block}, nil
@@ -263,10 +347,10 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 
 // settingsTabs are the sections of the settings page; each tab saves only
 // its own fields.
-var settingsTabs = []string{"general", "sso", "monitoring", "branding", "integrations"}
+var settingsTabs = []string{"general", "security", "sso", "monitoring", "branding", "integrations"}
 
 var settingsTabLabels = []struct{ Key, Label string }{
-	{"general", "General"}, {"sso", "SSO"}, {"monitoring", "Monitoring"}, {"branding", "Branding"}, {"integrations", "Integrations"},
+	{"general", "General"}, {"security", "Security"}, {"sso", "SSO"}, {"monitoring", "Monitoring"}, {"branding", "Branding"}, {"integrations", "Integrations"},
 }
 
 func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess session) {
@@ -291,6 +375,10 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		set.ConsoleAllow, set.ConsoleBlock = strings.Fields(r.FormValue("console_allow")), strings.Fields(r.FormValue("console_block"))
 	case "branding":
 		set.CompanyName = strings.TrimSpace(r.FormValue("company_name"))
+	case "security":
+		n, _ := strconv.Atoi(r.FormValue("min_length"))
+		set.Password = PasswordPolicy{MinLength: n, Upper: r.FormValue("upper") == "on", Lower: r.FormValue("lower") == "on",
+			Digit: r.FormValue("digit") == "on", Symbol: r.FormValue("symbol") == "on", NoName: r.FormValue("no_name") == "on"}
 	default:
 		http.Error(w, "unknown settings section", http.StatusBadRequest)
 		return
@@ -345,9 +433,9 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		return
 	}
 	doc, _ := json.Marshal(storedSettings{Settings: set, SecretEnc: enc})
-	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d",
+	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d allow=%q block=%q password=%+v",
 		set.OIDCIssuer, set.AllowedDomain, set.LocalLogin, set.StaleHours, set.WebhookURL != "", set.OIDCClientSecret != cur.OIDCClientSecret,
-		set.CompanyName, len(set.Logo))
+		set.CompanyName, len(set.Logo), set.ConsoleAllow, set.ConsoleBlock, set.Password)
 	err = s.auditAction(ctx, sess.Email, "settings.save", "server", detail, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
 		return err

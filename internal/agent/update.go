@@ -70,6 +70,15 @@ func (a *Agent) checkUpdateOutcome() {
 		a.state.UpdateResult = &api.UpdateResult{From: m.From, To: m.To, OK: true}
 		os.Remove(updateMarker) // confirmed: the watchdog will not roll back
 		a.event("agent updated from %s to %s", m.From, m.To)
+		return
+	}
+	// still the old version an hour later: the detached package install failed
+	// (OpenRC has no watchdog to clean up); without this the marker would
+	// block every later update
+	if st, err := os.Stat(updateMarker); err == nil && time.Since(st.ModTime()) > time.Hour {
+		a.state.UpdateResult = &api.UpdateResult{From: m.From, To: m.To, Detail: "the package install did not complete"}
+		os.Remove(updateMarker)
+		a.event("agent update to %s did not complete; it will be offered again", m.To)
 	}
 }
 

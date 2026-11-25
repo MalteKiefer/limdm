@@ -36,7 +36,9 @@ func migrate(ctx context.Context, db *pgxpool.Pool) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = 0; SELECT pg_advisory_xact_lock(7364)`); err != nil {
+	// no statement limit, but a bounded lock wait: the schema takes table
+	// locks until the commit, and a running instance must not stall behind them
+	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = '30s'; SELECT pg_advisory_xact_lock(7364)`); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, schema); err != nil {
@@ -189,7 +191,8 @@ type blueprintRec struct {
 	Desc     string
 	Updated  time.Time
 	Devices  int
-	Assigned bool
+	Assigned bool // explicitly assigned to the device
+	Applies  bool // the device's effective blueprint (explicit, group or default)
 }
 
 func scanBlueprint(row pgx.Row) (blueprintRec, error) {
@@ -386,9 +389,24 @@ func (s *Server) library(w http.ResponseWriter, r *http.Request, sess session) {
 		s.fail(w, err)
 		return
 	}
+	// items whose signature fails are not delivered; saving them again in
+	// the console signs them anew (items saved under 0.12.0 can be affected)
+	invalid := map[int64]bool{}
+	if rows, err := s.db.Query(r.Context(), `SELECT id, name, type, payload, signature FROM library_items`); err == nil {
+		for rows.Next() {
+			var id int64
+			var name, typ, sig string
+			var payload []byte
+			if rows.Scan(&id, &name, &typ, &payload, &sig) == nil && !itemSignatureOK(name, typ, payload, sig) {
+				invalid[id] = true
+			}
+		}
+		rows.Close()
+	}
 	type row struct {
 		api.LibraryItem
-		UsedBy []string
+		UsedBy  []string
+		Invalid bool
 	}
 	groups := map[string][]row{}
 	var types []string
@@ -396,7 +414,7 @@ func (s *Server) library(w http.ResponseWriter, r *http.Request, sess session) {
 		if _, ok := groups[it.Type]; !ok {
 			types = append(types, it.Type)
 		}
-		groups[it.Type] = append(groups[it.Type], row{it, use[it.ID]})
+		groups[it.Type] = append(groups[it.Type], row{it, use[it.ID], invalid[it.ID]})
 	}
 	label := func(t string) string {
 		if l, ok := typeLabels[t]; ok {
@@ -548,10 +566,18 @@ func (s *Server) libraryDelete(w http.ResponseWriter, r *http.Request, sess sess
 
 // ---- web: blueprints ----
 
+// effectiveBlueprintSQL is the blueprint of device d as resolveDevice picks
+// it: the explicit one, else the primary user's group, else default.
+const effectiveBlueprintSQL = `coalesce(d.blueprint_id,
+	(SELECT a.blueprint_id FROM dir_users u JOIN dir_members m ON m.user_id=u.id JOIN blueprint_group_assignments a ON a.group_id=m.group_id
+	 WHERE u.id=d.primary_user_id AND u.active ORDER BY a.priority, a.group_id LIMIT 1),
+	(SELECT id FROM blueprints WHERE name='default'))`
+
 func (s *Server) allBlueprints(ctx context.Context, deviceID string) ([]blueprintRec, error) {
 	rows, err := s.db.Query(ctx, `SELECT b.id, b.name, b.parent_id, b.tree, b.description, b.updated_at,
-		(SELECT count(*) FROM devices d WHERE NOT d.retired AND (d.blueprint_id=b.id OR (d.blueprint_id IS NULL AND b.name='default'))),
-		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND (d.blueprint_id=b.id OR (d.blueprint_id IS NULL AND b.name='default')))
+		(SELECT count(*) FROM devices d WHERE NOT d.retired AND `+effectiveBlueprintSQL+` = b.id),
+		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND (d.blueprint_id=b.id OR (d.blueprint_id IS NULL AND b.name='default'))),
+		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND `+effectiveBlueprintSQL+` = b.id)
 		FROM blueprints b ORDER BY b.name='default' DESC, b.name`, deviceID)
 	if err != nil {
 		return nil, err
@@ -559,7 +585,7 @@ func (s *Server) allBlueprints(ctx context.Context, deviceID string) ([]blueprin
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (blueprintRec, error) {
 		var b blueprintRec
 		var raw []byte
-		if err := row.Scan(&b.ID, &b.Name, &b.Parent, &raw, &b.Desc, &b.Updated, &b.Devices, &b.Assigned); err != nil {
+		if err := row.Scan(&b.ID, &b.Name, &b.Parent, &raw, &b.Desc, &b.Updated, &b.Devices, &b.Assigned, &b.Applies); err != nil {
 			return b, err
 		}
 		return b, json.Unmarshal(raw, &b.Tree)

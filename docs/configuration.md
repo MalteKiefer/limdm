@@ -106,3 +106,12 @@ Password checks in the profile count towards the same lockout as the sign in (5 
   and on demand.
 
 How groups select blueprints and what deactivation does: [concepts.md](concepts.md#directory).
+
+## Password policy
+
+Settings, Security sets the rules for passwords chosen in the console: initial and reset
+passwords of local accounts on devices, and the passwords of local console accounts. The
+minimum length is 12 to 128 characters (default 12); uppercase, lowercase, digit and special
+character can be required, and the user name can be ruled out. Generated passwords (new local
+console accounts, resets) are random and not affected. Passwords people set on their devices
+follow the compliance check `accounts.pwquality`.

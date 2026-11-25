@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/maltekiefer/limdm/internal/api"
@@ -449,6 +450,12 @@ func activeLocalUser(uid uint32) bool {
 	if uid == 0 {
 		return true
 	}
+	if !hasCmd("loginctl") {
+		// no logind (OpenRC without elogind): the user must run something on
+		// a virtual console, which only someone at the device can. A process
+		// environment (DISPLAY) proves nothing: ssh -X or any user sets it.
+		return onVirtualConsole(uid)
+	}
 	out, err := sh("loginctl", "list-sessions", "--no-legend")
 	if err != nil {
 		return false
@@ -465,6 +472,24 @@ func activeLocalUser(uid uint32) bool {
 	}
 	return false
 }
+
+// onVirtualConsole reports whether a process of uid has a virtual console
+// (/dev/ttyN, not a pseudo terminal) as its standard input.
+func onVirtualConsole(uid uint32) bool {
+	dirs, _ := filepath.Glob("/proc/[0-9]*")
+	for _, d := range dirs {
+		var st syscall.Stat_t
+		if syscall.Stat(d, &st) != nil || st.Uid != uid {
+			continue
+		}
+		if t, err := os.Readlink(d + "/fd/0"); err == nil && vtRe.MatchString(t) {
+			return true
+		}
+	}
+	return false
+}
+
+var vtRe = regexp.MustCompile(`^/dev/tty[0-9]+$`)
 
 var sessionIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
 

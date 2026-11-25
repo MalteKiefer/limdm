@@ -161,10 +161,10 @@ func (s *Server) recordUpdateResult(ctx context.Context, tx pgx.Tx, deviceID str
 		state = "rolled_back"
 	}
 	if _, err := tx.Exec(ctx, `UPDATE devices SET update_state=$2, update_version=$3, update_at=now(), update_requested=false, update_target='' WHERE id=$1`,
-		deviceID, state, res.To); err != nil {
+		deviceID, state, truncate(res.To, 32)); err != nil {
 		return err
 	}
-	if err := audit(ctx, tx, "device:"+deviceID, "agent.update", deviceID, fmt.Sprintf("%s -> %s: %s %s", res.From, res.To, state, truncate(res.Detail, 500))); err != nil {
+	if err := audit(ctx, tx, "device:"+deviceID, "agent.update", deviceID, fmt.Sprintf("%s -> %s: %s %s", truncate(res.From, 32), truncate(res.To, 32), state, truncate(res.Detail, 500))); err != nil {
 		return err
 	}
 	if state == "ok" {

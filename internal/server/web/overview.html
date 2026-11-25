@@ -6,11 +6,11 @@
 </div>
 <div class="stats">
   <a class="stat" href="/devices?status=compliant"><div class="label"><span class="dot ok"></span>{{t "Compliant"}}</div><div class="value">{{index .Counts "compliant"}}</div><div class="hint">{{pct (index .Counts "compliant") .Active}}{{t "% of active"}}</div></a>
-  <a class="stat" href="/devices?status=non-compliant"><div class="label"><span class="dot bad"></span>{{t "Non-compliant"}}</div><div class="value">{{index .Counts "non-compliant"}}</div><div class="hint">{{t "at least one failing check"}}</div></a>
-  <a class="stat" href="/devices?status=stale"><div class="label"><span class="dot warn"></span>{{t "Stale"}}</div><div class="value">{{index .Counts "stale"}}</div><div class="hint">{{t "silent for"}} {{.StaleHours}} {{t "h"}}</div></a>
-  <a class="stat" href="/devices?status=pending"><div class="label"><span class="dot na"></span>{{t "Pending"}}</div><div class="value">{{index .Counts "pending"}}</div><div class="hint">{{t "no report yet"}}</div></a>
+  <a class="stat" href="/devices?status=non-compliant"><div class="label"><span class="dot bad"></span>{{t "Non-compliant"}}</div><div class="value">{{index .Counts "non-compliant"}}</div><div class="hint">{{t "At least one failing check"}}</div></a>
+  <a class="stat" href="/devices?status=stale"><div class="label"><span class="dot warn"></span>{{t "Stale"}}</div><div class="value">{{index .Counts "stale"}}</div><div class="hint">{{t "Silent for"}} {{.StaleHours}} {{t "h"}}</div></a>
+  <a class="stat" href="/devices?status=pending"><div class="label"><span class="dot na"></span>{{t "Pending"}}</div><div class="value">{{index .Counts "pending"}}</div><div class="hint">{{t "No report yet"}}</div></a>
 </div>
-<div class="grid side-right">
+<div class="grid{{if ne .Sess.Role "helpdesk"}} side-right{{end}}">
   <div>
     <section class="card chart-card">
       <div class="card-head"><h2>{{t "Fleet status"}}</h2></div>
@@ -41,10 +41,10 @@
       {{else}}<p class="muted">{{t "No devices enrolled."}}</p>{{end}}
     </section>
   </div>
-  <section class="card">
+  {{if ne .Sess.Role "helpdesk"}}<section class="card">
     <div class="card-head"><h2>{{t "Recent activity"}}</h2><a class="muted" href="/audit">{{t "Audit log"}}</a></div>
     {{if .Recent}}<ul class="feed">{{range .Recent}}<li><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{fmtTime .At}}</time><div class="what"><b>{{.Action}}</b><span class="actor">{{.Actor}}</span>{{if .Detail}}<span class="sub muted">{{.Detail}}</span>{{end}}</div></li>{{end}}</ul>
     {{else}}<p class="muted">{{t "Nothing recorded yet."}}</p>{{end}}
-  </section>
+  </section>{{end}}
 </div>
 {{end}}
