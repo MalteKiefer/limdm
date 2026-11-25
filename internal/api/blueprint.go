@@ -350,6 +350,9 @@ func mergePayload(typ string, a, b json.RawMessage) (json.RawMessage, error) {
 		}
 		out = osPayload{Min: m}
 	default:
+		if merged, ok, err := mergeExtra(typ, a, b); ok {
+			return merged, err
+		}
 		return b, nil
 	}
 	return json.Marshal(out)

@@ -57,14 +57,15 @@ type Config struct {
 
 // State survives restarts. Declarations are kept so enforcement continues offline.
 type State struct {
-	Declarations  []api.Declaration   `json:"declarations"`
-	DeclToken     string              `json:"declarations_token"`
-	Users         []api.User          `json:"users"`
-	LastUpdateRun time.Time           `json:"last_update_run"`
-	RebootSince   time.Time           `json:"reboot_since"`
-	RebootPlanned time.Time           `json:"reboot_planned"` // when a post update reboot was scheduled
-	Results       []api.CommandResult `json:"results"`        // not yet reported
-	Events        []string            `json:"events"`
+	Declarations  []api.Declaration    `json:"declarations"`
+	DeclToken     string               `json:"declarations_token"`
+	Users         []api.User           `json:"users"`
+	LastUpdateRun time.Time            `json:"last_update_run"`
+	RebootSince   time.Time            `json:"reboot_since"`
+	RebootPlanned time.Time            `json:"reboot_planned"`        // when a post update reboot was scheduled
+	ScriptRuns    map[string]time.Time `json:"script_runs,omitempty"` // last run of recurring scripts
+	Results       []api.CommandResult  `json:"results"`               // not yet reported
+	Events        []string             `json:"events"`
 }
 
 type Agent struct {
@@ -510,6 +511,7 @@ func (a *Agent) enforce() {
 	if err := a.applyUsers(); err != nil {
 		a.problem(api.TypeLogin, "users: %v", err)
 	}
+	a.applyExtra()
 	// osquery is mandatory as inventory source; retry hourly, not every cycle
 	if !hasOsquery() && time.Since(a.osqueryTried) > time.Hour {
 		a.osqueryTried = time.Now()

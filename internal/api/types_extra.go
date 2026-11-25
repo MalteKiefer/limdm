@@ -1,0 +1,414 @@
+package api
+
+import (
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
+	"regexp"
+	"strings"
+)
+
+// Additional library types. Each payload is validated strictly here, on the
+// server when saved and on the agent before it is applied.
+
+const (
+	TypeRepositories  = "com.limdm.repositories"
+	TypeCertificates  = "com.limdm.certificates"
+	TypeSysctl        = "com.limdm.sysctl"
+	TypeKernelModules = "com.limdm.kernelmodules"
+	TypeSSH           = "com.limdm.ssh"
+	TypeBanner        = "com.limdm.banner"
+	TypeDNS           = "com.limdm.dns"
+	TypeNTP           = "com.limdm.ntp"
+	TypeProxy         = "com.limdm.proxy"
+	TypeFlatpak       = "com.limdm.flatpak"
+	TypeScripts       = "com.limdm.scripts"
+)
+
+type Repository struct {
+	Name       string `json:"name"`
+	Family     string `json:"family"` // debian | fedora
+	URL        string `json:"url"`
+	Suites     string `json:"suites,omitempty"`     // apt
+	Components string `json:"components,omitempty"` // apt
+	Key        string `json:"key"`                  // ASCII armored signing key, required
+}
+
+type Certificate struct {
+	Name string `json:"name"`
+	PEM  string `json:"pem"`
+}
+
+type FlatpakRemote struct {
+	Name string `json:"name"`
+	URL  string `json:"url"` // .flatpakrepo file
+}
+
+type Flatpak struct {
+	Remotes []FlatpakRemote `json:"remotes"`
+	Install []string        `json:"install"`
+	Remove  []string        `json:"remove"`
+}
+
+type Script struct {
+	Name          string `json:"name"`
+	IntervalHours int    `json:"interval_hours"`
+	Body          string `json:"body"`
+}
+
+type Banner struct {
+	Issue string `json:"issue"`
+	Motd  string `json:"motd"`
+}
+
+type DNS struct {
+	Servers []string `json:"servers"`
+	Domains []string `json:"domains"`
+	DNSSEC  bool     `json:"dnssec"`
+}
+
+type NTP struct {
+	Servers []string `json:"servers"`
+}
+
+type Proxy struct {
+	HTTP    string `json:"http"`
+	HTTPS   string `json:"https"`
+	NoProxy string `json:"no_proxy"`
+}
+
+// ExtraPolicy holds the additional sections of the effective policy.
+type ExtraPolicy struct {
+	Repositories  []Repository      `json:"repositories,omitempty"`
+	Certificates  []Certificate     `json:"certificates,omitempty"`
+	Sysctl        map[string]string `json:"sysctl,omitempty"`
+	KernelModules []string          `json:"kernel_modules,omitempty"`
+	SSH           map[string]string `json:"ssh,omitempty"`
+	Banner        *Banner           `json:"banner,omitempty"`
+	DNS           *DNS              `json:"dns,omitempty"`
+	NTP           *NTP              `json:"ntp,omitempty"`
+	Proxy         *Proxy            `json:"proxy,omitempty"`
+	Flatpak       *Flatpak          `json:"flatpak,omitempty"`
+	Scripts       []Script          `json:"scripts,omitempty"`
+}
+
+var extraExamples = map[string]string{
+	TypeRepositories:  `{"repositories": [{"name": "vendor", "family": "debian", "url": "https://repo.example.com/apt", "suites": "stable", "components": "main", "key": "-----BEGIN PGP PUBLIC KEY BLOCK-----..."}]}`,
+	TypeCertificates:  `{"certificates": [{"name": "corp-root", "pem": "-----BEGIN CERTIFICATE-----..."}]}`,
+	TypeSysctl:        `{"settings": {"vm.swappiness": "10"}}`,
+	TypeKernelModules: `{"block": ["firewire_core", "thunderbolt"]}`,
+	TypeSSH:           `{"options": {"AllowGroups": "ssh-users", "Banner": "/etc/issue.net"}}`,
+	TypeBanner:        `{"issue": "Authorized use only.", "motd": "Managed by IT."}`,
+	TypeDNS:           `{"servers": ["10.0.0.53"], "domains": ["corp.example.com"], "dnssec": true}`,
+	TypeNTP:           `{"servers": ["ntp1.example.com", "ntp2.example.com"]}`,
+	TypeProxy:         `{"http": "http://proxy.example.com:3128", "https": "http://proxy.example.com:3128", "no_proxy": "localhost,127.0.0.1,.example.com"}`,
+	TypeFlatpak:       `{"remotes": [{"name": "flathub", "url": "https://dl.flathub.org/repo/flathub.flatpakrepo"}], "install": ["org.mozilla.firefox"], "remove": []}`,
+	TypeScripts:       `{"scripts": [{"name": "cleanup", "interval_hours": 24, "body": "#!/bin/sh\njournalctl --vacuum-time=30d"}]}`,
+}
+
+func init() {
+	for t, ex := range extraExamples {
+		Types[t] = ex
+	}
+	for _, t := range []string{TypeRepositories, TypeCertificates, TypeSysctl, TypeKernelModules, TypeSSH, TypeFlatpak, TypeScripts} {
+		listTypes[t] = true
+	}
+}
+
+var (
+	nameRe     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+	sysctlKey  = regexp.MustCompile(`^[a-z0-9_]+(\.[a-zA-Z0-9_-]+)+$`)
+	sysctlVal  = regexp.MustCompile(`^[A-Za-z0-9 ._:/-]{1,200}$`)
+	moduleRe   = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
+	flatpakRef = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+){2,}$`)
+	hostRe     = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,252}[A-Za-z0-9])?$`)
+	suiteRe    = regexp.MustCompile(`^[A-Za-z0-9._/ -]{0,200}$`)
+	sshValRe   = regexp.MustCompile(`^[A-Za-z0-9 ,@._:/*-]{1,200}$`)
+)
+
+// sshAllowed are sshd options that cannot weaken the compliance baseline.
+var sshAllowed = map[string]bool{
+	"allowgroups": true, "allowusers": true, "denygroups": true, "denyusers": true, "banner": true,
+	"maxsessions": true, "maxstartups": true, "loglevel": true, "port": true, "listenaddress": true,
+	"authorizedkeysfile": true, "trustedusercakeys": true, "authorizedprincipalsfile": true,
+	"ciphers": true, "macs": true, "kexalgorithms": true, "hostkeyalgorithms": true, "pubkeyacceptedalgorithms": true,
+}
+
+func httpsURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil
+}
+
+func hostOrIP(s string) bool { return net.ParseIP(s) != nil || hostRe.MatchString(s) }
+
+func noControl(s string, max int) bool {
+	if len(s) > max {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x20 && r != '\n' && r != '\t' {
+			return false
+		}
+	}
+	return true
+}
+
+// applyExtra decodes and validates the additional types. ok is false for
+// types it does not know.
+func (d Declaration) applyExtra(p *Policy) (bool, error) {
+	var errs []error
+	bad := func(f string, a ...any) { errs = append(errs, fmt.Errorf(f, a...)) }
+	switch d.Type {
+	case TypeRepositories:
+		var v struct {
+			Repositories []Repository `json:"repositories"`
+		}
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		for _, r := range v.Repositories {
+			if r.Name == "osquery" {
+				bad("repository name osquery is reserved for the agent's own osquery source")
+			}
+			if !nameRe.MatchString(r.Name) || (r.Family != "debian" && r.Family != "fedora") || !httpsURL(r.URL) {
+				bad("repository %q: name, family (debian|fedora) and an https URL are required", r.Name)
+			}
+			if !suiteRe.MatchString(r.Suites) || !suiteRe.MatchString(r.Components) || (r.Family == "debian" && r.Suites == "") {
+				bad("repository %q: invalid suites or components", r.Name)
+			}
+			if !strings.Contains(r.Key, "BEGIN PGP PUBLIC KEY BLOCK") || len(r.Key) > 64<<10 {
+				bad("repository %q: an armored signing key is required, unsigned repositories are not allowed", r.Name)
+			}
+		}
+		p.Extra.Repositories = v.Repositories
+	case TypeCertificates:
+		var v struct {
+			Certificates []Certificate `json:"certificates"`
+		}
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		for _, c := range v.Certificates {
+			b, _ := pem.Decode([]byte(c.PEM))
+			if !nameRe.MatchString(c.Name) || b == nil || b.Type != "CERTIFICATE" {
+				bad("certificate %q: name and one PEM certificate are required", c.Name)
+				continue
+			}
+			cert, err := x509.ParseCertificate(b.Bytes)
+			if err != nil || !cert.IsCA {
+				bad("certificate %q: must be a CA certificate", c.Name)
+			}
+		}
+		p.Extra.Certificates = v.Certificates
+	case TypeSysctl:
+		var v struct {
+			Settings map[string]string `json:"settings"`
+		}
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		for k, val := range v.Settings {
+			if !sysctlKey.MatchString(k) || !sysctlVal.MatchString(val) {
+				bad("invalid sysctl %q=%q", k, val)
+			}
+		}
+		p.Extra.Sysctl = v.Settings
+	case TypeKernelModules:
+		var v struct {
+			Block []string `json:"block"`
+		}
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		for _, m := range v.Block {
+			if !moduleRe.MatchString(m) {
+				bad("invalid module name %q", m)
+			}
+		}
+		p.Extra.KernelModules = v.Block
+	case TypeSSH:
+		var v struct {
+			Options map[string]string `json:"options"`
+		}
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		for k, val := range v.Options {
+			if !sshAllowed[strings.ToLower(k)] || !sshValRe.MatchString(val) {
+				bad("sshd option %q is not allowed or has an invalid value", k)
+			}
+		}
+		p.Extra.SSH = v.Options
+	case TypeBanner:
+		var v Banner
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		if !noControl(v.Issue, 4096) || !noControl(v.Motd, 4096) {
+			bad("banner texts must be plain text up to 4096 characters")
+		}
+		p.Extra.Banner = &v
+	case TypeDNS:
+		var v DNS
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		for _, s := range v.Servers {
+			if net.ParseIP(s) == nil {
+				bad("DNS server %q must be an IP address", s)
+			}
+		}
+		for _, dom := range v.Domains {
+			if !hostRe.MatchString(dom) {
+				bad("invalid search domain %q", dom)
+			}
+		}
+		p.Extra.DNS = &v
+	case TypeNTP:
+		var v NTP
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		if len(v.Servers) == 0 {
+			bad("at least one NTP server is required")
+		}
+		for _, s := range v.Servers {
+			if !hostOrIP(s) {
+				bad("invalid NTP server %q", s)
+			}
+		}
+		p.Extra.NTP = &v
+	case TypeProxy:
+		var v Proxy
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		for _, u := range []string{v.HTTP, v.HTTPS} {
+			if pu, err := url.Parse(u); u != "" && (err != nil || (pu.Scheme != "http" && pu.Scheme != "https") || pu.Host == "" || strings.ContainsAny(u, " \"'\n")) {
+				bad("invalid proxy URL %q", u)
+			}
+		}
+		if strings.ContainsAny(v.NoProxy, " \"'\n") {
+			bad("no_proxy must be a comma separated list without spaces")
+		}
+		p.Extra.Proxy = &v
+	case TypeFlatpak:
+		var v Flatpak
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		for _, r := range v.Remotes {
+			if !nameRe.MatchString(r.Name) || !httpsURL(r.URL) {
+				bad("flatpak remote %q needs a name and an https URL", r.Name)
+			}
+		}
+		for _, ref := range append(append([]string{}, v.Install...), v.Remove...) {
+			if !flatpakRef.MatchString(ref) {
+				bad("invalid flatpak application ID %q", ref)
+			}
+		}
+		p.Extra.Flatpak = &v
+	case TypeScripts:
+		var v struct {
+			Scripts []Script `json:"scripts"`
+		}
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		for _, sc := range v.Scripts {
+			if !nameRe.MatchString(sc.Name) || sc.IntervalHours < 1 || sc.IntervalHours > 24*30 || sc.Body == "" || len(sc.Body) > 64<<10 {
+				bad("script %q: name, interval 1..720 hours and a body up to 64 KiB are required", sc.Name)
+			}
+		}
+		p.Extra.Scripts = v.Scripts
+	default:
+		return false, nil
+	}
+	return true, errors.Join(errs...)
+}
+
+// mergeExtra merges list types of the additional library types.
+func mergeExtra(typ string, a, b json.RawMessage) (json.RawMessage, bool, error) {
+	byName := func(key string) (json.RawMessage, error) {
+		var x, y map[string][]map[string]any
+		if err := errors.Join(json.Unmarshal(a, &x), json.Unmarshal(b, &y)); err != nil {
+			return nil, err
+		}
+		out := x[key]
+		for _, it := range y[key] {
+			replaced := false
+			for i, e := range out {
+				if e["name"] == it["name"] {
+					out[i], replaced = it, true
+				}
+			}
+			if !replaced {
+				out = append(out, it)
+			}
+		}
+		return json.Marshal(map[string]any{key: out})
+	}
+	mergeMap := func(key string) (json.RawMessage, error) {
+		var x, y map[string]map[string]string
+		if err := errors.Join(json.Unmarshal(a, &x), json.Unmarshal(b, &y)); err != nil {
+			return nil, err
+		}
+		m := map[string]string{}
+		for k, v := range x[key] {
+			m[k] = v
+		}
+		for k, v := range y[key] {
+			m[k] = v
+		}
+		return json.Marshal(map[string]any{key: m})
+	}
+	var out json.RawMessage
+	var err error
+	switch typ {
+	case TypeRepositories:
+		out, err = byName("repositories")
+	case TypeCertificates:
+		out, err = byName("certificates")
+	case TypeScripts:
+		out, err = byName("scripts")
+	case TypeSysctl:
+		out, err = mergeMap("settings")
+	case TypeSSH:
+		out, err = mergeMap("options")
+	case TypeKernelModules:
+		var x, y struct {
+			Block []string `json:"block"`
+		}
+		if err = errors.Join(json.Unmarshal(a, &x), json.Unmarshal(b, &y)); err == nil {
+			out, err = json.Marshal(map[string]any{"block": union(x.Block, y.Block)})
+		}
+	case TypeFlatpak:
+		var x, y Flatpak
+		if err = errors.Join(json.Unmarshal(a, &x), json.Unmarshal(b, &y)); err == nil {
+			remotes := x.Remotes
+			for _, r := range y.Remotes {
+				if !containsRemote(remotes, r.Name) {
+					remotes = append(remotes, r)
+				}
+			}
+			rm := union(x.Remove, y.Remove)
+			out, err = json.Marshal(Flatpak{Remotes: remotes, Install: without(union(x.Install, y.Install), rm), Remove: rm})
+		}
+	default:
+		return nil, false, nil
+	}
+	return out, true, err
+}
+
+func containsRemote(rs []FlatpakRemote, name string) bool {
+	for _, r := range rs {
+		if r.Name == name {
+			return true
+		}
+	}
+	return false
+}

@@ -76,6 +76,7 @@ type Policy struct {
 	ScreenLockSeconds int               `json:"screen_lock_seconds"`
 	Login             Login             `json:"login"`
 	Privacy           Privacy           `json:"privacy"`
+	Extra             ExtraPolicy       `json:"extra"`
 }
 
 type agentPayload struct {
@@ -295,6 +296,9 @@ func (d Declaration) apply(p *Policy) error {
 			return err
 		}
 	default:
+		if ok, err := d.applyExtra(p); ok {
+			return err
+		}
 		return fmt.Errorf("unknown declaration type %q", d.Type)
 	}
 	return errors.Join(errs...)
