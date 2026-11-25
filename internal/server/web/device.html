@@ -29,6 +29,11 @@
           <button role="menuitem" class="menu-item">{{t "Unlock device"}}</button></form>
         <div class="menu-sep"></div>
         <a role="menuitem" class="menu-item" href="/devices/{{$id}}?tab=commands&amp;type=script">{{t "Run script…"}}</a>
+        <div class="menu-sep"></div>
+        <a role="menuitem" class="menu-item warn" href="/devices/{{$id}}?tab=commands&amp;type=lost">{{t "Lost mode…"}}</a>
+        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="found">
+          <button role="menuitem" class="menu-item">{{t "End lost mode"}}</button></form>
+        <a role="menuitem" class="menu-item danger" href="/devices/{{$id}}?tab=commands&amp;type=wipe">{{t "Wipe device…"}}</a>
       </div>
     </details>
   </div>
@@ -279,6 +284,10 @@
       <label>{{t "Command"}}<select name="type">{{$pre := .PreType}}{{range .CommandTypes}}<option value="{{.}}" {{if eq . $pre}}selected{{end}}>{{actionLabel .}}</option>{{end}}</select></label>
       <label class="delay-only">{{t "Delay in minutes"}} <span class="hint">{{t "0 = now"}}</span><input name="minutes" type="number" min="0" max="1440" value="5"></label>
     </div>
+    <div class="lost-only notice">{{t "Blocks every login, ends running sessions and shows your message. With an escrowed recovery key, every other disk key slot is removed: after the next power off only IT can open the disk."}}</div>
+    <label class="lost-only">{{t "Message on the device"}} <span class="hint">{{t "for example a phone number"}}</span><textarea name="message" rows="3" maxlength="500"></textarea></label>
+    <div class="wipe-only notice error">{{t "Erases the disk encryption headers: all data on the device is lost for good. Devices without disk encryption are refused."}}</div>
+    <label class="confirm-only">{{t "Type the host name to confirm"}} <span class="mono">{{.D.Hostname}}</span><input name="confirm" autocomplete="off" spellcheck="false"></label>
     <label class="script-only">{{t "Script"}} <span class="hint">{{t "runs as root, only if the device allows scripts"}}</span><textarea name="payload" rows="6" class="code" placeholder="#!/bin/sh"></textarea></label>
     <button>{{t "Send"}}</button>
   </form>

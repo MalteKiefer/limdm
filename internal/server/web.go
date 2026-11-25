@@ -65,7 +65,8 @@ func parsePages(lang string) map[string]*template.Template {
 		},
 		"actionLabel": func(a string) string {
 			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot",
-				"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script"}[a])
+				"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script",
+				"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device"}[a])
 		},
 		"join":      strings.Join,
 		"hasPrefix": strings.HasPrefix,
@@ -538,7 +539,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
-		"CommandTypes": api.CommandTypes,
+		"CommandTypes": commandTypesFor(sess.Role),
 		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
 		"Resolved": res, "Tags": strings.Join(tags, ", "), "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery,
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"},
@@ -565,6 +566,30 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 			return
 		}
 		payload = strconv.Itoa(m)
+	case typ == "lost" || typ == "wipe" || typ == "found":
+		// protective actions: admins only, lost and wipe confirmed by typing the host name
+		if sess.Role != "admin" {
+			http.Error(w, "this action requires the admin role", http.StatusForbidden)
+			return
+		}
+		if typ != "found" {
+			var host string
+			if err := s.db.QueryRow(r.Context(), `SELECT hostname FROM devices WHERE id=$1`, id).Scan(&host); err != nil ||
+				!strings.EqualFold(strings.TrimSpace(r.FormValue("confirm")), host) {
+				http.Error(w, "type the host name to confirm", http.StatusBadRequest)
+				return
+			}
+		}
+		payload = ""
+		if typ == "lost" {
+			msg := strings.TrimSpace(r.FormValue("message"))
+			if len(msg) > 500 || strings.ContainsAny(msg, "\x00\r") {
+				http.Error(w, "message: up to 500 characters", http.StatusBadRequest)
+				return
+			}
+			b, _ := json.Marshal(api.LostMode{Message: msg})
+			payload = string(b)
+		}
 	case typ != "script":
 		payload = ""
 	case sess.Role != "admin":
@@ -1028,4 +1053,14 @@ func hasIPs(nics []api.NIC) bool {
 		}
 	}
 	return false
+}
+
+// commandTypesFor hides scripts and the protective actions from non admins.
+func commandTypesFor(role string) []string {
+	if role == "admin" {
+		return api.CommandTypes
+	}
+	return slices.DeleteFunc(slices.Clone(api.CommandTypes), func(t string) bool {
+		return t == "script" || t == "lost" || t == "found" || t == "wipe"
+	})
 }

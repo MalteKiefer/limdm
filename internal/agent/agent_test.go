@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -432,5 +433,22 @@ func TestDesktopRateLimitParallel(t *testing.T) {
 	wg.Wait()
 	if n := calls.Load(); n > 5 {
 		t.Fatalf("%d passphrase attempts ran in parallel, limit is 5", n)
+	}
+}
+
+func TestParseSlots(t *testing.T) {
+	luks2 := "LUKS header information\nVersion:       \t2\n\nKeyslots:\n  0: luks2\n\tKey:        512 bits\n  3: luks2\n\tKey:        512 bits\nTokens:\n  0: systemd-tpm2\n"
+	if got, err := parseSlots(luks2); err != nil || !slices.Equal(got, []int{0, 3}) {
+		t.Fatalf("luks2: %v %v", got, err)
+	}
+	luks1 := "Version:       \t1\nKey Slot 0: ENABLED\nKey Slot 1: DISABLED\nKey Slot 2: ENABLED\n"
+	if got, err := parseSlots(luks1); err != nil || !slices.Equal(got, []int{0, 2}) {
+		t.Fatalf("luks1: %v %v", got, err)
+	}
+	if _, err := parseSlots("garbage"); err == nil {
+		t.Fatal("unparsable dump accepted")
+	}
+	if m := unlocked.FindStringSubmatch("Key slot 3 unlocked.\nCommand successful."); m == nil || m[1] != "3" {
+		t.Fatal("unlocked slot not parsed")
 	}
 }

@@ -60,6 +60,27 @@ With `rotate_after_view` a key is replaced after someone viewed it:
 The device page shows "rotation pending" until then. If the device is offline, the viewed
 key keeps working until the device checks in again.
 
+## Lost or stolen devices
+
+Two admin actions on the device page (Actions menu), each confirmed by typing the host name
+and written to the audit log. They run when the device checks in the next time; a device
+that stays offline is covered by `offline_lock_hours` ([desktop-login.md](desktop-login.md#offline-lock)).
+
+**Lost mode** blocks every login (`/etc/nologin` with your message, local passwords locked),
+ends running sessions and, for every LUKS volume with an escrowed recovery key, removes every
+other key slot. The server adds the recovery keys to the command only at delivery; they are
+never stored in the command. After the next power off only IT can open the disk, with the
+recovery key from the console. Volumes without an escrowed key keep their slots; the result
+on the device page says so.
+
+**End lost mode** lifts the login block. The user's passphrase was removed: unlock the disk
+with the recovery key at boot and set a new passphrase, for example with
+`cryptsetup luksAddKey` using the recovery key, then rotate the viewed recovery key.
+
+**Wipe** erases the LUKS headers of all volumes (`cryptsetup luksErase`), which makes the data
+unrecoverable, and powers the device off two minutes later, after reporting the result. Devices
+without LUKS are refused, because there is no fast way to guarantee deletion; use lost mode.
+
 ## Limits
 
 * Only volumes visible to `lsblk` as `crypto_LUKS` are handled.

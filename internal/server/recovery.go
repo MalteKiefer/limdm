@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -146,4 +147,44 @@ func (s *Server) recoveryView(w http.ResponseWriter, r *http.Request, sess sessi
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	s.render(w, r, sess, "recovery", map[string]any{"ID": id, "Host": host, "Path": path, "UUID": uuid, "Key": key, "Rotate": rotate})
+}
+
+// attachRecoveryKeys adds the escrowed keys to "lost" commands at delivery:
+// the agent needs them to keep the volumes recoverable while it removes every
+// other key slot. They are sent over mTLS and never stored in the command.
+func (s *Server) attachRecoveryKeys(ctx context.Context, tx pgx.Tx, deviceID string, cmds []api.Command) error {
+	for i, c := range cmds {
+		if c.Type != "lost" {
+			continue
+		}
+		var lm api.LostMode
+		if err := json.Unmarshal([]byte(c.Payload), &lm); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT uuid, device_path, sealed FROM recovery_keys WHERE device_id=$1`, deviceID)
+		if err != nil {
+			return err
+		}
+		type row struct {
+			UUID, Path string
+			Sealed     []byte
+		}
+		keys, err := pgx.CollectRows(rows, pgx.RowToStructByPos[row])
+		if err != nil {
+			return err
+		}
+		for _, k := range keys {
+			plain, err := s.openRecovery(deviceID, k.UUID, k.Sealed)
+			if err != nil {
+				return err
+			}
+			lm.Keys = append(lm.Keys, api.RecoveryKey{UUID: k.UUID, Device: k.Path, Key: plain})
+		}
+		b, err := json.Marshal(lm)
+		if err != nil {
+			return err
+		}
+		cmds[i].Payload = string(b)
+	}
+	return nil
 }

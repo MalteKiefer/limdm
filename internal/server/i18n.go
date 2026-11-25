@@ -309,4 +309,10 @@ var deCatalog = map[string]string{
 	"Resolved through NSS: local files and directory sources such as sssd, LDAP, winbind, systemd-homed and DynamicUser. Sources that disable enumeration only list known entries.": "Über NSS aufgelöst: lokale Dateien und Verzeichnisquellen wie sssd, LDAP, winbind, systemd-homed und DynamicUser. Quellen ohne Aufzählung zeigen nur bekannte Einträge.",
 	"system": "System", "local": "lokal", "directory / NSS": "Verzeichnis / NSS", "Home": "Home",
 	"or a recovery code": "oder ein Recovery Code",
+	// lost mode and wipe
+	"Lost mode": "Verlustmodus", "End lost mode": "Verlustmodus beenden", "Wipe device": "Gerät löschen",
+	"Lost mode…": "Verlustmodus…", "Wipe device…": "Gerät löschen…", "Message on the device": "Nachricht auf dem Gerät",
+	"for example a phone number": "zum Beispiel eine Telefonnummer", "Type the host name to confirm": "Zur Bestätigung den Hostnamen eingeben",
+	"Blocks every login, ends running sessions and shows your message. With an escrowed recovery key, every other disk key slot is removed: after the next power off only IT can open the disk.": "Sperrt jede Anmeldung, beendet laufende Sitzungen und zeigt deine Nachricht. Mit hinterlegtem Wiederherstellungsschlüssel werden alle anderen Schlüssel der Festplatte entfernt: nach dem nächsten Ausschalten kann nur noch die IT die Festplatte öffnen.",
+	"Erases the disk encryption headers: all data on the device is lost for good. Devices without disk encryption are refused.":                                                                  "Löscht die Header der Festplattenverschlüsselung: alle Daten auf dem Gerät sind endgültig verloren. Geräte ohne Verschlüsselung werden abgelehnt.",
 }

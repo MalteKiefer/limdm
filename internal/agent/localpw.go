@@ -70,7 +70,10 @@ func forgetSSO(user string) {
 // deviceLocked: locked from the console or by the compliance policy. Local
 // passwords are locked too, so screen lockers and sudo without pam_nologin
 // cannot be used to get back in.
-func deviceLocked() bool { return readFile(nologinFile) == nologinText }
+func deviceLocked() bool {
+	s := readFile(nologinFile)
+	return s == nologinText || strings.HasPrefix(s, lostPrefix)
+}
 
 func recordSSO(user string, at time.Time) error {
 	m := readSSO()

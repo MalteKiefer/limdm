@@ -116,4 +116,7 @@ Device states: `compliant`, `in grace` (failing, grace period running), `non-com
 One off actions from the device page: `sync`, `update` (install all updates), `reboot`
 and `shutdown` (in one minute), `lock` and `unlock` (blocks new logins, locks running
 sessions), `script` (root shell script, only on devices enrolled with `allow_scripts`, admins
-only). Results show on the device page and in the audit log.
+only), and for lost devices `lost`, `found` and `wipe` (admins only, confirmed with the host
+name, see [disk-encryption.md](disk-encryption.md#lost-or-stolen-devices)). Commands are
+delivered until the device reports a result; the agent runs each one once. Unanswered
+commands expire after 7 days. Results show on the device page and in the audit log.

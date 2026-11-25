@@ -603,6 +603,10 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	if err := s.attachRecoveryKeys(ctx, tx, id, resp.Commands); err != nil {
+		s.fail(w, err)
+		return
+	}
 	if err := tx.Commit(ctx); err != nil {
 		s.fail(w, err)
 		return

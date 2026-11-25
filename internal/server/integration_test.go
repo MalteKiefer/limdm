@@ -598,6 +598,18 @@ func TestIntegration(t *testing.T) {
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"shutdown"}, "minutes": {"5000"}}, help); code != http.StatusBadRequest {
 		t.Fatalf("delay out of range accepted: %d", code)
 	}
+	// lost mode and wipe: admins only, confirmed with the host name
+	var host string
+	db.QueryRow(ctx, `SELECT hostname FROM devices WHERE id=$1`, er.DeviceID).Scan(&host)
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"wipe"}, "confirm": {host}}, help); code != http.StatusForbidden {
+		t.Fatalf("helpdesk wipe: %d", code)
+	}
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"wipe"}, "confirm": {"wrong"}}, adminSess); code != http.StatusBadRequest {
+		t.Fatalf("wipe without confirmation: %d", code)
+	}
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"lost"}, "confirm": {host}, "message": {"call IT"}}, adminSess); code != http.StatusSeeOther {
+		t.Fatalf("lost mode: %d", code)
+	}
 	var pl string
 	ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"reboot"}, "minutes": {"0"}}, help)
 	db.QueryRow(ctx, `SELECT payload FROM commands WHERE type='reboot' ORDER BY id DESC LIMIT 1`).Scan(&pl)
@@ -945,6 +957,15 @@ func TestRecoveryEscrow(t *testing.T) {
 	db.QueryRow(ctx, `SELECT rotate, viewed_at FROM recovery_keys`).Scan(&rotate, &viewed)
 	if rotate || viewed != nil {
 		t.Fatal("rotation not cleared")
+	}
+	// lost mode: the escrowed key is attached at delivery, not stored in the command
+	cmds := []api.Command{{ID: 1, Type: "lost", Payload: `{"message":"call +49 1"}`}, {ID: 2, Type: "sync"}}
+	tx, _ = db.Begin(ctx)
+	err = s.attachRecoveryKeys(ctx, tx, "d1", cmds)
+	tx.Rollback(ctx)
+	var lm api.LostMode
+	if err != nil || json.Unmarshal([]byte(cmds[0].Payload), &lm) != nil || lm.Message != "call +49 1" || len(lm.Keys) != 1 || !lm.Keys[0].Valid() || cmds[1].Payload != "" {
+		t.Fatalf("lost mode payload: %v %s", err, cmds[0].Payload)
 	}
 	// package source templates from the inventory
 	db.Exec(ctx, `UPDATE devices SET inventory=$1 WHERE id='d1'`, `{"repos":[

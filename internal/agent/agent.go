@@ -662,6 +662,12 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 	case "unlock":
 		out, err = unlockDevice()
 		a.syncPasswordLocks()
+	case "lost":
+		out, err = a.lostMode(c.Payload)
+	case "found":
+		out, err = a.foundMode()
+	case "wipe":
+		out, err = a.wipe()
 	case "script":
 		if !a.cfg.AllowScripts {
 			err = errors.New("remote scripts are disabled on this device (allow_scripts)")
