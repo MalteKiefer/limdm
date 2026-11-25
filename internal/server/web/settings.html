@@ -29,15 +29,15 @@
 <form class="card" method="post" action="/settings">
   {{template "csrf" .CSRF}}<input type="hidden" name="section" value="security">
   <div class="card-head stacked"><h2>{{t "Password policy"}}</h2><p class="muted">{{t "Applies to passwords set in the console: local accounts on devices (create, reset) and local console accounts. Passwords people set on their devices follow the compliance check Password quality."}}</p></div>
-  <label>{{t "Minimum length"}}<input name="min_length" type="number" min="12" max="128" value="{{.Set.Password.Min}}"><small class="field-hint">{{t "12 to 128 characters"}}</small></label>
+  <label>{{t "Minimum length"}}<input name="min_length" type="number" min="12" max="128" value="{{.Set.Rules.Min}}"><small class="field-hint">{{t "12 to 128 characters"}}</small></label>
   <fieldset class="event-grid">
     <legend>{{t "Required characters"}}</legend>
-    <label class="check"><input type="checkbox" name="upper" {{if .Set.Password.Upper}}checked{{end}}><span>{{t "Uppercase letter"}}<code>A–Z</code></span></label>
-    <label class="check"><input type="checkbox" name="lower" {{if .Set.Password.Lower}}checked{{end}}><span>{{t "Lowercase letter"}}<code>a–z</code></span></label>
-    <label class="check"><input type="checkbox" name="digit" {{if .Set.Password.Digit}}checked{{end}}><span>{{t "Digit"}}<code>0–9</code></span></label>
-    <label class="check"><input type="checkbox" name="symbol" {{if .Set.Password.Symbol}}checked{{end}}><span>{{t "Special character"}}<code>! ? # …</code></span></label>
+    <label class="check"><input type="checkbox" name="upper" {{if .Set.Rules.Upper}}checked{{end}}><span>{{t "Uppercase letter"}}<code>A–Z</code></span></label>
+    <label class="check"><input type="checkbox" name="lower" {{if .Set.Rules.Lower}}checked{{end}}><span>{{t "Lowercase letter"}}<code>a–z</code></span></label>
+    <label class="check"><input type="checkbox" name="digit" {{if .Set.Rules.Digit}}checked{{end}}><span>{{t "Digit"}}<code>0–9</code></span></label>
+    <label class="check"><input type="checkbox" name="symbol" {{if .Set.Rules.Symbol}}checked{{end}}><span>{{t "Special character"}}<code>! ? # …</code></span></label>
   </fieldset>
-  <label class="check"><input type="checkbox" name="no_name" {{if .Set.Password.NoName}}checked{{end}}> {{t "Must not contain the user name"}}</label>
+  <label class="check"><input type="checkbox" name="no_name" {{if .Set.Rules.NoName}}checked{{end}}> {{t "Must not contain the user name"}}</label>
   {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
 </form>
 {{else if eq .Tab "sso"}}
