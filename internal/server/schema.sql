@@ -268,3 +268,18 @@ BEGIN RAISE EXCEPTION 'device_events is append only'; END $$;
 DROP TRIGGER IF EXISTS device_events_append_only ON device_events;
 CREATE TRIGGER device_events_append_only BEFORE UPDATE ON device_events
     FOR EACH ROW EXECUTE FUNCTION device_events_append_only();
+
+-- Columns for list views, computed once on write instead of detoasting the
+-- inventory and check JSON of every device on every page view.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS os_name TEXT GENERATED ALWAYS AS (coalesce(inventory->>'os_name', '')) STORED;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS desktop TEXT GENERATED ALWAYS AS (coalesce(inventory->>'desktop', '')) STORED;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS memory_mb BIGINT GENERATED ALWAYS AS (coalesce((inventory->>'memory_mb')::bigint, 0)) STORED;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS checks_count INT GENERATED ALWAYS AS (CASE WHEN jsonb_typeof(checks) = 'array' THEN jsonb_array_length(checks) ELSE 0 END) STORED;
+
+-- Last verified position of the audit hash chain (incremental verification).
+CREATE TABLE IF NOT EXISTS audit_checkpoint (
+    one         BOOLEAN PRIMARY KEY DEFAULT true CHECK (one),
+    last_id     BIGINT NOT NULL,
+    last_hash   BYTEA NOT NULL,
+    verified_at TIMESTAMPTZ NOT NULL
+);

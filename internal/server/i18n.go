@@ -319,4 +319,5 @@ var deCatalog = map[string]string{
 	"Tamper attempt reported": "Manipulationsversuch gemeldet", "Details are in the audit log (agent.tamper).": "Details stehen im Audit Log (agent.tamper).",
 	"Allow uninstall for 1 hour": "Deinstallation für 1 Stunde erlauben",
 	"Device events":              "Geräteereignisse", "latest 100, kept 365 days": "letzte 100, 365 Tage aufbewahrt",
+	"and": "und", "more": "weitere",
 }

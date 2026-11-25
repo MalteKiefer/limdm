@@ -31,7 +31,7 @@
       {{if .Failing}}
       <div class="scroll"><table>
         <thead><tr><th>{{t "Check"}}</th><th>{{t "Level"}}</th><th class="num">{{t "Failing"}}</th><th>{{t "Devices"}}</th></tr></thead>
-        <tbody>{{range .Failing}}<tr><td>{{.Title}}<span class="sub mono">{{.ID}}</span></td><td>{{t "L"}}{{.Level}}</td><td class="num"><span class="pill fail">{{.Fail}}</span></td><td class="muted">{{join .FailingHosts ", "}}</td></tr>{{end}}</tbody>
+        <tbody>{{range .Failing}}<tr><td>{{.Title}}<span class="sub mono">{{.ID}}</span></td><td>{{t "L"}}{{.Level}}</td><td class="num"><span class="pill fail">{{.Fail}}</span></td><td class="muted">{{join .FailingHosts ", "}}{{if gt .Fail (len .FailingHosts)}} <span class="muted">{{t "and"}} {{sub .Fail (len .FailingHosts)}} {{t "more"}}</span>{{end}}</td></tr>{{end}}</tbody>
       </table></div>
       {{else}}<div class="empty">{{t "No failing checks across the fleet."}}</div>{{end}}
     </section>

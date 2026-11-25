@@ -28,9 +28,21 @@ func recordMetrics(ctx context.Context, tx pgx.Tx, deviceID string, m *api.Metri
 
 // historyLoop snapshots fleet compliance daily and prunes old samples.
 func (s *Server) historyLoop(ctx context.Context) {
+	lastFull := time.Time{}
 	tick := func() {
 		if err := s.snapshotFleet(ctx); err != nil {
 			s.log.Error("fleet snapshot", "err", err)
+		}
+		if time.Since(lastFull) > 24*time.Hour { // full chain check: catches changes behind the checkpoint
+			if broken, err := s.verifyAuditFrom(ctx, false); err != nil {
+				s.log.Error("audit verification", "err", err)
+			} else {
+				s.auditBroken.Store(broken) // shown on the audit page next to the incremental result
+				if broken != 0 {
+					s.log.Error("audit log hash chain broken", "entry", broken)
+				}
+			}
+			lastFull = time.Now()
 		}
 		if _, err := s.db.Exec(ctx, `DELETE FROM device_metrics WHERE at < now() - interval '30 days';
 			DELETE FROM fleet_history WHERE day < current_date - 400;

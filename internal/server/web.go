@@ -52,6 +52,7 @@ func parsePages(lang string) map[string]*template.Template {
 		},
 		"frac":      func(v uint64, pct uint64) uint64 { return v * pct / 100 },
 		"inc":       func(n int) int { return n + 1 },
+		"sub":       func(a, b int) int { return a - b },
 		"dec":       func(n int) int { return n - 1 },
 		"list":      func(v ...string) []string { return v },
 		"deref":     func(p *int64) int64 { return *p },
@@ -240,11 +241,10 @@ func (s *Server) status(d *deviceRow) {
 }
 
 func (s *Server) listDevices(ctx context.Context) ([]deviceRow, error) {
-	rows, err := s.db.Query(ctx, `SELECT d.id, d.hostname, coalesce(d.inventory->>'os_name',''), d.agent_version,
-		coalesce((SELECT b.name FROM blueprints b WHERE b.id=d.blueprint_id),'default') || coalesce(' · ' || nullif(array_to_string(d.tags, ', '), ''), ''),
-		coalesce(d.inventory->>'desktop',''), coalesce((d.inventory->>'memory_mb')::bigint, 0),
-		d.failing, jsonb_array_length(d.checks), d.last_seen, d.retired, d.grace_until, d.auto_locked
-		FROM devices d ORDER BY d.retired, d.hostname`)
+	rows, err := s.db.Query(ctx, `SELECT d.id, d.hostname, d.os_name, d.agent_version,
+		coalesce(b.name, 'default') || coalesce(' · ' || nullif(array_to_string(d.tags, ', '), ''), ''),
+		d.desktop, d.memory_mb, d.failing, d.checks_count, d.last_seen, d.retired, d.grace_until, d.auto_locked
+		FROM devices d LEFT JOIN blueprints b ON b.id = d.blueprint_id ORDER BY d.retired, d.hostname`)
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +307,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 	sort.Slice(oses, func(i, j int) bool {
 		return oses[i].Count > oses[j].Count || oses[i].Count == oses[j].Count && oses[i].Name < oses[j].Name
 	})
-	fc, err := s.fleetCompliance(ctx)
+	fc, err := s.fleetComplianceCached(ctx)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -803,7 +803,7 @@ type fleetStats struct {
 }
 
 func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session) {
-	fc, err := s.fleetCompliance(r.Context())
+	fc, err := s.fleetComplianceCached(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -861,6 +861,26 @@ func (f complianceFilter) apply(checks []*checkAgg, controls []*controlAgg) ([]*
 }
 
 // fleetCompliance aggregates the latest check results of all active devices.
+const maxListedHosts = 20
+
+type fleetCache struct {
+	at time.Time
+	fs fleetStats
+}
+
+// fleetComplianceCached serves the fleet aggregation for a minute; it reads
+// and decodes the check results of every device.
+func (s *Server) fleetComplianceCached(ctx context.Context) (fleetStats, error) {
+	if c := s.fleet.Load(); c != nil && time.Since(c.at) < time.Minute {
+		return c.fs, nil
+	}
+	fs, err := s.fleetCompliance(ctx)
+	if err == nil {
+		s.fleet.Store(&fleetCache{at: time.Now(), fs: fs})
+	}
+	return fs, err
+}
+
 func (s *Server) fleetCompliance(ctx context.Context) (fleetStats, error) {
 	var fs fleetStats
 	rows, err := s.db.Query(ctx, `SELECT hostname, checks, last_seen, failing FROM devices WHERE NOT retired`)
@@ -902,7 +922,9 @@ func (s *Server) fleetCompliance(ctx context.Context) (fleetStats, error) {
 				a.Pass++
 			case "fail":
 				a.Fail++
-				a.FailingHosts = append(a.FailingHosts, host)
+				if len(a.FailingHosts) < maxListedHosts { // the count is in Fail; long lists help nobody
+					a.FailingHosts = append(a.FailingHosts, host)
+				}
 			case "excepted":
 				a.Excepted++
 			default:
@@ -968,6 +990,9 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session)
 		return
 	}
 	brokenAt, err := s.verifyAudit(r.Context())
+	if full := s.auditBroken.Load(); err == nil && brokenAt == 0 && full != 0 {
+		brokenAt = full
+	}
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -977,13 +1002,30 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session)
 
 // verifyAudit recomputes the hash chain. Returns the first broken id or 0.
 // ponytail: full scan per page view; checkpoint verified ranges when the log reaches millions of rows.
-func (s *Server) verifyAudit(ctx context.Context) (int64, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log ORDER BY id`)
+// verifyAudit checks the hash chain and returns the first broken entry (0 =
+// intact). The audit page verifies incrementally from the last checkpoint;
+// the daily background run verifies everything from the start.
+func (s *Server) verifyAudit(ctx context.Context) (int64, error) { return s.verifyAuditFrom(ctx, true) }
+
+func (s *Server) verifyAuditFrom(ctx context.Context, incremental bool) (int64, error) {
+	var from int64
+	prev := make([]byte, 32)
+	if incremental {
+		var hash []byte
+		err := s.db.QueryRow(ctx, `SELECT last_id, last_hash FROM audit_checkpoint`).Scan(&from, &hash)
+		switch {
+		case err == nil:
+			prev = hash
+		case !errors.Is(err, pgx.ErrNoRows):
+			return 0, err
+		}
+	}
+	rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE id > $1 ORDER BY id`, from)
 	if err != nil {
 		return 0, err
 	}
 	defer rows.Close()
-	prev := make([]byte, 32)
+	last := from
 	for rows.Next() {
 		var a auditRow
 		if err := rows.Scan(&a.ID, &a.At, &a.Actor, &a.Action, &a.Target, &a.Detail, &a.Prev, &a.Hash); err != nil {
@@ -992,9 +1034,16 @@ func (s *Server) verifyAudit(ctx context.Context) (int64, error) {
 		if !bytes.Equal(a.Prev, prev) || !bytes.Equal(a.Hash, auditHash(a.Prev, a.At, a.Actor, a.Action, a.Target, a.Detail)) {
 			return a.ID, nil
 		}
-		prev = a.Hash
+		prev, last = a.Hash, a.ID
 	}
-	return 0, rows.Err()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if last > from {
+		_, err = s.db.Exec(ctx, `INSERT INTO audit_checkpoint(one, last_id, last_hash, verified_at) VALUES (true, $1, $2, now())
+			ON CONFLICT (one) DO UPDATE SET last_id=EXCLUDED.last_id, last_hash=EXCLUDED.last_hash, verified_at=now()`, last, prev)
+	}
+	return 0, err
 }
 
 // ---- CSV exports (audit evidence) ----

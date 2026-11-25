@@ -184,9 +184,12 @@ type Server struct {
 	hooks *http.Client                 // webhook client; nil uses http.DefaultClient (tests inject one)
 
 	saveMu sync.Mutex // serializes settings saves
-	relMu  sync.Mutex // release manifest, reloaded when its modification time changes
-	relMod time.Time
-	rels   []api.Release
+	fleet  atomic.Pointer[fleetCache]
+	// first broken audit entry found by the last full verification, 0 = intact
+	auditBroken atomic.Int64
+	relMu       sync.Mutex // release manifest, reloaded when its modification time changes
+	relMod      time.Time
+	rels        []api.Release
 }
 
 func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
