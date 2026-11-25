@@ -850,7 +850,7 @@ func (s *Server) queueCommand(ctx context.Context, actor, id, typ, payload strin
 	var u api.UserCommand
 	if strings.HasPrefix(typ, "user_") && json.Unmarshal([]byte(payload), &u) == nil {
 		u.Password = "" // never in the audit log
-		b, _ := json.Marshal(u)
+		b, _ := json.Marshal(u) //nolint:gosec // the password was cleared just above
 		detail = string(b)
 	}
 	return s.auditAction(ctx, actor, "command."+typ, id, truncate(detail, 2000), func(tx pgx.Tx) error {
@@ -921,7 +921,7 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		if err := u.Validate(typ); err != nil {
 			return "", http.StatusBadRequest, err.Error()
 		}
-		b, _ := json.Marshal(u)
+		b, _ := json.Marshal(u) //nolint:gosec // signed command payload over mTLS, cleared from the database once applied
 		payload = string(b)
 	case typ == "software_remove":
 		if sess.Role != "admin" {
