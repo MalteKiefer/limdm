@@ -451,7 +451,9 @@ func activeLocalUser(uid uint32) bool {
 	}
 	out, err := sh("loginctl", "list-sessions", "--no-legend")
 	if err != nil {
-		return false
+		// no logind (OpenRC without elogind): a local graphical session of
+		// this user, found through its processes, counts instead
+		return slices.ContainsFunc(procSessions(), func(g graphicalSession) bool { return g.uid == itoa(uid) })
 	}
 	for _, l := range strings.Split(out, "\n") {
 		f := strings.Fields(l)

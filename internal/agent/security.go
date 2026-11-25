@@ -445,7 +445,7 @@ func (a *Agent) notifyEscrow() {
 		}
 	}
 	if sent {
-		a.state.EscrowNotified = time.Now()
+		a.state.EscrowNotified = time.Now().Round(0)
 	}
 }
 

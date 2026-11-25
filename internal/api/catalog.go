@@ -75,7 +75,9 @@ func (r CatalogRemote) Validate() error {
 	switch {
 	case !remoteNameRe.MatchString(r.Name):
 		return fmt.Errorf("remote name %q: letters, digits, dots, dashes", r.Name)
-	case !strings.HasPrefix(r.URL, "https://") && !strings.HasPrefix(r.URL, "oci+https://"):
+	// a blocked remote is matched by name and never used: an insecure one
+	// (http, file) must be blockable
+	case r.State != "blocked" && !strings.HasPrefix(r.URL, "https://") && !strings.HasPrefix(r.URL, "oci+https://"):
 		return fmt.Errorf("remote %s: URL must start with https:// or oci+https://", r.Name)
 	case len(r.URL) > 512 || strings.ContainsAny(r.URL, " \n\x00") || len(r.Title) > 80:
 		return fmt.Errorf("remote %s: URL up to 512 characters without spaces, title up to 80", r.Name)

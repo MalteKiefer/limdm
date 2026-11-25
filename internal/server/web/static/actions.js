@@ -187,6 +187,14 @@
     out.append(frag);
   };
 
+  // Enter in a field with data-enter submits with that field's own button,
+  // not with the form's first one ("Sync now" in the bulk bar)
+  document.addEventListener('keydown', (e) => {
+    const name = e.key === 'Enter' && e.target.dataset && e.target.dataset.enter;
+    const btn = name && e.target.form && e.target.form.querySelector(`button[name="action"][value="${CSS.escape(name)}"]`);
+    if (btn) { e.preventDefault(); e.target.form.requestSubmit(btn); }
+  });
+
   document.addEventListener('submit', (e) => {
     const form = e.target;
     if (form.matches('form[data-flathub-search]')) { e.preventDefault(); flathubSearch(form); return; }

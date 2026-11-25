@@ -2,6 +2,18 @@
 
 All notable changes, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+### Fixed
+- Login items without `mode` from before 0.11 (they carry `local_password`) keep login mode instead of turning into sessions.
+- Firewall rules with ports outside 1..65535 or reversed ranges are rejected; declaration tokens match for payloads with `&`, `<` or `>`.
+- Agent: commands older than 8 days are refused, a reused command ID after a database restore runs, re-enrollment forgets the previous server's key and command IDs.
+- Agent: maintenance windows, reboot checks and script intervals count suspended time; tamper reports are never dropped from a full queue, and text inside other events no longer counts as tamper.
+- Agent: the desktop socket works without logind, package manager calls run one at a time, a broken renewed certificate keeps the current one, terminals are ended on Alpine without utmp, a stuck update on OpenRC is reported and offered again.
+- Checks: dnf5 security advisories counted, deb822 comment stanzas left intact when a source is disabled, SDDM and LightDM drop-ins checked for autologin, sshd checks without host keys, Match Address blocks for local networks, installed NTP daemons kept, stricter `ptrace_scope` and `tcp_syncookies` kept.
+- Console: blueprints from directory groups show in the device list, filter and counts; helpdesk sees no audit details; insecure remotes can be blocked; Enter in the bulk tag field adds the tag; Retire, Remove from catalog and Revoke ask first; "Approve for everyone" keeps a required app required.
+- Docker: the state volume belongs to the nonroot user; fail2ban bans rejected enrollments on port 8444.
+
 ## 0.13.0
 
 ### Added

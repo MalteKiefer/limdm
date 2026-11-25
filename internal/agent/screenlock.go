@@ -221,14 +221,27 @@ func autologinSettings() []autologinSetting {
 		s = append(s, autologinSetting{f, "daemon", "AutomaticLoginEnable", "false", truthy},
 			autologinSetting{f, "daemon", "TimedLoginEnable", "false", truthy})
 	}
-	if exists("/etc/sddm.conf") {
-		s = append(s, autologinSetting{"/etc/sddm.conf", "Autologin", "User", "", notEmpty})
+	// drop-ins are read in name order and the last one wins, so every file
+	// counts, not only the main one (KDE writes sddm.conf.d/kde_settings.conf)
+	for _, f := range confWithDropins("/etc/sddm.conf", "/etc/sddm.conf.d") {
+		s = append(s, autologinSetting{f, "Autologin", "User", "", notEmpty})
 	}
-	if exists("/etc/lightdm/lightdm.conf") {
-		s = append(s, autologinSetting{"/etc/lightdm/lightdm.conf", "Seat:*", "autologin-user", "", notEmpty},
-			autologinSetting{"/etc/lightdm/lightdm.conf", "SeatDefaults", "autologin-user", "", notEmpty})
+	for _, f := range confWithDropins("/etc/lightdm/lightdm.conf", "/etc/lightdm/lightdm.conf.d") {
+		s = append(s, autologinSetting{f, "Seat:*", "autologin-user", "", notEmpty},
+			autologinSetting{f, "SeatDefaults", "autologin-user", "", notEmpty})
 	}
 	return s
+}
+
+// confWithDropins lists main and its drop-in files (*.conf) that exist.
+func confWithDropins(main, dir string) []string {
+	var out []string
+	if exists(main) {
+		out = append(out, main)
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "*.conf"))
+	slices.Sort(files)
+	return append(out, files...)
 }
 
 // unenforced names desktops installed here that no mechanism above covers.

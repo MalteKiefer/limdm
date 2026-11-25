@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/user"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -186,24 +189,62 @@ func endConsoleSessions() []string {
 // endTTYs ends people's terminal and SSH logins from utmp (who): every
 // process on their terminal gets SIGHUP, then SIGKILL.
 func endTTYs() []string {
-	out, err := sh("who")
-	if err != nil {
-		return nil
-	}
-	var ended []string
+	people := peopleAccounts()
+	ttys := map[string]string{} // tty -> user
+	out, _ := sh("who")
 	for _, l := range strings.Split(out, "\n") {
 		f := strings.Fields(l)
 		if len(f) < 2 || f[0] == "root" || !userRe.MatchString(f[0]) || !strings.HasPrefix(f[1], "pts/") && !strings.HasPrefix(f[1], "tty") {
 			continue
 		}
-		if !slices.Contains(peopleAccounts(), f[0]) {
+		if slices.Contains(people, f[0]) {
+			ttys[f[1]] = f[0]
+		}
+	}
+	// musl systems (Alpine) often keep no utmp, so who lists nobody: the
+	// terminals people's processes run on count as well
+	for tty, user := range procTTYs(people) {
+		ttys[tty] = user
+	}
+	var ended []string
+	for tty, user := range ttys {
+		_, _ = sh("pkill", "-HUP", "-t", tty)
+		_, _ = sh("pkill", "-KILL", "-t", tty)
+		ended = append(ended, user+" ("+tty+")")
+	}
+	slices.Sort(ended)
+	return ended
+}
+
+// procTTYs maps the terminals (pts/N, ttyN) that processes of people run on
+// to the user, from the standard input of each process.
+func procTTYs(people []string) map[string]string {
+	uids := map[uint32]string{}
+	for _, p := range people {
+		if u, err := user.Lookup(p); err == nil {
+			if id, err := strconv.ParseUint(u.Uid, 10, 32); err == nil {
+				uids[uint32(id)] = p
+			}
+		}
+	}
+	out := map[string]string{}
+	dirs, _ := filepath.Glob("/proc/[0-9]*")
+	for _, d := range dirs {
+		var st syscall.Stat_t
+		if syscall.Stat(d, &st) != nil {
 			continue
 		}
-		_, _ = sh("pkill", "-HUP", "-t", f[1])
-		_, _ = sh("pkill", "-KILL", "-t", f[1])
-		ended = append(ended, f[0]+" ("+f[1]+")")
+		name, ok := uids[st.Uid]
+		if !ok {
+			continue
+		}
+		if t, err := os.Readlink(d + "/fd/0"); err == nil {
+			if tty, ok := strings.CutPrefix(t, "/dev/"); ok && (strings.HasPrefix(tty, "pts/") || strings.HasPrefix(tty, "tty") && tty != "tty") {
+				out[tty] = name
+			}
+		}
 	}
-	return ended
+	return out
 }
 
 // lockSessions locks every graphical session: through logind first (the

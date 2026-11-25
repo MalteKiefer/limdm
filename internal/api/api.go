@@ -309,8 +309,8 @@ func (d Declaration) apply(p *Policy) error {
 			return err
 		}
 		for _, a := range p.Firewall.Allow {
-			if !portRe.MatchString(a) {
-				bad("invalid firewall rule %q", a)
+			if !validPortRule(a) {
+				bad("invalid firewall rule %q (port 1..65535, ranges low:high)", a)
 			}
 		}
 	case TypeOSVersion:
@@ -349,6 +349,16 @@ func (d Declaration) apply(p *Policy) error {
 		}
 		p.Login = v.Login
 		p.Login.Enabled = true
+		if p.Login.Mode == "" {
+			// items from before 0.11 have no mode but local_password: they meant
+			// SSO at every login, and keep that instead of turning into sessions
+			var keys map[string]json.RawMessage
+			if json.Unmarshal(d.Payload, &keys) == nil {
+				if _, legacy := keys["local_password"]; legacy {
+					p.Login.Mode = "login"
+				}
+			}
+		}
 		if !strings.HasPrefix(p.Login.Issuer, "https://") || p.Login.ClientID == "" {
 			bad("login needs https issuer and client_id")
 		}
@@ -393,6 +403,24 @@ func (d Declaration) Token() string {
 	json.Compact(&buf, d.Payload)
 	h := sha256.Sum256([]byte(d.Type + "\x00" + d.Identifier + "\x00" + buf.String()))
 	return hex.EncodeToString(h[:8])
+}
+
+// validPortRule checks "port/proto" and "low:high/proto" beyond the syntax:
+// ufw and firewalld reject 0, 99999 or reversed ranges, and the firewall
+// would then never be enabled.
+func validPortRule(r string) bool {
+	if !portRe.MatchString(r) {
+		return false
+	}
+	ports, _, _ := strings.Cut(r, "/")
+	lo, hi, isRange := strings.Cut(ports, ":")
+	l, errL := strconv.Atoi(lo)
+	h := l
+	var errH error
+	if isRange {
+		h, errH = strconv.Atoi(hi)
+	}
+	return errL == nil && errH == nil && l >= 1 && h <= 65535 && l <= h && (!isRange || l < h)
 }
 
 // DefaultDeclarations is the baseline an agent enforces before its first sync.

@@ -11,10 +11,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -24,6 +26,11 @@ import (
 // host describes the local system. family is "debian" (Debian, Ubuntu) or "fedora".
 type host struct {
 	ID, Version, Name, family string
+
+	// pkgMu runs package manager calls one at a time: catalog installs run
+	// in the background next to the check in's own installs and upgrades
+	pkgMu   sync.Mutex
+	cacheMu sync.Mutex // guards pkgs
 
 	aptUpdated time.Time
 	pending    pendingCache
@@ -189,6 +196,8 @@ func writeIfChanged(path, content string, mode os.FileMode) (bool, error) {
 // ---- package management ----
 
 func (h *host) installedPackages() ([]api.Package, string, error) {
+	h.cacheMu.Lock()
+	defer h.cacheMu.Unlock()
 	stamp := h.pkgDBStamp()
 	if stamp != "" && stamp == h.pkgs.stamp {
 		return h.pkgs.list, h.pkgs.hash, nil
@@ -239,9 +248,13 @@ func (h *host) nativePackages() ([]api.Package, error) {
 
 func (h *host) isInstalled(name string) bool {
 	// answered from the cached list while the package database is unchanged
+	h.cacheMu.Lock()
 	if stamp := h.pkgDBStamp(); stamp != "" && stamp == h.pkgs.stamp {
-		return h.pkgs.names[name]
+		ok := h.pkgs.names[name]
+		h.cacheMu.Unlock()
+		return ok
 	}
+	h.cacheMu.Unlock()
 	switch h.family {
 	case "debian":
 		out, err := run(30*time.Second, "dpkg-query", "-W", "-f", "${db:Status-Abbrev}", name)
@@ -269,6 +282,12 @@ func (h *host) aptUpdate() error {
 }
 
 func (h *host) install(pkgs ...string) error {
+	h.pkgMu.Lock()
+	defer h.pkgMu.Unlock()
+	return h.installLocked(pkgs...)
+}
+
+func (h *host) installLocked(pkgs ...string) error {
 	if len(pkgs) == 0 {
 		return nil
 	}
@@ -276,7 +295,7 @@ func (h *host) install(pkgs ...string) error {
 		if err := h.aptUpdate(); err != nil {
 			return err
 		}
-		_, err := run(30*time.Minute, "apt-get", append([]string{"install", "-y", "-q", "--no-install-recommends",
+		_, err := run(30*time.Minute, "apt-get", append([]string{"install", "-y", "-q", "--no-install-recommends", "-o", "DPkg::Lock::Timeout=300",
 			"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold", "--"}, pkgs...)...)
 		return err
 	}
@@ -293,11 +312,13 @@ func (h *host) install(pkgs ...string) error {
 }
 
 func (h *host) remove(pkgs ...string) error {
+	h.pkgMu.Lock()
+	defer h.pkgMu.Unlock()
 	if len(pkgs) == 0 {
 		return nil
 	}
 	if h.family == "debian" {
-		_, err := run(30*time.Minute, "apt-get", append([]string{"remove", "-y", "-q", "--"}, pkgs...)...)
+		_, err := run(30*time.Minute, "apt-get", append([]string{"remove", "-y", "-q", "-o", "DPkg::Lock::Timeout=300", "--"}, pkgs...)...)
 		return err
 	}
 	var err error
@@ -315,6 +336,8 @@ func (h *host) remove(pkgs ...string) error {
 // upgrade installs updates. securityOnly uses unattended-upgrades on Debian
 // family (security origins by default) and dnf's security filter on Fedora.
 func (h *host) upgrade(securityOnly bool) (string, error) {
+	h.pkgMu.Lock()
+	defer h.pkgMu.Unlock()
 	h.pending = pendingCache{}
 	switch h.family { // rolling releases have no separate security channel: always everything
 	case "arch":
@@ -331,7 +354,7 @@ func (h *host) upgrade(securityOnly bool) (string, error) {
 		}
 		if securityOnly {
 			if !hasCmd("unattended-upgrade") {
-				if err := h.install("unattended-upgrades"); err != nil {
+				if err := h.installLocked("unattended-upgrades"); err != nil {
 					return "", err
 				}
 			}
@@ -398,7 +421,10 @@ func (h *host) pendingUpdates() (all, security int, err error) {
 		return n, n, nil
 	}
 	if h.family == "debian" {
-		if err = h.aptUpdate(); err != nil {
+		h.pkgMu.Lock()
+		err = h.aptUpdate()
+		h.pkgMu.Unlock()
+		if err != nil {
 			return
 		}
 		var out string
@@ -435,11 +461,15 @@ func countAptPending(out string) (all, security int) {
 	return
 }
 
+// advisoryRe matches the advisory ID that starts every package line of
+// "dnf updateinfo list" (dnf4: ID, severity, package) and of dnf5's
+// "advisory list" table (ID, type, severity, package, issued).
+var advisoryRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[0-9]{4}[:-][0-9A-Za-z]+`)
+
 func countDnfLines(out string) int {
 	n := 0
 	for _, line := range strings.Split(out, "\n") {
-		f := strings.Fields(line)
-		if len(f) == 3 && !strings.HasSuffix(line, ":") && !strings.HasPrefix(line, "Obsoleting") {
+		if f := strings.Fields(line); len(f) >= 3 && advisoryRe.MatchString(f[0]) {
 			n++
 		}
 	}

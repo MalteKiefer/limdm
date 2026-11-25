@@ -9,7 +9,8 @@ ignoreip = 127.0.0.1/8 ::1
 enabled  = true
 backend  = systemd
 filter   = limdm
-port     = http,https
+# console sign ins on 80/443, rejected enrollments on the agent port
+port     = http,https,8444
 maxretry = 5
 findtime = 10m
 bantime  = 1h

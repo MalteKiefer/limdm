@@ -49,7 +49,7 @@
     <div><dt>{{t "User"}}</dt><dd>{{if .Primary}}<a href="/directory?q={{.Primary}}">{{.Primary}}</a>{{else}}–{{end}}</dd>
       <dt>{{t "Tags"}}</dt><dd>{{range .TagList}}<a class="tag" href="/devices?tag={{.}}">#{{.}}</a> {{else}}–{{end}}</dd>
       <dt>{{t "Signed in"}}</dt><dd>{{range .Inv.Users}}<span class="tag">{{.}}</span> {{else}}–{{end}}</dd></div>
-    <div><dt>{{t "Blueprint"}}</dt><dd>{{range .Blueprints}}{{if .Assigned}}<a href="/blueprints/{{.ID}}">{{.Name}}</a>{{end}}{{end}}</dd>
+    <div><dt>{{t "Blueprint"}}</dt><dd>{{range .Blueprints}}{{if .Applies}}<a href="/blueprints/{{.ID}}">{{.Name}}</a>{{end}}{{end}}</dd>
       <dt>{{t "Last check in"}}</dt><dd>{{ago .D.LastSeen}}</dd>
       <dt>{{t "Agent"}}</dt><dd><a href="/devices?agent={{.D.AgentVersion}}">{{.D.AgentVersion}}</a>{{if .D.UpdateRequested}} <span class="muted">· {{t "update requested"}}</span>{{else if .D.UpdateState}} <span class="muted">· {{.D.UpdateVersion}} {{t .D.UpdateState}}</span>{{end}}</dd></div>
     <div><dt>{{t "Network"}}</dt><dd>{{if .D.ExternalIP}}<span class="mono">{{.D.ExternalIP}}</span>{{else}}–{{end}}</dd>
@@ -464,7 +464,7 @@
 <section class="card">
   <h2>{{t "Retire device"}}</h2>
   <p class="muted">{{t "Revokes the client certificate immediately. The device can no longer check in; history is kept."}}</p>
-  <form method="post" action="/devices/{{$id}}/retire">{{template "csrf" .CSRF}}<button class="danger">{{t "Retire and revoke certificate"}}</button></form>
+  <form method="post" action="/devices/{{$id}}/retire">{{template "csrf" .CSRF}}<button class="danger" data-confirm="{{t "Retire this device and revoke its certificate? It can no longer check in."}}">{{t "Retire and revoke certificate"}}</button></form>
 </section>
 {{end}}
 {{end}}

@@ -288,7 +288,29 @@ func Enroll(server, token, fingerprint string, allowScripts bool) error {
 		return err
 	}
 	cfg, _ := json.MarshalIndent(Config{Server: server, DeviceID: er.DeviceID, AllowScripts: allowScripts}, "", "  ")
-	_, err = writeIfChanged(configFile, string(cfg)+"\n", 0o600)
+	if _, err = writeIfChanged(configFile, string(cfg)+"\n", 0o600); err != nil {
+		return err
+	}
+	return forgetServerState()
+}
+
+// forgetServerState drops what belonged to the previous enrollment: command
+// IDs are per server database, so old ones would mark new commands as done,
+// and the pinned key of another server would refuse every command.
+func forgetServerState() error {
+	b, err := os.ReadFile(stateFile)
+	if err != nil {
+		return nil // first enrollment
+	}
+	var st map[string]json.RawMessage
+	if json.Unmarshal(b, &st) != nil {
+		return os.Remove(stateFile)
+	}
+	for _, k := range []string{"command_key", "done_commands"} {
+		delete(st, k)
+	}
+	out, _ := json.Marshal(st)
+	_, err = writeIfChanged(stateFile, string(out), 0o600)
 	return err
 }
 
@@ -369,9 +391,15 @@ func (a *Agent) event(format string, args ...any) {
 func (a *Agent) addEvent(line string) {
 	a.evMu.Lock()
 	defer a.evMu.Unlock()
-	if len(a.state.Events) < 500 {
-		a.state.Events = append(a.state.Events, line)
+	if len(a.state.Events) >= 500 {
+		// full while offline: drop the oldest routine line, never a tamper report
+		i := slices.IndexFunc(a.state.Events, func(e string) bool { return !strings.Contains(e, " tamper: ") })
+		if i < 0 {
+			i = 0
+		}
+		a.state.Events = slices.Delete(a.state.Events, i, i+1)
 	}
+	a.state.Events = append(a.state.Events, line)
 }
 
 // pendingEvents copies the queued events.
@@ -685,7 +713,7 @@ func (a *Agent) maintenance(now time.Time) {
 	}
 	if now.Sub(a.state.LastUpdateRun) > 20*time.Hour {
 		out, err := a.host.upgrade(u.Mode == "security")
-		a.state.LastUpdateRun = now
+		a.state.LastUpdateRun = now.Round(0) // wall clock: the monotonic one stops during suspend
 		if err != nil {
 			a.problem(api.TypeUpdates, "updates (%s) failed: %v", u.Mode, err)
 		} else {
@@ -695,7 +723,7 @@ func (a *Agent) maintenance(now time.Time) {
 	// Schedule once: a new shutdown call would replace and postpone the pending one.
 	if u.Reboot && now.Sub(a.state.RebootPlanned) > time.Hour && a.host.rebootRequired() {
 		if _, err := sh("shutdown", "-r", "+5", "LiMDM: rebooting in 5 minutes to finish updates"); err == nil {
-			a.state.RebootPlanned = now
+			a.state.RebootPlanned = now.Round(0)
 			a.event("reboot scheduled after updates")
 		}
 	}
@@ -710,7 +738,7 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out = "ok"
 	case "update":
 		out, err = a.host.upgrade(false)
-		a.state.LastUpdateRun = time.Now()
+		a.state.LastUpdateRun = time.Now().Round(0)
 	case "reboot", "shutdown":
 		out, err = a.powerAction(c.Type, c.Payload, c.CreatedAt)
 	case "lock":
@@ -915,6 +943,11 @@ func (a *Agent) renewIdentity(ctx context.Context) {
 		}
 		return
 	}
+	// a broken answer must not replace a working identity
+	if _, err := tls.X509KeyPair([]byte(string(keyPEM)+resp.Cert), []byte(string(keyPEM)+resp.Cert)); err != nil {
+		a.event("renewed certificate unusable, keeping the current one: %v", err)
+		return
+	}
 	if _, err := writeIfChanged(identityFile, string(keyPEM)+resp.Cert, 0o600); err != nil {
 		a.event("storing renewed certificate failed: %v", err)
 		return
@@ -1031,19 +1064,25 @@ func (a *Agent) runCommands(cmds []api.Command) {
 		a.state.DoneCommands = map[int64]time.Time{}
 	}
 	for id, at := range a.state.DoneCommands {
-		if time.Since(at) > 30*24*time.Hour {
+		if time.Since(at) > 30*24*time.Hour { // created (or run) more than 30 days ago
 			delete(a.state.DoneCommands, id)
 		}
 	}
 	for _, c := range cmds {
-		if _, done := a.state.DoneCommands[c.ID]; done {
+		if at, done := a.state.DoneCommands[c.ID]; done && (at.Equal(c.CreatedAt) || at.After(c.CreatedAt) && at.Sub(c.CreatedAt) < 8*24*time.Hour) {
+			// recorded with its creation time (older states: the run time),
+			// so a reused ID after a database restore is a new command
 			// ran before, but its result never arrived (for example a reboot "now")
 			if !slices.ContainsFunc(a.state.Results, func(r api.CommandResult) bool { return r.ID == c.ID }) {
 				a.state.Results = append(a.state.Results, api.CommandResult{ID: c.ID, OK: true, Output: "executed; the device restarted before the result was sent"})
 			}
 			continue
 		}
-		a.state.DoneCommands[c.ID] = time.Now() // before running: a reboot must not repeat after restart
+		// before running: a reboot must not repeat after restart
+		a.state.DoneCommands[c.ID] = c.CreatedAt
+		if c.CreatedAt.IsZero() {
+			a.state.DoneCommands[c.ID] = time.Now()
+		}
 		a.saveState()
 		if err := a.verifyCommand(c); err != nil {
 			a.event("command %d (%s) refused: %v", c.ID, c.Type, err)
@@ -1100,7 +1139,15 @@ func (a *Agent) verifyCommand(c api.Command) error {
 	if err != nil {
 		return err
 	}
-	return api.VerifyCommand(ed25519.PublicKey(pub), a.cfg.DeviceID, c)
+	if err := api.VerifyCommand(ed25519.PublicKey(pub), a.cfg.DeviceID, c); err != nil {
+		return err
+	}
+	// the server expires commands after 7 days: an older one, signed or not,
+	// is a replay (a row set back to pending in the database)
+	if time.Since(c.CreatedAt) > 8*24*time.Hour {
+		return errors.New("command older than 8 days")
+	}
+	return nil
 }
 
 // apiError reads the server's RFC 9457 problem details, if any.

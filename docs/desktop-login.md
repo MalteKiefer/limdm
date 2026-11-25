@@ -47,6 +47,8 @@ confirmation.
    (default 168). Login mode (`"mode": "login"`): `reverify_hours` 1 to 2160 with
    `local_password`; `offline_grace_hours` (default 72, at most 720) lets a due confirmation
    wait while the device cannot reach the LiMDM server.
+   Without `mode` the item runs in session mode, except items written before 0.11:
+   those carry `local_password` and keep login mode.
 
 **Switching SSO off** (servers, kiosks): assign a login library item with
 `{"enabled": false}` to that blueprint. Declarations apply from the parent blueprint to the

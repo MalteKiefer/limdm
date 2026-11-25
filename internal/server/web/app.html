@@ -72,7 +72,7 @@
   </form>
   <div>
     {{if and (not .New) (eq .Sess.Role "admin")}}<form class="card" method="post" action="/software/apps/{{.App.ID}}/delete">{{template "csrf" .CSRF}}
-      <h2>{{t "Remove from catalog"}}</h2><p class="muted">{{t "Installed copies stay on the devices."}}</p><button class="danger">{{t "Remove"}}</button></form>{{end}}
+      <h2>{{t "Remove from catalog"}}</h2><p class="muted">{{t "Installed copies stay on the devices."}}</p><button class="danger" data-confirm="{{t "Remove this app from the catalog?"}}">{{t "Remove"}}</button></form>{{end}}
     <section class="card"><h2>{{t "How it installs"}}</h2>
       <p class="muted">{{t "The agent uses the first source that works on the device. An app counts as installed when any of its sources or further names is installed, so a distribution package is never installed again as Flatpak."}}</p></section>
   </div>

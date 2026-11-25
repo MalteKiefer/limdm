@@ -460,7 +460,7 @@ func (a *Agent) applyScripts(scripts []api.Script) error {
 		if time.Since(a.state.ScriptRuns[sc.Name]) < time.Duration(sc.IntervalHours)*time.Hour {
 			continue
 		}
-		a.state.ScriptRuns[sc.Name] = time.Now()
+		a.state.ScriptRuns[sc.Name] = time.Now().Round(0) // wall clock, suspend included
 		out, err := runScript(sc.Body)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", sc.Name, err))

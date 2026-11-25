@@ -40,11 +40,37 @@ func disableRepoContent(name, s string) string {
 	b.WriteString(disabledMark)
 	switch {
 	case strings.HasSuffix(name, ".sources"): // deb822: Enabled: no in every stanza
-		for i, st := range strings.Split(strings.TrimRight(s, "\n"), "\n\n") {
+		// stanzas end at blank lines (also whitespace only or CRLF); stanzas
+		// of comments only stay as they are, apt rejects "Enabled" without Types
+		var stanzas [][]string
+		cur := []string{}
+		for _, line := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
+			if strings.TrimSpace(line) == "" {
+				if len(cur) > 0 {
+					stanzas, cur = append(stanzas, cur), []string{}
+				}
+				continue
+			}
+			cur = append(cur, line)
+		}
+		if len(cur) > 0 {
+			stanzas = append(stanzas, cur)
+		}
+		for i, st := range stanzas {
 			if i > 0 {
 				b.WriteString("\n")
 			}
-			b.WriteString(strings.TrimRight(enabledKey.ReplaceAllString(st+"\n", ""), "\n") + "\nEnabled: no\n")
+			fields := false
+			for _, line := range st {
+				if t := strings.TrimSpace(line); !strings.HasPrefix(t, "#") {
+					fields = true
+				}
+			}
+			text := strings.Join(st, "\n") + "\n"
+			if fields {
+				text = strings.TrimRight(enabledKey.ReplaceAllString(text, ""), "\n") + "\nEnabled: no\n"
+			}
+			b.WriteString(text)
 		}
 	case strings.HasSuffix(name, ".repo"): // ini: enabled=0 in every section
 		for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {

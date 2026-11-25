@@ -628,8 +628,10 @@ var deCatalog = map[string]string{
 	"Allow uninstall for 1 hour": "Deinstallation für 1 Stunde erlauben",
 	"Connect Slack, Discord, email or a signed webhook to hear about non-compliant devices, tamper attempts and failed commands.": "Verbinde Slack, Discord, E-Mail oder einen signierten Webhook, um über nicht konforme Geräte, Manipulationsversuche und fehlgeschlagene Befehle informiert zu werden.",
 	"Incoming webhook": "Eingehender Webhook", "Channel webhook": "Kanal Webhook", "Your SMTP server": "Eigener SMTP Server",
-	"Signed JSON to any HTTPS endpoint":                                      "Signiertes JSON an einen HTTPS Endpunkt",
-	"Stored encrypted. Only https targets on public addresses are accepted.": "Wird verschlüsselt gespeichert. Nur https Ziele mit öffentlicher Adresse sind erlaubt.",
+	"Signed JSON to any HTTPS endpoint":                                         "Signiertes JSON an einen HTTPS Endpunkt",
+	"Stored encrypted. Only https targets on public addresses are accepted.":    "Wird verschlüsselt gespeichert. Nur https Ziele mit öffentlicher Adresse sind erlaubt.",
+	"Retire this device and revoke its certificate? It can no longer check in.": "Gerät außer Betrieb nehmen und Zertifikat widerrufen? Es kann danach nicht mehr einchecken.",
+	"Remove this app from the catalog?":                                         "App aus dem Katalog entfernen?", "Revoke this enrollment token?": "Diesen Registrierungstoken widerrufen?",
 	"Device events": "Geräteereignisse", "kept 365 days": "365 Tage aufbewahrt", "Event pages": "Ereignisseiten",
 	"and": "und", "more": "weitere",
 }

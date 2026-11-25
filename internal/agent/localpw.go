@@ -224,7 +224,7 @@ func (a *Agent) syncPasswordLocks() {
 // enforceOffline locks the device after offline_lock_hours without server
 // contact and unlocks it once a check in succeeds.
 func (a *Agent) enforceOffline(contact bool) {
-	now := time.Now().UTC()
+	now := time.Now().UTC().Round(0)
 	if contact || a.state.LastContact.IsZero() {
 		a.state.LastContact = now // zero: first start with this feature, do not lock right away
 	}

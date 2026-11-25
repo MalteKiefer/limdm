@@ -366,7 +366,8 @@ func (s *Server) requestDecide(w http.ResponseWriter, r *http.Request, sess sess
 		} else if err != nil {
 			return "", "", "", "", err
 		} else if op == "approve-all" {
-			if _, err := tx.Exec(ctx, `UPDATE catalog_apps SET mode='available', enabled=true, updated_at=now() WHERE slug=$1`, app); err != nil {
+			// "on request" opens up; a required app stays required
+			if _, err := tx.Exec(ctx, `UPDATE catalog_apps SET mode=CASE WHEN mode='request' THEN 'available' ELSE mode END, enabled=true, updated_at=now() WHERE slug=$1`, app); err != nil {
 				return "", "", "", "", err
 			}
 		}
@@ -412,7 +413,7 @@ func (s *Server) fleetFlatpaks(ctx context.Context) ([]fleetFlatpak, error) {
 		FROM devices d, jsonb_array_elements(coalesce(d.inventory->'flatpaks', '[]'::jsonb)) f
 		WHERE NOT d.retired AND f->>'id' IS NOT NULL
 		  AND NOT EXISTS (SELECT 1 FROM catalog_apps a, jsonb_array_elements(a.sources) src WHERE src->>'flatpak' = f->>'id')
-		GROUP BY 1 ORDER BY 3 DESC, 2`)
+		GROUP BY 1 ORDER BY 4 DESC, 2`)
 	if err != nil {
 		return nil, err
 	}
@@ -499,7 +500,7 @@ func (s *Server) appImport(w http.ResponseWriter, r *http.Request, sess session)
 // on devices, as allowed or blocked).
 func (s *Server) remoteSave(w http.ResponseWriter, r *http.Request, sess session) {
 	rem := api.CatalogRemote{Name: strings.TrimSpace(r.FormValue("name")), URL: strings.TrimSpace(r.FormValue("url")),
-		Title: strings.TrimSpace(r.FormValue("title")), State: r.FormValue("state"), CatalogOnly: r.FormValue("catalog_only") == "on"}
+		Title: truncate(strings.TrimSpace(r.FormValue("title")), 80), State: r.FormValue("state"), CatalogOnly: r.FormValue("catalog_only") == "on"}
 	if rem.State == "" {
 		rem.State = "allowed"
 	}

@@ -430,7 +430,11 @@ func (s *Server) deviceLimit(n int, next http.HandlerFunc) http.HandlerFunc {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(v); err != nil {
+	enc := json.NewEncoder(w)
+	// no HTML escaping: declaration payloads travel byte for byte, so the
+	// agent's declaration tokens match the server's (scripts with "&&")
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
 		slog.Warn("writing a JSON response failed", "err", err) // the client went away
 	}
 }
@@ -1018,18 +1022,20 @@ func (s *Server) storeEvents(ctx context.Context, tx pgx.Tx, id string, events [
 		if i >= 500 {
 			break
 		}
-		if _, msg, ok := strings.Cut(ev, " tamper: "); ok { // security relevant: chained audit log
-			tamper = append(tamper, msg)
-			if err := audit(ctx, tx, "device:"+id, "agent.tamper", id, truncate(ev, 2000)); err != nil {
-				return nil, err
-			}
-			continue
-		}
 		at, msg := time.Now().UTC(), ev
 		if ts, rest, ok := strings.Cut(ev, " "); ok {
 			if t, err := time.Parse(time.RFC3339, ts); err == nil {
 				at, msg = t, rest
 			}
+		}
+		// only the event itself, not text inside it (script output names
+		// anything): "<time> tamper: <message>"
+		if rest, ok := strings.CutPrefix(msg, "tamper: "); ok { // security relevant: chained audit log
+			tamper = append(tamper, rest)
+			if err := audit(ctx, tx, "device:"+id, "agent.tamper", id, truncate(ev, 2000)); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		evAt, evText = append(evAt, at), append(evText, truncate(msg, 2000))
 	}

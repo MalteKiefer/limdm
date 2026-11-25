@@ -312,7 +312,7 @@ func (s *Server) listDevicesWhere(ctx context.Context, where string, args ...any
 	rows, err := s.db.Query(ctx, `SELECT d.id, d.hostname, d.os_name, d.agent_version,
 		coalesce(b.name, 'default'), d.tags,
 		d.desktop, d.memory_mb, d.failing, d.checks_count, d.last_seen, d.retired, d.grace_until, d.auto_locked
-		FROM devices d LEFT JOIN blueprints b ON b.id = d.blueprint_id WHERE `+where+` ORDER BY d.retired, d.hostname`, args...)
+		FROM devices d LEFT JOIN blueprints b ON b.id = `+effectiveBlueprintSQL+` WHERE `+where+` ORDER BY d.retired, d.hostname`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -331,7 +331,7 @@ var deviceFilters = []struct{ Key, Label, Where string }{
 	{"app", "Catalog app installed", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.inventory->'apps', '[]'::jsonb)) a WHERE a->>'id' = $1 AND (a->>'installed')::boolean)`},
 	{"flatpak", "Flatpak installed", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.inventory->'flatpaks', '[]'::jsonb)) f WHERE f->>'id' = $1)`},
 	{"remote", "Flatpak remote", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.inventory->'flatpak_remotes', '[]'::jsonb)) r WHERE r->>'name' = $1)`},
-	{"blueprint", "Blueprint", `coalesce((SELECT name FROM blueprints WHERE id = d.blueprint_id), 'default') = $1`},
+	{"blueprint", "Blueprint", `(SELECT name FROM blueprints WHERE id = ` + effectiveBlueprintSQL + `) = $1`},
 	{"agent", "Agent version", `d.agent_version = $1`},
 	{"failing", "Failing check", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.checks, '[]'::jsonb)) c WHERE c->>'id' = $1 AND c->>'status' = 'fail')`},
 }
@@ -517,15 +517,17 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 	if len(failing) > 6 {
 		failing = failing[:6]
 	}
-	rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log ORDER BY id DESC LIMIT 8`)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	recent, err := pgx.CollectRows(rows, pgx.RowToStructByPos[auditRow])
-	if err != nil {
-		s.fail(w, err)
-		return
+	var recent []auditRow
+	if sess.Role != "helpdesk" { // the audit log (script bodies included) is not theirs to read
+		rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log ORDER BY id DESC LIMIT 8`)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		if recent, err = pgx.CollectRows(rows, pgx.RowToStructByPos[auditRow]); err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
 	donut := donutChart([]donutPart{{"compliant", counts["compliant"], "ok"}, {"non-compliant", counts["non-compliant"], "bad"},
 		{"in grace", counts["in grace"], "warn"}, {"stale", counts["stale"], "warn"}, {"pending", counts["pending"], "na"}})

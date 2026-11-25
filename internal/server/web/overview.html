@@ -41,10 +41,10 @@
       {{else}}<p class="muted">{{t "No devices enrolled."}}</p>{{end}}
     </section>
   </div>
-  <section class="card">
+  {{if ne .Sess.Role "helpdesk"}}<section class="card">
     <div class="card-head"><h2>{{t "Recent activity"}}</h2><a class="muted" href="/audit">{{t "Audit log"}}</a></div>
     {{if .Recent}}<ul class="feed">{{range .Recent}}<li><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{fmtTime .At}}</time><div class="what"><b>{{.Action}}</b><span class="actor">{{.Actor}}</span>{{if .Detail}}<span class="sub muted">{{.Detail}}</span>{{end}}</div></li>{{end}}</ul>
     {{else}}<p class="muted">{{t "Nothing recorded yet."}}</p>{{end}}
-  </section>
+  </section>{{end}}
 </div>
 {{end}}

@@ -200,7 +200,7 @@ func TestUserAndSoftwareCommands(t *testing.T) {
 }
 
 func TestLoginCanBeSwitchedOff(t *testing.T) {
-	on := Declaration{Identifier: "sso", Type: TypeLogin, Payload: []byte(`{"issuer":"https://accounts.google.com","client_id":"x","local_password":true,"reverify_hours":24,"offline_grace_hours":360}`)}
+	on := Declaration{Identifier: "sso", Type: TypeLogin, Payload: []byte(`{"issuer":"https://accounts.google.com","client_id":"x","mode":"session","reverify_hours":24,"offline_grace_hours":360}`)}
 	off := Declaration{Identifier: "servers", Type: TypeLogin, Payload: []byte(`{"enabled":false}`)}
 	p, st := Compose([]Declaration{on})
 	if !p.Login.Enabled || !p.Login.Session() || p.Login.GraceHours != 168 || !st[0].Valid {
@@ -223,11 +223,24 @@ func TestLoginModes(t *testing.T) {
 	if !st[0].Valid || p.Login.Mode != "session" || !p.Login.LocalPassword || p.Login.ReverifyHours != 720 || p.Login.GraceHours != 168 {
 		t.Fatalf("session defaults: %+v %+v", p.Login, st)
 	}
+	// a pre 0.11 item (local_password, no mode) keeps SSO at every login
+	p, st = Compose([]Declaration{d(`{"issuer":"https://a","client_id":"x","local_password":false}`)})
+	if !st[0].Valid || p.Login.Session() || p.Login.LocalPassword {
+		t.Fatalf("legacy item: %+v %+v", p.Login, st)
+	}
 	if _, st := Compose([]Declaration{d(`{"issuer":"https://a","client_id":"x","mode":"kiosk"}`)}); st[0].Valid {
 		t.Fatal("unknown mode accepted")
 	}
 	p, st = Compose([]Declaration{d(`{"issuer":"https://a","client_id":"x","mode":"login","local_password":true,"reverify_hours":24}`)})
 	if !st[0].Valid || p.Login.Session() {
 		t.Fatalf("login mode: %+v", p.Login)
+	}
+}
+
+func TestFirewallPortRanges(t *testing.T) {
+	for r, want := range map[string]bool{"22/tcp": true, "60000:61000/udp": true, "0/tcp": false, "99999/tcp": false, "2000:1000/tcp": false, "80:80/tcp": false} {
+		if validPortRule(r) != want {
+			t.Errorf("%s: want %v", r, want)
+		}
 	}
 }
