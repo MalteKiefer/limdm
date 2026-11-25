@@ -108,7 +108,8 @@ func (a *Agent) applyUsers() error {
 			errs = append(errs, err)
 			continue
 		}
-		forgetSSO(name) // coming back later must not skip the SSO confirmation
+		_, _ = sh("loginctl", "terminate-user", name) // disabled in the directory: running sessions end too
+		forgetSSO(name)                               // coming back later must not skip the SSO confirmation
 		delete(a.state.RemovePending, name)
 		a.event("locked removed user %s", name)
 	}
@@ -286,8 +287,8 @@ func PAMAuth() int {
 		fmt.Print(offlineText)
 		return 1
 	}
-	if !ssoDue(cfg, username, now) && !passwordLocked(username) {
-		return 1 // confirmed recently: pam_unix checks the local password
+	if !ssoLockWanted(cfg, username, now) && !passwordLocked(username) {
+		return 1 // bound and not overdue: pam_unix checks the local password
 	}
 	if cfg.LocalPassword {
 		if err := checkLocalPassword(username, pw); err != nil {
@@ -312,32 +313,53 @@ func PAMAuth() int {
 }
 
 func deviceLogin(ctx context.Context, cfg api.Login, email string) error {
+	flow, err := startDeviceFlow(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	// the mapped email is not shown: the user is not authenticated yet
+	fmt.Printf("Confirm the sign in with your company account:\nOpen %s and enter the code %s\n", flow.URI, flow.Code)
+	return flow.finish(ctx, cfg, email)
+}
+
+// deviceFlow is a started OAuth device authorization: the user opens URI
+// and enters Code, finish waits for the confirmation and checks the account.
+type deviceFlow struct {
+	URI, Code string
+	provider  *oidc.Provider
+	oc        oauth2.Config
+	da        *oauth2.DeviceAuthResponse
+}
+
+func startDeviceFlow(ctx context.Context, cfg api.Login) (*deviceFlow, error) {
 	p, err := oidc.NewProvider(ctx, cfg.Issuer)
 	if err != nil {
-		return errors.New("identity provider unreachable")
+		return nil, errors.New("identity provider unreachable")
 	}
 	ep := p.Endpoint()
 	if ep.DeviceAuthURL == "" {
-		return errors.New("provider does not support the device authorization grant")
+		return nil, errors.New("provider does not support the device authorization grant")
 	}
 	oc := oauth2.Config{ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, Endpoint: ep,
 		Scopes: []string{oidc.ScopeOpenID, "email", "profile"}}
 	da, err := oc.DeviceAuth(ctx)
 	if err != nil {
-		return fmt.Errorf("device authorization: %w", err)
+		return nil, fmt.Errorf("device authorization: %w", err)
 	}
 	uri := da.VerificationURIComplete
 	if uri == "" {
 		uri = da.VerificationURI
 	}
-	// the mapped email is not shown: the user is not authenticated yet
-	fmt.Printf("Confirm the sign in with your company account:\nOpen %s and enter the code %s\n", uri, da.UserCode)
-	tok, err := oc.DeviceAccessToken(ctx, da)
+	return &deviceFlow{URI: uri, Code: da.UserCode, provider: p, oc: oc, da: da}, nil
+}
+
+func (f *deviceFlow) finish(ctx context.Context, cfg api.Login, email string) error {
+	tok, err := f.oc.DeviceAccessToken(ctx, f.da)
 	if err != nil {
 		return errors.New("not confirmed")
 	}
 	raw, _ := tok.Extra("id_token").(string)
-	idt, err := p.Verifier(&oidc.Config{ClientID: cfg.ClientID}).Verify(ctx, raw)
+	idt, err := f.provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}).Verify(ctx, raw)
 	if err != nil {
 		return errors.New("invalid ID token")
 	}
@@ -388,6 +410,9 @@ var pamServices = map[string]bool{
 	"login": true, "gdm-password": true, "gdm-fingerprint": false, "lightdm": true, "sddm": true, "lxdm": true, "slim": true,
 	"kde": true, "gnome-screensaver": true, "xscreensaver": true, "cinnamon-screensaver": true, "mate-screensaver": true,
 	"xfce4-screensaver": true, "sudo": true, "sudo-i": true, "su": true, "su-l": true, "polkit-1": true,
+	// greeters and lockers of compositors and window managers
+	"greetd": true, "cosmic-greeter": true, "swaylock": true, "hyprlock": true, "gtklock": true, "waylock": true,
+	"i3lock": true, "xsecurelock": true, "kscreensaver": true, "plasma-login": true, "lxqt-lockscreen": true,
 }
 
 func localService(service, rhost string) bool {

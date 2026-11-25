@@ -507,6 +507,18 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 	}
 	pending := commands
 	if !pending {
+		// a desktop user of this device was suspended or deleted in the directory
+		// since the last check in: the device locks the account at once
+		if err := s.db.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM devices d, jsonb_array_elements(d.users) u
+			WHERE d.id=$1 AND d.last_seen IS NOT NULL AND (
+				EXISTS (SELECT 1 FROM dir_users du WHERE lower(du.email)=lower(u->>'email') AND NOT du.active AND du.updated_at > d.last_seen)
+				OR EXISTS (SELECT 1 FROM dir_tombstones t WHERE t.email=lower(u->>'email') AND t.removed_at > d.last_seen)))`, id).Scan(&pending); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+	if !pending {
 		// agent updates can be security fixes: a due version triggers a check in
 		// at once, unless it was just handed out and is being installed
 		rel, clearTarget, err := s.dueUpdate(ctx, s.db, id, running)

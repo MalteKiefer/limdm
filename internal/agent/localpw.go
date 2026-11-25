@@ -103,6 +103,30 @@ func ssoDueAt(p pamPolicy, last time.Time, confirmed, offline bool, now time.Tim
 	return !offline || age > reverify+p.Grace()
 }
 
+// ssoLockWanted: the local password of a managed user must be locked, so
+// only an SSO confirmation at the login screen lets them in. Session mode:
+// never confirmed, or overdue beyond the grace period while the device is
+// online. Login mode: whenever a confirmation is due.
+func ssoLockWanted(p pamPolicy, user string, now time.Time) bool {
+	if !p.Session() {
+		return ssoDue(p, user, now)
+	}
+	t, ok := readSSO()[user]
+	return sessionLock(p, t, ok, serverOffline(now), now)
+}
+
+func sessionLock(p pamPolicy, last time.Time, confirmed, offline bool, now time.Time) bool {
+	if !confirmed {
+		return true
+	}
+	return !offline && now.Sub(last) > time.Duration(p.ReverifyHours+p.GraceHours)*time.Hour
+}
+
+// sessionDue: the desktop app should ask for a confirmation in the session.
+func sessionDue(p pamPolicy, last time.Time, now time.Time) bool {
+	return now.Sub(last) > time.Duration(p.ReverifyHours)*time.Hour
+}
+
 // serverOffline: the agent has not reached the LiMDM server for 30 minutes.
 func serverOffline(now time.Time) bool {
 	var st struct {
@@ -176,7 +200,7 @@ func (a *Agent) syncPasswordLocks() {
 	}
 	now := time.Now()
 	for user := range readUsers() {
-		want := a.state.OfflineLocked || deviceLocked() || ssoDue(p, user, now)
+		want := a.state.OfflineLocked || deviceLocked() || ssoLockWanted(p, user, now)
 		has := passwordLocked(user)
 		switch {
 		case want && !has:
