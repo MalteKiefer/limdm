@@ -435,7 +435,7 @@ func (s *Server) libraryEdit(w http.ResponseWriter, r *http.Request, sess sessio
 		return
 	}
 	s.render(w, r, sess, "item", map[string]any{"It": it, "Payload": pretty.String(), "AllTypes": sortedTypes(),
-		"Example": prettyJSON(api.Types[it.Type]), "UsedBy": use[it.ID]})
+		"Example": prettyJSON(api.Types[it.Type]), "Examples": itemExamples(), "UsedBy": use[it.ID]})
 }
 
 func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess session) {
@@ -444,7 +444,7 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		Description: strings.TrimSpace(r.FormValue("description")), Payload: json.RawMessage(r.FormValue("payload"))}
 	fail := func(err error) {
 		s.render(w, r, sess, "item", map[string]any{"It": it, "Payload": r.FormValue("payload"), "AllTypes": sortedTypes(),
-			"Example": prettyJSON(api.Types[it.Type]), "Error": err.Error()})
+			"Example": prettyJSON(api.Types[it.Type]), "Examples": itemExamples(), "Error": err.Error()})
 	}
 	if it.Type == api.TypeCertificates {
 		p, err := addUploadedCerts(r, it.Payload)
@@ -718,6 +718,8 @@ func addUploadedCerts(r *http.Request, payload json.RawMessage) (json.RawMessage
 			return nil, fmt.Errorf("settings: %w", err)
 		}
 	}
+	// the editor's example entry is no certificate: an upload replaces it
+	v.Certificates = slices.DeleteFunc(v.Certificates, func(c api.Certificate) bool { return strings.HasSuffix(strings.TrimSpace(c.PEM), "-----...") })
 	base := strings.ToLower(nonName.ReplaceAllString(strings.TrimSuffix(filepath.Base(hdr.Filename), filepath.Ext(hdr.Filename)), "-"))
 	base = strings.Trim(base, "-._")
 	if base == "" {
@@ -744,4 +746,14 @@ func addUploadedCerts(r *http.Request, payload json.RawMessage) (json.RawMessage
 		return nil, errors.New("the uploaded file contains no PEM certificate")
 	}
 	return json.Marshal(v)
+}
+
+// itemExamples are the example settings per type, for the item editor to
+// swap when the type changes.
+func itemExamples() map[string]string {
+	m := make(map[string]string, len(api.Types))
+	for t, ex := range api.Types {
+		m[t] = prettyJSON(ex)
+	}
+	return m
 }

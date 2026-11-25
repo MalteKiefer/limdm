@@ -6,11 +6,12 @@
 </div>
 {{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
 <div class="grid side-right">
+  <script type="application/json" id="item-examples">{{.Examples}}</script>
   <form class="card" method="post" action="/library" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.It.ID}}">
     <div class="inline">
       <label>{{t "Name"}}<input name="name" value="{{.It.Name}}" required maxlength="100"></label>
-      <label>{{t "Type"}}<select name="type">{{$cur := .It.Type}}{{range .AllTypes}}<option value="{{.}}" {{if eq . $cur}}selected{{end}}>{{typeLabel .}}</option>{{end}}</select></label>
+      <label>{{t "Type"}}<select name="type" data-examples="item-examples" data-example-target="item-example">{{$cur := .It.Type}}{{range .AllTypes}}<option value="{{.}}" {{if eq . $cur}}selected{{end}}>{{typeLabel .}}</option>{{end}}</select></label>
     </div>
     <label>{{t "Description"}}<input name="description" value="{{.It.Description}}" maxlength="300"></label>
     <label>{{t "Settings"}} <span class="hint">{{t "JSON, validated strictly before saving"}}</span>
@@ -19,7 +20,7 @@
     {{if eq .Sess.Role "admin"}}<div class="form-foot"><span class="muted">{{t "Devices pick up changes at their next check in."}}</span><button>{{t "Save item"}}</button></div>{{end}}
   </form>
   <div>
-    <section class="card"><h2>{{t "Example"}}</h2><pre class="fp">{{.Example}}</pre>
+    <section class="card"><h2>{{t "Example"}}</h2><pre class="fp" id="item-example">{{.Example}}</pre>
       <p class="muted">{{t "Lists (packages, services, files, firewall rules, OS minimums) from several items are merged; for every other type the item evaluated last in the blueprint wins."}}</p></section>
     {{if and .It.ID (eq .Sess.Role "admin") (not .UsedBy)}}
     <form class="card" method="post" action="/library/{{.It.ID}}/delete"><input type="hidden" name="csrf" value="{{.CSRF}}">

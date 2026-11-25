@@ -68,3 +68,23 @@ document.addEventListener('click', async (e) => {
   await navigator.clipboard.writeText(b.dataset.copy);
   b.textContent = b.dataset.copied || '✓';
 });
+
+// library item editor: a type change swaps the example settings, unless the
+// settings were edited (then only the example card changes)
+document.addEventListener('change', (e) => {
+  const sel = e.target.closest('select[data-examples]');
+  if (!sel) return;
+  let examples;
+  try { examples = JSON.parse(document.getElementById(sel.dataset.examples).textContent); } catch { return; }
+  const ex = examples[sel.value];
+  if (ex === undefined) return;
+  const card = document.getElementById(sel.dataset.exampleTarget);
+  const area = sel.form && sel.form.querySelector('textarea[name=payload]');
+  if (area) {
+    const prev = sel.dataset.prevExample !== undefined ? sel.dataset.prevExample : (card ? card.textContent : '');
+    const norm = (s) => s.replace(/\s+/g, '');
+    if (area.value.trim() === '' || norm(area.value) === norm(prev)) area.value = ex;
+  }
+  if (card) card.textContent = ex;
+  sel.dataset.prevExample = ex;
+});
