@@ -23,6 +23,8 @@
           {{if not .Blocked}}<form method="post" action="/agents/{{.Version}}/block"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary small">{{t "Block"}}</button></form>{{end}}
         </td>{{end}}
       </tr>{{else}}<tr><td colspan="7" class="empty">{{t "No versions fetched yet. The server checks every six hours."}}</td></tr>{{end}}</tbody>
+      {{if .Older}}<tbody><tr><td colspan="7" class="more"><a href="/agents?older=1">{{t "Show older versions"}} <span class="n">{{.Older}}</span></a> <span class="muted">{{t "older than every agent in use"}}</span></td></tr></tbody>
+      {{else if .ShowingAll}}<tbody><tr><td colspan="7" class="more"><a href="/agents">{{t "Hide older versions"}}</a></td></tr></tbody>{{end}}
     </table></div>
   </section>
 <div class="grid two">

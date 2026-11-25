@@ -187,3 +187,12 @@ func TestPublicAddr(t *testing.T) {
 		}
 	}
 }
+
+func TestSplitOlder(t *testing.T) {
+	rels := []releaseView{{agentRelease: agentRelease{Version: "0.9.0"}, Devices: 1}, {agentRelease: agentRelease{Version: "0.8.5"}},
+		{agentRelease: agentRelease{Version: "0.8.4"}, Devices: 1}, {agentRelease: agentRelease{Version: "0.8.3"}}, {agentRelease: agentRelease{Version: "0.7.0"}, Failed: 1}}
+	cur, old := splitOlder(rels, []versionCount{{"0.9.0", 1}, {"0.8.4", 1}})
+	if len(cur) != 4 || len(old) != 1 || old[0].Version != "0.8.3" {
+		t.Fatalf("current %v older %v", cur, old)
+	}
+}
