@@ -110,6 +110,11 @@ var extraExamples = map[string]string{
 	TypeScripts:       `{"scripts": [{"name": "cleanup", "interval_hours": 24, "body": "#!/bin/sh\njournalctl --vacuum-time=30d"}]}`,
 }
 
+var (
+	proxyURLRe = regexp.MustCompile(`^https?://([A-Za-z0-9._~%-]+(:[A-Za-z0-9._~%-]*)?@)?[A-Za-z0-9.\[\]:-]+(/[A-Za-z0-9._~/-]*)?$`)
+	noProxyRe  = regexp.MustCompile(`^[A-Za-z0-9.,:/*_\[\]-]*$`)
+)
+
 func init() {
 	for t, ex := range extraExamples {
 		Types[t] = ex
@@ -287,13 +292,14 @@ func (d Declaration) applyExtra(p *Policy) (bool, error) {
 		if err := strict(d.Payload, &v); err != nil {
 			return true, err
 		}
+		// values end up in shell, apt and dnf config files: allowlist only
 		for _, u := range []string{v.HTTP, v.HTTPS} {
-			if pu, err := url.Parse(u); u != "" && (err != nil || (pu.Scheme != "http" && pu.Scheme != "https") || pu.Host == "" || strings.ContainsAny(u, " \"'\n")) {
+			if pu, err := url.Parse(u); u != "" && (err != nil || !proxyURLRe.MatchString(u) || pu.Host == "") {
 				bad("invalid proxy URL %q", u)
 			}
 		}
-		if strings.ContainsAny(v.NoProxy, " \"'\n") {
-			bad("no_proxy must be a comma separated list without spaces")
+		if !noProxyRe.MatchString(v.NoProxy) {
+			bad("no_proxy must be a comma separated list of hosts, domains or networks")
 		}
 		p.Extra.Proxy = &v
 	case TypeFlatpak:

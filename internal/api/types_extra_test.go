@@ -58,12 +58,14 @@ func TestExtraTypesValidate(t *testing.T) {
 		"ssh value injection":   `{"options":{"Banner":"/etc/issue\nPermitRootLogin yes"}}`,
 		"dns hostname":          `{"servers":["dns.example.com"]}`,
 		"proxy quote injection": `{"http":"http://p:3128\" ; rm -rf /"}`,
+		"proxy command subst":   `{"http":"http://p$(id):3128/"}`,
+		"no_proxy backtick":     `{"no_proxy":"localhost,` + "`id`" + `"}`,
 		"flatpak option":        `{"install":["--user"]}`,
 		"script interval":       `{"scripts":[{"name":"x","interval_hours":0,"body":"true"}]}`,
 	}
 	types := map[string]string{"unsigned repository": TypeRepositories, "http repository": TypeRepositories, "leaf certificate": TypeCertificates,
 		"sysctl injection": TypeSysctl, "weakening ssh option": TypeSSH, "ssh value injection": TypeSSH, "dns hostname": TypeDNS,
-		"proxy quote injection": TypeProxy, "flatpak option": TypeFlatpak, "script interval": TypeScripts}
+		"proxy quote injection": TypeProxy, "proxy command subst": TypeProxy, "no_proxy backtick": TypeProxy, "flatpak option": TypeFlatpak, "script interval": TypeScripts}
 	for name, payload := range bad {
 		if (LibraryItem{Name: "x", Type: types[name], Payload: json.RawMessage(payload)}).Validate() == nil {
 			t.Errorf("%s accepted", name)

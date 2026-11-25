@@ -273,7 +273,8 @@ func (a *Agent) applyProxy(p *api.Proxy) error {
 		e.WriteString(managedHeader)
 		for k, v := range map[string]string{"http_proxy": p.HTTP, "https_proxy": p.HTTPS, "no_proxy": p.NoProxy} {
 			if v != "" {
-				fmt.Fprintf(&b, "export %s=%q\nexport %s=%q\n", k, v, strings.ToUpper(k), v)
+				q := "'" + strings.ReplaceAll(v, "'", `'\''`) + "'" // single quotes: no shell expansion
+				fmt.Fprintf(&b, "export %s=%s\nexport %s=%s\n", k, q, strings.ToUpper(k), q)
 				fmt.Fprintf(&e, "%s=%s\n%s=%s\n", k, v, strings.ToUpper(k), v)
 			}
 		}
