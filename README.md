@@ -27,9 +27,12 @@ and 2) and ISO/IEC 27001:2022 Annex A.
 | Concept | Meaning |
 |---|---|
 | Declaration | One piece of desired state: `identifier`, `type`, `payload`. Any change changes its `server_token`. |
-| Blueprint | A set of declarations with a priority. If several blueprints of a device declare the same type, the lowest priority number wins. `default` applies to every device. |
+| Library item | A reusable, validated declaration payload, for example "CIS Level 1 baseline" or "Proxy Berlin". |
+| Blueprint | An assignment map: library items plus `if` nodes with rules on device facts (OS, version, architecture, desktop, vendor, model, hostname, tags, directory groups, department), nested freely. A blueprint can inherit from a parent, whose map is evaluated first. Each device has exactly one blueprint: set explicitly, through the group of its primary user, or `default`. The server merges the selected items into one declaration per type (lists are combined, otherwise the last item wins). |
+| Directory | People and groups from SCIM 2.0 (Okta, Entra ID, authentik, JumpCloud) or Google Workspace (Directory API, hourly). Groups map to blueprints; people become primary users of devices. |
+| Compliance policy | The compliance item carries a grace period, a signed webhook notification and optional automatic lock and unlock. |
 | Status | The agent reports per declaration whether it is `valid` and `active`, with reasons, plus status items (inventory, compliance checks). It only sends status when its hash changes. |
-| Command | One off actions only: `sync`, `update`, `reboot`, `script` (scripts only if allowed on the device at enrollment). |
+| Command | One off actions only: `sync`, `update`, `reboot`, `shutdown`, `lock`, `unlock`, `script` (scripts only if allowed on the device at enrollment). |
 | Inventory | Hardware, disks, volumes with encryption state, memory, OS, desktop environment, packages, and (with consent via the privacy declaration) accounts and network interfaces. Collected with [osquery](https://osquery.io), which the agent requires. |
 
 ### Declaration types
@@ -47,6 +50,14 @@ and 2) and ISO/IEC 27001:2022 Annex A.
 | `com.limdm.screenlock` | `{"idle_seconds": 300}` (GNOME, locked against user changes) |
 | `com.limdm.login` | `{"issuer": "https://accounts.google.com", "client_id": "...", "client_secret": "...", "allowed_domain": "example.com"}` |
 | `com.limdm.privacy` | `{"network_info": false, "logged_in_users": false}` |
+| `com.limdm.repositories` | signed package sources with a pinned key (https only) |
+| `com.limdm.certificates` | CA certificates for the system trust store |
+| `com.limdm.sysctl`, `com.limdm.kernelmodules` | kernel parameters, blocked modules |
+| `com.limdm.ssh`, `com.limdm.banner` | hardening sshd options (allowlist), login banner |
+| `com.limdm.dns`, `com.limdm.ntp`, `com.limdm.proxy` | resolvers, time servers, system proxy |
+| `com.limdm.flatpak`, `com.limdm.scripts` | Flatpak apps, recurring scripts (only where scripts are allowed) |
+
+The console shows an example payload for every type.
 
 Payloads are validated strictly (unknown fields, package and unit names against option
 injection, paths against traversal), by the server on save and again by the agent
@@ -138,6 +149,10 @@ requirements (policies, roles, risk analysis, training) stay with the ISMS.
    ```
 
    `reset`, `disable`, `enable` and `list` manage existing accounts.
+6. Everything else (OIDC, local login, stale threshold, compliance webhook, console users,
+   directory connections) is configured in the console under **Settings**, **Users** and
+   **Directory**. Secrets are stored encrypted with a key derived from `LIMDM_SESSION_KEY`.
+   The console is available in English and German.
 
 ### Behind Caddy
 
@@ -242,7 +257,7 @@ make snapshot
 * The CA key is a 0600 file, no HSM/PKCS#11 yet; the agent key is a file, no TPM binding.
 * The desktop login client secret is stored unencrypted in the database and on the device
   (0600, root only).
-* No group based roles from Google Workspace yet; admins and auditors are configured by email.
+* Console roles (admin, helpdesk, auditor) are assigned per user in the console, not yet from directory groups.
 
 ## License
 
