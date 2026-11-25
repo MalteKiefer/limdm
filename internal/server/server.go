@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
@@ -18,6 +19,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -182,6 +184,7 @@ type Server struct {
 	cfg    Config
 	db     *pgxpool.Pool
 	ca     *deviceCA
+	cmdKey ed25519.PrivateKey // signs commands (command.key next to the CA)
 	log    *slog.Logger
 	limit  limiter
 	rt     atomic.Pointer[runtimeState] // settings editable in the UI and the OIDC client built from them
@@ -231,7 +234,11 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	}
 
 	log.Info("device CA ready", "fingerprint", ca.Fingerprint())
-	s := &Server{cfg: cfg, db: db, ca: ca, log: log, geoSem: make(chan struct{}, 1)}
+	cmdKey, err := loadOrCreateCommandKey(cfg.CADir)
+	if err != nil {
+		return nil, fmt.Errorf("command key: %w", err)
+	}
+	s := &Server{cfg: cfg, db: db, ca: ca, cmdKey: cmdKey, log: log, geoSem: make(chan struct{}, 1)}
 	if err := s.seedConsoleUsers(ctx); err != nil {
 		return nil, err
 	}
@@ -273,7 +280,7 @@ func (s *Server) AdminHandler() http.Handler {
 	mux.HandleFunc("POST /logout", s.logout)
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	s.webRoutes(mux)
-	return securityHeaders(mux)
+	return securityHeaders(s.consoleFilter(mux))
 }
 
 // AgentHandler serves the agent API. Everything except fetching the CA and
@@ -572,7 +579,8 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		if res.OK {
 			status = "ok"
 		}
-		if _, err := tx.Exec(ctx, `UPDATE commands SET status=$3, output=$4, updated_at=now() WHERE id=$1 AND device_id=$2 AND status='sent'`,
+		if _, err := tx.Exec(ctx, `UPDATE commands SET status=$3, output=$4, updated_at=now(),
+			payload=CASE WHEN type IN ('user_create','user_password') THEN '' ELSE payload END WHERE id=$1 AND device_id=$2 AND status='sent'`,
 			res.ID, id, status, truncate(res.Output, 64<<10)); err != nil {
 			s.fail(w, err)
 			return
@@ -623,7 +631,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			Console: s.cfg.PublicURL + "/devices/" + id}
 	}
 
-	resp := api.CheckinResponse{ServerTime: time.Now().UTC(),
+	resp := api.CheckinResponse{ServerTime: time.Now().UTC(), CommandKey: hex.EncodeToString(s.cmdKey.Public().(ed25519.PublicKey)),
 		NeedStatus: statusHash != req.StatusHash, NeedPackages: pkgHash != req.PackagesHash}
 	res, err := resolveDevice(ctx, tx, id)
 	if err != nil {
@@ -694,20 +702,21 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	}
 	// Commands are delivered until a result arrives (the agent ignores IDs it
 	// already ran), so a lost response cannot drop them. After 7 days they expire.
-	if _, err := tx.Exec(ctx, `UPDATE commands SET status='expired', updated_at=now()
+	if _, err := tx.Exec(ctx, `UPDATE commands SET status='expired', updated_at=now(),
+		payload=CASE WHEN type IN ('user_create','user_password') THEN '' ELSE payload END
 		WHERE device_id=$1 AND status IN ('pending','sent') AND created_at < now() - interval '7 days'`, id); err != nil {
 		s.fail(w, err)
 		return
 	}
 	rows, err := tx.Query(ctx, `UPDATE commands SET status='sent', updated_at=now() WHERE device_id=$1 AND status IN ('pending','sent')
-		RETURNING id, type, payload, created_at`, id)
+		RETURNING id, type, payload, created_at, signature`, id)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	resp.Commands, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (api.Command, error) {
 		var c api.Command
-		return c, row.Scan(&c.ID, &c.Type, &c.Payload, &c.CreatedAt)
+		return c, row.Scan(&c.ID, &c.Type, &c.Payload, &c.CreatedAt, &c.Signature)
 	})
 	if err != nil {
 		s.fail(w, err)
@@ -786,4 +795,28 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "\n[truncated]"
+}
+
+// consoleFilter refuses console requests from networks outside the allowed
+// list or in the blocked list. Health checks, SCIM (bearer token, the
+// identity provider's addresses) and the install script for devices stay
+// reachable.
+func (s *Server) consoleFilter(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if p == "/healthz" || p == "/install.sh" || strings.HasPrefix(p, "/scim/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if rt := s.rt.Load(); rt != nil && !consoleAllowed(rt, clientIP(r)) {
+			ip := "invalid"
+			if a, err := netip.ParseAddr(clientIP(r)); err == nil {
+				ip = a.String() // parsed, never the raw header text
+			}
+			s.log.Warn("console request refused by network list", "ip", ip)
+			http.Error(w, "access from this network is not allowed", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

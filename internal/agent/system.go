@@ -193,7 +193,7 @@ func (h *host) nativePackages() ([]api.Package, error) {
 	if h.family == "debian" {
 		out, err = run(time.Minute, "dpkg-query", "-W", "-f", "${db:Status-Abbrev}\t${Package}\t${Version}\t${Architecture}\n")
 	} else {
-		out, err = run(time.Minute, "rpm", "-qa", "--qf", "ii \t%{NAME}\t%{VERSION}-%{RELEASE}\t%{ARCH}\n")
+		out, err = run(time.Minute, "rpm", "-qa", "--qf", "ii \t%{NAME}\t%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}\t%|ARCH?{%{ARCH}}|\n")
 	}
 	if err != nil {
 		return nil, err
@@ -201,7 +201,7 @@ func (h *host) nativePackages() ([]api.Package, error) {
 	var pkgs []api.Package
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Split(line, "\t")
-		if len(f) == 4 && strings.HasPrefix(f[0], "ii") {
+		if len(f) == 4 && strings.HasPrefix(f[0], "ii") && f[1] != "gpg-pubkey" {
 			pkgs = append(pkgs, api.Package{Name: f[1], Version: f[2], Arch: f[3]})
 		}
 	}
@@ -277,14 +277,33 @@ func (h *host) upgrade(securityOnly bool) (string, error) {
 			}
 			return run(2*time.Hour, "unattended-upgrade", "-v")
 		}
-		return run(2*time.Hour, "apt-get", "upgrade", "-y", "-q", "--with-new-pkgs",
+		// wait for dpkg instead of failing while unattended-upgrades or PackageKit holds it
+		out, err := run(2*time.Hour, "apt-get", "upgrade", "-y", "-q", "--with-new-pkgs", "-o", "DPkg::Lock::Timeout=900",
 			"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold")
+		return out + flatpakUpgrade(), err
 	}
 	args := []string{"upgrade", "-y", "-q", "--refresh"}
 	if securityOnly {
 		args = append(args, "--security")
 	}
-	return run(2*time.Hour, "dnf", args...)
+	out, err := run(2*time.Hour, "dnf", args...)
+	if !securityOnly {
+		out += flatpakUpgrade()
+	}
+	return out, err
+}
+
+// flatpakUpgrade updates system wide Flatpak apps and runtimes too, so
+// "install all updates" means all; its errors are reported, not fatal.
+func flatpakUpgrade() string {
+	if !hasCmd("flatpak") {
+		return ""
+	}
+	out, err := run(time.Hour, "flatpak", "update", "-y", "--noninteractive", "--system")
+	if err != nil {
+		return "\nflatpak: " + err.Error()
+	}
+	return "\n" + lastLines(out, 10)
 }
 
 // pendingUpdates counts available updates; cached for an hour because it hits the mirrors.
@@ -399,15 +418,27 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 		Source:    "native",
 		MachineID: readTrim("/etc/machine-id"), OSID: h.ID, OSVersion: h.Version, OSName: h.Name,
 		Kernel: readTrim("/proc/sys/kernel/osrelease"), Arch: runtime.GOARCH,
-		Vendor: readTrim("/sys/class/dmi/id/sys_vendor"), Model: readTrim("/sys/class/dmi/id/product_name"),
-		Serial: readTrim("/sys/class/dmi/id/product_serial"),
+		Vendor: cleanDMI(readTrim("/sys/class/dmi/id/sys_vendor")), Model: cleanDMI(readTrim("/sys/class/dmi/id/product_name")),
+		Serial: cleanDMI(readTrim("/sys/class/dmi/id/product_serial")),
+	}
+	if inv.Model == "" { // ARM boards (Raspberry Pi …) describe themselves in the device tree
+		inv.Model = strings.TrimRight(readTrim("/proc/device-tree/model"), "\x00")
+	}
+	if inv.Serial == "" {
+		inv.Serial = strings.TrimRight(readTrim("/proc/device-tree/serial-number"), "\x00")
 	}
 	inv.Hostname, _ = os.Hostname()
 	sc := bufio.NewScanner(strings.NewReader(readFile("/proc/cpuinfo")))
-	for sc.Scan() {
-		if k, v, ok := strings.Cut(sc.Text(), ":"); ok && strings.TrimSpace(k) == "model name" {
-			inv.CPU = strings.TrimSpace(v)
-			break
+	for sc.Scan() { // x86 has "model name"; ARM kernels "Hardware", "Model" or "CPU part"
+		if k, v, ok := strings.Cut(sc.Text(), ":"); ok {
+			switch strings.TrimSpace(k) {
+			case "model name":
+				inv.CPU = strings.TrimSpace(v)
+			case "Hardware", "Model":
+				if inv.CPU == "" {
+					inv.CPU = strings.TrimSpace(v)
+				}
+			}
 		}
 	}
 	for _, line := range strings.Split(readFile("/proc/meminfo"), "\n") {
@@ -437,6 +468,7 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 	annotateSSO(inv.Accounts)
 	inv.Repos = h.repos()
 	inv.Flatpaks, inv.FlatpakRemotes = flatpakInventory(inv.Accounts)
+	inv.Snaps, inv.AppImages = snapInventory(), appImageInventory()
 	inv.Desktop, inv.DisplayManager = desktop()
 	inv.Interfaces, inv.DNS, inv.Routes, inv.VPNs = network(priv)
 	if out, err := run(30*time.Second, "who"); err == nil && priv.LoggedInUsers {

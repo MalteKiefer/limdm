@@ -16,8 +16,28 @@
   against the device CA in the server, not only in the handshake.
 * **Agent updates** need an Ed25519 signature from an offline release key compiled into
   the agent. Downgrades are refused.
+* **Signed commands.** Every command (lock, wipe, script, message …) is signed when it
+  is created, with an Ed25519 key in `command.key` next to the CA key, never in the
+  database. The signature covers device, command ID, type, creation time and payload. The
+  agent pins the public key at its first check in with a signing server and from then on
+  runs only commands with a valid signature; refused ones are reported and logged. Whoever
+  can only write to the database cannot make a device run anything. Recovery keys for lost
+  mode travel beside the signed payload, inside the mTLS channel. Back up `command.key`
+  with the CA: a new key makes every device refuse commands until it is re-enrolled.
+* **Fallback DNS.** When the system resolver cannot resolve the server's name or none of
+  its addresses answers, the agent asks Cloudflare (1.1.1.1, 1.0.0.1) and Google (8.8.8.8,
+  8.8.4.4) over DNS over HTTPS, by IP and with their certificates checked; plain DNS on
+  port 53 is never used for this. A wrong answer cannot redirect the agent: TLS still
+  verifies the server's name against the pinned CA. `"no_fallback_dns": true` in
+  `/etc/limdm/config.json` turns it off for networks that must not reach public resolvers.
 
 ## Console
+
+* **Network lists.** **Settings**, **Console access by network** limits the console to
+  allowed networks (addresses or CIDR ranges) and refuses blocked ones, even when allowed.
+  Loopback is always allowed, saving a list that would lock out your own address is
+  refused, and the agent API, health check, SCIM and the install script are not affected.
+  Behind a reverse proxy on the same host the address comes from X-Forwarded-For.
 
 * HTTPS only. Without its own certificate the console binds to loopback and runs behind a
   local TLS proxy such as Caddy.

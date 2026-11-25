@@ -63,7 +63,9 @@ func (h *host) ensureOsquery() error {
 
 // osq runs one query; osquery returns every column as a string.
 func osq(query string) ([]map[string]string, error) {
-	out, err := run(time.Minute, osqueryi, "--json", query)
+	// an explicit database path: osqueryi otherwise writes below $HOME, which
+	// is unset or / for a service; events are not needed for single queries
+	out, err := run(time.Minute, osqueryi, "--json", "--database_path="+stateDir+"/osqueryi.db", "--disable_events", query)
 	if err != nil {
 		return nil, err
 	}
@@ -111,20 +113,21 @@ func enrichFromOsquery(inv *api.Inventory) {
 		if mem := atou(s["physical_memory"]); mem > 0 {
 			inv.MemoryMB = mem >> 20
 		}
-		inv.Vendor = firstNonEmpty(s["hardware_vendor"], inv.Vendor)
-		inv.Model = firstNonEmpty(s["hardware_model"], inv.Model)
-		inv.Serial = firstNonEmpty(s["hardware_serial"], inv.Serial)
+		inv.Vendor = firstNonEmpty(cleanDMI(s["hardware_vendor"]), inv.Vendor)
+		inv.Model = firstNonEmpty(cleanDMI(s["hardware_model"]), inv.Model)
+		inv.Serial = firstNonEmpty(cleanDMI(s["hardware_serial"]), inv.Serial)
 	}
 	if r, err := osq("SELECT name, version, codename FROM os_version"); err == nil && len(r) == 1 {
 		inv.OSCodename = r[0]["codename"]
 	}
 	if r, err := osq("SELECT vendor, version FROM platform_info"); err == nil && len(r) == 1 {
-		inv.BIOSVendor, inv.BIOSVersion = r[0]["vendor"], r[0]["version"]
+		inv.BIOSVendor, inv.BIOSVersion = cleanDMI(r[0]["vendor"]), cleanDMI(r[0]["version"])
 	}
 	if r, err := osq("SELECT swap_total FROM memory_info"); err == nil && len(r) == 1 {
 		inv.SwapMB = atou(r[0]["swap_total"]) >> 20
 	}
-	if r, err := osq("SELECT name, model, size, block_size, type FROM block_devices WHERE parent = '' AND name NOT LIKE '/dev/loop%' AND name NOT LIKE '/dev/ram%' AND name NOT LIKE '/dev/zram%' AND name NOT LIKE '/dev/sr%'"); err == nil && len(r) > 0 {
+	if r, err := osq("SELECT name, model, size, block_size, type FROM block_devices WHERE parent = '' AND name NOT LIKE '/dev/loop%' AND name NOT LIKE '/dev/ram%' AND name NOT LIKE '/dev/zram%' AND name NOT LIKE '/dev/sr%'" +
+		" AND name NOT LIKE '/dev/dm-%' AND name NOT LIKE '/dev/nbd%' AND name NOT LIKE '/dev/zd%' AND name NOT LIKE '/dev/mtdblock%' AND name NOT LIKE '/dev/fd%'"); err == nil && len(r) > 0 {
 		var disks []api.Disk
 		for _, d := range r {
 			size := atou(d["size"]) * max(atou(d["block_size"]), 1)
@@ -137,6 +140,18 @@ func enrichFromOsquery(inv *api.Inventory) {
 			inv.Disks = disks
 		}
 	}
+}
+
+// cleanDMI drops the placeholders vendors leave in firmware fields.
+func cleanDMI(v string) string {
+	v = strings.TrimSpace(v)
+	switch strings.ToLower(strings.Trim(v, ". ")) {
+	case "", "to be filled by o.e.m", "to be filled by oem", "default string", "system serial number", "system product name",
+		"system manufacturer", "system version", "not specified", "not applicable", "none", "n/a", "na", "oem", "o.e.m",
+		"0", "00000000", "0123456789", "123456789", "chassis serial number", "invalid", "unknown", "xxxxxxxxxxxx":
+		return ""
+	}
+	return v
 }
 
 func firstNonEmpty(v ...string) string {
@@ -156,6 +171,11 @@ func diskType(dev string) string {
 		return "nvme"
 	case strings.HasPrefix(name, "vd") || strings.HasPrefix(name, "xvd"):
 		return "virtual"
+	case strings.HasPrefix(name, "mmcblk"): // eMMC or SD card
+		if readTrim("/sys/block/"+name+"/device/type") == "SD" {
+			return "sd"
+		}
+		return "emmc"
 	}
 	switch readTrim("/sys/block/" + name + "/queue/rotational") {
 	case "0":
@@ -197,7 +217,8 @@ func nativeDisks() []api.Disk {
 	return disks
 }
 
-var localFS = map[string]bool{"ext4": true, "ext3": true, "xfs": true, "btrfs": true, "vfat": true, "f2fs": true, "zfs": true}
+var localFS = map[string]bool{"ext4": true, "ext3": true, "ext2": true, "xfs": true, "btrfs": true, "bcachefs": true, "vfat": true,
+	"exfat": true, "ecryptfs": true, "ntfs": true, "ntfs3": true, "f2fs": true, "zfs": true, "jfs": true, "nilfs2": true, "reiserfs": true}
 
 func nativeVolumes() []api.Volume {
 	out, err := sh("findmnt", "-J", "-b", "-l", "-o", "SOURCE,TARGET,FSTYPE,SIZE,AVAIL")
@@ -227,67 +248,207 @@ func nativeVolumes() []api.Volume {
 			continue
 		}
 		seen[f.Target] = true
-		vols = append(vols, api.Volume{Device: dev, Mount: f.Target, FS: f.FSType, SizeGB: f.Size >> 30, FreeGB: f.Avail >> 30, Encrypted: onLUKS(dev)})
+		method := volumeEncryption(dev, f.FSType, f.Target)
+		vols = append(vols, api.Volume{Device: dev, Mount: f.Target, FS: f.FSType, SizeGB: f.Size >> 30, FreeGB: f.Avail >> 30,
+			Encrypted: method != "", Encryption: method})
 	}
 	sort.Slice(vols, func(i, j int) bool { return vols[i].Mount < vols[j].Mount })
 	return vols
 }
 
-// onLUKS reports whether a block device sits on a dm-crypt mapping.
-func onLUKS(dev string) bool {
-	if !strings.HasPrefix(dev, "/dev/") {
-		return false
+// volumeEncryption names how a mounted file system is encrypted, "" when it
+// is not: dm-crypt below it (any layering: LVM on LUKS, LUKS on LVM, RAID),
+// native ZFS encryption, eCryptfs. A Btrfs file system spanning several
+// devices counts only when every device is encrypted.
+func volumeEncryption(src, fstype, target string) string {
+	switch fstype {
+	case "zfs":
+		out, err := sh("zfs", "get", "-H", "-o", "value", "encryption", src)
+		if v := strings.TrimSpace(out); err == nil && v != "off" && v != "-" && v != "" {
+			return "ZFS native (" + v + ")"
+		}
+		return ""
+	case "ecryptfs":
+		return "eCryptfs"
 	}
-	out, err := sh("lsblk", "-s", "-n", "-o", "TYPE", dev)
-	return err == nil && strings.Contains(" "+strings.Join(strings.Fields(out), " ")+" ", " crypt ")
+	if !strings.HasPrefix(src, "/dev/") {
+		return ""
+	}
+	devs := []string{src}
+	if fstype == "btrfs" && target != "" {
+		if out, err := sh("btrfs", "filesystem", "show", target); err == nil {
+			if d := btrfsDevices(out); len(d) > 0 {
+				devs = d
+			}
+		}
+	}
+	method := ""
+	for _, d := range devs {
+		m := dmCryptType(d)
+		if m == "" {
+			return "" // one plain device leaves data unencrypted
+		}
+		method = m
+	}
+	return method
 }
 
-// desktop detects the installed desktop environment and display manager.
+// btrfsDevices reads the "devid … path /dev/x" lines of btrfs filesystem show.
+func btrfsDevices(out string) []string {
+	var devs []string
+	for _, l := range strings.Split(out, "\n") {
+		f := strings.Fields(l)
+		if len(f) >= 2 && f[0] == "devid" && strings.HasPrefix(f[len(f)-1], "/dev/") {
+			devs = append(devs, f[len(f)-1])
+		}
+	}
+	return devs
+}
+
+// dmCryptType finds the dm-crypt mapping below a device and its type from
+// cryptsetup (LUKS1, LUKS2, PLAIN, TCRYPT, BITLK; hw-opal for self
+// encrypting drives); "" when the device is not encrypted.
+func dmCryptType(dev string) string {
+	if !strings.HasPrefix(dev, "/dev/") {
+		return ""
+	}
+	out, err := sh("lsblk", "-s", "-n", "-r", "-o", "NAME,TYPE", dev)
+	if err != nil {
+		return ""
+	}
+	name := ""
+	for _, l := range strings.Split(out, "\n") {
+		if f := strings.Fields(l); len(f) == 2 && f[1] == "crypt" {
+			name = f[0]
+			break
+		}
+	}
+	if name == "" {
+		return ""
+	}
+	st, err := sh("cryptsetup", "status", name)
+	if err != nil {
+		return "dm-crypt"
+	}
+	return cryptTypeOf(st)
+}
+
+func cryptTypeOf(status string) string {
+	typ, opal := "dm-crypt", false
+	for _, l := range strings.Split(status, "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(l), ":")
+		switch {
+		case ok && k == "type":
+			typ = strings.TrimSpace(v)
+			if typ == "PLAIN" {
+				typ = "plain dm-crypt"
+			}
+		case strings.Contains(l, "hw-opal"):
+			opal = true
+		}
+	}
+	if opal {
+		typ += " hw-opal"
+	}
+	return typ
+}
+
+// desktop reports the desktop in use (the running sessions' XDG_CURRENT_DESKTOP)
+// or, without a session, the installed one, and the display manager.
 func desktop() (env, dm string) {
-	switch {
-	case hasCmd("gnome-shell"):
-		env = "GNOME"
+	for _, gs := range graphicalSessions() {
+		for _, kv := range gs.env {
+			if v, ok := strings.CutPrefix(kv, "XDG_CURRENT_DESKTOP="); ok && v != "" {
+				env = desktopName(v)
+			}
+		}
+		if env != "" {
+			break
+		}
+	}
+	if env == "" {
+		env = installedDesktop()
+	}
+	return strings.TrimSpace(env), displayManager()
+}
+
+// desktopName turns XDG_CURRENT_DESKTOP ("ubuntu:GNOME", "labwc:wlroots",
+// "X-Cinnamon") into a name, with the version where the desktop reports one.
+func desktopName(xdg string) string {
+	parts := strings.Split(xdg, ":")
+	name := parts[0]
+	for _, p := range parts { // "ubuntu:GNOME", "Budgie:GNOME": the first known name wins
+		if desktopVersion(p) != "" || knownDesktops[strings.ToLower(p)] != "" {
+			name = p
+			break
+		}
+	}
+	if v := desktopVersion(name); v != "" {
+		return v
+	}
+	if n := knownDesktops[strings.ToLower(name)]; n != "" {
+		return n
+	}
+	return strings.TrimPrefix(name, "X-")
+}
+
+var knownDesktops = map[string]string{
+	"x-cinnamon": "Cinnamon", "cinnamon": "Cinnamon", "xfce": "Xfce", "mate": "MATE", "cosmic": "COSMIC", "budgie": "Budgie",
+	"lxqt": "LXQt", "lxde": "LXDE", "pantheon": "Pantheon", "deepin": "Deepin", "enlightenment": "Enlightenment",
+	"hyprland": "Hyprland", "niri": "niri", "river": "river", "labwc": "labwc", "wayfire": "Wayfire", "i3": "i3",
+	"openbox": "Openbox", "awesome": "awesome", "bspwm": "bspwm", "qtile": "Qtile", "dwm": "dwm", "unity": "Unity",
+}
+
+// desktopVersion asks the desktops that report a version.
+func desktopVersion(name string) string {
+	switch strings.ToLower(name) {
+	case "gnome":
 		if out, err := sh("gnome-shell", "--version"); err == nil {
-			env = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "GNOME Shell"))
-			env = "GNOME " + env
+			return "GNOME " + strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "GNOME Shell"))
 		}
-	case hasCmd("plasmashell"):
-		env = "KDE Plasma"
+		return "GNOME"
+	case "kde":
 		if out, err := sh("plasmashell", "--version"); err == nil {
-			env = "KDE Plasma " + strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "plasmashell"))
+			return "KDE Plasma " + strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "plasmashell"))
 		}
-	case hasCmd("cinnamon-session"):
-		env = "Cinnamon"
-	case hasCmd("xfce4-session"):
-		env = "Xfce"
-	case hasCmd("mate-session"):
-		env = "MATE"
-	case hasCmd("cosmic-session"):
-		env = "COSMIC"
-	case hasCmd("budgie-desktop"):
-		env = "Budgie"
-	case hasCmd("lxqt-session"):
-		env = "LXQt"
-	case hasCmd("sway"):
-		env = "Sway"
+		return "KDE Plasma"
+	case "sway":
 		if out, err := sh("sway", "--version"); err == nil {
-			env = "Sway " + strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "sway version"))
+			return "Sway " + strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "sway version"))
 		}
-	case hasCmd("Hyprland"):
-		env = "Hyprland"
-	case hasCmd("niri"):
-		env = "niri"
-	case hasCmd("river"):
-		env = "river"
-	case hasCmd("labwc"):
-		env = "labwc"
-	case hasCmd("i3"):
-		env = "i3"
+		return "Sway"
 	}
+	return ""
+}
+
+// installedDesktop is the first desktop found installed (servers, no session).
+func installedDesktop() string {
+	for _, c := range []struct{ cmd, name string }{
+		{"gnome-shell", "GNOME"}, {"plasmashell", "KDE"}, {"cinnamon-session", "Cinnamon"}, {"xfce4-session", "Xfce"},
+		{"mate-session", "MATE"}, {"cosmic-session", "COSMIC"}, {"budgie-desktop", "Budgie"}, {"lxqt-session", "LXQt"},
+		{"gala", "Pantheon"}, {"startdde", "Deepin"}, {"lxsession", "LXDE"}, {"enlightenment", "Enlightenment"},
+		{"sway", "sway"}, {"Hyprland", "Hyprland"}, {"niri", "niri"}, {"river", "river"}, {"labwc", "labwc"},
+		{"wayfire", "Wayfire"}, {"i3", "i3"}, {"openbox", "Openbox"}, {"awesome", "awesome"}, {"bspwm", "bspwm"}, {"qtile", "Qtile"},
+	} {
+		if hasCmd(c.cmd) {
+			return desktopName(c.name)
+		}
+	}
+	return ""
+}
+
+// displayManager reads systemd's display-manager alias, or finds a running one.
+func displayManager() string {
 	if target, err := os.Readlink("/etc/systemd/system/display-manager.service"); err == nil {
-		dm = strings.TrimSuffix(filepath.Base(target), ".service")
+		return strings.TrimSuffix(filepath.Base(target), ".service")
 	}
-	return strings.TrimSpace(env), dm
+	running := userProcs()["0"]
+	for _, dm := range []string{"gdm", "gdm3", "sddm", "lightdm", "greetd", "lxdm", "ly", "slim", "xdm", "cosmic-greeter"} {
+		if running[dm] {
+			return dm
+		}
+	}
+	return ""
 }
 
 // osqueryPackages returns installed packages from osquery.
@@ -297,11 +458,16 @@ func (h *host) osqueryPackages() ([]api.Package, error) {
 	}
 	q := "SELECT name, version, arch FROM deb_packages WHERE status LIKE '%installed'"
 	if h.family != "debian" {
-		q = "SELECT name, version || '-' || release AS version, arch FROM rpm_packages"
+		// with the epoch as rpm compares versions; gpg-pubkey entries are keys, not packages
+		q = "SELECT name, CASE WHEN epoch NOT IN ('', '0') THEN epoch || ':' ELSE '' END || version || '-' || release AS version," +
+			" CASE WHEN arch = '(none)' THEN '' ELSE arch END AS arch FROM rpm_packages WHERE name != 'gpg-pubkey'"
 	}
 	rows, err := osq(q)
 	if err != nil {
 		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, errors.New("osquery returned no packages") // the native list is used instead
 	}
 	pkgs := make([]api.Package, 0, len(rows))
 	for _, r := range rows {

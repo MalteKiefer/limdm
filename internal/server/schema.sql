@@ -351,3 +351,9 @@ ALTER TABLE catalog_requests ALTER COLUMN app DROP NOT NULL;
 ALTER TABLE catalog_requests ADD COLUMN IF NOT EXISTS flatpak TEXT NOT NULL DEFAULT '';
 ALTER TABLE catalog_requests ADD COLUMN IF NOT EXISTS remote TEXT NOT NULL DEFAULT '';
 ALTER TABLE catalog_requests ADD COLUMN IF NOT EXISTS app_name TEXT NOT NULL DEFAULT '';
+
+-- icon hash computed once per write, not per catalog query and check in
+ALTER TABLE catalog_apps ADD COLUMN IF NOT EXISTS icon_hash TEXT GENERATED ALWAYS AS (coalesce(encode(sha256(icon), 'hex'), '')) STORED;
+
+-- Ed25519 signature of each command (command.key), checked by the agent
+ALTER TABLE commands ADD COLUMN IF NOT EXISTS signature TEXT NOT NULL DEFAULT '';

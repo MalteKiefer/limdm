@@ -20,7 +20,7 @@
 {{end}}
 <div class="grid side-right">
   <form class="card" method="post" action="/software/apps" enctype="multipart/form-data">
-    <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="new" value="{{if .New}}1{{end}}">
+    {{template "csrf" .CSRF}}<input type="hidden" name="new" value="{{if .New}}1{{end}}">
     <div class="inline">
       <label>{{t "ID"}} <span class="hint">{{t "lower case, digits, dashes"}}</span><input name="id" value="{{.App.ID}}" required pattern="[a-z0-9][a-z0-9-]{0,47}" {{if not .New}}readonly{{end}}></label>
       <label>{{t "Name"}}<input name="name" value="{{.App.Name}}" required maxlength="80"></label>
@@ -71,7 +71,7 @@
     {{if eq .Sess.Role "admin"}}<div class="form-foot"><span class="muted">{{t "Devices pick up changes at their next check in."}}</span><button>{{t "Save"}}</button></div>{{end}}
   </form>
   <div>
-    {{if and (not .New) (eq .Sess.Role "admin")}}<form class="card" method="post" action="/software/apps/{{.App.ID}}/delete"><input type="hidden" name="csrf" value="{{.CSRF}}">
+    {{if and (not .New) (eq .Sess.Role "admin")}}<form class="card" method="post" action="/software/apps/{{.App.ID}}/delete">{{template "csrf" .CSRF}}
       <h2>{{t "Remove from catalog"}}</h2><p class="muted">{{t "Installed copies stay on the devices."}}</p><button class="danger">{{t "Remove"}}</button></form>{{end}}
     <section class="card"><h2>{{t "How it installs"}}</h2>
       <p class="muted">{{t "The agent uses the first source that works on the device. An app counts as installed when any of its sources or further names is installed, so a distribution package is never installed again as Flatpak."}}</p></section>

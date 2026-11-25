@@ -83,11 +83,12 @@ func keepOnlyKey(dev, key string) error {
 	})
 }
 
-func (a *Agent) lostMode(payload string) (string, error) {
+func (a *Agent) lostMode(payload string, attached []api.RecoveryKey) (string, error) {
 	var lm api.LostMode
 	if err := json.Unmarshal([]byte(payload), &lm); err != nil {
 		return "", err
 	}
+	lm.Keys = append(lm.Keys, attached...) // sent beside the signed payload
 	text := lostPrefix
 	if m := strings.TrimSpace(lm.Message); m != "" {
 		text += m + "\n"
@@ -95,15 +96,24 @@ func (a *Agent) lostMode(payload string) (string, error) {
 	if _, err := writeIfChanged(nologinFile, text, 0o644); err != nil {
 		return "", err
 	}
-	a.syncPasswordLocks()
 	var report []string
-	// end running sessions of everybody but root
-	if out, err := sh("loginctl", "list-users", "--no-legend"); err == nil {
-		for _, l := range strings.Split(out, "\n") {
-			if f := strings.Fields(l); len(f) >= 2 && f[0] != "0" && userRe.MatchString(f[1]) {
-				if _, err := sh("loginctl", "terminate-user", f[1]); err == nil {
-					report = append(report, "session of "+f[1]+" ended")
-				}
+	if locked, err := lockPasswords(); err != nil {
+		report = append(report, "locking local passwords: "+err.Error())
+	} else if len(locked) > 0 {
+		report = append(report, "local passwords of "+strings.Join(locked, ", ")+" locked")
+	}
+	// end running sessions of people; root, greeters and system users stay
+	if !hasCmd("loginctl") { // without logind: end every process of people's accounts
+		for _, u := range peopleAccounts() {
+			if _, err := sh("pkill", "-KILL", "-u", u); err == nil {
+				report = append(report, "processes of "+u+" ended")
+			}
+		}
+	}
+	for _, l := range loginSessions() {
+		if l.person() {
+			if _, err := sh("loginctl", "terminate-session", l.ID); err == nil {
+				report = append(report, "session "+l.ID+" of "+l.User+" ended")
 			}
 		}
 	}
@@ -137,7 +147,9 @@ func (a *Agent) foundMode() (string, error) {
 	if err := os.Remove(nologinFile); err != nil {
 		return "", err
 	}
-	a.syncPasswordLocks()
+	if _, err := a.releasePasswords(); err != nil {
+		a.event("releasing local passwords: %v", err)
+	}
 	a.event("lost mode ended")
 	return "logins allowed again; set a new disk passphrase with the recovery key", nil
 }

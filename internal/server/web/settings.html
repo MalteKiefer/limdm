@@ -10,16 +10,24 @@
 <div class="narrow">
 {{if eq .Tab "general"}}
 <form class="card" method="post" action="/settings">
-  <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="section" value="general">
+  {{template "csrf" .CSRF}}<input type="hidden" name="section" value="general">
   <h2>{{t "Access"}}</h2>
   <label class="check"><input type="checkbox" name="local_login" {{if .Set.LocalLogin}}checked{{end}}> {{t "allow local accounts (password + TOTP)"}}</label>
   <label>{{t "Device counts as stale after (hours)"}}<input name="stale_hours" type="number" min="1" max="2160" value="{{.Set.StaleHours}}"></label>
   <dl class="kv"><dt>{{t "Public URL"}}</dt><dd class="mono">{{.PublicURL}}</dd></dl>
   {{if $admin}}<div class="form-foot"><span class="muted">{{t "Local accounts can only be switched off while an OIDC administrator exists."}}</span><button>{{t "Save"}}</button></div>{{end}}
 </form>
+<form class="card" method="post" action="/settings">
+  {{template "csrf" .CSRF}}<input type="hidden" name="section" value="network">
+  <h2>{{t "Console access by network"}}</h2>
+  <p class="muted">{{t "Addresses or CIDR ranges, separated by spaces or lines. The agent API is not affected; this host (loopback) is always allowed. Your address:"}} <span class="mono">{{.ClientIP}}</span></p>
+  <label>{{t "Allowed networks"}} <span class="hint">{{t "empty: every network"}}</span><textarea name="console_allow" rows="3" class="code" placeholder="10.0.0.0/8 2001:db8::/32">{{join .Set.ConsoleAllow "\n"}}</textarea></label>
+  <label>{{t "Blocked networks"}} <span class="hint">{{t "refused even when allowed above"}}</span><textarea name="console_block" rows="3" class="code" placeholder="203.0.113.0/24">{{join .Set.ConsoleBlock "\n"}}</textarea></label>
+  {{if $admin}}<div class="form-foot"><span class="muted">{{t "Saving is refused when your own address would be locked out."}}</span><button>{{t "Save"}}</button></div>{{end}}
+</form>
 {{else if eq .Tab "sso"}}
 <form class="card" method="post" action="/settings">
-  <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="section" value="sso">
+  {{template "csrf" .CSRF}}<input type="hidden" name="section" value="sso">
   <h2>{{t "Single sign on (OIDC)"}}</h2>
   <p class="muted">{{t "Google Workspace: create an OAuth client of type Web application with this redirect URI:"}} <code>{{.Redirect}}</code></p>
   <label>{{t "Issuer"}}<input name="oidc_issuer" value="{{.Set.OIDCIssuer}}" placeholder="{{t "https://accounts.google.com"}}" spellcheck="false"></label>
@@ -31,7 +39,7 @@
 </form>
 {{else if eq .Tab "monitoring"}}
 <form class="card" method="post" action="/settings">
-  <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="section" value="monitoring">
+  {{template "csrf" .CSRF}}<input type="hidden" name="section" value="monitoring">
   <h2>{{t "Compliance webhook"}}</h2>
   <label>{{t "URL"}} <span class="hint">{{t "https URL receiving JSON when a device becomes non-compliant"}}</span><input name="webhook_url" value="{{.Set.WebhookURL}}" placeholder="{{t "https://hooks.example.com/limdm"}}" spellcheck="false"></label>
   {{if $admin}}<dl class="kv"><dt>{{t "Signing key"}}</dt><dd><span class="fp">{{.WebhookSecret}}</span><span class="sub">X-LiMDM-Signature: sha256=HMAC-SHA256(key, body)</span></dd></dl>{{end}}
@@ -39,7 +47,7 @@
 </form>
 {{else if eq .Tab "branding"}}
 <form class="card" method="post" action="/settings" enctype="multipart/form-data">
-  <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="section" value="branding">
+  {{template "csrf" .CSRF}}<input type="hidden" name="section" value="branding">
   <h2>{{t "Branding"}}</h2>
   <label>{{t "Company name"}} <span class="hint">{{t "shown in the console and in dialogs on devices"}}</span><input name="company_name" value="{{.Set.CompanyName}}" maxlength="80"></label>
   <label>{{t "Logo"}} <span class="hint">{{t "PNG, square, up to 256 KiB"}}</span><input type="file" name="logo" accept="image/png"></label>

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
@@ -31,6 +32,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -57,6 +59,9 @@ type Config struct {
 	Server       string `json:"server"`
 	DeviceID     string `json:"device_id"`
 	AllowScripts bool   `json:"allow_scripts"` // remote scripts are opt in per device
+	// NoFallbackDNS turns off asking Cloudflare and Google (DNS over HTTPS)
+	// when the system resolver cannot reach the server.
+	NoFallbackDNS bool `json:"no_fallback_dns,omitempty"`
 }
 
 // State survives restarts. Declarations are kept so enforcement continues offline.
@@ -73,6 +78,7 @@ type State struct {
 
 	PendingKeys    []pendingKey         `json:"pending_keys,omitempty"` // recovery keys not yet escrowed
 	Escrowed       map[string]time.Time `json:"escrowed,omitempty"`     // LUKS UUID: escrowed at
+	CommandKey     string               `json:"command_key,omitempty"`  // pinned public key commands are signed with
 	EscrowNotified time.Time            `json:"escrow_notified"`
 	Company        string               `json:"company,omitempty"`
 	BrandingHash   string               `json:"branding_hash,omitempty"`
@@ -93,6 +99,7 @@ type Agent struct {
 	state  State
 
 	pol        api.Policy
+	polView    atomic.Pointer[api.Policy] // copy of pol for other goroutines
 	desktop    *desktopServer
 	evMu       sync.Mutex // guards state.Events and state.AppRequests: the desktop socket works from its own goroutines
 	store      store
@@ -143,7 +150,7 @@ func pinnedTLS(caPEM []byte, withIdentity bool) (*tls.Config, error) {
 
 func newClient(tc *tls.Config) *http.Client {
 	return &http.Client{Timeout: 2 * time.Minute, Transport: &http.Transport{
-		TLSClientConfig: tc, Proxy: http.ProxyFromEnvironment, ForceAttemptHTTP2: true}}
+		TLSClientConfig: tc, Proxy: http.ProxyFromEnvironment, ForceAttemptHTTP2: true, DialContext: fallbackDial()}}
 }
 
 func newCSR() (keyPEM []byte, csrPEM string, err error) {
@@ -311,6 +318,7 @@ func New(log *slog.Logger) (*Agent, error) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, err
 	}
+	fallbackDNS = !cfg.NoFallbackDNS
 	a := &Agent{cfg: cfg, client: newClient(tc), host: h, log: log}
 	if b, err := os.ReadFile(stateFile); err == nil {
 		if err := json.Unmarshal(b, &a.state); err != nil {
@@ -329,6 +337,16 @@ func New(log *slog.Logger) (*Agent, error) {
 func (a *Agent) compose() {
 	a.pol, a.declStatus = api.Compose(a.state.Declarations)
 	a.users = a.state.Users
+	p := a.pol
+	a.polView.Store(&p) // for maintainLoop, which runs beside the check in
+}
+
+// policy is the composed policy for code outside the check in goroutine.
+func (a *Agent) policy() *api.Policy {
+	if p := a.polView.Load(); p != nil {
+		return p
+	}
+	return &api.Policy{}
 }
 
 // problem records an event and marks the declaration of typ as not achieved.
@@ -550,6 +568,7 @@ func (a *Agent) cycle(ctx context.Context) {
 		a.syncNow = true
 	}
 	a.compose()
+	a.pinCommandKey(resp.CommandKey)
 	a.runCommands(resp.Commands)
 	if u := resp.AgentUpdate; u != nil && u.Version != a.failedUpdate {
 		if err := a.installUpdate(ctx, *u); err != nil {
@@ -695,13 +714,13 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = a.powerAction(c.Type, c.Payload, c.CreatedAt)
 	case "lock":
 		a.notifyUsers("Device locked", a.company()+" locked this device. Sessions end and new sign ins are blocked until IT unlocks it.", "critical")
-		out, err = lockDevice()
+		out, err = a.lockDevice()
 		a.syncPasswordLocks()
 	case "unlock":
-		out, err = unlockDevice()
+		out, err = a.unlockDevice()
 		a.syncPasswordLocks()
 	case "lost":
-		out, err = a.lostMode(c.Payload)
+		out, err = a.lostMode(c.Payload, c.Keys)
 	case "found":
 		out, err = a.foundMode()
 	case "wipe":
@@ -710,6 +729,10 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = allowUninstall()
 	case "message":
 		out, err = a.showMessage(c.Payload)
+	case "software_remove":
+		out, err = a.removeSoftware(c.Payload)
+	case "user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete":
+		out, err = a.userCommand(c.Type, c.Payload)
 	case "app_install", "app_remove":
 		out, err = a.appCommand(strings.TrimPrefix(c.Type, "app_"), c.Payload)
 	case "script":
@@ -736,40 +759,34 @@ const (
 	nologinText = "This device is locked by IT (LiMDM). Contact your administrator.\n"
 )
 
-// lockDevice blocks new logins and locks running desktop sessions. The agent
-// keeps checking in, so the device can be unlocked remotely.
-func lockDevice() (string, error) {
-	if _, err := writeIfChanged(nologinFile, nologinText, 0o644); err != nil {
-		return "", err
-	}
-	out, _ := sh("loginctl", "lock-sessions") // no sessions on servers is fine
-	return "logins blocked, sessions locked " + out, nil
-}
-
-func unlockDevice() (string, error) {
-	if readFile(nologinFile) != nologinText {
-		return "not locked by LiMDM, nothing changed", nil
-	}
-	if err := os.Remove(nologinFile); err != nil {
-		return "", err
-	}
-	return "logins allowed again", nil
-}
-
+// runScript runs a script IT sent. A shebang line picks the interpreter
+// (bash, python …); without one it runs with /bin/sh.
 func runScript(body string) (string, error) {
 	f, err := os.CreateTemp(stateDir, "script-*")
 	if err != nil {
 		return "", err
 	}
 	defer os.Remove(f.Name())
-	_, err = f.WriteString(body)
+	_, err = f.WriteString(strings.ReplaceAll(body, "\r\n", "\n")) // pasted from Windows editors
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
 	if err != nil {
 		return "", err
 	}
-	return run(30*time.Minute, "/bin/sh", f.Name())
+	argv := append(scriptInterpreter(body), f.Name())
+	return run(30*time.Minute, argv[0], argv[1:]...)
+}
+
+// scriptInterpreter reads the shebang ("#!/usr/bin/env python3",
+// "#!/bin/bash -e"); the file itself is never executed, so a noexec
+// /var/lib (CIS hardening) does not matter.
+func scriptInterpreter(body string) []string {
+	first, _, _ := strings.Cut(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	if f := strings.Fields(strings.TrimPrefix(first, "#!")); strings.HasPrefix(first, "#!") && len(f) > 0 {
+		return f
+	}
+	return []string{"/bin/sh"}
 }
 
 // collectAuthEvents ships desktop login events written by pam-auth.
@@ -812,8 +829,49 @@ func (a *Agent) post(ctx context.Context, path string, in, out any) error {
 }
 
 // pollLoop asks the server every minute whether commands wait, so a reboot,
-// lock or wipe does not wait for the next full check in.
+// lock or wipe does not wait for the next full check in. It runs on its own
+// clock: desktop upkeep runs in maintainLoop and can never delay it. A
+// random offset spreads devices; after failures it waits longer (up to 5
+// minutes) and returns to one minute with the first answer.
 func (a *Agent) pollLoop(ctx context.Context) {
+	go a.maintainLoop(ctx)
+	wait, failures := pollJitter(), 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		var resp api.PollResponse
+		pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		err := a.post(pctx, "/api/v1/poll", struct{}{}, &resp)
+		cancel()
+		if err != nil {
+			failures++
+			if failures == 3 {
+				a.log.Warn("poll failing", "err", err)
+			}
+		} else {
+			failures = 0
+		}
+		if err == nil && resp.Pending {
+			a.kickCheckin() // buffered: a check in already running picks it up next
+		}
+		wait = pollWait(failures)
+	}
+}
+
+// pollWait is one minute, doubling per failure up to five, plus jitter.
+func pollWait(failures int) time.Duration {
+	d := time.Minute << min(failures, 3)
+	return min(d, 5*time.Minute) + pollJitter()
+}
+
+func pollJitter() time.Duration { return time.Duration(mrand.Int64N(int64(10 * time.Second))) } //nolint:gosec // jitter, not a secret
+
+// maintainLoop keeps desktop helpers, idle locks and a device lock in place
+// every minute, independent of the server.
+func (a *Agent) maintainLoop(ctx context.Context) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	for {
@@ -822,18 +880,9 @@ func (a *Agent) pollLoop(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		a.ensureHelpers()   // within a minute of a desktop login
-		a.ensureIdleLocks() // compositors without a locker of their own
-		var resp api.PollResponse
-		pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		err := a.post(pctx, "/api/v1/poll", struct{}{}, &resp)
-		cancel()
-		if err == nil && resp.Pending {
-			select {
-			case a.kick <- struct{}{}:
-			default:
-			}
-		}
+		a.ensureHelpers()     // within a minute of a desktop login
+		a.ensureIdleLocks()   // compositors without a locker of their own
+		a.enforceDeviceLock() // a locked device stays locked
 	}
 }
 
@@ -995,6 +1044,11 @@ func (a *Agent) runCommands(cmds []api.Command) {
 		}
 		a.state.DoneCommands[c.ID] = time.Now() // before running: a reboot must not repeat after restart
 		a.saveState()
+		if err := a.verifyCommand(c); err != nil {
+			a.event("command %d (%s) refused: %v", c.ID, c.Type, err)
+			a.state.Results = append(a.state.Results, api.CommandResult{ID: c.ID, Output: "not executed: " + err.Error()})
+			continue
+		}
 		a.state.Results = append(a.state.Results, a.execute(c))
 		a.syncNow = true
 	}
@@ -1018,4 +1072,32 @@ func (a *Agent) getBytes(path string, limit int64, out *[]byte) error {
 	}
 	*out, err = io.ReadAll(io.LimitReader(resp.Body, limit))
 	return err
+}
+
+// pinCommandKey keeps the first command key the server sends (over the
+// pinned CA and mTLS). A different key later is refused, not adopted.
+func (a *Agent) pinCommandKey(hexKey string) {
+	switch {
+	case hexKey == "" || hexKey == a.state.CommandKey:
+	case a.state.CommandKey == "":
+		if b, err := hex.DecodeString(hexKey); err == nil && len(b) == ed25519.PublicKeySize {
+			a.state.CommandKey = hexKey
+			a.event("command signing key pinned; unsigned commands are refused from now on")
+		}
+	default:
+		a.event("the server sent a different command signing key; keeping the pinned one")
+	}
+}
+
+// verifyCommand checks a command's signature once a key is pinned. Before
+// that (servers without signing) commands run as before.
+func (a *Agent) verifyCommand(c api.Command) error {
+	if a.state.CommandKey == "" {
+		return nil
+	}
+	pub, err := hex.DecodeString(a.state.CommandKey)
+	if err != nil {
+		return err
+	}
+	return api.VerifyCommand(ed25519.PublicKey(pub), a.cfg.DeviceID, c)
 }

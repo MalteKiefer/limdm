@@ -208,8 +208,7 @@ type catalogRow struct {
 	Installs int
 }
 
-const catalogCols = `slug, name, summary, category, mode, sources, detect, enabled, scope, icon IS NOT NULL,
-	coalesce(encode(sha256(icon), 'hex'), ''), updated_at`
+const catalogCols = `slug, name, summary, category, mode, sources, detect, enabled, scope, icon_hash <> '', icon_hash, updated_at`
 
 func scanCatalog(row pgx.CollectableRow) (catalogRow, error) {
 	var r catalogRow

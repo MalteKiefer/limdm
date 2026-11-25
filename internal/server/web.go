@@ -52,6 +52,13 @@ var pages = func() map[string]map[string]*template.Template {
 func parsePages(lang, layout string) map[string]*template.Template {
 	T := func(s string) string { return translate(lang, s) }
 	funcs := template.FuncMap{
+		"dict": func(kv ...any) map[string]any { // arguments for shared partials
+			m := make(map[string]any, len(kv)/2)
+			for i := 0; i+1 < len(kv); i += 2 {
+				m[kv[i].(string)] = kv[i+1]
+			}
+			return m
+		},
 		"t":       T,
 		"lang":    func() string { return lang },
 		"version": func() string { return Version },
@@ -71,6 +78,7 @@ func parsePages(lang, layout string) map[string]*template.Template {
 			}
 		},
 		"frac":       func(v uint64, pct uint64) uint64 { return v * pct / 100 },
+		"add":        func(a, b int) int { return a + b },
 		"inc":        func(n int) int { return n + 1 },
 		"sub":        func(a, b int) int { return a - b },
 		"dec":        func(n int) int { return n - 1 },
@@ -91,7 +99,9 @@ func parsePages(lang, layout string) map[string]*template.Template {
 			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot",
 				"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script",
 				"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour", "message": "Message",
-				"app_install": "Install app", "app_remove": "Remove app"}[a])
+				"app_install": "Install app", "app_remove": "Remove app",
+				"user_create": "Create user", "user_admin": "Change admin rights", "user_lock": "Lock user", "user_unlock": "Unlock user",
+				"user_password": "Reset password", "user_delete": "Delete user", "software_remove": "Remove software"}[a])
 		},
 		"join":      strings.Join,
 		"hasPrefix": strings.HasPrefix,
@@ -603,33 +613,37 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		}
 		userLines = append(userLines, l)
 	}
-	rows, err := s.db.Query(ctx, `SELECT id, type, status, output, created_by, created_at FROM commands WHERE device_id=$1 ORDER BY id DESC LIMIT 50`, id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
+	tab := r.URL.Query().Get("tab")
 	type cmd struct {
 		ID                       int64
 		Type, Status, Output, By string
 		At                       time.Time
 	}
-	cmds, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (cmd, error) {
-		var c cmd
-		return c, row.Scan(&c.ID, &c.Type, &c.Status, &c.Output, &c.By, &c.At)
-	})
-	if err != nil {
-		s.fail(w, err)
-		return
+	var cmds []cmd
+	if tab == "commands" { // outputs can be large; only the commands tab shows them
+		rows, err := s.db.Query(ctx, `SELECT id, type, status, output, created_by, created_at FROM commands WHERE device_id=$1 ORDER BY id DESC LIMIT 50`, id)
+		if err == nil {
+			cmds, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (cmd, error) {
+				var c cmd
+				return c, row.Scan(&c.ID, &c.Type, &c.Status, &c.Output, &c.By, &c.At)
+			})
+		}
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
 	bps, err := s.allBlueprints(ctx, id)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	charts, err := s.deviceCharts(ctx, id)
-	if err != nil {
-		s.fail(w, err)
-		return
+	var charts []template.HTML
+	if tab == "" || tab == "overview" {
+		if charts, err = s.deviceCharts(ctx, id); err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
 	recovery, err := s.recoveryKeys(ctx, id)
 	if err != nil {
@@ -650,6 +664,29 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 			s.fail(w, err)
 			return
 		}
+	}
+	// the latest protective action per kind (lock, lost mode, wipe, uninstall
+	// release) stays visible on the device page until the next one replaces it
+	type protective struct {
+		Type, Status, By string
+		At               time.Time
+	}
+	var protect []protective
+	if rows, err := s.db.Query(ctx, `SELECT DISTINCT ON (k) type, status, created_by, created_at FROM (
+		SELECT *, CASE type WHEN 'unlock' THEN 'lock' WHEN 'found' THEN 'lost' ELSE type END AS k FROM commands
+		WHERE device_id=$1 AND type IN ('lock','unlock','lost','found','wipe','allow_uninstall')) c
+		ORDER BY k, id DESC`, id); err == nil {
+		protect, err = pgx.CollectRows(rows, pgx.RowToStructByPos[protective])
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		protect = slices.DeleteFunc(protect, func(p protective) bool { // the release ends after an hour
+			return p.Type == "allow_uninstall" && time.Since(p.At) > 2*time.Hour
+		})
+	} else {
+		s.fail(w, err)
+		return
 	}
 	var tampered *time.Time
 	if err := s.db.QueryRow(ctx, `SELECT tampered_at FROM devices WHERE id=$1 AND tampered_at > now() - interval '30 days'`, id).Scan(&tampered); err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -688,7 +725,6 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		Identifier, Type, State, Class string
 		Reasons                        []string
 	}
-	tab := r.URL.Query().Get("tab")
 	sub := r.URL.Query().Get("sub")
 	switch {
 	case tab == "software" && sub != "sources" && sub != "flatpak" && sub != "catalog":
@@ -779,7 +815,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
 		"CommandTypes": commandTypesFor(sess.Role),
 		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
-		"Resolved": res, "Tags": strings.Join(tags, ", "), "TagList": tags, "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery, "Tampered": tampered, "Events": events,
+		"Resolved": res, "Tags": strings.Join(tags, ", "), "TagList": tags, "Protective": protect, "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery, "Tampered": tampered, "Events": events,
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"},
 		"Sub": sub, "ShowSystem": r.URL.Query().Get("system") == "1", "NetworkInfo": len(data.Inv.DNS)+len(data.Inv.Routes) > 0 || hasIPs(data.Inv.Interfaces),
 	})
@@ -797,16 +833,28 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 		return
 	}
 	back := "/devices/" + id
-	if typ == "app_install" || typ == "app_remove" {
+	switch {
+	case typ == "app_install" || typ == "app_remove":
 		back += "?tab=software&sub=catalog"
+	case strings.HasPrefix(typ, "user_"):
+		back += "?tab=accounts"
+	case typ == "software_remove":
+		back += "?tab=software&sub=" + url.QueryEscape(r.FormValue("back_sub"))
 	}
 	http.Redirect(w, r, back, http.StatusSeeOther)
 }
 
 // queueCommand stores a command for a device and audits it.
 func (s *Server) queueCommand(ctx context.Context, actor, id, typ, payload string) error {
-	return s.auditAction(ctx, actor, "command."+typ, id, truncate(payload, 2000), func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO commands(device_id, type, payload, created_by) VALUES ($1,$2,$3,$4)`, id, typ, payload, actor); err != nil {
+	detail := payload
+	var u api.UserCommand
+	if strings.HasPrefix(typ, "user_") && json.Unmarshal([]byte(payload), &u) == nil {
+		u.Password = ""         // never in the audit log
+		b, _ := json.Marshal(u) //nolint:gosec // the password was cleared just above
+		detail = string(b)
+	}
+	return s.auditAction(ctx, actor, "command."+typ, id, truncate(detail, 2000), func(tx pgx.Tx) error {
+		if err := s.insertCommand(ctx, tx, id, typ, payload, actor); err != nil {
 			return err
 		}
 		if typ == "unlock" || typ == "lock" { // a manual action takes over from the compliance policy
@@ -863,6 +911,27 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 			return "", http.StatusBadRequest, "message: text up to 1000 characters, title up to 100"
 		}
 		b, _ := json.Marshal(api.Message{Title: title, Text: text})
+		payload = string(b)
+	case strings.HasPrefix(typ, "user_"):
+		if sess.Role != "admin" {
+			return "", http.StatusForbidden, "this action requires the admin role"
+		}
+		u := api.UserCommand{Username: strings.TrimSpace(r.FormValue("username")), FullName: strings.TrimSpace(r.FormValue("full_name")),
+			Password: r.FormValue("password"), Admin: r.FormValue("admin") == "on" || r.FormValue("admin") == "1", KeepHome: r.FormValue("keep_home") == "on"}
+		if err := u.Validate(typ); err != nil {
+			return "", http.StatusBadRequest, err.Error()
+		}
+		b, _ := json.Marshal(u) //nolint:gosec // signed command payload over mTLS, cleared from the database once applied
+		payload = string(b)
+	case typ == "software_remove":
+		if sess.Role != "admin" {
+			return "", http.StatusForbidden, "this action requires the admin role"
+		}
+		sr := api.SoftwareRemove{Kind: r.FormValue("kind"), Name: r.FormValue("name"), Installation: r.FormValue("installation")}
+		if err := sr.Validate(); err != nil {
+			return "", http.StatusBadRequest, err.Error()
+		}
+		b, _ := json.Marshal(sr)
 		payload = string(b)
 	case typ == "app_install" || typ == "app_remove":
 		if sess.Role != "admin" {

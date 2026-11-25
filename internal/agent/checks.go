@@ -75,7 +75,7 @@ var catalog = []check{
 	{ID: "updates.reboot", Title: "No pending reboot older than 7 days", Level: 1,
 		Refs: refs(l(bsiPatch), l("A.8.8")),
 		Run:  runRebootPending},
-	{ID: "disk.encryption", Title: "System disk is encrypted (LUKS)", Level: 1,
+	{ID: "disk.encryption", Title: "System disk is encrypted", Level: 1,
 		Refs: refs(l(bsiClient, bsiCrypto), l("A.8.1", "A.8.24", "A.7.10")),
 		Run:  runDiskEncryption},
 	{ID: "firewall.active", Title: "Host firewall is active", Level: 1,
@@ -152,6 +152,9 @@ var catalog = []check{
 		Refs: refs(l(bsiLinux, bsiLinuxSv), l("A.8.5", "A.8.20"), "Ensure sshd PermitRootLogin is disabled", "Ensure sshd PermitEmptyPasswords is disabled",
 			"Ensure sshd MaxAuthTries is configured", "Ensure sshd LoginGraceTime is configured", "Ensure sshd HostbasedAuthentication is disabled",
 			"Ensure sshd IgnoreRhosts is enabled", "Ensure sshd PermitUserEnvironment is disabled", "Ensure sshd ClientAliveInterval and ClientAliveCountMax are configured")},
+	{ID: "ssh.crypto", Title: "SSH offers no weak algorithms or host keys", Level: 1,
+		Refs: refs(l(bsiLinux, bsiLinuxSv, bsiCrypto), l("A.8.24"), "Ensure sshd Ciphers are configured", "Ensure sshd MACs are configured", "Ensure sshd KexAlgorithms is configured"),
+		Run:  runSSHCrypto, Fix: fixSSHCrypto},
 	{ID: "ssh.strict", Title: "SSH allows keys only and no forwarding", Level: 2, Group: "sshd",
 		KV:   map[string]string{"passwordauthentication": "no", "kbdinteractiveauthentication": "no", "allowtcpforwarding": "no"},
 		Refs: refs(l(bsiLinux, bsiLinuxSv), l("A.8.5"), "Ensure sshd DisableForwarding is enabled")},
@@ -389,26 +392,175 @@ func runSSHD(kv map[string]string) (string, string) {
 	if err := os.MkdirAll("/run/sshd", 0o755); err != nil { //nolint:gosec // sshd privilege separation dir
 		return fail, err.Error()
 	}
-	out, err := sh(bin, "-T")
+	evals, err := sshdEffective(bin)
 	if err != nil {
-		return fail, "sshd -T: " + err.Error()
-	}
-	got := map[string]string{}
-	for _, line := range strings.Split(out, "\n") {
-		if k, v, ok := strings.Cut(line, " "); ok {
-			got[strings.ToLower(k)] = strings.ToLower(strings.TrimSpace(v))
-		}
+		return fail, err.Error()
 	}
 	var bad []string
 	for _, k := range sortedKeys(kv) {
-		if !sshValueOK(got[k], kv[k]) {
-			bad = append(bad, fmt.Sprintf("%s=%s (want %s)", k, got[k], kv[k]))
+		for spec, got := range evals { // every Match context has to comply
+			if !sshValueOK(got[k], kv[k]) {
+				bad = append(bad, fmt.Sprintf("%s=%s (want %s)%s", k, got[k], kv[k], spec))
+				break
+			}
 		}
 	}
 	if len(bad) > 0 {
 		return fail, strings.Join(bad, ", ")
 	}
 	return pass, ""
+}
+
+// sshdEffective evaluates the effective server configuration for the global
+// context and, so Match blocks count, for a connection as root and as each
+// person with a local account (up to five). Keys are lower case.
+func sshdEffective(bin string) (map[string]map[string]string, error) {
+	specs := []string{""}
+	users := append([]string{"root"}, peopleAccounts()...)
+	for _, u := range users[:min(len(users), 6)] {
+		specs = append(specs, "user="+u+",host=client.invalid,addr=203.0.113.1,laddr=127.0.0.1,lport=22")
+	}
+	res := map[string]map[string]string{}
+	for _, spec := range specs {
+		args := []string{"-T"}
+		if spec != "" {
+			args = append(args, "-C", spec)
+		}
+		out, err := sh(bin, args...)
+		if err != nil {
+			if spec == "" {
+				return nil, fmt.Errorf("sshd -T: %w", err)
+			}
+			continue // an older sshd without -C support: the global evaluation stands
+		}
+		got := map[string]string{}
+		for _, line := range strings.Split(out, "\n") {
+			if k, v, ok := strings.Cut(line, " "); ok {
+				got[strings.ToLower(k)] = strings.ToLower(strings.TrimSpace(v))
+			}
+		}
+		label := ""
+		if spec != "" {
+			label = " for " + strings.TrimPrefix(strings.Split(spec, ",")[0], "user=")
+		}
+		res[label] = got
+	}
+	return res, nil
+}
+
+// weakSSH lists weak algorithms the server offers and weak host keys.
+func weakSSH(evals map[string]map[string]string, hostKeys map[string]int) []string {
+	weak := map[string][]string{
+		"ciphers":           {"3des-cbc", "aes128-cbc", "aes192-cbc", "aes256-cbc", "blowfish-cbc", "cast128-cbc", "arcfour", "arcfour128", "arcfour256", "rijndael-cbc@lysator.liu.se"},
+		"macs":              {"hmac-md5", "hmac-md5-96", "hmac-sha1", "hmac-sha1-96", "umac-64@openssh.com", "hmac-md5-etm@openssh.com", "hmac-md5-96-etm@openssh.com", "hmac-sha1-96-etm@openssh.com", "umac-64-etm@openssh.com"},
+		"kexalgorithms":     {"diffie-hellman-group1-sha1", "diffie-hellman-group14-sha1", "diffie-hellman-group-exchange-sha1"},
+		"hostkeyalgorithms": {"ssh-dss", "ssh-rsa", "ssh-dss-cert-v01@openssh.com", "ssh-rsa-cert-v01@openssh.com"},
+	}
+	seen := map[string]bool{}
+	var bad []string
+	for _, got := range evals {
+		for _, key := range sortedKeys(map[string]string{"ciphers": "", "macs": "", "kexalgorithms": "", "hostkeyalgorithms": ""}) {
+			for _, alg := range strings.Split(got[key], ",") {
+				if slices.Contains(weak[key], alg) && !seen[key+alg] {
+					seen[key+alg] = true
+					bad = append(bad, key+": "+alg)
+				}
+			}
+		}
+	}
+	for f, bits := range hostKeys {
+		switch {
+		case strings.Contains(f, "_dsa_"):
+			bad = append(bad, "host key "+f+": DSA")
+		case strings.Contains(f, "_rsa_") && bits < 3072:
+			bad = append(bad, fmt.Sprintf("host key %s: RSA %d bits", f, bits))
+		}
+	}
+	slices.Sort(bad)
+	return bad
+}
+
+// sshHostKeys reads the size of each host key with ssh-keygen.
+func sshHostKeys() map[string]int {
+	keys := map[string]int{}
+	files, _ := filepath.Glob("/etc/ssh/ssh_host_*_key.pub")
+	for _, f := range files {
+		if out, err := sh("ssh-keygen", "-l", "-f", f); err == nil {
+			if fields := strings.Fields(out); len(fields) > 0 {
+				keys[filepath.Base(f)], _ = strconv.Atoi(fields[0])
+			}
+		}
+	}
+	return keys
+}
+
+func runSSHCrypto(a *Agent) (string, string) {
+	bin := sshdBinary()
+	if bin == "" {
+		return na, "no SSH server installed"
+	}
+	_ = os.MkdirAll("/run/sshd", 0o755) //nolint:gosec // sshd privilege separation dir
+	evals, err := sshdEffective(bin)
+	if err != nil {
+		return fail, err.Error()
+	}
+	if bad := weakSSH(evals, sshHostKeys()); len(bad) > 0 {
+		return fail, strings.Join(bad, "; ")
+	}
+	return pass, ""
+}
+
+const sshCryptoDropin = "/etc/ssh/sshd_config.d/02-limdm-crypto.conf"
+
+// fixSSHCrypto offers only strong algorithms this OpenSSH supports; weak
+// host keys are reported, not replaced (clients would see a new key).
+func fixSSHCrypto(a *Agent) error {
+	bin := sshdBinary()
+	if bin == "" || !strings.Contains(readFile("/etc/ssh/sshd_config"), "sshd_config.d/*.conf") {
+		return nil
+	}
+	strong := map[string][]string{
+		"Ciphers":       {"chacha20-poly1305@openssh.com", "aes256-gcm@openssh.com", "aes128-gcm@openssh.com", "aes256-ctr", "aes192-ctr", "aes128-ctr"},
+		"MACs":          {"hmac-sha2-512-etm@openssh.com", "hmac-sha2-256-etm@openssh.com", "umac-128-etm@openssh.com"},
+		"KexAlgorithms": {"sntrup761x25519-sha512@openssh.com", "mlkem768x25519-sha256", "curve25519-sha256", "curve25519-sha256@libssh.org", "diffie-hellman-group16-sha512", "diffie-hellman-group18-sha512", "diffie-hellman-group-exchange-sha256"},
+	}
+	query := map[string]string{"Ciphers": "cipher", "MACs": "mac", "KexAlgorithms": "kex"}
+	var b strings.Builder
+	b.WriteString(managedHeader)
+	for _, k := range []string{"Ciphers", "KexAlgorithms", "MACs"} {
+		out, err := sh("ssh", "-Q", query[k])
+		if err != nil {
+			return err
+		}
+		have := strings.Fields(out)
+		var use []string
+		for _, alg := range strong[k] {
+			if slices.Contains(have, alg) {
+				use = append(use, alg)
+			}
+		}
+		if len(use) == 0 {
+			return fmt.Errorf("no strong %s supported", k)
+		}
+		fmt.Fprintf(&b, "%s %s\n", k, strings.Join(use, ","))
+	}
+	old, readErr := os.ReadFile(sshCryptoDropin)
+	changed, err := writeIfChanged(sshCryptoDropin, b.String(), 0o600)
+	if err != nil || !changed {
+		return err
+	}
+	if _, err := sh(bin, "-t"); err != nil {
+		if readErr == nil {
+			err = errors.Join(err, os.WriteFile(sshCryptoDropin, old, 0o600)) //nolint:gosec // constant path, restoring the previous file
+		} else {
+			err = errors.Join(err, os.Remove(sshCryptoDropin))
+		}
+		return err
+	}
+	for _, unit := range []string{"ssh", "sshd"} {
+		_, _ = sh("systemctl", "try-reload-or-restart", unit)
+	}
+	return nil
 }
 
 func sshValueOK(got, want string) bool {
@@ -513,7 +665,7 @@ func runDiskEncryption(a *Agent) (string, string) {
 			switch {
 			case de.Excluded(v.Mount):
 			case v.Encrypted:
-				ok = append(ok, v.Mount)
+				ok = append(ok, v.Mount+" ("+v.Encryption+")")
 			default:
 				open = append(open, v.Mount)
 			}
@@ -524,24 +676,29 @@ func runDiskEncryption(a *Agent) (string, string) {
 		if len(ok) == 0 {
 			return fail, "no encrypted volume found"
 		}
-		return pass, "on LUKS: " + strings.Join(ok, ", ")
+		return pass, "encrypted: " + strings.Join(ok, ", ")
 	}
-	src, err := sh("findmnt", "-n", "-o", "SOURCE", "/")
-	if err != nil {
-		return fail, err.Error()
+	// image based systems (ostree, composefs) mount an overlay at /: the
+	// data lives on /sysroot, otherwise /var holds it
+	for _, mnt := range []string{"/", "/sysroot", "/var"} {
+		out, err := sh("findmnt", "-n", "-o", "SOURCE,FSTYPE", mnt)
+		f := strings.Fields(out)
+		if err != nil || len(f) < 2 {
+			continue
+		}
+		src, fstype := f[0], f[1]
+		if i := strings.Index(src, "["); i > 0 { // btrfs subvolume: /dev/mapper/x[/root]
+			src = src[:i]
+		}
+		if !strings.HasPrefix(src, "/dev/") && fstype != "zfs" {
+			continue // overlay, composefs, tmpfs
+		}
+		if m := volumeEncryption(src, fstype, mnt); m != "" {
+			return pass, mnt + " (" + src + ") is encrypted: " + m
+		}
+		return fail, mnt + " (" + src + ") is not encrypted (reinstall with LUKS required)"
 	}
-	src = strings.TrimSpace(src)
-	if i := strings.Index(src, "["); i > 0 { // btrfs subvolume: /dev/mapper/x[/root]
-		src = src[:i]
-	}
-	out, err := sh("lsblk", "-s", "-n", "-o", "TYPE", src)
-	if err != nil {
-		return fail, err.Error()
-	}
-	if slices.Contains(strings.Fields(out), "crypt") {
-		return pass, src + " is on LUKS"
-	}
-	return fail, src + " is not encrypted (reinstall with LUKS required)"
+	return fail, "no block device found below /"
 }
 
 func runFirewall(a *Agent) (string, string) {

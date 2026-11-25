@@ -2,6 +2,7 @@ package agent
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
@@ -14,6 +15,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"math/big"
 	"net"
 	"net/http"
@@ -630,14 +632,18 @@ func TestIdleLockRespectsRemediation(t *testing.T) {
 	a := &Agent{}
 	a.pol.ScreenLockSeconds = 300
 	a.pol.Compliance.Level, a.pol.Compliance.Remediate = 1, true
+	snap := func() { p := a.pol; a.polView.Store(&p) }
+	snap()
 	if !a.remediatesScreenLock() {
 		t.Fatal("remediation on")
 	}
 	a.pol.Compliance.Exclude = []string{"desktop.screenlock"}
+	snap()
 	if a.remediatesScreenLock() {
 		t.Fatal("excluded check must not be enforced")
 	}
 	a.pol.Compliance.Exclude, a.pol.Compliance.Remediate = nil, false
+	snap()
 	if a.remediatesScreenLock() {
 		t.Fatal("remediation off must not start lockers")
 	}
@@ -689,5 +695,194 @@ func TestAppRepoFiles(t *testing.T) {
 	left, _ := filepath.Glob(filepath.Join(dir, "*"))
 	if len(left) != 1 || filepath.Base(left[0]) != "limdm-app-mullvad.sources" {
 		t.Fatalf("left: %v", left)
+	}
+}
+
+func TestParsePeople(t *testing.T) {
+	passwd := "root:x:0:0:root:/root:/bin/bash\ngdm:x:42:42::/var/lib/gdm:/sbin/nologin\nmalte:x:1000:1000::/home/malte:/bin/zsh\nsvc:x:1001:1001::/:/usr/sbin/nologin\nnobody:x:65534:65534::/:/bin/false\nanna:x:1002:1002::/home/anna:/bin/bash\n"
+	if got := parsePeople(passwd); !slices.Equal(got, []string{"malte", "anna"}) {
+		t.Fatalf("people: %v", got)
+	}
+}
+
+func TestConsoleSession(t *testing.T) {
+	props := `Id=3
+Name=malte
+User=1000
+Type=tty
+Class=user
+State=active
+Remote=no
+LockedHint=no
+Audit=3
+
+Id=4
+Name=malte
+User=1000
+Type=wayland
+Class=user
+State=active
+Remote=no
+LockedHint=yes
+Audit=4
+
+Id=5
+Name=anna
+User=1001
+Type=unspecified
+Class=user
+State=active
+Remote=yes
+LockedHint=no
+Audit=5
+
+Id=6
+Name=root
+User=0
+Type=tty
+Class=user
+State=active
+Remote=yes
+
+Id=c1
+Name=gdm
+User=42
+Type=wayland
+Class=greeter
+State=online
+
+Id=7
+Name=malte
+User=1000
+Type=unspecified
+Class=manager
+State=active`
+	got := map[string]bool{}
+	for _, l := range parseSessions(props) {
+		got[l.ID] = consoleSession(l)
+	}
+	want := map[string]bool{"3": true, "4": false, "5": true, "6": false, "c1": false, "7": false}
+	if !maps.Equal(got, want) {
+		t.Fatalf("console sessions: %v", got)
+	}
+	if s := parseSessions(props); !s[1].Locked || s[1].Type != "wayland" || s[1].Audit != "4" {
+		t.Fatalf("parsed: %+v", s[1])
+	}
+}
+
+func TestScriptInterpreter(t *testing.T) {
+	for body, want := range map[string]string{
+		"echo hi":                           "/bin/sh",
+		"#!/bin/bash -e\necho hi":           "/bin/bash -e",
+		"#!/usr/bin/env python3\r\nprint()": "/usr/bin/env python3",
+		"#!\necho":                          "/bin/sh",
+	} {
+		if got := strings.Join(scriptInterpreter(body), " "); got != want {
+			t.Errorf("%q: %q", body, got)
+		}
+	}
+}
+
+func TestVerifyCommand(t *testing.T) {
+	pub, key, _ := ed25519.GenerateKey(nil)
+	a := &Agent{cfg: Config{DeviceID: "d1"}}
+	c := api.Command{ID: 7, Type: "lock", CreatedAt: time.Now().Truncate(time.Microsecond)}
+	if a.verifyCommand(c) != nil {
+		t.Fatal("before a key is pinned commands run as before")
+	}
+	a.state.CommandKey = hex.EncodeToString(pub)
+	if a.verifyCommand(c) == nil {
+		t.Fatal("unsigned command accepted after pinning")
+	}
+	c.Signature = api.SignCommand(key, "d1", c)
+	if err := a.verifyCommand(c); err != nil {
+		t.Fatal(err)
+	}
+	c.Payload = "rm -rf /"
+	if a.verifyCommand(c) == nil {
+		t.Fatal("changed payload accepted")
+	}
+}
+
+func TestInventoryHelpers(t *testing.T) {
+	for in, want := range map[string]string{"To be filled by O.E.M.": "", "Default string": "", " LENOVO ": "LENOVO", "0123456789": "", "PF47M7M1": "PF47M7M1"} {
+		if got := cleanDMI(in); got != want {
+			t.Errorf("cleanDMI(%q) = %q", in, got)
+		}
+	}
+	for in, want := range map[string]string{"labwc:wlroots": "labwc", "X-Cinnamon": "Cinnamon", "Hyprland": "Hyprland", "XFCE": "Xfce", "Pantheon": "Pantheon"} {
+		if got := desktopName(in); got != want {
+			t.Errorf("desktopName(%q) = %q", in, got)
+		}
+	}
+}
+
+func TestPollWait(t *testing.T) {
+	if w := pollWait(0); w < time.Minute || w > time.Minute+10*time.Second {
+		t.Fatalf("normal: %v", w)
+	}
+	if w := pollWait(10); w < 5*time.Minute || w > 5*time.Minute+10*time.Second {
+		t.Fatalf("backoff capped at five minutes: %v", w)
+	}
+}
+
+func TestParseSnapList(t *testing.T) {
+	out := "Name      Version   Rev    Tracking       Publisher   Notes\ncore22    20240111  1122   latest/stable  canonical✓  base\nfirefox   125.0     4173   latest/stable  mozilla*    -\n"
+	got := parseSnapList(out)
+	if len(got) != 2 || got[0].Notes != "base" || got[1].Name != "firefox" || got[1].Publisher != "mozilla" || got[1].Notes != "" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestWeakSSH(t *testing.T) {
+	evals := map[string]map[string]string{
+		"":         {"ciphers": "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com", "macs": "hmac-sha2-256-etm@openssh.com", "kexalgorithms": "curve25519-sha256"},
+		" for bob": {"ciphers": "aes128-cbc", "macs": "hmac-sha1", "kexalgorithms": "curve25519-sha256"},
+	}
+	bad := weakSSH(evals, map[string]int{"ssh_host_rsa_key.pub": 2048, "ssh_host_ed25519_key.pub": 256, "ssh_host_dsa_key.pub": 1024})
+	want := []string{"ciphers: aes128-cbc", "host key ssh_host_dsa_key.pub: DSA", "host key ssh_host_rsa_key.pub: RSA 2048 bits", "macs: hmac-sha1"}
+	if !slices.Equal(bad, want) {
+		t.Fatalf("%v", bad)
+	}
+	if len(weakSSH(map[string]map[string]string{"": evals[""]}, map[string]int{"ssh_host_rsa_key.pub": 4096})) != 0 {
+		t.Fatal("strong configuration flagged")
+	}
+}
+
+func TestEncryptionParsing(t *testing.T) {
+	st := "/dev/mapper/luks-1 is active and is in use.\n  type:    LUKS2\n  cipher:  aes-xts-plain64\n"
+	if got := cryptTypeOf(st); got != "LUKS2" {
+		t.Fatal(got)
+	}
+	if got := cryptTypeOf("  type:    PLAIN\n"); got != "plain dm-crypt" {
+		t.Fatal(got)
+	}
+	if got := cryptTypeOf("  type:    LUKS2\n  hw-opal: yes\n"); got != "LUKS2 hw-opal" {
+		t.Fatal(got)
+	}
+	show := "Label: none  uuid: 1\n\tTotal devices 2 FS bytes used 1.00GiB\n\tdevid    1 size 100.00GiB used 2.00GiB path /dev/mapper/a\n\tdevid    2 size 100.00GiB used 2.00GiB path /dev/sdb1\n"
+	if d := btrfsDevices(show); !slices.Equal(d, []string{"/dev/mapper/a", "/dev/sdb1"}) {
+		t.Fatal(d)
+	}
+}
+
+func TestSSOOfflineGrace(t *testing.T) {
+	p := pamPolicy{Login: api.Login{Enabled: true, LocalPassword: true, ReverifyHours: 24}}
+	now := time.Now()
+	for _, c := range []struct {
+		age     time.Duration
+		offline bool
+		due     bool
+	}{{time.Hour, false, false}, {30 * time.Hour, false, true}, {30 * time.Hour, true, false}, {24*time.Hour + 73*time.Hour, true, true}} {
+		if got := ssoDueAt(p, now.Add(-c.age), true, c.offline, now); got != c.due {
+			t.Errorf("age %v offline %v: due %v", c.age, c.offline, got)
+		}
+	}
+	if !ssoDueAt(p, time.Time{}, false, true, now) {
+		t.Fatal("never confirmed: due even offline")
+	}
+	p.OfflineGraceHours = 10
+	if !ssoDueAt(p, now.Add(-35*time.Hour), true, true, now) {
+		t.Fatal("configured grace of 10 hours exceeded")
 	}
 }

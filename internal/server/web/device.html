@@ -1,57 +1,93 @@
 {{define "title"}}{{.D.Hostname}} {{t "· LiMDM"}}{{end}}
 {{define "content"}}
 {{$id := .D.ID}}{{$admin := eq .Sess.Role "admin"}}
-<div class="page-head">
-  <div>
-    <div class="eyebrow"><a href="/devices">{{t "Devices"}}</a></div>
-    <h1>{{.D.Hostname}} <span class="pill {{.D.Class}}">{{t .D.Status}}</span></h1>
-    <div class="meta"><span>{{.Inv.OSName}}</span><span>{{t "last seen"}} {{ago .D.LastSeen}}</span><span>{{t "agent"}} {{.D.AgentVersion}}{{if .D.UpdateRequested}} · {{t "update requested"}}{{else if .D.UpdateState}} · {{t "update"}} {{.D.UpdateVersion}} {{t .D.UpdateState}}{{end}}</span>{{if .Inv.Source}}<span>{{t "inventory via"}} {{.Inv.Source}}</span>{{end}}{{if .D.ExternalIP}}<span class="mono">{{.D.ExternalIP}}</span>{{end}}{{with .D.Geo}}{{if .Place}}<span title="{{.ISP}}{{if .ASN}} AS{{.ASN}}{{end}}">{{.Place}}</span>{{end}}{{end}}</div>
-  </div>
-  {{if and (eq .Sess.Role "admin") (ne .D.Status "retired")}}
-  <div class="actions">
-    <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="sync"><button class="secondary">{{t "Sync now"}}</button></form>
+<header class="device-head">
+  <div class="eyebrow"><a href="/devices">{{t "Devices"}}</a> / {{.D.Hostname}}</div>
+  <div class="dh-top">
+    <div class="dh-title">
+      <span class="dh-icon" aria-hidden="true">{{if .Inv.Desktop}}<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>{{else}}<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="7" rx="1.5"/><rect x="4" y="14" width="16" height="7" rx="1.5"/><path d="M8 6.5h.01M8 17.5h.01"/></svg>{{end}}</span>
+      <h1>{{.D.Hostname}}</h1><span class="pill {{.D.Class}}">{{t .D.Status}}</span>
+    </div>
+    {{if and $admin (ne .D.Status "retired")}}
+    <div class="actions">
+      <form method="post" action="/devices/{{$id}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="sync"><button class="secondary">{{t "Sync now"}}</button></form>
+      <a class="button secondary" href="#dlg-edit" data-open="dlg-edit">{{t "Edit device details"}}</a>
     <details class="menu">
-      <summary class="button secondary">{{t "Actions"}}</summary>
+      <summary class="button secondary icon-only" aria-label="{{t "More actions"}}" title="{{t "More actions"}}">⋯</summary>
       <div class="menu-list" role="menu">
         <div class="sub"><button type="button" class="menu-item sub-head" aria-haspopup="menu">{{t "Updates"}}</button><div class="sub-list" role="menu">
-            <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="update"><button role="menuitem" class="menu-item">{{t "Install all updates"}}</button></form>
+            {{template "cmd" dict "ID" $id "CSRF" $.CSRF "Type" "update" "Label" "Install all updates"}}
             <a role="menuitem" class="menu-item" href="#dlg-agent" data-open="dlg-agent">{{t "Update agent…"}}</a>
             <a role="menuitem" class="menu-item" href="#dlg-message" data-open="dlg-message">{{t "Send message…"}}</a>
         </div></div>
         <div class="sub"><button type="button" class="menu-item sub-head" aria-haspopup="menu">{{t "Power"}}</button><div class="sub-list" role="menu">
-            <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="reboot"><input type="hidden" name="minutes" value="0"><button role="menuitem" class="menu-item">{{t "Reboot now"}}</button></form>
+            {{template "cmd" dict "ID" $id "CSRF" $.CSRF "Type" "reboot" "Label" "Reboot now" "Now" true}}
             <a role="menuitem" class="menu-item" href="/devices/{{$id}}?tab=commands&amp;type=reboot" data-open="dlg-reboot">{{t "Reboot later…"}}</a>
-            <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="shutdown"><input type="hidden" name="minutes" value="0"><button role="menuitem" class="menu-item warn">{{t "Shut down now"}}</button></form>
+            {{template "cmd" dict "ID" $id "CSRF" $.CSRF "Type" "shutdown" "Label" "Shut down now" "Now" true "Class" "warn"}}
             <a role="menuitem" class="menu-item warn" href="/devices/{{$id}}?tab=commands&amp;type=shutdown" data-open="dlg-shutdown">{{t "Shut down later…"}}</a>
         </div></div>
         <div class="sub"><button type="button" class="menu-item sub-head" aria-haspopup="menu">{{t "Security"}}</button><div class="sub-list" role="menu">
-            <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="lock"><button role="menuitem" class="menu-item warn">{{t "Lock device"}}</button></form>
-            <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="unlock"><button role="menuitem" class="menu-item">{{t "Unlock device"}}</button></form>
+            {{template "cmd" dict "ID" $id "CSRF" $.CSRF "Type" "lock" "Label" "Lock device" "Class" "warn"}}
+            {{template "cmd" dict "ID" $id "CSRF" $.CSRF "Type" "unlock" "Label" "Unlock device"}}
             <a role="menuitem" class="menu-item warn" href="/devices/{{$id}}?tab=commands&amp;type=lost" data-open="dlg-lost">{{t "Lost mode…"}}</a>
-            <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="found"><button role="menuitem" class="menu-item">{{t "End lost mode"}}</button></form>
+            {{template "cmd" dict "ID" $id "CSRF" $.CSRF "Type" "found" "Label" "End lost mode"}}
             <a role="menuitem" class="menu-item danger" href="/devices/{{$id}}?tab=commands&amp;type=wipe" data-open="dlg-wipe">{{t "Wipe device…"}}</a>
         </div></div>
         <div class="sub"><button type="button" class="menu-item sub-head" aria-haspopup="menu">{{t "Agent"}}</button><div class="sub-list" role="menu">
             <a role="menuitem" class="menu-item" href="/devices/{{$id}}?tab=commands&amp;type=script">{{t "Run script…"}}</a>
-            <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="allow_uninstall"><button role="menuitem" class="menu-item">{{t "Allow uninstall for 1 hour"}}</button></form>
+            {{template "cmd" dict "ID" $id "CSRF" $.CSRF "Type" "allow_uninstall" "Label" "Allow uninstall for 1 hour"}}
         </div></div>
       </div>
     </details>
+    </div>
+    {{end}}
   </div>
-  {{end}}
-</div>
+  <dl class="dh-facts">
+    <div><dt>{{t "Model"}}</dt><dd>{{if .Inv.Model}}{{.Inv.Vendor}} {{.Inv.Model}}{{else}}–{{end}}</dd>
+      <dt>{{t "Serial"}}</dt><dd class="mono">{{if .Inv.Serial}}{{.Inv.Serial}}{{else}}–{{end}}</dd>
+      <dt>{{t "OS version"}}</dt><dd>{{if .Inv.OSName}}{{.Inv.OSName}}{{else}}–{{end}}</dd></div>
+    <div><dt>{{t "User"}}</dt><dd>{{if .Primary}}<a href="/directory?q={{.Primary}}">{{.Primary}}</a>{{else}}–{{end}}</dd>
+      <dt>{{t "Tags"}}</dt><dd>{{range .TagList}}<a class="tag" href="/devices?tag={{.}}">#{{.}}</a> {{else}}–{{end}}</dd>
+      <dt>{{t "Signed in"}}</dt><dd>{{range .Inv.Users}}<span class="tag">{{.}}</span> {{else}}–{{end}}</dd></div>
+    <div><dt>{{t "Blueprint"}}</dt><dd>{{range .Blueprints}}{{if .Assigned}}<a href="/blueprints/{{.ID}}">{{.Name}}</a>{{end}}{{end}}</dd>
+      <dt>{{t "Last check in"}}</dt><dd>{{ago .D.LastSeen}}</dd>
+      <dt>{{t "Agent"}}</dt><dd><a href="/devices?agent={{.D.AgentVersion}}">{{.D.AgentVersion}}</a>{{if .D.UpdateRequested}} <span class="muted">· {{t "update requested"}}</span>{{else if .D.UpdateState}} <span class="muted">· {{.D.UpdateVersion}} {{t .D.UpdateState}}</span>{{end}}</dd></div>
+    <div><dt>{{t "Network"}}</dt><dd>{{if .D.ExternalIP}}<span class="mono">{{.D.ExternalIP}}</span>{{else}}–{{end}}</dd>
+      <dt>{{t "Location"}}</dt><dd>{{with .D.Geo}}{{if .Place}}<span title="{{.ISP}}{{if .ASN}} AS{{.ASN}}{{end}}">{{.Place}}</span>{{else}}–{{end}}{{else}}–{{end}}</dd>
+      <dt>{{t "Inventory"}}</dt><dd>{{if .Inv.Source}}{{.Inv.Source}}{{else}}–{{end}}</dd></div>
+  </dl>
+</header>
+{{range .Protective}}{{if or (eq .Type "lock") (eq .Type "lost") (eq .Type "wipe")}}<div class="notice error state-notice" role="status">{{else}}<div class="notice ok state-notice" role="status">{{end}}
+  <strong>{{if eq .Type "lock"}}{{t "Device locked"}}{{else if eq .Type "unlock"}}{{t "Device unlocked"}}{{else if eq .Type "lost"}}{{t "Lost mode on"}}{{else if eq .Type "found"}}{{t "Lost mode ended"}}{{else if eq .Type "wipe"}}{{t "Wipe sent"}}{{else}}{{t "Uninstall allowed for 1 hour"}}{{end}}</strong>
+  <span>{{t "by"}} {{.By}}, {{fmtTime .At}}</span>
+  <span class="pill {{if eq .Status "ok"}}ok{{else if eq .Status "failed"}}bad{{else}}warn{{end}}">{{if eq .Status "ok"}}{{t "done on the device"}}{{else if eq .Status "failed"}}{{t "failed"}}{{else}}{{t "waiting for the device"}}{{end}}</span>
+</div>{{end}}
+{{if $admin}}<dialog id="dlg-edit" class="modal wide" aria-labelledby="dlg-edit-h">
+    <form method="post" action="/devices/{{$id}}/assign">
+      <h2 id="dlg-edit-h">{{t "Edit device details"}}</h2>
+      {{template "csrf" .CSRF}}
+      <label>{{t "Blueprint"}}<select name="blueprint_id">{{range .Blueprints}}<option value="{{if eq .Name "default"}}0{{else}}{{.ID}}{{end}}" {{if .Assigned}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+      <label>{{t "Primary user"}} <span class="hint">{{t "from the directory; brings groups and department into blueprint rules"}}</span>
+        <input name="primary_user" value="{{.Primary}}" list="people" autocomplete="off" placeholder="{{t "jane.doe@example.com"}}"></label>
+      <datalist id="people">{{range .People}}<option value="{{.}}">{{end}}</datalist>
+      <label>{{t "Tags"}} <span class="hint">{{t "comma separated, usable in blueprint conditions"}}</span><input name="tags" value="{{.Tags}}" placeholder="{{t "finance, berlin"}}"></label>
+      <label>{{t "Desktop users"}} <span class="hint">{{t "one per line: username email [admin]"}}</span>
+        <textarea name="users" rows="4" class="code" placeholder="jdoe jane.doe@example.com admin">{{.Users}}</textarea></label>
+      <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Save"}}</button></div>
+    </form>
+</dialog>{{end}}
 <dialog id="dlg-key" class="modal" aria-label="{{t "Recovery key"}}"><div data-dialog-body></div>
   <div class="form-foot"><span></span><button type="button" data-close>{{t "Close"}}</button></div></dialog>
 {{if and (eq .Sess.Role "admin") (ne .D.Status "retired")}}
-<dialog id="dlg-reboot" class="modal" aria-labelledby="dlg-reboot-h"><form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="reboot">
+<dialog id="dlg-reboot" class="modal" aria-labelledby="dlg-reboot-h"><form method="post" action="/devices/{{$id}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="reboot">
   <h2 id="dlg-reboot-h">{{t "Reboot later"}}</h2>
   <label>{{t "Delay in minutes"}} <span class="hint">{{t "the user is warned on the device"}}</span><input name="minutes" type="number" min="1" max="1440" value="5" required autofocus></label>
   <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Schedule"}}</button></div></form></dialog>
-<dialog id="dlg-shutdown" class="modal" aria-labelledby="dlg-shutdown-h"><form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="shutdown">
+<dialog id="dlg-shutdown" class="modal" aria-labelledby="dlg-shutdown-h"><form method="post" action="/devices/{{$id}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="shutdown">
   <h2 id="dlg-shutdown-h">{{t "Shut down later"}}</h2>
   <label>{{t "Delay in minutes"}} <span class="hint">{{t "the user is warned on the device"}}</span><input name="minutes" type="number" min="1" max="1440" value="5" required autofocus></label>
   <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Schedule"}}</button></div></form></dialog>
-<dialog id="dlg-agent" class="modal" aria-labelledby="dlg-agent-h"><form method="post" action="/devices/{{$id}}/agent-update"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<dialog id="dlg-agent" class="modal" aria-labelledby="dlg-agent-h"><form method="post" action="/devices/{{$id}}/agent-update">{{template "csrf" .CSRF}}
   <h2 id="dlg-agent-h">{{t "Update agent"}}</h2>
   <p class="muted">{{t "Installed:"}} <span class="mono">{{.D.AgentVersion}}</span>. {{t "The device installs the version at its next check in and returns to the current one if the new agent does not check in within 15 minutes."}}</p>
   <label>{{t "Version"}}<select name="version">
@@ -59,19 +95,19 @@
     {{range .AgentVersions}}<option value="{{.}}">{{.}}{{if eq . $.D.AgentVersion}} ({{t "installed"}}){{end}}</option>{{end}}
   </select></label>
   <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Update"}}</button></div></form></dialog>
-<dialog id="dlg-message" class="modal" aria-labelledby="dlg-message-h"><form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="message">
+<dialog id="dlg-message" class="modal" aria-labelledby="dlg-message-h"><form method="post" action="/devices/{{$id}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="message">
   <h2 id="dlg-message-h">{{t "Send message"}}</h2>
   <p class="muted">{{t "Shown as notification and dialog to everyone signed in on the desktop, at the next check in."}}</p>
   <label>{{t "Title"}} <span class="hint">{{t "optional"}}</span><input name="title" maxlength="100"></label>
   <label>{{t "Message"}}<textarea name="text" rows="4" maxlength="1000" required></textarea></label>
   <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Send"}}</button></div></form></dialog>
-<dialog id="dlg-lost" class="modal" aria-labelledby="dlg-lost-h"><form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="lost">
+<dialog id="dlg-lost" class="modal" aria-labelledby="dlg-lost-h"><form method="post" action="/devices/{{$id}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="lost">
   <h2 id="dlg-lost-h">{{t "Lost mode"}}</h2>
   <p class="notice">{{t "Blocks every login, ends running sessions and shows your message. With an escrowed recovery key, every other disk key slot is removed: after the next power off only IT can open the disk."}}</p>
   <label>{{t "Message on the device"}} <span class="hint">{{t "for example a phone number"}}</span><textarea name="message" rows="3" maxlength="500"></textarea></label>
   <label>{{t "Type the host name to confirm"}} <span class="mono">{{.D.Hostname}}</span><input name="confirm" autocomplete="off" spellcheck="false" required></label>
   <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button class="danger">{{t "Enable lost mode"}}</button></div></form></dialog>
-<dialog id="dlg-wipe" class="modal" aria-labelledby="dlg-wipe-h"><form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="wipe">
+<dialog id="dlg-wipe" class="modal" aria-labelledby="dlg-wipe-h"><form method="post" action="/devices/{{$id}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="wipe">
   <h2 id="dlg-wipe-h">{{t "Wipe device"}}</h2>
   <p class="notice error">{{t "Erases the disk encryption headers: all data on the device is lost for good. Devices without disk encryption are refused."}}</p>
   <label>{{t "Type the host name to confirm"}} <span class="mono">{{.D.Hostname}}</span><input name="confirm" autocomplete="off" spellcheck="false" required></label>
@@ -94,7 +130,7 @@
 </div>
 {{if .Charts}}<section class="card"><div class="card-head"><h2>{{t "Last 7 days"}}</h2><span class="muted">{{t "sampled every 15 minutes"}}</span></div>
   <div class="charts"><figure>{{index .Charts 0}}<figcaption>{{t "Memory used"}}</figcaption></figure><figure>{{index .Charts 1}}<figcaption>{{t "Root filesystem used"}}</figcaption></figure><figure>{{index .Charts 2}}<figcaption>{{t "Load (1 min)"}}</figcaption></figure></div></section>{{end}}
-<div class="grid side-right">
+<div>
   <section class="card">
     <h2>{{t "System"}}</h2>
     <dl class="kv">
@@ -112,24 +148,6 @@
       <dt>{{t "Enrolled"}}</dt><dd>{{fmtTime .Enrolled}}</dd>
       <dt>{{t "Certificate"}}</dt><dd>{{t "valid until"}} {{fmtTime .CertExp}}</dd>
     </dl>
-  </section>
-  <section class="card">
-    <h2>{{t "Assignment"}}</h2>
-    {{if eq .Sess.Role "admin"}}
-    <form method="post" action="/devices/{{$id}}/assign">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <label>{{t "Blueprint"}}<select name="blueprint_id">{{range .Blueprints}}<option value="{{if eq .Name "default"}}0{{else}}{{.ID}}{{end}}" {{if .Assigned}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
-      <label>{{t "Primary user"}} <span class="hint">{{t "from the directory; brings groups and department into blueprint rules"}}</span>
-        <input name="primary_user" value="{{.Primary}}" list="people" autocomplete="off" placeholder="{{t "jane.doe@example.com"}}"></label>
-      <datalist id="people">{{range .People}}<option value="{{.}}">{{end}}</datalist>
-      <label>{{t "Tags"}} <span class="hint">{{t "comma separated, usable in blueprint conditions"}}</span><input name="tags" value="{{.Tags}}" placeholder="{{t "finance, berlin"}}"></label>
-      <label>{{t "Desktop users"}} <span class="hint">{{t "one per line: username email [admin]"}}</span>
-        <textarea name="users" rows="4" class="code" placeholder="jdoe jane.doe@example.com admin">{{.Users}}</textarea></label>
-      <button>{{t "Save assignment"}}</button>
-    </form>
-    {{else}}
-    <dl class="kv">{{range .Blueprints}}{{if .Assigned}}<dt>{{t "Blueprint"}}</dt><dd>{{.Name}}</dd>{{end}}{{end}}<dt>{{t "Tags"}}</dt><dd>{{range .TagList}}<a class="tag" href="/devices?tag={{.}}">#{{.}}</a> {{else}}<span class="muted">{{t "none"}}</span>{{end}}</dd></dl>
-    {{end}}
   </section>
 </div>
 {{end}}
@@ -165,7 +183,7 @@
   <div class="scroll"><table>
     <thead><tr><th>{{t "Mount point"}}</th><th>{{t "Device"}}</th><th>{{t "Filesystem"}}</th><th>{{t "Encryption"}}</th><th>{{t "Usage"}}</th><th class="num">{{t "Free"}}</th></tr></thead>
     <tbody>{{range .Inv.Volumes}}<tr><td class="mono">{{.Mount}}</td><td class="mono">{{.Device}}</td><td>{{.FS}}</td>
-      <td>{{if .Encrypted}}<span class="pill ok">{{t "LUKS"}}</span>{{else if call $.EncExcluded .Mount}}<span class="pill">{{t "excluded"}}</span>{{else}}<span class="pill bad">{{t "none"}}</span>{{end}}</td>
+      <td>{{if .Encrypted}}<span class="pill ok">{{if .Encryption}}{{.Encryption}}{{else}}{{t "encrypted"}}{{end}}</span>{{else if call $.EncExcluded .Mount}}<span class="pill">{{t "excluded"}}</span>{{else}}<span class="pill bad">{{t "none"}}</span>{{end}}</td>
       <td><meter min="0" max="{{.SizeGB}}" value="{{used .SizeGB .FreeGB}}" low="{{frac .SizeGB 80}}" high="{{frac .SizeGB 90}}" optimum="0"></meter> <span class="muted">{{used .SizeGB .FreeGB}} {{t "of"}} {{.SizeGB}} {{t "GB"}}</span></td>
       <td class="num">{{.FreeGB}} {{t "GB"}}</td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No volume data reported."}}</td></tr>{{end}}</tbody>
   </table></div>
@@ -176,7 +194,7 @@
     <thead><tr><th>{{t "Device"}}</th><th>{{t "Volume UUID"}}</th><th>{{t "Escrowed"}}</th><th>{{t "Last viewed"}}</th><th></th></tr></thead>
     <tbody>{{range .Recovery}}<tr><td class="mono">{{.Device}}</td><td class="mono">{{.UUID}}</td><td>{{fmtTime .Escrowed}}</td>
       <td>{{if .ViewedAt}}{{fmtTime (derefTime .ViewedAt)}}{{if .ViewedBy}} · {{deref2 .ViewedBy}}{{end}}{{if .Rotate}} <span class="pill warn">{{t "rotation pending"}}</span>{{end}}{{else}}<span class="muted">{{t "never"}}</span>{{end}}</td>
-      <td>{{if ne $.Sess.Role "auditor"}}<form method="post" action="/devices/{{$id}}/recovery" data-dialog-post="dlg-key"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="uuid" value="{{.UUID}}"><button class="secondary small">{{t "Show key"}}</button></form>{{end}}</td></tr>
+      <td>{{if ne $.Sess.Role "auditor"}}<form method="post" action="/devices/{{$id}}/recovery" data-dialog-post="dlg-key">{{template "csrf" $.CSRF}}<input type="hidden" name="uuid" value="{{.UUID}}"><button class="secondary small">{{t "Show key"}}</button></form>{{end}}</td></tr>
     {{else}}<tr><td colspan="5" class="empty">{{t "No recovery key escrowed. Declare disk encryption recovery; the user is then asked on the desktop."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
@@ -186,7 +204,7 @@
 <nav class="subtabs" aria-label="{{t "Software"}}">
   <a href="/devices/{{$id}}?tab=software&amp;sub=packages" {{if eq .Sub "packages"}}class="on" aria-current="page"{{end}}>{{t "Packages"}} <span class="n">{{.PackageCount}}</span></a>
   <a href="/devices/{{$id}}?tab=software&amp;sub=sources" {{if eq .Sub "sources"}}class="on" aria-current="page"{{end}}>{{t "Package sources"}} <span class="n">{{len .Inv.Repos}}</span></a>
-  <a href="/devices/{{$id}}?tab=software&amp;sub=flatpak" {{if eq .Sub "flatpak"}}class="on" aria-current="page"{{end}}>{{t "Flatpak"}} <span class="n">{{len .Inv.Flatpaks}}</span></a>
+  <a href="/devices/{{$id}}?tab=software&amp;sub=flatpak" {{if eq .Sub "flatpak"}}class="on" aria-current="page"{{end}}>{{t "Apps"}} <span class="n">{{add (len .Inv.Flatpaks) (add (len .Inv.Snaps) (len .Inv.AppImages))}}</span></a>
   <a href="/devices/{{$id}}?tab=software&amp;sub=catalog" {{if eq .Sub "catalog"}}class="on" aria-current="page"{{end}}>{{t "Catalog"}} <span class="n">{{len .Inv.Apps}}</span></a>
 </nav>
 {{if eq .Sub "catalog"}}
@@ -197,7 +215,7 @@
     <tbody>{{range .Inv.Apps}}<tr><td>{{with index $.AppNames .ID}}{{.}}{{else}}{{.ID}}{{end}}</td>
       <td>{{if .Installed}}<span class="pill ok">{{t "installed"}}</span>{{else}}<span class="pill">{{t "not installed"}}</span>{{end}}</td>
       <td>{{if eq .Via "flatpak"}}Flatpak{{else if eq .Via "package"}}{{t "system package"}}{{end}}</td><td class="muted">{{.Error}}</td>
-      {{if $admin}}<td class="row-actions"><form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="app" value="{{.ID}}">
+      {{if $admin}}<td class="row-actions"><form method="post" action="/devices/{{$id}}/command">{{template "csrf" $.CSRF}}<input type="hidden" name="app" value="{{.ID}}">
         {{if .Installed}}<button class="secondary small" name="type" value="app_remove" data-confirm="{{t "Remove the app from this device?"}}">{{t "Remove"}}</button>{{else}}<button class="small" name="type" value="app_install">{{t "Install"}}</button>{{end}}</form></td>{{end}}</tr>{{else}}<tr><td colspan="5" class="empty">{{t "The device has not reported its catalog yet."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
@@ -218,7 +236,23 @@
     <thead><tr><th>{{t "Application"}}</th><th>{{t "Version"}}</th><th>{{t "Branch"}}</th><th>{{t "Remote"}}</th><th>{{t "Installation"}}</th><th>{{t "Catalog"}}</th></tr></thead>
     <tbody>{{range .Inv.Flatpaks}}<tr><td>{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}<span class="sub mono">{{.ID}}</span></td><td>{{.Version}}</td><td class="mono">{{.Branch}}</td><td>{{.Origin}}</td>
       <td>{{if eq .Installation "system"}}{{t "system"}}{{else}}<span class="tag">{{.Installation}}</span>{{end}}</td>
-      <td class="row-actions">{{with index $.CatalogFlatpaks .ID}}<a href="/software/apps/{{.}}">{{t "in catalog"}}</a>{{else}}{{if eq $.Sess.Role "admin"}}<form method="post" action="/software/import"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="device" value="{{$id}}"><input type="hidden" name="flatpak" value="{{.ID}}"><button class="secondary small">{{t "Add to catalog"}}</button></form>{{end}}{{end}}</td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No Flatpak applications reported."}}</td></tr>{{end}}</tbody>
+      <td class="row-actions">{{if $admin}}{{template "rmsw" dict "ID" $id "CSRF" $.CSRF "Kind" "flatpak" "Name" .ID "Inst" .Installation "Sub" "flatpak"}} {{end}}{{with index $.CatalogFlatpaks .ID}}<a href="/software/apps/{{.}}">{{t "in catalog"}}</a>{{else}}{{if eq $.Sess.Role "admin"}}<form method="post" action="/software/import">{{template "csrf" $.CSRF}}<input type="hidden" name="device" value="{{$id}}"><input type="hidden" name="flatpak" value="{{.ID}}"><button class="secondary small">{{t "Add to catalog"}}</button></form>{{end}}{{end}}</td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No Flatpak applications reported."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "Snaps"}}</h2><span class="muted">{{len .Inv.Snaps}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Snap"}}</th><th>{{t "Version"}}</th><th>{{t "Publisher"}}</th><th>{{t "Notes"}}</th>{{if $admin}}<th></th>{{end}}</tr></thead>
+    <tbody>{{range .Inv.Snaps}}<tr><td class="mono">{{.Name}}</td><td class="mono">{{.Version}}</td><td>{{.Publisher}}</td><td class="muted">{{.Notes}}</td>
+      {{if $admin}}<td class="row-actions">{{if or (eq .Notes "base") (eq .Notes "snapd") (eq .Notes "core")}}<span class="muted">{{t "system"}}</span>{{else}}{{template "rmsw" dict "ID" $id "CSRF" $.CSRF "Kind" "snap" "Name" .Name "Sub" "flatpak"}}{{end}}</td>{{end}}</tr>{{else}}<tr><td colspan="5" class="empty">{{t "No snaps installed."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "AppImages"}}</h2><span class="muted">{{len .Inv.AppImages}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "File"}}</th><th>{{t "Owner"}}</th><th class="num">{{t "Size"}}</th>{{if $admin}}<th></th>{{end}}</tr></thead>
+    <tbody>{{range .Inv.AppImages}}<tr><td class="mono">{{.Path}}</td><td>{{.Owner}}</td><td class="num">{{.SizeMB}} MB</td>
+      {{if $admin}}<td class="row-actions">{{template "rmsw" dict "ID" $id "CSRF" $.CSRF "Kind" "appimage" "Name" .Path "Sub" "flatpak"}}</td>{{end}}</tr>{{else}}<tr><td colspan="4" class="empty">{{t "No AppImages found."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 {{else if eq .Sub "sources"}}
@@ -242,8 +276,8 @@
     <button class="secondary">{{t "Filter"}}</button>
   </form>
   <div class="scroll"><table>
-    <thead><tr><th>{{t "Package"}}</th><th>{{t "Version"}}</th><th>{{t "Architecture"}}</th></tr></thead>
-    <tbody>{{range .Packages}}<tr><td class="mono">{{.Name}}</td><td class="mono">{{.Version}}</td><td>{{.Arch}}</td></tr>{{else}}<tr><td colspan="3" class="empty">{{t "No matching packages."}}</td></tr>{{end}}</tbody>
+    <thead><tr><th>{{t "Package"}}</th><th>{{t "Version"}}</th><th>{{t "Architecture"}}</th>{{if $admin}}<th></th>{{end}}</tr></thead>
+    <tbody>{{range .Packages}}<tr><td class="mono">{{.Name}}</td><td class="mono">{{.Version}}</td><td>{{.Arch}}</td>{{if $admin}}<td class="row-actions">{{template "rmsw" dict "ID" $id "CSRF" $.CSRF "Kind" "package" "Name" .Name "Sub" "packages"}}</td>{{end}}</tr>{{else}}<tr><td colspan="4" class="empty">{{t "No matching packages."}}</td></tr>{{end}}</tbody>
   </table></div>
   {{if gt .PkgPages 1}}<nav class="pager" aria-label="{{t "Package pages"}}">
     <span class="muted">{{.PkgFrom}}–{{.PkgTo}} {{t "of"}} {{.PkgMatched}}</span>
@@ -322,12 +356,29 @@
     <td>{{range .Members}}<span class="tag mono">{{.}}</span>{{end}}</td><td>{{if eq .Source "local"}}{{t "local"}}{{else}}<span class="pill accent">{{t "directory / NSS"}}</span>{{end}}</td></tr>{{end}}{{else}}<tr><td colspan="4" class="empty">{{t "No account data reported."}}</td></tr>{{end}}</tbody>
 </table></div></section>
 {{else}}
+{{if $admin}}<div class="actions"><a class="button" href="#dlg-user" data-open="dlg-user">{{t "Add local user…"}}</a></div>
+<dialog id="dlg-user" class="modal" aria-labelledby="dlg-user-h"><form method="post" action="/devices/{{$id}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="user_create">
+  <h2 id="dlg-user-h">{{t "Add local user"}}</h2>
+  <div class="inline"><label>{{t "User name"}}<input name="username" required pattern="[a-z_][a-z0-9_-]{0,31}" autocomplete="off" spellcheck="false"></label>
+    <label>{{t "Full name"}}<input name="full_name" maxlength="100"></label></div>
+  <label>{{t "Initial password"}} <span class="hint">{{t "at least 12 characters; must be changed at the first login; removed from the server once applied"}}</span><input name="password" type="password" minlength="12" required autocomplete="new-password"></label>
+  <label class="check"><input type="checkbox" name="admin"> {{t "administrator (sudo)"}}</label>
+  <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Create"}}</button></div></form></dialog>{{end}}
 <section class="tablecard"><div class="scroll"><table>
-  <thead><tr><th>{{t "Account"}}</th><th class="num">UID</th><th>{{t "Name"}}</th><th>{{t "Home"}}</th><th>{{t "Shell"}}</th><th>{{t "Source"}}</th><th>{{t "Rights"}}</th><th>{{t "SSO"}}</th></tr></thead>
+  <thead><tr><th>{{t "Account"}}</th><th class="num">UID</th><th>{{t "Name"}}</th><th>{{t "Home"}}</th><th>{{t "Shell"}}</th><th>{{t "Source"}}</th><th>{{t "Rights"}}</th><th>{{t "SSO"}}</th>{{if $admin}}<th></th>{{end}}</tr></thead>
   <tbody>{{range .Inv.Accounts}}{{if or $.ShowSystem (not .System)}}<tr><td class="mono">{{.Name}}</td><td class="num">{{.UID}}</td><td>{{.Gecos}}</td><td class="mono muted">{{.Home}}</td><td class="mono muted">{{.Shell}}</td>
     <td>{{if eq .Source "nss"}}<span class="pill accent">{{t "directory / NSS"}}</span>{{else}}{{t "local"}}{{end}}{{if .System}} <span class="pill">{{t "system"}}</span>{{end}}</td>
     <td>{{if .Admin}}<span class="pill warn">{{t "admin"}}</span>{{else}}<span class="pill">{{t "user"}}</span>{{end}}</td>
-    <td>{{if .SSO}}{{if .LastSSO}}{{t "confirmed"}} {{ago .LastSSO}}{{else}}<span class="muted">{{t "never confirmed"}}</span>{{end}}{{if .PwdLocked}} <span class="pill warn">{{t "local password locked"}}</span>{{end}}{{else}}<span class="muted">–</span>{{end}}</td></tr>{{end}}{{else}}<tr><td colspan="8" class="empty">{{t "No account data reported."}}</td></tr>{{end}}</tbody>
+    <td>{{if .SSO}}{{if .LastSSO}}{{t "confirmed"}} {{ago .LastSSO}}{{else}}<span class="muted">{{t "never confirmed"}}</span>{{end}}{{if .PwdLocked}} <span class="pill warn">{{t "local password locked"}}</span>{{end}}{{else}}<span class="muted">–</span>{{end}}</td>
+    {{if $admin}}<td class="row-actions">{{if and (not .System) (ne .Name "root") (ne .Source "nss")}}
+      <details class="menu"><summary class="button secondary small icon-only" aria-label="{{t "Actions"}}">⋯</summary><div class="menu-list" role="menu">
+        {{if .Admin}}{{template "ucmd" dict "ID" $id "CSRF" $.CSRF "Type" "user_admin" "User" .Name "Label" "Remove admin rights"}}{{else}}{{template "ucmd" dict "ID" $id "CSRF" $.CSRF "Type" "user_admin" "User" .Name "Admin" true "Label" "Make administrator"}}{{end}}
+        {{template "ucmd" dict "ID" $id "CSRF" $.CSRF "Type" "user_lock" "User" .Name "Label" "Lock account" "Class" "warn"}}
+        {{template "ucmd" dict "ID" $id "CSRF" $.CSRF "Type" "user_unlock" "User" .Name "Label" "Unlock account"}}
+        <form method="post" action="/devices/{{$id}}/command" class="menu-form">{{template "csrf" $.CSRF}}<input type="hidden" name="type" value="user_password"><input type="hidden" name="username" value="{{.Name}}">
+          <label>{{t "New password"}}<input name="password" type="password" minlength="12" required autocomplete="new-password"></label><div class="menu-row"><button class="small">{{t "Reset password"}}</button></div></form>
+        {{template "ucmd" dict "ID" $id "CSRF" $.CSRF "Type" "user_delete" "User" .Name "Label" "Delete account" "Class" "danger" "Confirm" "Delete this account and its home directory?"}}
+      </div></details>{{end}}</td>{{end}}</tr>{{end}}{{else}}<tr><td colspan="8" class="empty">{{t "No account data reported."}}</td></tr>{{end}}</tbody>
 </table></div></section>
 {{end}}
 {{end}}
@@ -371,7 +422,7 @@
 <section class="card">
   <h2>{{t "Send command"}}</h2>
   <form method="post" action="/devices/{{$id}}/command">
-    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    {{template "csrf" .CSRF}}
     <div class="inline">
       <label>{{t "Command"}}<select name="type">{{$pre := .PreType}}<optgroup label="{{t "Updates"}}"><option value="sync" {{if eq $pre "sync"}}selected{{end}}>{{actionLabel "sync"}}</option><option value="update" {{if eq $pre "update"}}selected{{end}}>{{actionLabel "update"}}</option></optgroup><optgroup label="{{t "Power"}}"><option value="reboot" {{if eq $pre "reboot"}}selected{{end}}>{{actionLabel "reboot"}}</option><option value="shutdown" {{if eq $pre "shutdown"}}selected{{end}}>{{actionLabel "shutdown"}}</option></optgroup><optgroup label="{{t "Security"}}"><option value="lock" {{if eq $pre "lock"}}selected{{end}}>{{actionLabel "lock"}}</option><option value="unlock" {{if eq $pre "unlock"}}selected{{end}}>{{actionLabel "unlock"}}</option><option value="lost" {{if eq $pre "lost"}}selected{{end}}>{{actionLabel "lost"}}</option><option value="found" {{if eq $pre "found"}}selected{{end}}>{{actionLabel "found"}}</option><option value="wipe" {{if eq $pre "wipe"}}selected{{end}}>{{actionLabel "wipe"}}</option></optgroup><optgroup label="{{t "Agent"}}"><option value="script" {{if eq $pre "script"}}selected{{end}}>{{actionLabel "script"}}</option><option value="allow_uninstall" {{if eq $pre "allow_uninstall"}}selected{{end}}>{{actionLabel "allow_uninstall"}}</option></optgroup></select></label>
       <label class="delay-only">{{t "Delay in minutes"}} <span class="hint">{{t "0 = now"}}</span><input name="minutes" type="number" min="0" max="1440" value="5"></label>
@@ -403,7 +454,7 @@
 <section class="card">
   <h2>{{t "Retire device"}}</h2>
   <p class="muted">{{t "Revokes the client certificate immediately. The device can no longer check in; history is kept."}}</p>
-  <form method="post" action="/devices/{{$id}}/retire"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger">{{t "Retire and revoke certificate"}}</button></form>
+  <form method="post" action="/devices/{{$id}}/retire">{{template "csrf" .CSRF}}<button class="danger">{{t "Retire and revoke certificate"}}</button></form>
 </section>
 {{end}}
 {{end}}

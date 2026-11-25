@@ -25,7 +25,7 @@
 </table></div></section>
 {{if and .Fleet (eq .Sess.Role "admin")}}
 <form class="tablecard" method="post" action="/software/import">
-  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  {{template "csrf" .CSRF}}
   <div class="card-head"><h2>{{t "Installed on devices, not in the catalog"}}</h2><button class="small">{{t "Add selected to catalog"}}</button></div>
   <p class="muted card-note">{{t "Flatpaks users or IT installed earlier. Added apps count as installed and managed on these devices; nothing is installed again. With the Flathub filter on, apps outside the catalog get no updates."}}</p>
   <div class="scroll"><table>
@@ -43,10 +43,10 @@
       <td>{{if eq .State "blocked"}}<span class="pill bad">{{t "blocked"}}</span>{{else}}<span class="pill ok">{{t "allowed"}}</span>{{end}}</td>
       <td>{{if .CatalogOnly}}{{t "yes"}}{{else}}<span class="muted">{{t "no"}}</span>{{end}}</td><td class="num">{{if .Devices}}<a class="count" href="/devices?remote={{.Name}}">{{.Devices}}</a>{{else}}<span class="muted">0</span>{{end}}</td>
       {{if eq $.Sess.Role "admin"}}<td class="row-actions inline-actions">
-        {{if eq .State "blocked"}}<form method="post" action="/software/remotes/{{.Name}}/allow"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary small">{{t "Allow"}}</button></form>
-        {{else}}<form method="post" action="/software/remotes/{{.Name}}/block"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary small">{{t "Block"}}</button></form>{{end}}
-        <form method="post" action="/software/remotes/{{.Name}}/filter"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary small">{{if .CatalogOnly}}{{t "Allow all apps"}}{{else}}{{t "Only catalog apps"}}{{end}}</button></form>
-        <form method="post" action="/software/remotes/{{.Name}}/unmanage"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary small">{{t "Stop managing"}}</button></form>
+        {{if eq .State "blocked"}}<form method="post" action="/software/remotes/{{.Name}}/allow">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Allow"}}</button></form>
+        {{else}}<form method="post" action="/software/remotes/{{.Name}}/block">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Block"}}</button></form>{{end}}
+        <form method="post" action="/software/remotes/{{.Name}}/filter">{{template "csrf" $.CSRF}}<button class="secondary small">{{if .CatalogOnly}}{{t "Allow all apps"}}{{else}}{{t "Only catalog apps"}}{{end}}</button></form>
+        <form method="post" action="/software/remotes/{{.Name}}/unmanage">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Stop managing"}}</button></form>
       </td>{{end}}</tr>{{else}}<tr><td colspan="6" class="empty">{{t "No managed remotes."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
@@ -56,13 +56,13 @@
     <thead><tr><th>{{t "Remote"}}</th><th>{{t "URL"}}</th><th class="num">{{t "Devices"}}</th>{{if eq $.Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
     <tbody>{{range .Found}}<tr><td>{{.Name}}{{if .Title}}<span class="sub">{{.Title}}</span>{{end}}</td><td class="mono">{{.URL}}</td><td class="num">{{if .Devices}}<a class="count" href="/devices?remote={{.Name}}">{{.Devices}}</a>{{else}}<span class="muted">0</span>{{end}}</td>
       {{if eq $.Sess.Role "admin"}}<td class="row-actions inline-actions">
-        <form method="post" action="/software/remotes"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="url" value="{{.URL}}"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="state" value="allowed"><button class="small">{{t "Take over"}}</button></form>
-        <form method="post" action="/software/remotes"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="url" value="{{.URL}}"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="state" value="blocked"><button class="secondary small">{{t "Block"}}</button></form>
+        <form method="post" action="/software/remotes">{{template "csrf" $.CSRF}}<input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="url" value="{{.URL}}"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="state" value="allowed"><button class="small">{{t "Take over"}}</button></form>
+        <form method="post" action="/software/remotes">{{template "csrf" $.CSRF}}<input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="url" value="{{.URL}}"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="state" value="blocked"><button class="secondary small">{{t "Block"}}</button></form>
       </td>{{end}}</tr>{{end}}</tbody>
   </table></div>
 </section>{{end}}
 {{if eq .Sess.Role "admin"}}<form class="card narrow" method="post" action="/software/remotes">
-  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  {{template "csrf" .CSRF}}
   <h2>{{t "Add remote"}}</h2>
   <div class="inline"><label>{{t "Name"}}<input name="name" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}" placeholder="fedora"></label>
     <label>{{t "Title"}}<input name="title" maxlength="80" placeholder="Fedora Flatpaks"></label></div>
@@ -78,15 +78,15 @@
     <td>{{.AppName}}{{if .Flatpak}}<span class="sub mono">{{.Flatpak}} · {{.Remote}}</span>{{if not .App}} <span class="pill">{{t "not in catalog"}}</span>{{end}}{{end}}</td><td><a href="/devices/{{.DeviceID}}">{{.Hostname}}</a></td><td class="mono">{{.User}}</td><td>{{.Note}}</td><td class="nowrap">{{fmtTime .CreatedAt}}</td>
     <td>{{if eq .Status "pending"}}<span class="pill warn">{{t "pending"}}</span>{{else if eq .Status "approved"}}<span class="pill ok">{{t "approved"}}</span>{{else}}<span class="pill bad">{{t "denied"}}</span>{{end}}{{if .DecidedBy}}<span class="sub">{{derefStr .DecidedBy}}</span>{{end}}</td>
     {{if eq $.Sess.Role "admin"}}<td class="row-actions inline-actions">{{if eq .Status "pending"}}
-      <form method="post" action="/software/requests/{{.ID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="small">{{if .Flatpak}}{{t "Approve for this device"}}{{else}}{{t "Approve"}}{{end}}</button></form>
-      {{if .Flatpak}}<form method="post" action="/software/requests/{{.ID}}/approve-all"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary small">{{t "Approve for everyone"}}</button></form>{{end}}
-      <form method="post" action="/software/requests/{{.ID}}/deny"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary small">{{t "Deny"}}</button></form>{{end}}</td>{{end}}
+      <form method="post" action="/software/requests/{{.ID}}/approve">{{template "csrf" $.CSRF}}<button class="small">{{if .Flatpak}}{{t "Approve for this device"}}{{else}}{{t "Approve"}}{{end}}</button></form>
+      {{if .Flatpak}}<form method="post" action="/software/requests/{{.ID}}/approve-all">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Approve for everyone"}}</button></form>{{end}}
+      <form method="post" action="/software/requests/{{.ID}}/deny">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Deny"}}</button></form>{{end}}</td>{{end}}
   </tr>{{else}}<tr><td colspan="7" class="empty">{{t "No requests yet."}}</td></tr>{{end}}</tbody>
 </table></div></section>
 {{else}}
 <div class="narrow">
 <form class="card" method="post" action="/software/settings">
-  <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="tab" value="settings">
+  {{template "csrf" .CSRF}}<input type="hidden" name="tab" value="settings">
   <h2>{{t "Store policy"}}</h2>
   <p class="muted">{{t "Default for devices without a Software store policy item. Assign that item in a blueprint to decide per device group."}}</p>
   <label class="check"><input type="checkbox" name="restrict_flathub" {{if .Set.RestrictFlathub}}checked{{end}}> {{t "Flathub offers only catalog apps"}}</label>

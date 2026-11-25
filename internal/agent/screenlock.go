@@ -341,7 +341,8 @@ func fixScreenLock(a *Agent) error {
 type idleSession struct {
 	user, uid, kind string // kind: wayland (wlroots style) or x11
 	env             []string
-	locked          bool // the agent's own locker runs in this session
+	locked          bool // the agent's own idle locker runs in this session
+	screenLocked    bool // a screen locker shows right now
 }
 
 // compositors that need an external idle locker
@@ -376,10 +377,9 @@ func ownLockerRuns(s graphicalSession) bool {
 	return true
 }
 
-// idleSessions lists graphical sessions of compositors and window managers
-// without a screen locker of their own, and whether the agent's locker runs.
-func idleSessions() []idleSession {
-	procs := map[string]map[string]bool{} // uid -> process names
+// userProcs maps uid to the names of its running processes.
+func userProcs() map[string]map[string]bool {
+	procs := map[string]map[string]bool{}
 	dirs, _ := filepath.Glob("/proc/[0-9]*")
 	for _, d := range dirs {
 		comm, err := os.ReadFile(d + "/comm")
@@ -396,6 +396,13 @@ func idleSessions() []idleSession {
 		}
 		procs[uid][strings.TrimSpace(string(comm))] = true
 	}
+	return procs
+}
+
+// idleSessions lists graphical sessions of compositors and window managers
+// without a screen locker of their own, and whether the agent's locker runs.
+func idleSessions() []idleSession {
+	procs := userProcs()
 	var res []idleSession
 	for _, s := range graphicalSessions() {
 		p := procs[s.uid]
@@ -413,7 +420,7 @@ func idleSessions() []idleSession {
 		if kind == "" {
 			continue // a desktop environment with its own locker, configured above
 		}
-		res = append(res, idleSession{user: s.user, uid: s.uid, kind: kind, env: s.env, locked: ownLockerRuns(s)})
+		res = append(res, idleSession{user: s.user, uid: s.uid, kind: kind, env: s.env, locked: ownLockerRuns(s), screenLocked: lockerRunning(p)})
 	}
 	return res
 }
@@ -437,8 +444,9 @@ func xTimeout(s idleSession) int {
 // remediatesScreenLock: the idle locker is a change on the device, so it
 // follows the same rules as every other remediation.
 func (a *Agent) remediatesScreenLock() bool {
-	p := a.pol.Compliance
-	return a.pol.ScreenLockSeconds > 0 && p.Remediate && p.Level >= 1 && !slices.Contains(p.Exclude, "desktop.screenlock")
+	pol := a.policy()
+	p := pol.Compliance
+	return pol.ScreenLockSeconds > 0 && p.Remediate && p.Level >= 1 && !slices.Contains(p.Exclude, "desktop.screenlock")
 }
 
 // ensureIdleLocks starts the agent's locker in sessions that lack it and
@@ -447,7 +455,7 @@ func (a *Agent) ensureIdleLocks() {
 	if !a.remediatesScreenLock() {
 		return
 	}
-	seconds := a.pol.ScreenLockSeconds
+	seconds := a.policy().ScreenLockSeconds
 	for _, s := range idleSessions() {
 		if s.kind == "x11" && hasCmd("xset") && xTimeout(s) != seconds {
 			// xss-lock follows the X screensaver timeout; a user's "xset s off" is undone here
