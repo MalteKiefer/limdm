@@ -4,6 +4,12 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 
 ## Unreleased
 
+### Added
+- Settings, Security: a password policy (minimum length, character classes, no user name) for passwords set in the console, on devices and for local console accounts.
+
+### Changed
+- Hints sit below their fields and start with a capital letter; option labels too. The email kind reads "E-Mail (SMTP)" in German.
+
 ### Fixed
 - Login items without `mode` from before 0.11 (they carry `local_password`) keep login mode instead of turning into sessions.
 - Firewall rules with ports outside 1..65535 or reversed ranges are rejected; declaration tokens match for payloads with `&`, `<` or `>`.

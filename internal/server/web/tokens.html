@@ -41,7 +41,7 @@ allow_scripts = false</pre>
       <h2>{{t "New token"}}</h2>
       {{template "csrf" .CSRF}}
       <label>{{t "Note"}}<input name="note" maxlength="200" placeholder="{{t "e.g. laptops batch 12"}}"></label>
-      <label>{{t "Blueprint"}}<select name="blueprint_id"><option value="0">{{t "default only"}}</option>{{range .Blueprints}}{{if ne .Name "default"}}<option value="{{.ID}}">{{.Name}}</option>{{end}}{{end}}</select></label>
+      <label>{{t "Blueprint"}}<select name="blueprint_id"><option value="0">{{t "Default only"}}</option>{{range .Blueprints}}{{if ne .Name "default"}}<option value="{{.ID}}">{{.Name}}</option>{{end}}{{end}}</select></label>
       <div class="inline">
         <label>{{t "Uses"}}<input name="uses" type="number" value="1" min="1" max="10000"></label>
         <label>{{t "Valid for days"}}<input name="days" type="number" value="7" min="1" max="90"></label>

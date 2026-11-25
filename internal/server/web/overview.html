@@ -6,9 +6,9 @@
 </div>
 <div class="stats">
   <a class="stat" href="/devices?status=compliant"><div class="label"><span class="dot ok"></span>{{t "Compliant"}}</div><div class="value">{{index .Counts "compliant"}}</div><div class="hint">{{pct (index .Counts "compliant") .Active}}{{t "% of active"}}</div></a>
-  <a class="stat" href="/devices?status=non-compliant"><div class="label"><span class="dot bad"></span>{{t "Non-compliant"}}</div><div class="value">{{index .Counts "non-compliant"}}</div><div class="hint">{{t "at least one failing check"}}</div></a>
-  <a class="stat" href="/devices?status=stale"><div class="label"><span class="dot warn"></span>{{t "Stale"}}</div><div class="value">{{index .Counts "stale"}}</div><div class="hint">{{t "silent for"}} {{.StaleHours}} {{t "h"}}</div></a>
-  <a class="stat" href="/devices?status=pending"><div class="label"><span class="dot na"></span>{{t "Pending"}}</div><div class="value">{{index .Counts "pending"}}</div><div class="hint">{{t "no report yet"}}</div></a>
+  <a class="stat" href="/devices?status=non-compliant"><div class="label"><span class="dot bad"></span>{{t "Non-compliant"}}</div><div class="value">{{index .Counts "non-compliant"}}</div><div class="hint">{{t "At least one failing check"}}</div></a>
+  <a class="stat" href="/devices?status=stale"><div class="label"><span class="dot warn"></span>{{t "Stale"}}</div><div class="value">{{index .Counts "stale"}}</div><div class="hint">{{t "Silent for"}} {{.StaleHours}} {{t "h"}}</div></a>
+  <a class="stat" href="/devices?status=pending"><div class="label"><span class="dot na"></span>{{t "Pending"}}</div><div class="value">{{index .Counts "pending"}}</div><div class="hint">{{t "No report yet"}}</div></a>
 </div>
 <div class="grid side-right">
   <div>

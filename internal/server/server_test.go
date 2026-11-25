@@ -362,3 +362,22 @@ func TestTruncateStorable(t *testing.T) {
 		t.Errorf("NUL in JSONB: %s", j)
 	}
 }
+
+func TestPasswordPolicy(t *testing.T) {
+	p := PasswordPolicy{Upper: true, Digit: true, Symbol: true, NoName: true}
+	for pw, want := range map[string]string{
+		"Correct-horse-9":   "",
+		"short":             passwordErrors[0],
+		"correct-horse-99":  passwordErrors[2],
+		"Correct-horse-xx":  passwordErrors[4],
+		"Correcthorse99":    passwordErrors[5],
+		"Anna-is-here-2025": passwordErrors[6],
+	} {
+		if got := p.Check(pw, "anna"); got != want {
+			t.Errorf("%q: got %q want %q", pw, got, want)
+		}
+	}
+	if (PasswordPolicy{}).Min() != 12 || (PasswordPolicy{MinLength: 20}).Min() != 20 {
+		t.Error("minimum length")
+	}
+}

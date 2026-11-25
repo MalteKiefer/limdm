@@ -36,8 +36,8 @@
     {{template "csrf" .CSRF}}
     <input type="hidden" name="username" value="{{.P.Name}}" autocomplete="username">
     <label>{{t "Current password"}}<input type="password" name="current" required autocomplete="current-password"></label>
-    <label>{{t "New password"}} <span class="hint">{{t "at least 12 characters"}}</span><input type="password" name="new" required minlength="12" autocomplete="new-password"></label>
-    <label>{{t "Repeat new password"}}<input type="password" name="repeat" required minlength="12" autocomplete="new-password"></label>
+    <label>{{t "New password"}}<input type="password" name="new" required minlength="{{.PwMin}}" autocomplete="new-password"><small class="field-hint">{{t "Follows the password policy (Settings, Security)"}}</small></label>
+    <label>{{t "Repeat new password"}}<input type="password" name="repeat" required minlength="{{.PwMin}}" autocomplete="new-password"></label>
     <div class="form-foot"><span class="muted">{{t "Five wrong entries lock the account for 15 minutes."}}</span><button>{{t "Change password"}}</button></div>
   </form>
 {{end}}

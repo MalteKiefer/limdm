@@ -12,7 +12,7 @@
 <form class="card" method="post" action="/settings">
   {{template "csrf" .CSRF}}<input type="hidden" name="section" value="general">
   <h2>{{t "Access"}}</h2>
-  <label class="check"><input type="checkbox" name="local_login" {{if .Set.LocalLogin}}checked{{end}}> {{t "allow local accounts (password + TOTP)"}}</label>
+  <label class="check"><input type="checkbox" name="local_login" {{if .Set.LocalLogin}}checked{{end}}> {{t "Allow local accounts (password + TOTP)"}}</label>
   <label>{{t "Device counts as stale after (hours)"}}<input name="stale_hours" type="number" min="1" max="2160" value="{{.Set.StaleHours}}"></label>
   <dl class="kv"><dt>{{t "Public URL"}}</dt><dd class="mono">{{.PublicURL}}</dd></dl>
   {{if $admin}}<div class="form-foot"><span class="muted">{{t "Local accounts can only be switched off while an OIDC administrator exists."}}</span><button>{{t "Save"}}</button></div>{{end}}
@@ -21,9 +21,24 @@
   {{template "csrf" .CSRF}}<input type="hidden" name="section" value="network">
   <h2>{{t "Console access by network"}}</h2>
   <p class="muted">{{t "Addresses or CIDR ranges, separated by spaces or lines. The agent API is not affected; this host (loopback) is always allowed. Your address:"}} <span class="mono">{{.ClientIP}}</span></p>
-  <label>{{t "Allowed networks"}} <span class="hint">{{t "empty: every network"}}</span><textarea name="console_allow" rows="3" class="code" placeholder="10.0.0.0/8 2001:db8::/32">{{join .Set.ConsoleAllow "\n"}}</textarea></label>
-  <label>{{t "Blocked networks"}} <span class="hint">{{t "refused even when allowed above"}}</span><textarea name="console_block" rows="3" class="code" placeholder="203.0.113.0/24">{{join .Set.ConsoleBlock "\n"}}</textarea></label>
+  <label>{{t "Allowed networks"}}<textarea name="console_allow" rows="3" class="code" placeholder="10.0.0.0/8 2001:db8::/32">{{join .Set.ConsoleAllow "\n"}}</textarea><small class="field-hint">{{t "Empty: every network"}}</small></label>
+  <label>{{t "Blocked networks"}}<textarea name="console_block" rows="3" class="code" placeholder="203.0.113.0/24">{{join .Set.ConsoleBlock "\n"}}</textarea><small class="field-hint">{{t "Refused even when allowed above"}}</small></label>
   {{if $admin}}<div class="form-foot"><span class="muted">{{t "Saving is refused when your own address would be locked out."}}</span><button>{{t "Save"}}</button></div>{{end}}
+</form>
+{{else if eq .Tab "security"}}
+<form class="card" method="post" action="/settings">
+  {{template "csrf" .CSRF}}<input type="hidden" name="section" value="security">
+  <div class="card-head stacked"><h2>{{t "Password policy"}}</h2><p class="muted">{{t "Applies to passwords set in the console: local accounts on devices (create, reset) and local console accounts. Passwords people set on their devices follow the compliance check Password quality."}}</p></div>
+  <label>{{t "Minimum length"}}<input name="min_length" type="number" min="12" max="128" value="{{.Set.Password.Min}}"><small class="field-hint">{{t "12 to 128 characters"}}</small></label>
+  <fieldset class="event-grid">
+    <legend>{{t "Required characters"}}</legend>
+    <label class="check"><input type="checkbox" name="upper" {{if .Set.Password.Upper}}checked{{end}}><span>{{t "Uppercase letter"}}<code>A–Z</code></span></label>
+    <label class="check"><input type="checkbox" name="lower" {{if .Set.Password.Lower}}checked{{end}}><span>{{t "Lowercase letter"}}<code>a–z</code></span></label>
+    <label class="check"><input type="checkbox" name="digit" {{if .Set.Password.Digit}}checked{{end}}><span>{{t "Digit"}}<code>0–9</code></span></label>
+    <label class="check"><input type="checkbox" name="symbol" {{if .Set.Password.Symbol}}checked{{end}}><span>{{t "Special character"}}<code>! ? # …</code></span></label>
+  </fieldset>
+  <label class="check"><input type="checkbox" name="no_name" {{if .Set.Password.NoName}}checked{{end}}> {{t "Must not contain the user name"}}</label>
+  {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
 </form>
 {{else if eq .Tab "sso"}}
 <form class="card" method="post" action="/settings">
@@ -32,16 +47,16 @@
   <p class="muted">{{t "Google Workspace: create an OAuth client of type Web application with this redirect URI:"}} <code>{{.Redirect}}</code></p>
   <label>{{t "Issuer"}}<input name="oidc_issuer" value="{{.Set.OIDCIssuer}}" placeholder="{{t "https://accounts.google.com"}}" spellcheck="false"></label>
   <label>{{t "Client ID"}}<input name="oidc_client_id" value="{{.Set.OIDCClientID}}" spellcheck="false"></label>
-  <label>{{t "Client secret"}} <span class="hint">{{if .HasSecret}}{{t "stored encrypted; leave empty to keep"}}{{else}}{{t "not set"}}{{end}}</span><input name="oidc_client_secret" type="password" autocomplete="new-password"></label>
-  {{if .HasSecret}}<label class="check"><input type="checkbox" name="clear_secret"> {{t "remove the stored secret"}}</label>{{end}}
-  <label>{{t "Allowed domain"}} <span class="hint">{{t "Google hd claim or email domain, optional"}}</span><input name="allowed_domain" value="{{.Set.AllowedDomain}}" placeholder="{{t "example.com"}}"></label>
+  <label>{{t "Client secret"}}<input name="oidc_client_secret" type="password" autocomplete="new-password"><small class="field-hint">{{if .HasSecret}}{{t "Stored encrypted; leave empty to keep"}}{{else}}{{t "Not set"}}{{end}}</small></label>
+  {{if .HasSecret}}<label class="check"><input type="checkbox" name="clear_secret"> {{t "Remove the stored secret"}}</label>{{end}}
+  <label>{{t "Allowed domain"}}<input name="allowed_domain" value="{{.Set.AllowedDomain}}" placeholder="{{t "example.com"}}"><small class="field-hint">{{t "Google hd claim or email domain, optional"}}</small></label>
   {{if $admin}}<div class="form-foot"><span class="muted">{{t "OIDC changes are checked against the provider before they take effect."}}</span><button>{{t "Save"}}</button></div>{{end}}
 </form>
 {{else if eq .Tab "monitoring"}}
 <form class="card" method="post" action="/settings">
   {{template "csrf" .CSRF}}<input type="hidden" name="section" value="monitoring">
   <h2>{{t "Compliance webhook"}}</h2>
-  <label>{{t "URL"}} <span class="hint">{{t "https URL receiving JSON when a device becomes non-compliant"}}</span><input name="webhook_url" value="{{.Set.WebhookURL}}" placeholder="{{t "https://hooks.example.com/limdm"}}" spellcheck="false"></label>
+  <label>{{t "URL"}}<input name="webhook_url" value="{{.Set.WebhookURL}}" placeholder="{{t "https://hooks.example.com/limdm"}}" spellcheck="false"><small class="field-hint">{{t "Https URL receiving JSON when a device becomes non-compliant"}}</small></label>
   {{if $admin}}<dl class="kv"><dt>{{t "Signing key"}}</dt><dd><span class="fp">{{.WebhookSecret}}</span><span class="sub">X-LiMDM-Signature: sha256=HMAC-SHA256(key, body)</span></dd></dl>{{end}}
   {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
 </form>
@@ -52,7 +67,7 @@
     <thead><tr><th>{{t "Channel"}}</th><th>{{t "Kind"}}</th><th>{{t "Events"}}</th><th>{{t "Last delivery"}}</th>{{if $admin}}<th></th>{{end}}</tr></thead>
     <tbody>{{range .Channels}}<tr>
       <td>{{.Name}}<span class="sub mono">{{.Target}}</span></td>
-      <td><span class="kind-badge {{.Kind}}">{{if eq .Kind "email"}}{{t "Email"}}{{else if eq .Kind "slack"}}Slack{{else if eq .Kind "discord"}}Discord{{else}}{{t "Webhook"}}{{end}}</span>{{if not .Enabled}} <span class="pill">{{t "off"}}</span>{{end}}</td>
+      <td><span class="kind-badge {{.Kind}}">{{if eq .Kind "email"}}{{t "Email (SMTP)"}}{{else if eq .Kind "slack"}}Slack{{else if eq .Kind "discord"}}Discord{{else}}{{t "Webhook"}}{{end}}</span>{{if not .Enabled}} <span class="pill">{{t "off"}}</span>{{end}}</td>
       <td>{{if .Events}}<div class="event-tags">{{range .Events}}<span class="tag">{{t .}}</span>{{end}}</div>{{else}}<span class="muted">{{t "all events"}}</span>{{end}}</td>
       <td class="delivery">{{if .LastOK}}{{if derefBool .LastOK}}<span class="pill ok">{{t "delivered"}}</span>{{else}}<span class="pill bad">{{t "failed"}}</span>{{end}} <span class="muted nowrap">{{fmtTime (derefTime .LastAt)}}</span>{{if not (derefBool .LastOK)}}<span class="sub">{{.LastError}}</span>{{end}}{{else}}<span class="muted">{{t "never"}}</span>{{end}}</td>
       {{if $admin}}<td class="row-actions">
@@ -72,7 +87,7 @@
     <legend>{{t "Kind"}}</legend>
     <label><input type="radio" name="kind" value="slack" checked><strong>Slack</strong><span>{{t "Incoming webhook"}}</span></label>
     <label><input type="radio" name="kind" value="discord"><strong>Discord</strong><span>{{t "Channel webhook"}}</span></label>
-    <label><input type="radio" name="kind" value="email"><strong>{{t "Email"}}</strong><span>{{t "Your SMTP server"}}</span></label>
+    <label><input type="radio" name="kind" value="email"><strong>{{t "Email (SMTP)"}}</strong><span>{{t "To one or more addresses"}}</span></label>
     <label><input type="radio" name="kind" value="webhook"><strong>{{t "Webhook"}}</strong><span>{{t "Signed JSON to any HTTPS endpoint"}}</span></label>
   </fieldset>
   <label>{{t "Name"}}<input name="name" required maxlength="80" placeholder="{{t "IT on call"}}"></label>
@@ -80,20 +95,20 @@
   <div class="kind-email">
     <div class="form-row">
       <label class="grow">{{t "SMTP server"}}<input name="smtp_host" spellcheck="false" placeholder="smtp.example.com"></label>
-      <label class="narrow">{{t "Port"}}<input name="smtp_port" type="number" min="1" max="65535" value="587"></label>
-      <label class="narrow">{{t "Encryption"}}<select name="smtp_tls"><option value="starttls">STARTTLS</option><option value="tls">TLS</option></select></label>
+      <label class="short">{{t "Port"}}<input name="smtp_port" type="number" min="1" max="65535" value="587"></label>
+      <label class="short">{{t "Encryption"}}<select name="smtp_tls"><option value="starttls">STARTTLS</option><option value="tls">TLS</option></select></label>
     </div>
     <div class="form-row">
       <label>{{t "User"}}<input name="smtp_user" autocomplete="off" spellcheck="false"></label>
-      <label>{{t "Password"}}<input name="smtp_password" type="password" autocomplete="new-password"><small class="field-hint">{{t "stored encrypted"}}</small></label>
+      <label>{{t "Password"}}<input name="smtp_password" type="password" autocomplete="new-password"><small class="field-hint">{{t "Stored encrypted"}}</small></label>
     </div>
     <div class="form-row">
       <label>{{t "Sender"}}<input name="smtp_from" placeholder="LiMDM &lt;mdm@example.com&gt;"></label>
-      <label>{{t "Recipients"}}<input name="smtp_to" placeholder="it@example.com, security@example.com"><small class="field-hint">{{t "separated by commas or spaces"}}</small></label>
+      <label>{{t "Recipients"}}<input name="smtp_to" placeholder="it@example.com, security@example.com"><small class="field-hint">{{t "Separated by commas or spaces"}}</small></label>
     </div>
   </div>
   <fieldset class="event-grid">
-    <legend>{{t "Events"}}<small class="field-hint">{{t "none selected: all events"}}</small></legend>
+    <legend>{{t "Events"}}<small class="field-hint">{{t "None selected: all events"}}</small></legend>
     {{range .NotifyEvents}}<label class="check"><input type="checkbox" name="events" value="{{.Type}}"><span>{{t .Label}}<code>{{.Type}}</code></span></label>{{end}}
   </fieldset>
   <div class="form-foot"><span></span><button>{{t "Add channel"}}</button></div>
@@ -103,9 +118,9 @@
 <form class="card" method="post" action="/settings" enctype="multipart/form-data">
   {{template "csrf" .CSRF}}<input type="hidden" name="section" value="branding">
   <h2>{{t "Branding"}}</h2>
-  <label>{{t "Company name"}} <span class="hint">{{t "shown in the console and in dialogs on devices"}}</span><input name="company_name" value="{{.Set.CompanyName}}" maxlength="80"></label>
-  <label>{{t "Logo"}} <span class="hint">{{t "PNG, square, up to 256 KiB"}}</span><input type="file" name="logo" accept="image/png"></label>
-  {{if .Set.Logo}}<div class="logo-preview"><img src="/branding/logo.png?v={{.Brand.V}}" alt=""><label class="check"><input type="checkbox" name="remove_logo"> {{t "remove logo"}}</label></div>{{end}}
+  <label>{{t "Company name"}}<input name="company_name" value="{{.Set.CompanyName}}" maxlength="80"><small class="field-hint">{{t "Shown in the console and in dialogs on devices"}}</small></label>
+  <label>{{t "Logo"}}<input type="file" name="logo" accept="image/png"><small class="field-hint">{{t "PNG, square, up to 256 KiB"}}</small></label>
+  {{if .Set.Logo}}<div class="logo-preview"><img src="/branding/logo.png?v={{.Brand.V}}" alt=""><label class="check"><input type="checkbox" name="remove_logo"> {{t "Remove logo"}}</label></div>{{end}}
   {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
 </form>
 {{else}}

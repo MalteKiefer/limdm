@@ -7,8 +7,8 @@
 <div class="stats">
   <div class="stat"><div class="label"><span class="dot ok"></span>{{t "Compliant"}}</div><div class="value">{{.Compliant}}</div></div>
   <div class="stat"><div class="label"><span class="dot bad"></span>{{t "Non-compliant"}}</div><div class="value">{{.NonCompliant}}</div></div>
-  <div class="stat"><div class="label"><span class="dot warn"></span>{{t "Stale"}}</div><div class="value">{{.Stale}}</div><div class="hint">{{t "silent for"}} {{.StaleHours}} {{t "h"}}</div></div>
-  <div class="stat"><div class="label"><span class="dot na"></span>{{t "Pending"}}</div><div class="value">{{.Pending}}</div><div class="hint">{{t "no report yet"}}</div></div>
+  <div class="stat"><div class="label"><span class="dot warn"></span>{{t "Stale"}}</div><div class="value">{{.Stale}}</div><div class="hint">{{t "Silent for"}} {{.StaleHours}} {{t "h"}}</div></div>
+  <div class="stat"><div class="label"><span class="dot na"></span>{{t "Pending"}}</div><div class="value">{{.Pending}}</div><div class="hint">{{t "No report yet"}}</div></div>
 </div>
 <form class="filters" method="get" action="/compliance">
   <input type="search" name="q" value="{{.F.Q}}" placeholder="{{t "Search checks"}}" aria-label="{{t "Search checks"}}">

@@ -9,7 +9,7 @@
   <section class="card">
     <div class="inline">
       <label>{{t "Name"}}<input name="name" value="{{.BP.Name}}" required pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}" {{if eq .BP.Name "default"}}readonly{{end}}></label>
-      <label>{{t "Inherits from"}}<select name="parent_id" {{if eq .BP.Name "default"}}disabled{{end}}><option value="0">{{t "nothing"}}</option>
+      <label>{{t "Inherits from"}}<select name="parent_id" {{if eq .BP.Name "default"}}disabled{{end}}><option value="0">{{t "Nothing"}}</option>
         {{$pid := .ParentID}}{{$self := .BP.ID}}{{range .Blueprints}}{{if ne .ID $self}}<option value="{{.ID}}" {{if eq .ID $pid}}selected{{end}}>{{.Name}}</option>{{end}}{{end}}</select></label>
     </div>
     <label>{{t "Description"}}<input name="description" value="{{.BP.Desc}}" maxlength="300"></label>

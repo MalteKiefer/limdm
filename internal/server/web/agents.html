@@ -33,8 +33,8 @@
     <form class="card" method="post" action="/agents/policy">
       <h2>{{t "Rollout"}}</h2>
       {{template "csrf" .CSRF}}
-      <label class="check"><input type="checkbox" name="auto" {{if .Policy.Auto}}checked{{end}}> {{t "update agents automatically"}}</label>
-      <label>{{t "Pilot tag"}} <span class="hint">{{t "devices with this tag get an approved version at once"}}</span><input name="pilot_tag" value="{{.Policy.PilotTag}}"></label>
+      <label class="check"><input type="checkbox" name="auto" {{if .Policy.Auto}}checked{{end}}> {{t "Update agents automatically"}}</label>
+      <label>{{t "Pilot tag"}}<input name="pilot_tag" value="{{.Policy.PilotTag}}"><small class="field-hint">{{t "Devices with this tag get an approved version at once"}}</small></label>
       <label>{{t "Delay for all other devices (days)"}}<input name="delay_days" type="number" min="0" max="90" value="{{.Policy.DelayDays}}"></label>
       <button>{{t "Save"}}</button>
       <p class="muted">{{t "A device that does not check in within 15 minutes after an update returns to its previous agent. After three failed devices a version is blocked automatically."}}</p>

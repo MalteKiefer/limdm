@@ -66,8 +66,8 @@
   <h2>{{t "Add remote"}}</h2>
   <div class="inline"><label>{{t "Name"}}<input name="name" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}" placeholder="fedora"></label>
     <label>{{t "Title"}}<input name="title" maxlength="80" placeholder="Fedora Flatpaks"></label></div>
-  <label>{{t "URL"}} <span class="hint">{{t ".flatpakrepo file, repository or oci+https URL"}}</span><input name="url" required placeholder="oci+https://registry.fedoraproject.org"></label>
-  <label class="check"><input type="checkbox" name="catalog_only"> {{t "only catalog apps (with the store filter on)"}}</label>
+  <label>{{t "URL"}}<input name="url" required placeholder="oci+https://registry.fedoraproject.org"><small class="field-hint">{{t ".flatpakrepo file, repository or oci+https URL"}}</small></label>
+  <label class="check"><input type="checkbox" name="catalog_only"> {{t "Only catalog apps (with the store filter on)"}}</label>
   <input type="hidden" name="state" value="allowed">
   <div class="form-foot"><span></span><button>{{t "Add"}}</button></div>
 </form>{{end}}

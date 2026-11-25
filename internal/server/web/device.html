@@ -57,6 +57,7 @@
       <dt>{{t "Inventory"}}</dt><dd>{{if .Inv.Source}}{{.Inv.Source}}{{else}}–{{end}}</dd></div>
   </dl>
 </header>
+{{with .PwError}}<div class="notice error" role="alert">{{t .}}</div>{{end}}
 {{range .Protective}}{{if or (eq .Type "lock") (eq .Type "lost") (eq .Type "wipe")}}<div class="notice error state-notice" role="status">{{else}}<div class="notice ok state-notice" role="status">{{end}}
   <strong>{{if eq .Type "lock"}}{{t "Device locked"}}{{else if eq .Type "unlock"}}{{t "Device unlocked"}}{{else if eq .Type "lost"}}{{t "Lost mode on"}}{{else if eq .Type "found"}}{{t "Lost mode ended"}}{{else if eq .Type "wipe"}}{{t "Wipe sent"}}{{else}}{{t "Uninstall allowed for 1 hour"}}{{end}}</strong>
   <span>{{t "by"}} {{.By}}, {{fmtTime .At}}</span>
@@ -67,11 +68,11 @@
       <h2 id="dlg-edit-h">{{t "Edit device details"}}</h2>
       {{template "csrf" .CSRF}}
       <label>{{t "Blueprint"}}<select name="blueprint_id">{{range .Blueprints}}<option value="{{if eq .Name "default"}}0{{else}}{{.ID}}{{end}}" {{if .Assigned}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
-      <label>{{t "Primary user"}} <span class="hint">{{t "from the directory; brings groups and department into blueprint rules"}}</span>
+      <label>{{t "Primary user"}} <span class="hint">{{t "From the directory; brings groups and department into blueprint rules"}}</span>
         <input name="primary_user" value="{{.Primary}}" list="people" autocomplete="off" placeholder="{{t "jane.doe@example.com"}}"></label>
       <datalist id="people">{{range .People}}<option value="{{.}}">{{end}}</datalist>
-      <label>{{t "Tags"}} <span class="hint">{{t "comma separated, usable in blueprint conditions"}}</span><input name="tags" value="{{.Tags}}" placeholder="{{t "finance, berlin"}}"></label>
-      <label>{{t "Desktop users"}} <span class="hint">{{t "one per line: username email [admin]"}}</span>
+      <label>{{t "Tags"}}<input name="tags" value="{{.Tags}}" placeholder="{{t "finance, berlin"}}"><small class="field-hint">{{t "Comma separated, usable in blueprint conditions"}}</small></label>
+      <label>{{t "Desktop users"}} <span class="hint">{{t "One per line: username email [admin]"}}</span>
         <textarea name="users" rows="4" class="code" placeholder="jdoe jane.doe@example.com admin">{{.Users}}</textarea></label>
       <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Save"}}</button></div>
     </form>
@@ -81,30 +82,30 @@
 {{if and (eq .Sess.Role "admin") (ne .D.Status "retired")}}
 <dialog id="dlg-reboot" class="modal" aria-labelledby="dlg-reboot-h"><form method="post" action="/devices/{{$id}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="reboot">
   <h2 id="dlg-reboot-h">{{t "Reboot later"}}</h2>
-  <label>{{t "Delay in minutes"}} <span class="hint">{{t "the user is warned on the device"}}</span><input name="minutes" type="number" min="1" max="1440" value="5" required autofocus></label>
+  <label>{{t "Delay in minutes"}}<input name="minutes" type="number" min="1" max="1440" value="5" required autofocus><small class="field-hint">{{t "The user is warned on the device"}}</small></label>
   <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Schedule"}}</button></div></form></dialog>
 <dialog id="dlg-shutdown" class="modal" aria-labelledby="dlg-shutdown-h"><form method="post" action="/devices/{{$id}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="shutdown">
   <h2 id="dlg-shutdown-h">{{t "Shut down later"}}</h2>
-  <label>{{t "Delay in minutes"}} <span class="hint">{{t "the user is warned on the device"}}</span><input name="minutes" type="number" min="1" max="1440" value="5" required autofocus></label>
+  <label>{{t "Delay in minutes"}}<input name="minutes" type="number" min="1" max="1440" value="5" required autofocus><small class="field-hint">{{t "The user is warned on the device"}}</small></label>
   <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Schedule"}}</button></div></form></dialog>
 <dialog id="dlg-agent" class="modal" aria-labelledby="dlg-agent-h"><form method="post" action="/devices/{{$id}}/agent-update">{{template "csrf" .CSRF}}
   <h2 id="dlg-agent-h">{{t "Update agent"}}</h2>
   <p class="muted">{{t "Installed:"}} <span class="mono">{{.D.AgentVersion}}</span>. {{t "The device installs the version at its next check in and returns to the current one if the new agent does not check in within 15 minutes."}}</p>
   <label>{{t "Version"}}<select name="version">
-    <option value="">{{t "newest approved version"}}</option>
+    <option value="">{{t "Newest approved version"}}</option>
     {{range .AgentVersions}}<option value="{{.}}">{{.}}{{if eq . $.D.AgentVersion}} ({{t "installed"}}){{end}}</option>{{end}}
   </select></label>
   <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Update"}}</button></div></form></dialog>
 <dialog id="dlg-message" class="modal" aria-labelledby="dlg-message-h"><form method="post" action="/devices/{{$id}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="message">
   <h2 id="dlg-message-h">{{t "Send message"}}</h2>
   <p class="muted">{{t "Shown as notification and dialog to everyone signed in on the desktop, at the next check in."}}</p>
-  <label>{{t "Title"}} <span class="hint">{{t "optional"}}</span><input name="title" maxlength="100"></label>
+  <label>{{t "Title"}}<input name="title" maxlength="100"><small class="field-hint">{{t "Optional"}}</small></label>
   <label>{{t "Message"}}<textarea name="text" rows="4" maxlength="1000" required></textarea></label>
   <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Send"}}</button></div></form></dialog>
 <dialog id="dlg-lost" class="modal" aria-labelledby="dlg-lost-h"><form method="post" action="/devices/{{$id}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="lost">
   <h2 id="dlg-lost-h">{{t "Lost mode"}}</h2>
   <p class="notice">{{t "Blocks every login, ends running sessions and shows your message. With an escrowed recovery key, every other disk key slot is removed: after the next power off only IT can open the disk."}}</p>
-  <label>{{t "Message on the device"}} <span class="hint">{{t "for example a phone number"}}</span><textarea name="message" rows="3" maxlength="500"></textarea></label>
+  <label>{{t "Message on the device"}}<textarea name="message" rows="3" maxlength="500"></textarea><small class="field-hint">{{t "For example a phone number"}}</small></label>
   <label>{{t "Type the host name to confirm"}} <span class="mono">{{.D.Hostname}}</span><input name="confirm" autocomplete="off" spellcheck="false" required></label>
   <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button class="danger">{{t "Enable lost mode"}}</button></div></form></dialog>
 <dialog id="dlg-wipe" class="modal" aria-labelledby="dlg-wipe-h"><form method="post" action="/devices/{{$id}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="wipe">
@@ -123,7 +124,7 @@
 {{if .D.AutoLocked}}<div class="notice error" role="status"><strong>{{t "Locked by compliance policy."}}</strong> {{t "Logins are blocked until the device is compliant again or an admin unlocks it."}}</div>{{end}}
 {{if .Since}}<div class="notice">{{t "Failing compliance since"}} {{fmtTime (derefTime .Since)}}{{if .D.GraceUntil}}{{t "; grace period"}} {{if eq .D.Status "in grace"}}{{t "ends"}}{{else}}{{t "ended"}}{{end}} {{fmtTime (derefTime .D.GraceUntil)}}{{end}}.</div>{{end}}
 <div class="stats">
-  <div class="stat"><div class="label">{{t "Failing checks"}}</div><div class="value">{{.Failing}}</div><div class="hint">{{t "of"}} {{len .Checks}} {{t "evaluated"}}</div></div>
+  <div class="stat"><div class="label">{{t "Failing checks"}}</div><div class="value">{{.Failing}}</div><div class="hint">{{t "Of"}} {{len .Checks}} {{t "evaluated"}}</div></div>
   <div class="stat"><div class="label">{{t "Memory"}}</div><div class="value">{{gib .Inv.MemoryMB}}</div><div class="hint">{{if .Inv.SwapMB}}{{t "swap"}} {{gib .Inv.SwapMB}}{{else}}{{t "no swap"}}{{end}}</div></div>
   <div class="stat"><div class="label">{{t "CPU"}}</div><div class="value">{{if .Inv.CPUThreads}}{{.Inv.CPUThreads}}{{else}}{{t "n/a"}}{{end}}</div><div class="hint">{{if .Inv.CPUCores}}{{.Inv.CPUCores}} {{t "cores,"}} {{end}}{{t "threads"}}</div></div>
   <div class="stat"><div class="label">{{t "Root filesystem"}}</div><div class="value">{{.Inv.DiskGB}} {{t "GB"}}</div><div class="hint">{{len .Inv.Volumes}} {{t "volumes,"}} {{len .Inv.Disks}} {{t "disks"}}</div></div>
@@ -365,8 +366,8 @@
   <h2 id="dlg-user-h">{{t "Add local user"}}</h2>
   <div class="inline"><label>{{t "User name"}}<input name="username" required pattern="[a-z_][a-z0-9_-]{0,31}" autocomplete="off" spellcheck="false"></label>
     <label>{{t "Full name"}}<input name="full_name" maxlength="100"></label></div>
-  <label>{{t "Initial password"}} <span class="hint">{{t "at least 12 characters; must be changed at the first login; removed from the server once applied"}}</span><input name="password" type="password" minlength="12" required autocomplete="new-password"></label>
-  <label class="check"><input type="checkbox" name="admin"> {{t "administrator (sudo)"}}</label>
+  <label>{{t "Initial password"}}<input name="password" type="password" minlength="{{$.PwMin}}" required autocomplete="new-password"><small class="field-hint">{{t "Follows the password policy (Settings, Security); must be changed at the first login; removed from the server once applied"}}</small></label>
+  <label class="check"><input type="checkbox" name="admin"> {{t "Administrator (sudo)"}}</label>
   <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button>{{t "Create"}}</button></div></form></dialog>{{end}}
 <section class="tablecard"><div class="scroll"><table>
   <thead><tr><th>{{t "Account"}}</th><th class="num">UID</th><th>{{t "Name"}}</th><th>{{t "Home"}}</th><th>{{t "Shell"}}</th><th>{{t "Source"}}</th><th>{{t "Rights"}}</th><th>{{t "SSO"}}</th>{{if $admin}}<th></th>{{end}}</tr></thead>
@@ -380,7 +381,7 @@
         {{template "ucmd" dict "ID" $id "CSRF" $.CSRF "Type" "user_lock" "User" .Name "Label" "Lock account" "Class" "warn"}}
         {{template "ucmd" dict "ID" $id "CSRF" $.CSRF "Type" "user_unlock" "User" .Name "Label" "Unlock account"}}
         <form method="post" action="/devices/{{$id}}/command" class="menu-form">{{template "csrf" $.CSRF}}<input type="hidden" name="type" value="user_password"><input type="hidden" name="username" value="{{.Name}}">
-          <label>{{t "New password"}}<input name="password" type="password" minlength="12" required autocomplete="new-password"></label><div class="menu-row"><button class="small">{{t "Reset password"}}</button></div></form>
+          <label>{{t "New password"}}<input name="password" type="password" minlength="{{$.PwMin}}" required autocomplete="new-password"></label><div class="menu-row"><button class="small">{{t "Reset password"}}</button></div></form>
         {{template "ucmd" dict "ID" $id "CSRF" $.CSRF "Type" "user_delete" "User" .Name "Label" "Delete account" "Class" "danger" "Confirm" "Delete this account and its home directory?"}}
       </div></details>{{end}}</td>{{end}}</tr>{{end}}{{else}}<tr><td colspan="8" class="empty">{{t "No account data reported."}}</td></tr>{{end}}</tbody>
 </table></div></section>
@@ -429,13 +430,13 @@
     {{template "csrf" .CSRF}}
     <div class="inline">
       <label>{{t "Command"}}<select name="type">{{$pre := .PreType}}<optgroup label="{{t "Updates"}}"><option value="sync" {{if eq $pre "sync"}}selected{{end}}>{{actionLabel "sync"}}</option><option value="update" {{if eq $pre "update"}}selected{{end}}>{{actionLabel "update"}}</option></optgroup><optgroup label="{{t "Power"}}"><option value="reboot" {{if eq $pre "reboot"}}selected{{end}}>{{actionLabel "reboot"}}</option><option value="shutdown" {{if eq $pre "shutdown"}}selected{{end}}>{{actionLabel "shutdown"}}</option></optgroup><optgroup label="{{t "Security"}}"><option value="lock" {{if eq $pre "lock"}}selected{{end}}>{{actionLabel "lock"}}</option><option value="unlock" {{if eq $pre "unlock"}}selected{{end}}>{{actionLabel "unlock"}}</option><option value="lost" {{if eq $pre "lost"}}selected{{end}}>{{actionLabel "lost"}}</option><option value="found" {{if eq $pre "found"}}selected{{end}}>{{actionLabel "found"}}</option><option value="wipe" {{if eq $pre "wipe"}}selected{{end}}>{{actionLabel "wipe"}}</option></optgroup><optgroup label="{{t "Agent"}}"><option value="script" {{if eq $pre "script"}}selected{{end}}>{{actionLabel "script"}}</option><option value="allow_uninstall" {{if eq $pre "allow_uninstall"}}selected{{end}}>{{actionLabel "allow_uninstall"}}</option></optgroup></select></label>
-      <label class="delay-only">{{t "Delay in minutes"}} <span class="hint">{{t "0 = now"}}</span><input name="minutes" type="number" min="0" max="1440" value="5"></label>
+      <label class="delay-only">{{t "Delay in minutes"}}<input name="minutes" type="number" min="0" max="1440" value="5"><small class="field-hint">{{t "0 = now"}}</small></label>
     </div>
     <div class="lost-only notice">{{t "Blocks every login, ends running sessions and shows your message. With an escrowed recovery key, every other disk key slot is removed: after the next power off only IT can open the disk."}}</div>
-    <label class="lost-only">{{t "Message on the device"}} <span class="hint">{{t "for example a phone number"}}</span><textarea name="message" rows="3" maxlength="500"></textarea></label>
+    <label class="lost-only">{{t "Message on the device"}}<textarea name="message" rows="3" maxlength="500"></textarea><small class="field-hint">{{t "For example a phone number"}}</small></label>
     <div class="wipe-only notice error">{{t "Erases the disk encryption headers: all data on the device is lost for good. Devices without disk encryption are refused."}}</div>
     <label class="confirm-only">{{t "Type the host name to confirm"}} <span class="mono">{{.D.Hostname}}</span><input name="confirm" autocomplete="off" spellcheck="false"></label>
-    <label class="script-only">{{t "Script"}} <span class="hint">{{t "runs as root, only if the device allows scripts"}}</span><textarea name="payload" rows="6" class="code" placeholder="#!/bin/sh"></textarea></label>
+    <label class="script-only">{{t "Script"}}<textarea name="payload" rows="6" class="code" placeholder="#!/bin/sh"></textarea><small class="field-hint">{{t "Runs as root, only if the device allows scripts"}}</small></label>
     <button>{{t "Send"}}</button>
   </form>
 </section>

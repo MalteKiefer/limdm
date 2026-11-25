@@ -833,6 +833,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		}
 	}
 	s.render(w, r, sess, "device", map[string]any{"EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames, "AppBusy": appBusy, "AppNotes": appNotes, "CatalogFlatpaks": catalogFlatpaks,
+		"PwError": pwError(r), "PwMin": s.settings().Password.Min(),
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
@@ -844,9 +845,21 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 	})
 }
 
+// pwError is the password policy message a redirect named, if any.
+func pwError(r *http.Request) string {
+	if i, err := strconv.Atoi(r.URL.Query().Get("pwerr")); err == nil && i >= 0 && i < len(passwordErrors) {
+		return passwordErrors[i]
+	}
+	return ""
+}
+
 func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess session) {
 	id, typ := r.PathValue("id"), r.FormValue("type")
 	payload, code, msg := s.commandPayload(r, sess, id, typ)
+	if i := slices.Index(passwordErrors, msg); i >= 0 {
+		http.Redirect(w, r, "/devices/"+url.PathEscape(id)+"?tab=accounts&pwerr="+strconv.Itoa(i), http.StatusSeeOther)
+		return
+	}
 	if code != 0 {
 		http.Error(w, msg, code)
 		return
@@ -943,6 +956,11 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 			Password: r.FormValue("password"), Admin: r.FormValue("admin") == "on" || r.FormValue("admin") == "1", KeepHome: r.FormValue("keep_home") == "on"}
 		if err := u.Validate(typ); err != nil {
 			return "", http.StatusBadRequest, err.Error()
+		}
+		if typ == "user_create" || typ == "user_password" {
+			if msg := s.settings().Password.Check(u.Password, u.Username); msg != "" {
+				return "", http.StatusBadRequest, msg
+			}
 		}
 		b, _ := json.Marshal(u) //nolint:gosec // signed command payload over mTLS, cleared from the database once applied
 		payload = string(b)
