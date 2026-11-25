@@ -546,3 +546,53 @@ func TestCertInfo(t *testing.T) {
 		t.Fatalf("cert info: %+v", info)
 	}
 }
+
+func TestScreenLockFiles(t *testing.T) {
+	if !strings.Contains(kdeLockFile(300), "[Daemon][$i]") || !strings.Contains(kdeLockFile(300), "Timeout=5") {
+		t.Fatal(kdeLockFile(300))
+	}
+	if !strings.Contains(kdeLockFile(30), "Timeout=1") {
+		t.Fatal("KDE needs at least one minute")
+	}
+	if !strings.Contains(xfceLockFile(600), `name="delay" type="int" value="10" locked="*"`) {
+		t.Fatal(xfceLockFile(600))
+	}
+	set, locks := dconfLockFiles(300)
+	for _, k := range []string{"org/gnome/desktop/session", "org/cinnamon/desktop/screensaver", "org/mate/screensaver"} {
+		if !strings.Contains(set, k) || !strings.Contains(locks, "/"+k) {
+			t.Fatalf("%s missing", k)
+		}
+	}
+	if !strings.Contains(swayLockFile(300), "exec swayidle -w timeout 300 'swaylock -f -c 000000'") {
+		t.Fatal(swayLockFile(300))
+	}
+	strict := screenLockPolicy{seconds: 300, hideUsers: true}
+	if l := lightdmFile(strict); !strings.Contains(l, "greeter-hide-users=true") || !strings.Contains(l, "autologin-user=\n") {
+		t.Fatal(l)
+	}
+	if l := lightdmFile(screenLockPolicy{seconds: 300, allowAutologin: true}); strings.Contains(l, "autologin-user") || strings.Contains(l, "hide-users") {
+		t.Fatal(l)
+	}
+	if s := sddmFile(strict); !strings.Contains(s, "[Autologin]\nUser=\n") || !strings.Contains(s, "RememberLastUser=false") {
+		t.Fatal(s)
+	}
+	if _, g := gdmFiles(true); !strings.Contains(g, "disable-user-list=true") {
+		t.Fatal(g)
+	}
+}
+
+func TestINI(t *testing.T) {
+	gdm := "# GDM\n[daemon]\nAutomaticLoginEnable=True\nAutomaticLogin=bob\n\n[security]\n"
+	out := setINIValue(gdm, "daemon", "AutomaticLoginEnable", "false")
+	if iniValue(out, "daemon", "AutomaticLoginEnable") != "false" || iniValue(out, "daemon", "AutomaticLogin") != "bob" || !strings.Contains(out, "[security]") {
+		t.Fatalf("set existing: %q", out)
+	}
+	out = setINIValue("[security]\n", "daemon", "AutomaticLoginEnable", "false")
+	if iniValue(out, "daemon", "AutomaticLoginEnable") != "false" {
+		t.Fatalf("add section: %q", out)
+	}
+	out = setINIValue("[daemon]\nWaylandEnable=false\n[security]\n", "daemon", "AutomaticLoginEnable", "false")
+	if iniValue(out, "daemon", "AutomaticLoginEnable") != "false" || iniValue(out, "security", "AutomaticLoginEnable") != "" {
+		t.Fatalf("add key in section: %q", out)
+	}
+}
