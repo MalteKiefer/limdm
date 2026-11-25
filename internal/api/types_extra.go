@@ -118,7 +118,8 @@ var extraExamples = map[string]string{
 }
 
 var (
-	proxyURLRe = regexp.MustCompile(`^https?://([A-Za-z0-9._~%-]+(:[A-Za-z0-9._~%-]*)?@)?[A-Za-z0-9.\[\]:-]+(/[A-Za-z0-9._~/-]*)?$`)
+	// no user:password@: proxy settings land in world readable profile files
+	proxyURLRe = regexp.MustCompile(`^https?://[A-Za-z0-9.\[\]:-]+(/[A-Za-z0-9._~/-]*)?$`)
 	noProxyRe  = regexp.MustCompile(`^[A-Za-z0-9.,:/*_\[\]-]*$`)
 )
 
@@ -236,6 +237,9 @@ func (d Declaration) applyExtra(p *Policy) (bool, error) {
 		for k, val := range v.Settings {
 			if !sysctlKey.MatchString(k) || !sysctlVal.MatchString(val) {
 				bad("invalid sysctl %q=%q", k, val)
+			}
+			if sysctlForbidden(k) {
+				bad("sysctl %q runs programs as root and cannot be managed", k)
 			}
 		}
 		p.Extra.Sysctl = v.Settings
@@ -450,6 +454,17 @@ func containsRemote(rs []FlatpakRemote, name string) bool {
 		if r.Name == name {
 			return true
 		}
+	}
+	return false
+}
+
+// sysctlForbidden lists kernel parameters that name programs the kernel runs
+// as root; setting them would be remote code execution outside allow_scripts.
+func sysctlForbidden(key string) bool {
+	switch {
+	case key == "kernel.modprobe", key == "kernel.core_pattern", key == "kernel.poweroff_cmd", key == "kernel.hotplug",
+		strings.HasPrefix(key, "kernel.usermodehelper."), strings.HasPrefix(key, "fs.binfmt_misc."):
+		return true
 	}
 	return false
 }

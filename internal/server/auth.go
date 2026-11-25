@@ -16,6 +16,8 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/oauth2"
+
+	"github.com/maltekiefer/limdm/internal/api"
 )
 
 const (
@@ -169,7 +171,7 @@ func (s *Server) roleFor(ctx context.Context, email string, verified bool, hd st
 	if !verified || email == "" {
 		return ""
 	}
-	if d := s.settings().AllowedDomain; d != "" && !strings.EqualFold(hd, d) && !strings.HasSuffix(email, "@"+d) {
+	if set := s.settings(); !api.DomainAllowed(set.OIDCIssuer, email, hd, set.AllowedDomain) {
 		return ""
 	}
 	return s.oidcRole(ctx, email)

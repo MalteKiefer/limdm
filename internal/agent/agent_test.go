@@ -84,19 +84,26 @@ func TestSSHValue(t *testing.T) {
 }
 
 func TestCheckIdentity(t *testing.T) {
-	if checkIdentity("A@Firma.de", true, "firma.de", "a@firma.de", "firma.de") != nil {
+	if checkIdentity("https://idp.example", "A@Firma.de", true, "firma.de", "a@firma.de", "firma.de") != nil {
 		t.Fatal("valid identity rejected")
 	}
 	for _, c := range [][]string{
 		{"b@firma.de", "firma.de"},  // other user
 		{"a@firma.de.evil", "evil"}, // wrong domain
 	} {
-		if checkIdentity(c[0], true, c[1], "a@firma.de", "firma.de") == nil {
+		if checkIdentity("https://idp.example", c[0], true, c[1], "a@firma.de", "firma.de") == nil {
 			t.Errorf("%v accepted", c)
 		}
 	}
-	if checkIdentity("a@firma.de", false, "firma.de", "a@firma.de", "firma.de") == nil {
+	if checkIdentity("https://idp.example", "a@firma.de", false, "firma.de", "a@firma.de", "firma.de") == nil {
 		t.Fatal("unverified email accepted")
+	}
+	// Google: a consumer account with a verified company address has no hd claim
+	if checkIdentity("https://accounts.google.com", "a@firma.de", true, "", "a@firma.de", "firma.de") == nil {
+		t.Fatal("Google account without hd accepted")
+	}
+	if checkIdentity("https://accounts.google.com", "a@firma.de", true, "firma.de", "a@firma.de", "firma.de") != nil {
+		t.Fatal("Workspace account rejected")
 	}
 }
 
@@ -380,5 +387,17 @@ func TestCommandsRunOnce(t *testing.T) {
 	a.runCommands([]api.Command{{ID: 7, Type: "sync"}})
 	if len(a.state.Results) != 1 {
 		t.Fatalf("pending result duplicated: %+v", a.state.Results)
+	}
+}
+
+func TestPAMServiceFilter(t *testing.T) {
+	for _, c := range []struct {
+		service, rhost string
+		want           bool
+	}{{"gdm-password", "", true}, {"login", "", true}, {"sudo", "", true}, {"sshd", "", false},
+		{"login", "203.0.113.7", false}, {"sshd", "203.0.113.7", false}, {"cron", "", false}, {"", "", false}} {
+		if localService(c.service, c.rhost) != c.want {
+			t.Errorf("%s from %q: want %v", c.service, c.rhost, c.want)
+		}
 	}
 }

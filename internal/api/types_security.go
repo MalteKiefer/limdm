@@ -173,6 +173,10 @@ func (d Declaration) applySecurity(p *Policy) (bool, error) {
 					bad("polkit rule %q: invalid group %q", r.Name, g)
 				}
 			}
+			// granting without authentication to everybody, also remote, would give root like rights
+			if r.Result == "yes" && len(r.Groups) == 0 && !r.LocalActiveOnly {
+				bad("polkit rule %q: result yes needs groups or local_active_only", r.Name)
+			}
 		}
 		p.Extra.Polkit = v.Rules
 	case TypeSudo:

@@ -249,6 +249,9 @@ func PAMAuth() int {
 		return 1
 	}
 	pw := readAuthtok()
+	if !localService(os.Getenv("PAM_SERVICE"), os.Getenv("PAM_RHOST")) {
+		return 1 // remote or unknown service: never start a device flow, pam_unix decides
+	}
 	username := os.Getenv("PAM_USER")
 	email, ok := readUsers()[username]
 	if !ok {
@@ -311,7 +314,8 @@ func deviceLogin(ctx context.Context, cfg api.Login, email string) error {
 	if uri == "" {
 		uri = da.VerificationURI
 	}
-	fmt.Printf("Sign in as %s:\nOpen %s and enter the code %s\n", email, uri, da.UserCode)
+	// the mapped email is not shown: the user is not authenticated yet
+	fmt.Printf("Confirm the sign in with your company account:\nOpen %s and enter the code %s\n", uri, da.UserCode)
 	tok, err := oc.DeviceAccessToken(ctx, da)
 	if err != nil {
 		return errors.New("not confirmed")
@@ -329,17 +333,17 @@ func deviceLogin(ctx context.Context, cfg api.Login, email string) error {
 	if err := idt.Claims(&c); err != nil {
 		return err
 	}
-	return checkIdentity(c.Email, c.EmailVerified, c.HD, email, cfg.AllowedDomain)
+	return checkIdentity(cfg.Issuer, c.Email, c.EmailVerified, c.HD, email, cfg.AllowedDomain)
 }
 
-func checkIdentity(gotEmail string, verified bool, hd, wantEmail, domain string) error {
+func checkIdentity(issuer, gotEmail string, verified bool, hd, wantEmail, domain string) error {
 	if !verified {
 		return errors.New("email not verified")
 	}
 	if !strings.EqualFold(gotEmail, wantEmail) {
 		return errors.New("account does not match this user")
 	}
-	if domain != "" && !strings.EqualFold(hd, domain) && !strings.HasSuffix(strings.ToLower(gotEmail), "@"+strings.ToLower(domain)) {
+	if !api.DomainAllowed(issuer, gotEmail, hd, domain) {
 		return errors.New("account is not in the allowed domain")
 	}
 	return nil
@@ -357,4 +361,22 @@ func recordAuthEvent(username, email string, err error) {
 		fmt.Fprintln(f, msg)
 		f.Close()
 	}
+}
+
+// pamServices run the SSO device flow: display managers, screen lockers, the
+// text console and privilege prompts at the device. sshd and other remote
+// services are excluded, so an unauthenticated network client can neither
+// start a device flow (code phishing, a root process waiting on the IdP) nor
+// learn which accounts are managed.
+var pamServices = map[string]bool{
+	"login": true, "gdm-password": true, "gdm-fingerprint": false, "lightdm": true, "sddm": true, "lxdm": true, "slim": true,
+	"kde": true, "gnome-screensaver": true, "xscreensaver": true, "cinnamon-screensaver": true, "mate-screensaver": true,
+	"xfce4-screensaver": true, "sudo": true, "sudo-i": true, "su": true, "su-l": true, "polkit-1": true,
+}
+
+func localService(service, rhost string) bool {
+	if rhost != "" && rhost != "localhost" && rhost != "127.0.0.1" && rhost != "::1" {
+		return false
+	}
+	return pamServices[service]
 }

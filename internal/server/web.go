@@ -202,8 +202,8 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /tokens", s.page(s.tokens))
 	mux.HandleFunc("POST /tokens", s.page(s.tokenCreate))
 	mux.HandleFunc("GET /compliance", s.page(s.compliance))
-	mux.HandleFunc("GET /audit", s.page(s.auditPage))
-	mux.HandleFunc("GET /export/{kind}", s.page(s.export))
+	mux.HandleFunc("GET /audit", s.page(s.adminOrAuditor(s.auditPage)))
+	mux.HandleFunc("GET /export/{kind}", s.page(s.adminOrAuditor(s.export)))
 }
 
 // ---- devices ----

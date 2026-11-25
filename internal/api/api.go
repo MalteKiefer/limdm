@@ -262,6 +262,9 @@ func (d Declaration) apply(p *Policy) error {
 			if _, err := f.FileMode(); err != nil {
 				bad("file %s: %v", f.Path, err)
 			}
+			if userWritable(f.Path) {
+				bad("file %s: directories writable by users cannot be managed (symlink attacks)", f.Path)
+			}
 		}
 		p.Files = v.Files
 	case TypeFirewall:
@@ -376,8 +379,8 @@ func (f File) FileMode() (uint32, error) {
 		return 0o644, nil
 	}
 	m, err := strconv.ParseUint(f.Mode, 8, 32)
-	if err != nil || m > 0o7777 {
-		return 0, fmt.Errorf("invalid mode %q", f.Mode)
+	if err != nil || m > 0o777 {
+		return 0, fmt.Errorf("invalid mode %q (0000..0777, no setuid, setgid or sticky bits)", f.Mode)
 	}
 	return uint32(m), nil
 }
@@ -690,4 +693,14 @@ func CompareVersions(a, b string) int {
 		}
 	}
 	return 0
+}
+
+// userWritable reports paths below directories regular users can write to.
+func userWritable(p string) bool {
+	for _, d := range []string{"/home/", "/tmp/", "/var/tmp/", "/run/user/", "/dev/shm/", "/var/mail/", "/var/spool/"} {
+		if strings.HasPrefix(p, d) {
+			return true
+		}
+	}
+	return false
 }
