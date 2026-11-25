@@ -1,9 +1,10 @@
 [Unit]
 Description=LiMDM agent watchdog
 After=network-online.target
+# "systemctl stop" is refused (tamper protection); see docs/agent.md
+RefuseManualStop=yes
 
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/limdm-agent watchdog
-RefuseManualStop=yes
 UMask=0077
