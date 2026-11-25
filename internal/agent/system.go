@@ -436,6 +436,7 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 	inv.Accounts, inv.Groups = nssAccounts()
 	annotateSSO(inv.Accounts)
 	inv.Repos = h.repos()
+	inv.Flatpaks, inv.FlatpakRemotes = flatpakInventory(inv.Accounts)
 	inv.Desktop, inv.DisplayManager = desktop()
 	inv.Interfaces, inv.DNS, inv.Routes, inv.VPNs = network(priv)
 	if out, err := run(30*time.Second, "who"); err == nil && priv.LoggedInUsers {

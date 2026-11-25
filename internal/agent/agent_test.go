@@ -452,3 +452,14 @@ func TestParseSlots(t *testing.T) {
 		t.Fatal("unlocked slot not parsed")
 	}
 }
+
+func TestParseFlatpak(t *testing.T) {
+	apps := parseFlatpakApps("org.mozilla.firefox\tFirefox\t133.0\tstable\tflathub\norg.gnome.Calculator\tCalculator\t\tstable\tfedora\n", "malte")
+	if len(apps) != 2 || apps[0].Name != "Firefox" || apps[1].Origin != "fedora" || apps[1].Installation != "malte" {
+		t.Fatalf("apps: %+v", apps)
+	}
+	rem := parseFlatpakRemotes("flathub\thttps://dl.flathub.org/repo/\tFlathub\tsystem\nfedora\toci+https://registry.fedoraproject.org\tFedora\tsystem,oci,disabled\n", "system")
+	if len(rem) != 2 || rem[0].Disabled || !rem[1].Disabled || rem[0].Title != "Flathub" {
+		t.Fatalf("remotes: %+v", rem)
+	}
+}

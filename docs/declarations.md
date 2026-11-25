@@ -62,6 +62,16 @@ are recorded by the server and are not affected ([security.md](security.md#priva
  "install": ["org.mozilla.firefox"], "remove": []}
 ```
 
+Remotes go to the system installation by default. `"scope": "user"` adds or changes the
+remote in the installation of every regular user (uid 1000 and above with a home).
+`"disabled": true` keeps a remote but switches it off; a repository URL that differs from the
+configured one is changed with `flatpak remote-modify`. Applications are installed system
+wide.
+
+The device page lists Flatpak applications and remotes of the system and of every user
+(**Software**, **Flatpak**). **Edit**, **Disable** and **Enable** open a prefilled library
+item; **Add remote** starts an empty one.
+
 ### `com.limdm.repositories` (list)
 
 Package sources managed by LiMDM, and unmanaged sources to switch off.

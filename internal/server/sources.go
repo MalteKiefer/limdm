@@ -75,3 +75,40 @@ func (s *Server) sourceTemplate(ctx context.Context, deviceID, file, mode string
 }
 
 var nonName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+// flatpakTemplate prefills a Flatpak library item from a remote a device
+// reported: edit keeps it as it is (change the URL or scope), disable and
+// enable switch it.
+func (s *Server) flatpakTemplate(ctx context.Context, deviceID, name, inst, mode string) (api.LibraryItem, error) {
+	var raw []byte
+	if err := s.db.QueryRow(ctx, `SELECT inventory FROM devices WHERE id=$1`, deviceID).Scan(&raw); err != nil {
+		return api.LibraryItem{}, err
+	}
+	var inv api.Inventory
+	if err := json.Unmarshal(raw, &inv); err != nil {
+		return api.LibraryItem{}, err
+	}
+	for _, r := range inv.FlatpakRemotes {
+		if r.Name != name || r.Installation != inst {
+			continue
+		}
+		scope := "system"
+		if inst != "system" {
+			scope = "user"
+		}
+		rem := api.FlatpakRemote{Name: r.Name, URL: strings.Replace(r.URL, "http://", "https://", 1), Scope: scope}
+		it := api.LibraryItem{Type: api.TypeFlatpak, Name: "Flatpak remote " + r.Name,
+			Description: "Flatpak remote " + r.Name + " (" + scope + " installation)."}
+		switch mode {
+		case "disable":
+			rem.Disabled = true
+			it.Name, it.Description = "Disable Flatpak remote "+r.Name, "Switches off the Flatpak remote "+r.Name+" ("+scope+" installation)."
+		case "enable":
+			it.Name, it.Description = "Enable Flatpak remote "+r.Name, "Switches on the Flatpak remote "+r.Name+" ("+scope+" installation)."
+		}
+		b, err := json.Marshal(api.Flatpak{Remotes: []api.FlatpakRemote{rem}, Install: []string{}, Remove: []string{}})
+		it.Payload = b
+		return it, err
+	}
+	return api.LibraryItem{}, errors.New("unknown remote")
+}

@@ -539,7 +539,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 	tab := r.URL.Query().Get("tab")
 	sub := r.URL.Query().Get("sub")
 	switch {
-	case tab == "software" && sub != "sources":
+	case tab == "software" && sub != "sources" && sub != "flatpak":
 		sub = "packages"
 	case tab == "accounts" && sub != "groups":
 		sub = "users"

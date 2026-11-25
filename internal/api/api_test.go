@@ -132,3 +132,16 @@ func TestDiskEncryptionExclude(t *testing.T) {
 		}
 	}
 }
+
+func TestFlatpakScope(t *testing.T) {
+	for payload, ok := range map[string]bool{
+		`{"remotes":[{"name":"flathub","url":"https://dl.flathub.org/repo/flathub.flatpakrepo","scope":"user"}],"install":[],"remove":[]}`:  true,
+		`{"remotes":[{"name":"flathub","url":"https://dl.flathub.org/repo/flathub.flatpakrepo","scope":"other"}],"install":[],"remove":[]}`: false,
+		`{"remotes":[{"name":"flathub","url":"https://dl.flathub.org/repo/","disabled":true}],"install":[],"remove":[]}`:                    true,
+	} {
+		_, st := Compose([]Declaration{{Identifier: "f", Type: TypeFlatpak, Payload: []byte(payload)}})
+		if st[0].Valid != ok {
+			t.Errorf("%s: valid=%v", payload, st[0].Valid)
+		}
+	}
+}

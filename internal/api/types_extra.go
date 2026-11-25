@@ -45,8 +45,18 @@ type Certificate struct {
 }
 
 type FlatpakRemote struct {
-	Name string `json:"name"`
-	URL  string `json:"url"` // .flatpakrepo file
+	Name     string `json:"name"`
+	URL      string `json:"url"`                // .flatpakrepo file or repository URL
+	Scope    string `json:"scope,omitempty"`    // system (default) or user: the installation of every regular user
+	Disabled bool   `json:"disabled,omitempty"` // keep the remote but switch it off
+}
+
+// InstallationScope is "system" for an empty scope.
+func (r FlatpakRemote) InstallationScope() string {
+	if r.Scope == "" {
+		return "system"
+	}
+	return r.Scope
 }
 
 type Flatpak struct {
@@ -332,6 +342,9 @@ func (d Declaration) applyExtra(p *Policy) (bool, error) {
 			if !nameRe.MatchString(r.Name) || !httpsURL(r.URL) {
 				bad("flatpak remote %q needs a name and an https URL", r.Name)
 			}
+			if r.Scope != "" && r.Scope != "system" && r.Scope != "user" {
+				bad("flatpak remote %q: scope is system or user", r.Name)
+			}
 		}
 		for _, ref := range append(append([]string{}, v.Install...), v.Remove...) {
 			if !flatpakRef.MatchString(ref) {
@@ -436,7 +449,7 @@ func mergeExtra(typ string, a, b json.RawMessage) (json.RawMessage, bool, error)
 		if err = errors.Join(json.Unmarshal(a, &x), json.Unmarshal(b, &y)); err == nil {
 			remotes := x.Remotes
 			for _, r := range y.Remotes {
-				if !containsRemote(remotes, r.Name) {
+				if !containsRemote(remotes, r) {
 					remotes = append(remotes, r)
 				}
 			}
@@ -449,9 +462,9 @@ func mergeExtra(typ string, a, b json.RawMessage) (json.RawMessage, bool, error)
 	return out, true, err
 }
 
-func containsRemote(rs []FlatpakRemote, name string) bool {
+func containsRemote(rs []FlatpakRemote, x FlatpakRemote) bool {
 	for _, r := range rs {
-		if r.Name == name {
+		if r.Name == x.Name && r.InstallationScope() == x.InstallationScope() {
 			return true
 		}
 	}

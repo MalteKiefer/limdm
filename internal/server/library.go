@@ -395,7 +395,13 @@ func (s *Server) libraryEdit(w http.ResponseWriter, r *http.Request, sess sessio
 			http.NotFound(w, r)
 			return
 		}
-	} else if q := r.URL.Query(); q.Get("from") != "" {
+	} else if q := r.URL.Query(); q.Get("from") != "" && q.Get("remote") != "" {
+		var err error
+		if it, err = s.flatpakTemplate(r.Context(), q.Get("from"), q.Get("remote"), q.Get("inst"), q.Get("mode")); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+	} else if q.Get("from") != "" {
 		var err error
 		if it, err = s.sourceTemplate(r.Context(), q.Get("from"), q.Get("file"), q.Get("mode")); err != nil {
 			http.NotFound(w, r)
