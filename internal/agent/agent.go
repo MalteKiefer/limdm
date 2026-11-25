@@ -867,7 +867,7 @@ func pollWait(failures int) time.Duration {
 	return min(d, 5*time.Minute) + pollJitter()
 }
 
-func pollJitter() time.Duration { return time.Duration(mrand.Int64N(int64(10 * time.Second))) }
+func pollJitter() time.Duration { return time.Duration(mrand.Int64N(int64(10 * time.Second))) } //nolint:gosec // jitter, not a secret
 
 // maintainLoop keeps desktop helpers, idle locks and a device lock in place
 // every minute, independent of the server.

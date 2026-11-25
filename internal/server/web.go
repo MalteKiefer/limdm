@@ -849,7 +849,7 @@ func (s *Server) queueCommand(ctx context.Context, actor, id, typ, payload strin
 	detail := payload
 	var u api.UserCommand
 	if strings.HasPrefix(typ, "user_") && json.Unmarshal([]byte(payload), &u) == nil {
-		u.Password = "" // never in the audit log
+		u.Password = ""         // never in the audit log
 		b, _ := json.Marshal(u) //nolint:gosec // the password was cleared just above
 		detail = string(b)
 	}
