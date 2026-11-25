@@ -22,3 +22,6 @@ release.key
 
 # public osquery repository signing key, embedded into the agent (not a secret)
 !internal/api/osquery.asc
+
+# public signing keys of vendor package repositories (seed catalog)
+!internal/server/vendorkeys/*.asc

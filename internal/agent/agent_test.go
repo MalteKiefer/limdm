@@ -666,3 +666,28 @@ func TestStoreHelpers(t *testing.T) {
 		t.Fatal("a failed job can start again")
 	}
 }
+
+func TestAppRepoFiles(t *testing.T) {
+	r := api.Repository{Name: "netbird", URL: "https://pkgs.netbird.io/yum/", Key: "KEY", SignedMetadata: true}
+	kn, k, sn, src := (&host{family: "fedora"}).repoFiles("limdm-app-", r)
+	if kn != "RPM-GPG-KEY-limdm-app-netbird" || k != "KEY" || sn != "limdm-app-netbird.repo" ||
+		!strings.Contains(src, "gpgcheck=0\nrepo_gpgcheck=1\ngpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-app-netbird") {
+		t.Fatalf("fedora: %s %s\n%s", kn, sn, src)
+	}
+	r = api.Repository{Name: "mullvad", URL: "https://repository.mullvad.net/deb/stable", Suites: "stable", Components: "main", Key: "KEY"}
+	kn, _, sn, src = (&host{family: "debian"}).repoFiles("limdm-app-", r)
+	if kn != "limdm-app-mullvad.asc" || sn != "limdm-app-mullvad.sources" || !strings.Contains(src, "Signed-By: /etc/apt/keyrings/limdm-app-mullvad.asc") {
+		t.Fatalf("debian: %s %s\n%s", kn, sn, src)
+	}
+	// declarations must not delete the catalog's repository files
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "limdm-app-mullvad.sources"), nil, 0o644)
+	os.WriteFile(filepath.Join(dir, "limdm-old.sources"), nil, 0o644)
+	if _, err := syncManaged(dir, "limdm-", ".sources", nil, appRepoFiles(dir)...); err != nil {
+		t.Fatal(err)
+	}
+	left, _ := filepath.Glob(filepath.Join(dir, "*"))
+	if len(left) != 1 || filepath.Base(left[0]) != "limdm-app-mullvad.sources" {
+		t.Fatalf("left: %v", left)
+	}
+}

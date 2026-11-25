@@ -71,6 +71,7 @@ var migrations = []struct {
 			ON CONFLICT (name) DO NOTHING`)
 		return err
 	}},
+	{7, func(ctx context.Context, tx pgx.Tx) error { return seedApps(ctx, tx, moreCatalog) }},
 }
 
 func columnExists(ctx context.Context, tx pgx.Tx, table, column string) (bool, error) {

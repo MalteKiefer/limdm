@@ -40,6 +40,7 @@ type appRequestRow struct {
 	DecidedBy               *string
 	CreatedAt               time.Time
 	DecidedAt               *time.Time
+	Flatpak, Remote         string // a Flatpak outside the catalog
 }
 
 func (s *Server) softwarePage(w http.ResponseWriter, r *http.Request, sess session) {
@@ -87,8 +88,9 @@ func (s *Server) renderSoftware(w http.ResponseWriter, r *http.Request, sess ses
 			return
 		}
 	case "requests":
-		rows, err := s.db.Query(ctx, `SELECT q.id, q.device_id, d.hostname, q.app, a.name, q.username, q.note, q.status, q.decided_by, q.created_at, q.decided_at
-			FROM catalog_requests q JOIN devices d ON d.id=q.device_id JOIN catalog_apps a ON a.slug=q.app
+		rows, err := s.db.Query(ctx, `SELECT q.id, q.device_id, d.hostname, coalesce(q.app, ''), coalesce(a.name, q.app_name), q.username, q.note, q.status,
+			q.decided_by, q.created_at, q.decided_at, q.flatpak, q.remote
+			FROM catalog_requests q JOIN devices d ON d.id=q.device_id LEFT JOIN catalog_apps a ON a.slug=q.app
 			ORDER BY (q.status='pending') DESC, q.created_at DESC LIMIT 300`)
 		if err != nil {
 			s.fail(w, err)
@@ -178,6 +180,7 @@ func (s *Server) renderApp(w http.ResponseWriter, r *http.Request, sess session,
 		return
 	}
 	var fl, deb, rpm string
+	var debRepo, rpmRepo api.Repository
 	remote, prefer := "flathub", "flatpak"
 	for i, src := range app.Sources {
 		switch src.Kind {
@@ -185,6 +188,13 @@ func (s *Server) renderApp(w http.ResponseWriter, r *http.Request, sess session,
 			fl, remote = src.Flatpak, src.RemoteOf()
 		case "package":
 			deb, rpm = src.Debian, src.Fedora
+			for _, r := range src.Repos {
+				if r.Family == "debian" {
+					debRepo = r
+				} else {
+					rpmRepo = r
+				}
+			}
 			if i == 0 {
 				prefer = "package"
 			}
@@ -196,7 +206,7 @@ func (s *Server) renderApp(w http.ResponseWriter, r *http.Request, sess session,
 		return
 	}
 	s.render(w, r, sess, "app", map[string]any{"App": app, "New": isNew, "Blueprints": bps, "Error": errMsg, "Remotes": remotes, "Remote": remote,
-		"Flatpak": fl, "Debian": deb, "Fedora": rpm, "Prefer": prefer, "Detect": strings.Join(app.Detect, " ")})
+		"Flatpak": fl, "Debian": deb, "Fedora": rpm, "DebRepo": debRepo, "RpmRepo": rpmRepo, "Prefer": prefer, "Detect": strings.Join(app.Detect, " ")})
 }
 
 // appSave stores a catalog app from the form.
@@ -211,9 +221,26 @@ func (s *Server) appSave(w http.ResponseWriter, r *http.Request, sess session) {
 		flatpak.Remote = rem
 	}
 	pkgs := api.AppSource{Kind: "package", Debian: strings.Join(strings.Fields(r.FormValue("debian")), " "), Fedora: strings.Join(strings.Fields(r.FormValue("fedora")), " ")}
+	repoName := r.FormValue("repo_name") // keeps the file names on the devices stable
+	if repoName == "" {
+		repoName = app.ID
+	}
+	if u := strings.TrimSpace(r.FormValue("deb_repo_url")); u != "" {
+		pkgs.Repos = append(pkgs.Repos, api.Repository{Name: repoName, Family: "debian", URL: u, Suites: strings.TrimSpace(r.FormValue("deb_repo_suite")),
+			Components: strings.TrimSpace(r.FormValue("deb_repo_components")), Key: strings.TrimSpace(r.FormValue("deb_repo_key")) + "\n"})
+	}
+	if u := strings.TrimSpace(r.FormValue("rpm_repo_url")); u != "" {
+		pkgs.Repos = append(pkgs.Repos, api.Repository{Name: repoName, Family: "fedora", URL: u, Key: strings.TrimSpace(r.FormValue("rpm_repo_key")) + "\n",
+			SignedMetadata: r.FormValue("rpm_repo_signed_metadata") == "on"})
+	}
 	var srcs []api.AppSource
 	if flatpak.Flatpak != "" {
 		srcs = append(srcs, flatpak)
+	}
+	if len(pkgs.Repos) > 0 && pkgs.Debian == "" && pkgs.Fedora == "" {
+		app.Sources = srcs
+		s.renderApp(w, r, sess, app, isNew, "A vendor repository needs the package names to install from it.")
+		return
 	}
 	if pkgs.Debian != "" || pkgs.Fedora != "" {
 		if r.FormValue("prefer") == "package" {
@@ -303,18 +330,48 @@ func (s *Server) appDelete(w http.ResponseWriter, r *http.Request, sess session)
 
 // requestDecide approves or denies a user's request.
 func (s *Server) requestDecide(w http.ResponseWriter, r *http.Request, sess session) {
+	ctx := r.Context()
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	op := r.PathValue("op")
-	status := map[string]string{"approve": "approved", "deny": "denied"}[op]
+	status := map[string]string{"approve": "approved", "approve-all": "approved", "deny": "denied"}[op]
 	if err != nil || status == "" {
 		http.NotFound(w, r)
 		return
 	}
-	err = s.auditActionFn(r.Context(), func(tx pgx.Tx) (string, string, string, string, error) {
-		var device, app string
-		err := tx.QueryRow(r.Context(), `UPDATE catalog_requests SET status=$2, decided_by=$3, decided_at=now() WHERE id=$1 AND status='pending'
-			RETURNING device_id, app`, id, status, sess.Email).Scan(&device, &app)
-		return sess.Email, "catalog.request." + op, device, app, err
+	err = s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
+		var device, app, flatpak, remote, name string
+		err := tx.QueryRow(ctx, `UPDATE catalog_requests SET status=$2, decided_by=$3, decided_at=now() WHERE id=$1 AND status='pending'
+			RETURNING device_id, coalesce(app, ''), flatpak, remote, app_name`, id, status, sess.Email).Scan(&device, &app, &flatpak, &remote, &name)
+		if err != nil || status != "approved" || flatpak == "" {
+			return sess.Email, "catalog.request." + op, device, app + flatpak, err
+		}
+		// an app from outside the catalog joins it: "on request" for this
+		// device only, or available for everyone
+		mode := api.AppOnRequest
+		if op == "approve-all" {
+			mode = api.AppAvailable
+		}
+		if err := tx.QueryRow(ctx, `SELECT a.slug FROM catalog_apps a, jsonb_array_elements(a.sources) src WHERE src->>'flatpak'=$1 LIMIT 1`, flatpak).Scan(&app); errors.Is(err, pgx.ErrNoRows) {
+			if app, err = s.slugFor(ctx, tx, name); err != nil {
+				return "", "", "", "", err
+			}
+			src := api.AppSource{Kind: "flatpak", Flatpak: flatpak}
+			if remote != "" && remote != "flathub" {
+				src.Remote = remote
+			}
+			doc, _ := json.Marshal([]api.AppSource{src})
+			if _, err := tx.Exec(ctx, `INSERT INTO catalog_apps(slug, name, mode, sources) VALUES ($1,$2,$3,$4)`, app, truncate(name, 80), mode, doc); err != nil {
+				return "", "", "", "", err
+			}
+		} else if err != nil {
+			return "", "", "", "", err
+		} else if op == "approve-all" {
+			if _, err := tx.Exec(ctx, `UPDATE catalog_apps SET mode='available', enabled=true, updated_at=now() WHERE slug=$1`, app); err != nil {
+				return "", "", "", "", err
+			}
+		}
+		_, err = tx.Exec(ctx, `UPDATE catalog_requests SET app=$2 WHERE id=$1`, id, app)
+		return sess.Email, "catalog.request." + op, device, flatpak + " -> " + app, err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.NotFound(w, r)
@@ -493,4 +550,52 @@ func (s *Server) remoteOp(w http.ResponseWriter, r *http.Request, sess session) 
 		return
 	}
 	http.Redirect(w, r, "/software?tab=remotes", http.StatusSeeOther)
+}
+
+// flathubAdd puts a Flathub app into the catalog with its name, summary,
+// category and icon, then opens it for editing.
+func (s *Server) flathubAdd(w http.ResponseWriter, r *http.Request, sess session) {
+	ctx := r.Context()
+	id := strings.TrimSpace(r.FormValue("id"))
+	if !api.ValidFlatpakID(id) {
+		http.NotFound(w, r)
+		return
+	}
+	app, icon, err := s.flathubApp(ctx, id)
+	if err != nil {
+		s.log.Warn("flathub app lookup failed") // no details: they carry the requested ID
+		s.renderApp(w, r, sess, catalogRow{CatalogApp: api.CatalogApp{Mode: api.AppAvailable}, Enabled: true}, true, "Flathub did not answer; try again later.")
+		return
+	}
+	if m := r.FormValue("mode"); m == api.AppOnRequest || m == api.AppRequired {
+		app.Mode = m
+	}
+	var slug string
+	err = s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM catalog_apps a, jsonb_array_elements(a.sources) src WHERE src->>'flatpak'=$1)`, id).Scan(&exists); err != nil || exists {
+			return "", "", "", "", errAppExists
+		}
+		var err error
+		if slug, err = s.slugFor(ctx, tx, app.Name); err != nil {
+			return "", "", "", "", err
+		}
+		app.ID = slug
+		if err := app.Validate(); err != nil {
+			return "", "", "", "", err
+		}
+		doc, _ := json.Marshal(app.Sources)
+		_, err = tx.Exec(ctx, `INSERT INTO catalog_apps(slug, name, summary, category, mode, sources, icon, icon_tried) VALUES ($1,$2,$3,$4,$5,$6,$7,now())`,
+			slug, app.Name, app.Summary, app.Category, app.Mode, doc, icon)
+		return sess.Email, "catalog.save", slug, "from Flathub " + id, err
+	})
+	if errors.Is(err, errAppExists) {
+		http.Redirect(w, r, "/software", http.StatusSeeOther)
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/software/apps/"+slug, http.StatusSeeOther)
 }

@@ -290,6 +290,8 @@ func (s *Server) AgentHandler() http.Handler {
 	mux.HandleFunc("POST /api/v1/poll", s.deviceAuth(s.poll, false))
 	mux.HandleFunc("GET /api/v1/agent-packages/{version}/{file}", s.deviceAuth(s.agentPackage, false))
 	mux.HandleFunc("GET /api/v1/catalog/icons/{id}", s.deviceAuth(s.catalogIcon, false))
+	mux.HandleFunc("GET /api/v1/catalog/search", s.deviceAuth(s.flathubSearchJSON, false))
+	mux.HandleFunc("GET /api/v1/catalog/flathub-icon", s.deviceAuth(s.flathubIcon, false))
 	return securityHeaders(mux)
 }
 

@@ -74,46 +74,108 @@ func (a *Agent) applyExtra() {
 	a.notifyEscrow()
 }
 
+// repoFiles renders a repository for this host's family: key file name and
+// content (none with KeyFile) and source file name and content. prefix is
+// limdm- for declarations and limdm-app- for catalog apps.
+func (h *host) repoFiles(prefix string, r api.Repository) (keyName, key, srcName, src string) {
+	if h.family == "debian" {
+		keyPath := r.KeyFile
+		if keyPath == "" {
+			keyName, key = prefix+r.Name+".asc", r.Key
+			keyPath = "/etc/apt/keyrings/" + keyName
+		}
+		return keyName, key, prefix + r.Name + ".sources", managedHeader + "Types: deb\nURIs: " + r.URL + "\nSuites: " + r.Suites +
+			"\nComponents: " + r.Components + "\nSigned-By: " + keyPath + "\n"
+	}
+	keyPath := r.KeyFile
+	if keyPath == "" {
+		keyName, key = "RPM-GPG-KEY-"+prefix+r.Name, r.Key
+		keyPath = "/etc/pki/rpm-gpg/" + keyName
+	}
+	check := "gpgcheck=1\nrepo_gpgcheck=0"
+	if r.SignedMetadata {
+		check = "gpgcheck=0\nrepo_gpgcheck=1"
+	}
+	return keyName, key, prefix + r.Name + ".repo", managedHeader + "[" + prefix + r.Name + "]\nname=" + r.Name + "\nbaseurl=" + r.URL +
+		"\nenabled=1\n" + check + "\ngpgkey=file://" + keyPath + "\n"
+}
+
+// repoDirs are the key and source directories of this host's family.
+func (h *host) repoDirs() (keyDir, srcDir string) {
+	if h.family == "debian" {
+		return "/etc/apt/keyrings", "/etc/apt/sources.list.d"
+	}
+	return "/etc/pki/rpm-gpg", "/etc/yum.repos.d"
+}
+
 func (a *Agent) applyRepositories(repos []api.Repository) error {
 	keys, sources := map[string]string{}, map[string]string{}
 	for _, r := range repos {
 		if r.Family != a.host.family {
 			continue
 		}
-		if a.host.family == "debian" {
-			keyPath := r.KeyFile
-			if keyPath == "" {
-				key := "limdm-" + r.Name + ".asc"
-				keys[key] = r.Key
-				keyPath = "/etc/apt/keyrings/" + key
-			}
-			sources["limdm-"+r.Name+".sources"] = managedHeader + "Types: deb\nURIs: " + r.URL + "\nSuites: " + r.Suites +
-				"\nComponents: " + r.Components + "\nSigned-By: " + keyPath + "\n"
-		} else {
-			keyPath := r.KeyFile
-			if keyPath == "" {
-				key := "RPM-GPG-KEY-limdm-" + r.Name
-				keys[key] = r.Key
-				keyPath = "/etc/pki/rpm-gpg/" + key
-			}
-			sources["limdm-"+r.Name+".repo"] = managedHeader + "[limdm-" + r.Name + "]\nname=" + r.Name + "\nbaseurl=" + r.URL +
-				"\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=0\ngpgkey=file://" + keyPath + "\n"
+		kn, k, sn, src := a.host.repoFiles("limdm-", r)
+		if kn != "" {
+			keys[kn] = k
 		}
+		sources[sn] = src
 	}
+	keyDir, srcDir := a.host.repoDirs()
+	// osquery's source and catalog app sources have their own owners
+	keyKeep, srcKeep := appRepoFiles(keyDir), appRepoFiles(srcDir)
 	var c1, c2 bool
 	var err1, err2 error
 	if a.host.family == "debian" {
-		c1, err1 = syncManaged("/etc/apt/keyrings", "limdm-", ".asc", keys, "limdm-osquery.asc")
-		c2, err2 = syncManaged("/etc/apt/sources.list.d", "limdm-", ".sources", sources, "limdm-osquery.sources")
+		c1, err1 = syncManaged(keyDir, "limdm-", ".asc", keys, append(keyKeep, "limdm-osquery.asc")...)
+		c2, err2 = syncManaged(srcDir, "limdm-", ".sources", sources, append(srcKeep, "limdm-osquery.sources")...)
 	} else {
-		c1, err1 = syncManaged("/etc/pki/rpm-gpg", "RPM-GPG-KEY-limdm-", "", keys, "RPM-GPG-KEY-limdm-osquery")
-		c2, err2 = syncManaged("/etc/yum.repos.d", "limdm-", ".repo", sources, "limdm-osquery.repo")
+		c1, err1 = syncManaged(keyDir, "RPM-GPG-KEY-limdm-", "", keys, append(keyKeep, "RPM-GPG-KEY-limdm-osquery")...)
+		c2, err2 = syncManaged(srcDir, "limdm-", ".repo", sources, append(srcKeep, "limdm-osquery.repo")...)
 	}
 	if c1 || c2 {
 		a.host.aptUpdated = time.Time{} // refresh package lists with the new sources
 		a.event("package sources updated")
 	}
 	return errors.Join(err1, err2)
+}
+
+// appRepoFiles lists the catalog apps' repository files in dir.
+func appRepoFiles(dir string) []string {
+	var names []string
+	for _, pat := range []string{"limdm-app-*", "RPM-GPG-KEY-limdm-app-*"} {
+		m, _ := filepath.Glob(filepath.Join(dir, pat))
+		for _, f := range m {
+			names = append(names, filepath.Base(f))
+		}
+	}
+	return names
+}
+
+// setAppRepos adds (or with remove, deletes) the vendor repository of a
+// catalog app's package source for this host.
+func (a *Agent) setAppRepos(src api.AppSource, remove bool) error {
+	keyDir, srcDir := a.host.repoDirs()
+	var errs []error
+	for _, r := range src.Repos {
+		if r.Family != a.host.family {
+			continue
+		}
+		kn, k, sn, s := a.host.repoFiles("limdm-app-", r)
+		if remove {
+			k, s = "", ""
+		}
+		if kn != "" {
+			_, err := writeOrRemove(filepath.Join(keyDir, kn), k, 0o644)
+			errs = append(errs, err)
+		}
+		c, err := writeOrRemove(filepath.Join(srcDir, sn), s, 0o644)
+		errs = append(errs, err)
+		if c && !remove {
+			a.host.aptUpdated = time.Time{}
+			a.event("added package source %s", r.Name)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (a *Agent) applyCertificates(certs []api.Certificate) error {

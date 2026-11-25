@@ -232,11 +232,17 @@ func TestAddUploadedCerts(t *testing.T) {
 }
 
 func TestDefaultCatalogValid(t *testing.T) {
-	if len(defaultCatalog) != 25 {
-		t.Fatalf("%d default apps", len(defaultCatalog))
+	if len(defaultCatalog) != 25 || len(moreCatalog) != 53 {
+		t.Fatalf("%d default apps, %d more", len(defaultCatalog), len(moreCatalog))
 	}
-	seen := map[string]bool{}
-	for _, a := range defaultCatalog {
+	seen, flatpaks := map[string]bool{}, map[string]bool{}
+	for _, a := range append(append([]api.CatalogApp{}, defaultCatalog...), moreCatalog...) {
+		for _, s := range a.Sources {
+			if s.Flatpak != "" && flatpaks[s.Flatpak] {
+				t.Errorf("Flatpak %s twice", s.Flatpak)
+			}
+			flatpaks[s.Flatpak] = true
+		}
 		a.Mode = api.AppAvailable
 		if err := a.Validate(); err != nil {
 			t.Error(err)
@@ -249,5 +255,21 @@ func TestDefaultCatalogValid(t *testing.T) {
 	bad := api.CatalogApp{ID: "x", Name: "X", Mode: api.AppAvailable, Sources: []api.AppSource{{Kind: "package", Debian: "rm -rf /"}}}
 	if bad.Validate() == nil {
 		t.Fatal("invalid package list accepted")
+	}
+}
+
+func TestFlathubIconURL(t *testing.T) {
+	ok := "https://dl.flathub.org/media/org/kde/krita/7a1c/icons/128x128/org.kde.krita.png"
+	if flathubIconURL(ok) != ok {
+		t.Fatal("Flathub icon refused")
+	}
+	for _, bad := range []string{"http://dl.flathub.org/a.png", "https://evil.example/a.png", "https://dl.flathub.org.evil.example/a.png",
+		"https://dl.flathub.org/a.png?x=1", "https://u@dl.flathub.org/a.png", "https://dl.flathub.org/../a.png", "https://dl.flathub.org/a.svg"} {
+		if flathubIconURL(bad) != "" {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+	if catalogCategory("AudioVideo") != "Multimedia" || catalogCategory("WebBrowser") != "Internet" || catalogCategory("Unknown") != "" {
+		t.Fatal("category mapping")
 	}
 }

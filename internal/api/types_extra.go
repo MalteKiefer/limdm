@@ -38,6 +38,24 @@ type Repository struct {
 	Components string `json:"components,omitempty"` // apt
 	Key        string `json:"key,omitempty"`        // ASCII armored signing key
 	KeyFile    string `json:"key_file,omitempty"`   // or a keyring already on the device (distribution keys)
+	// SignedMetadata: the repository signs its metadata, not each package
+	// (dnf repo_gpgcheck instead of gpgcheck; apt always checks metadata).
+	SignedMetadata bool `json:"signed_metadata,omitempty"`
+}
+
+// Validate checks a package repository; unsigned ones are not allowed.
+func (r Repository) Validate() error {
+	if !nameRe.MatchString(r.Name) || (r.Family != "debian" && r.Family != "fedora") || !httpsURL(r.URL) {
+		return fmt.Errorf("repository %q: name, family (debian|fedora) and an https URL are required", r.Name)
+	}
+	if !suiteRe.MatchString(r.Suites) || !suiteRe.MatchString(r.Components) || (r.Family == "debian" && r.Suites == "") {
+		return fmt.Errorf("repository %q: invalid suites or components", r.Name)
+	}
+	armored := strings.Contains(r.Key, "BEGIN PGP PUBLIC KEY BLOCK") && len(r.Key) <= 64<<10
+	if armored == (r.KeyFile != "") || (r.KeyFile != "" && !keyFileRe.MatchString(r.KeyFile)) {
+		return fmt.Errorf("repository %q: either an armored signing key or a key_file in /usr/share/keyrings, /etc/apt/keyrings or /etc/pki/rpm-gpg is required; unsigned repositories are not allowed", r.Name)
+	}
+	return nil
 }
 
 type Certificate struct {
@@ -215,18 +233,11 @@ func (d Declaration) applyExtra(p *Policy) (bool, error) {
 		}
 		p.Extra.RepoDisable = v.Disable
 		for _, r := range v.Repositories {
-			if r.Name == "osquery" {
-				bad("repository name osquery is reserved for the agent's own osquery source")
+			if r.Name == "osquery" || strings.HasPrefix(r.Name, "app-") {
+				bad("repository name %q: osquery and names starting with app- are reserved for the agent", r.Name)
 			}
-			if !nameRe.MatchString(r.Name) || (r.Family != "debian" && r.Family != "fedora") || !httpsURL(r.URL) {
-				bad("repository %q: name, family (debian|fedora) and an https URL are required", r.Name)
-			}
-			if !suiteRe.MatchString(r.Suites) || !suiteRe.MatchString(r.Components) || (r.Family == "debian" && r.Suites == "") {
-				bad("repository %q: invalid suites or components", r.Name)
-			}
-			armored := strings.Contains(r.Key, "BEGIN PGP PUBLIC KEY BLOCK") && len(r.Key) <= 64<<10
-			if armored == (r.KeyFile != "") || (r.KeyFile != "" && !keyFileRe.MatchString(r.KeyFile)) {
-				bad("repository %q: either an armored signing key or a key_file in /usr/share/keyrings, /etc/apt/keyrings or /etc/pki/rpm-gpg is required; unsigned repositories are not allowed", r.Name)
+			if err := r.Validate(); err != nil {
+				errs = append(errs, err)
 			}
 		}
 		p.Extra.Repositories = v.Repositories

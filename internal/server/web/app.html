@@ -2,6 +2,22 @@
 {{define "content"}}
 <div class="page-head"><div><div class="eyebrow"><a href="/software">{{t "Software"}}</a></div><h1>{{if .New}}{{t "Add app"}}{{else}}{{.App.Name}}{{end}}</h1></div></div>
 {{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+{{if and .New (eq .Sess.Role "admin")}}
+<section class="card flathub-search" data-csrf="{{.CSRF}}">
+  <h2>{{t "Search Flathub"}}</h2>
+  <p class="muted">{{t "Name, summary, category and icon are taken over; you can change them afterwards."}}</p>
+  <form class="filters" data-flathub-search>
+    <input type="search" name="q" minlength="2" maxlength="80" required placeholder="{{t "e.g. Krita, Obsidian, Zotero"}}" aria-label="{{t "Search Flathub"}}">
+    <select name="mode" aria-label="{{t "Mode"}}">
+      <option value="available">{{t "available: users install it themselves"}}</option>
+      <option value="request">{{t "on request: an admin approves"}}</option>
+      <option value="required">{{t "required: installed automatically"}}</option></select>
+    <button>{{t "Search"}}</button>
+  </form>
+  <div class="flathub-results" data-flathub-results data-empty="{{t "Nothing found, or everything found is in the catalog already."}}" data-add="{{t "Add to catalog"}}"></div>
+</section>
+<h2 class="section-title">{{t "Or enter the app yourself"}}</h2>
+{{end}}
 <div class="grid side-right">
   <form class="card" method="post" action="/software/apps" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="new" value="{{if .New}}1{{end}}">
@@ -27,14 +43,29 @@
       <label>{{t "Debian and Ubuntu packages"}}<input name="debian" value="{{.Debian}}" spellcheck="false"></label>
       <label>{{t "Fedora packages"}}<input name="fedora" value="{{.Fedora}}" spellcheck="false"></label>
     </div>
+    <details class="vendor-repo" {{if or .DebRepo.URL .RpmRepo.URL}}open{{end}}>
+      <summary>{{t "Vendor package repository"}} <span class="hint">{{t "for packages your distribution does not ship; added before the install, removed with the app"}}</span></summary>
+      <input type="hidden" name="repo_name" value="{{or .DebRepo.Name .RpmRepo.Name}}">
+      <div class="inline">
+        <label>{{t "Debian and Ubuntu repository URL"}}<input name="deb_repo_url" value="{{.DebRepo.URL}}" type="url" pattern="https://.*" placeholder="https://repo.example.com/apt" spellcheck="false"></label>
+        <label>{{t "Suite"}}<input name="deb_repo_suite" value="{{.DebRepo.Suites}}" placeholder="stable" spellcheck="false"></label>
+        <label>{{t "Components"}}<input name="deb_repo_components" value="{{.DebRepo.Components}}" placeholder="main" spellcheck="false"></label>
+      </div>
+      <label>{{t "Debian signing key"}} <span class="hint">{{t "ASCII armored public key"}}</span><textarea name="deb_repo_key" rows="3" spellcheck="false" class="mono">{{.DebRepo.Key}}</textarea></label>
+      <label>{{t "Fedora repository URL"}} <span class="hint">{{t "baseurl, $basearch allowed"}}</span><input name="rpm_repo_url" value="{{.RpmRepo.URL}}" type="url" pattern="https://.*" placeholder="https://repo.example.com/rpm/$basearch" spellcheck="false"></label>
+      <label>{{t "Fedora signing key"}} <span class="hint">{{t "ASCII armored public key"}}</span><textarea name="rpm_repo_key" rows="3" spellcheck="false" class="mono">{{.RpmRepo.Key}}</textarea></label>
+      <label class="check"><input type="checkbox" name="rpm_repo_signed_metadata" {{if .RpmRepo.SignedMetadata}}checked{{end}}> {{t "the repository signs its metadata, not each package"}}</label>
+    </details>
     <label>{{t "Install from"}}<select name="prefer">
       <option value="flatpak" {{if eq .Prefer "flatpak"}}selected{{end}}>{{t "Flatpak first, packages as fallback"}}</option>
       <option value="package" {{if eq .Prefer "package"}}selected{{end}}>{{t "packages first, Flatpak as fallback"}}</option></select></label>
     <label>{{t "Also installed when"}} <span class="hint">{{t "further package names, space separated, e.g. firefox-esr"}}</span><input name="detect" value="{{.Detect}}" spellcheck="false"></label>
     <h2>{{t "Availability"}}</h2>
     <label class="check"><input type="checkbox" name="enabled" {{if .App.Enabled}}checked{{end}}> {{t "in the catalog"}}</label>
-    <label>{{t "Only for these blueprints"}} <span class="hint">{{t "none selected: every device"}}</span>
-      <select name="scope" multiple size="5">{{$scope := .App.Scope}}{{range .Blueprints}}<option value="{{.ID}}" {{if hasID $scope .ID}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+    <fieldset class="checklist">
+      <legend>{{t "Only for these blueprints"}} <span class="hint">{{t "none selected: every device"}}</span></legend>
+      {{$scope := .App.Scope}}{{range .Blueprints}}<label class="check chip"><input type="checkbox" name="scope" value="{{.ID}}" {{if hasID $scope .ID}}checked{{end}}> {{.Name}}</label>{{end}}
+    </fieldset>
     <label>{{t "Icon"}} <span class="hint">{{t "PNG; Flatpak apps get theirs from Flathub"}}</span><input type="file" name="icon" accept="image/png"></label>
     {{if .App.HasIcon}}<div class="logo-preview"><img src="/software/icons/{{.App.ID}}?v={{.App.IconHash}}" alt=""><label class="check"><input type="checkbox" name="remove_icon"> {{t "remove icon"}}</label></div>{{end}}
     {{if eq .Sess.Role "admin"}}<div class="form-foot"><span class="muted">{{t "Devices pick up changes at their next check in."}}</span><button>{{t "Save"}}</button></div>{{end}}

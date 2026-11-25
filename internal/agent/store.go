@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -23,6 +26,7 @@ const (
 	flathubURL      = "https://dl.flathub.org/repo/flathub.flatpakrepo"
 	storeReadOnly   = "/etc/polkit-1/rules.d/60-limdm-store-readonly.rules"
 	catalogIconsDir = "/var/cache/limdm/catalog"
+	searchIconsDir  = "/var/cache/limdm/search"
 	appRetry        = time.Hour // a failed required or approved app is tried again after this
 )
 
@@ -162,6 +166,10 @@ func (a *Agent) installApp(app api.CatalogApp) error {
 			if len(names) == 0 {
 				continue
 			}
+			if err := a.setAppRepos(src, false); err != nil {
+				errs = append(errs, fmt.Errorf("package source: %w", err))
+				continue
+			}
 			if err := a.host.install(names...); err != nil {
 				errs = append(errs, fmt.Errorf("packages: %w", err))
 				continue
@@ -200,6 +208,9 @@ func (a *Agent) removeApp(app api.CatalogApp, flatpaks map[string]string) error 
 			}
 			if err := a.host.remove(names...); err != nil {
 				return err
+			}
+			if err := a.setAppRepos(src, true); err != nil {
+				a.event("removing the package source of %s: %v", app.Name, err)
 			}
 			a.event("removed %s (packages %s)", app.Name, strings.Join(names, " "))
 			return nil
@@ -532,4 +543,86 @@ func flathubFilterContent(ids []string) string {
 		b.WriteString("allow app/" + id + "\n")
 	}
 	return b.String()
+}
+
+// ---- apps outside the catalog ----
+
+// DesktopHit is a search result; Icon is a cached file the app can read.
+type DesktopHit struct {
+	api.FlatpakHit
+	Icon string `json:"icon,omitempty"`
+}
+
+// searchApps asks the server (which asks Flathub) and caches the icons.
+func (a *Agent) searchApps(q string) DesktopResponse {
+	q = strings.TrimSpace(q)
+	if len(q) < 2 || len(q) > 80 {
+		return DesktopResponse{Error: "search: 2 to 80 characters"}
+	}
+	var body []byte
+	if err := a.getBytes("/api/v1/catalog/search?q="+url.QueryEscape(q), 1<<20, &body); err != nil {
+		return DesktopResponse{Error: "the server did not answer the search"}
+	}
+	var hits []api.FlatpakHit
+	if err := json.Unmarshal(body, &hits); err != nil {
+		return DesktopResponse{Error: "the server did not answer the search"}
+	}
+	if err := os.MkdirAll(searchIconsDir, 0o755); err == nil { //nolint:gosec // icons are read by the user's desktop app
+		_ = os.Chmod(searchIconsDir, 0o755) //nolint:gosec // see above, the agent runs with UMask=0077
+	}
+	out := make([]DesktopHit, 0, len(hits))
+	for _, h := range hits {
+		if !api.ValidFlatpakID(h.ID) {
+			continue
+		}
+		d := DesktopHit{FlatpakHit: h}
+		if h.Icon != "" {
+			f := searchIconsDir + "/" + h.ID + ".png"
+			var png []byte
+			if exists(f) {
+				d.Icon = f
+			} else if a.getBytes("/api/v1/catalog/flathub-icon?u="+url.QueryEscape(h.Icon), 512<<10, &png) == nil &&
+				bytes.HasPrefix(png, []byte("\x89PNG\r\n\x1a\n")) {
+				if _, err := writeIfChanged(f, string(png), 0o644); err == nil {
+					d.Icon = f
+				}
+			}
+		}
+		out = append(out, d)
+	}
+	return DesktopResponse{OK: true, Hits: out}
+}
+
+// requestNewApp queues a request for an app outside the catalog; IT decides
+// in the console.
+func (a *Agent) requestNewApp(r api.AppRequest) DesktopResponse {
+	if !api.ValidFlatpakID(r.Flatpak) || (r.Remote != "" && !api.ValidRemoteName(r.Remote)) {
+		return DesktopResponse{Error: "invalid app"}
+	}
+	r.Name, r.Note = truncateString(strings.TrimSpace(r.Name), 80), truncateString(r.Note, 500)
+	a.evMu.Lock()
+	switch {
+	case slices.ContainsFunc(a.state.AppRequests, func(q api.AppRequest) bool { return q.Flatpak == r.Flatpak }):
+	case len(a.state.AppRequests) >= 20:
+		a.evMu.Unlock()
+		return DesktopResponse{Error: "too many open requests, wait for the next check in"}
+	default:
+		a.state.AppRequests = append(a.state.AppRequests, r)
+	}
+	a.evMu.Unlock()
+	a.kickCheckin()
+	return DesktopResponse{OK: true}
+}
+
+// withQueued adds requests not yet sent to the server as pending.
+func (a *Agent) withQueued(reqs []api.RequestState) []api.RequestState {
+	out := slices.Clone(reqs)
+	a.evMu.Lock()
+	defer a.evMu.Unlock()
+	for _, q := range a.state.AppRequests {
+		if q.Flatpak != "" && !slices.ContainsFunc(out, func(r api.RequestState) bool { return r.Flatpak == q.Flatpak }) {
+			out = append(out, api.RequestState{Flatpak: q.Flatpak, Name: q.Name, Status: "pending"})
+		}
+	}
+	return out
 }

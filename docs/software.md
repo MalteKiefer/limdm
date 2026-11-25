@@ -16,8 +16,14 @@ LiMDM desktop app ── socket: install "firefox" ──► limdm-agent (root)
 **Software** in the console lists the apps. A new installation starts with 25 well known
 apps (Firefox, Thunderbird, Chromium, Google Chrome, LibreOffice, GIMP, Inkscape, VLC, Visual
 Studio Code, Slack, Zoom, Spotify, Discord, Signal, Telegram, KeePassXC, Bitwarden, OBS Studio,
-Audacity, Blender, Remmina, FileZilla, Nextcloud, Element, Postman). Apps deleted from the
-catalog are not added again.
+Audacity, Blender, Remmina, FileZilla, Nextcloud, Element, Postman). An update adds 53
+more: 50 apps from Flathub (browsers like Brave, Vivaldi, Microsoft Edge, Mullvad Browser and
+Tor Browser; office and notes like ONLYOFFICE, Obsidian, Joplin, Zotero, Okular; graphics and
+video like Krita, darktable, Kdenlive, FreeCAD, KiCad, draw.io; chat like Mattermost,
+Rocket.Chat, Zulip, Jitsi Meet; development like IntelliJ IDEA, PyCharm, VSCodium, DBeaver,
+Wireshark, Podman Desktop; remote access like AnyDesk and RustDesk; and more), plus the VPN
+clients **Mullvad VPN**, **Tailscale** and **NetBird** from their vendors' package
+repositories. Apps deleted from the catalog are not added again.
 
 Per app:
 
@@ -25,9 +31,22 @@ Per app:
 |---|---|
 | Mode | **available**: users install and remove it; **on request**: users ask, an admin approves under **Requests**, then the device installs it by itself; **required**: installed on every device that gets it |
 | Sources | Flatpak ID from Flathub and Debian/Ubuntu or Fedora package names; **Install from** sets which comes first, the other is the fallback |
+| Vendor package repository | for packages the distribution does not ship: repository URL (Debian: suite and components) and the vendor's ASCII armored signing key, per family |
 | Also installed when | further package names that count as installed (`firefox-esr`, `code`) |
 | Blueprints | none: every device; otherwise only devices whose blueprint (or a parent) is listed |
 | Icon | Flatpak apps get theirs from Flathub; upload a PNG for others |
+
+## Vendor package repositories
+
+Software that needs a system service (VPN clients, endpoint agents) does not work as a
+Flatpak; it comes as a package from the vendor's own repository. An app can carry one
+repository per family. The agent adds it (`/etc/apt/sources.list.d/limdm-app-<name>.sources`
+with the key in `/etc/apt/keyrings`, or `/etc/yum.repos.d/limdm-app-<name>.repo` with the key
+in `/etc/pki/rpm-gpg`) right before installing the packages, keeps it for updates while the
+app is installed, and removes it with the app. Unsigned repositories are refused. For
+repositories that sign their metadata instead of each package (NetBird's RPM repository),
+tick **the repository signs its metadata**; dnf then checks `repo_gpgcheck`. Package
+sources declared with a **Package sources** profile are separate and never touch these files.
 
 ## Installed is installed
 
@@ -46,6 +65,28 @@ On a device page (**Software**, **Flatpak**) each app has **Add to catalog**. De
 have such an app count it as installed and managed right away; nothing is installed again.
 Take over what you want to keep before switching on the Flathub filter: apps outside the
 catalog get no updates once it is on.
+
+## Adding apps from Flathub
+
+**Software**, **Add app** searches Flathub. **Add to catalog** takes over name, summary,
+category and icon; the entry opens for editing. The console asks Flathub through the
+server, so browsers need no access to Flathub and the strict content security policy stays.
+
+## Requests for apps outside the catalog
+
+In the desktop app, **+** next to the search opens **Request another app**. Users search
+Flathub (through the agent and the server; devices never talk to Flathub for this), pick an
+app and add a note. The request shows under **Requests** in the console with **not in
+catalog**:
+
+* **Approve for this device** creates a catalog entry in mode on request (or reuses the one
+  for this Flatpak) and approves the device; it installs by itself at the next check in.
+* **Approve for everyone** creates the entry in mode available.
+* **Deny** keeps the catalog as it is.
+
+Users see their requests and the decision under **My requests**. Only Flathub and managed
+remotes that are allowed can be requested; the agent allows 20 searches a minute and 20
+unsent requests.
 
 ## Flatpak remotes
 
