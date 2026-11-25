@@ -72,6 +72,7 @@ var migrations = []struct {
 		return err
 	}},
 	{7, func(ctx context.Context, tx pgx.Tx) error { return seedApps(ctx, tx, moreCatalog) }},
+	{8, seedVendorIcons},
 }
 
 func columnExists(ctx context.Context, tx pgx.Tx, table, column string) (bool, error) {

@@ -3,8 +3,9 @@
 // limdm-desktop runs in the user's desktop session (XDG autostart). It shows
 // a tray icon with the device's state (details, check in, agent log) and asks
 // the user for what only they can provide, currently the disk passphrase to
-// create a recovery key. Dialogs use zenity (GNOME) or kdialog (KDE), so the
-// helper needs no GUI libraries and never runs as root.
+// create a recovery key. Dialogs are libadwaita message dialogs from the GTK
+// app (limdm-desktop-ui --dialog); zenity (GNOME) or kdialog (KDE) stand in
+// where GTK 4 is missing. The helper needs no GUI libraries and never runs as root.
 package main
 
 import (
@@ -83,10 +84,49 @@ func call(req agent.DesktopRequest) (agent.DesktopResponse, error) {
 type dialogs struct {
 	tool, icon, title string
 	zenity, zenity4   bool
+	native            bool // the GTK app shows libadwaita dialogs
+}
+
+// dialogSpec is what limdm-desktop-ui --dialog reads on stdin.
+type dialogSpec struct {
+	Kind    string      `json:"kind"` // message | error | ask | password
+	Title   string      `json:"title,omitempty"`
+	Heading string      `json:"heading"`
+	Body    string      `json:"body,omitempty"`
+	Yes     string      `json:"yes,omitempty"`
+	No      string      `json:"no,omitempty"`
+	Label   string      `json:"label,omitempty"`
+	Rows    [][2]string `json:"rows,omitempty"`
+	Pre     string      `json:"pre,omitempty"`
+}
+
+// nativeDialog runs a libadwaita dialog. handled is false when GTK 4 or
+// libadwaita 1.4 is missing (exit code 3); the caller falls back then.
+func (d *dialogs) nativeDialog(spec dialogSpec) (out []byte, accepted, handled bool) {
+	if !d.native {
+		return nil, false, false
+	}
+	spec.Title = d.title
+	in, _ := json.Marshal(spec)
+	cmd := exec.CommandContext(ctx, appPath, "--dialog")
+	cmd.Stdin = bytes.NewReader(in)
+	out, err := cmd.Output()
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return bytes.TrimRight(out, "\r\n"), true, true
+	case errors.As(err, &exit) && exit.ExitCode() == 1:
+		return nil, false, true
+	}
+	d.native = false
+	return nil, false, false
 }
 
 func newDialogs(company, logo string) (*dialogs, error) {
 	d := &dialogs{icon: logo, title: company}
+	if _, err := os.Stat(appPath); err == nil {
+		d.native = true
+	}
 	if p, err := exec.LookPath("zenity"); err == nil {
 		d.tool, d.zenity = p, true
 		out, _ := exec.CommandContext(ctx, p, "--version").Output()
@@ -97,7 +137,10 @@ func newDialogs(company, logo string) (*dialogs, error) {
 		d.tool = p
 		return d, nil
 	}
-	return nil, errors.New("neither zenity nor kdialog is installed")
+	if d.native {
+		return d, nil
+	}
+	return nil, errors.New("neither the LiMDM app, zenity nor kdialog is installed")
 }
 
 // text formats heading and body: Pango markup for zenity, plain for kdialog.
@@ -134,6 +177,12 @@ func (d *dialogs) kdialogArgs(extra ...string) []string {
 const iconDisk = "drive-harddisk-encrypted"
 
 func (d *dialogs) ask(heading, body, yes, no string) bool {
+	if _, ok, handled := d.nativeDialog(dialogSpec{Kind: "ask", Heading: heading, Body: body, Yes: yes, No: no}); handled {
+		return ok
+	}
+	if d.tool == "" {
+		return false
+	}
 	var cmd *exec.Cmd
 	if d.zenity {
 		cmd = exec.CommandContext(ctx, d.tool, d.zenityArgs("--question", iconDisk, "--text="+d.text(heading, body), "--ok-label="+yes, "--cancel-label="+no)...)
@@ -144,6 +193,13 @@ func (d *dialogs) ask(heading, body, yes, no string) bool {
 }
 
 func (d *dialogs) message(heading, body string, isErr bool) {
+	kind := "message"
+	if isErr {
+		kind = "error"
+	}
+	if _, _, handled := d.nativeDialog(dialogSpec{Kind: kind, Heading: heading, Body: body}); handled || d.tool == "" {
+		return
+	}
 	if d.zenity {
 		kind, icon := "--info", "emblem-ok-symbolic"
 		if isErr {
@@ -152,17 +208,20 @@ func (d *dialogs) message(heading, body string, isErr bool) {
 		_ = exec.CommandContext(ctx, d.tool, d.zenityArgs(kind, icon, "--text="+d.text(heading, body), "--ok-label="+tr("Close", "Schließen"))...).Run() // nothing to do if it fails
 		return
 	}
-	kind := "--msgbox"
+	kd := "--msgbox"
 	if isErr {
-		kind = "--error"
+		kd = "--error"
 	}
-	_ = exec.CommandContext(ctx, d.tool, d.kdialogArgs(kind, d.text(heading, body))...).Run()
+	_ = exec.CommandContext(ctx, d.tool, d.kdialogArgs(kd, d.text(heading, body))...).Run()
 }
 
 // sheet shows a read only page with one Close button: a heading, an optional
 // sentence and property rows (dim label above its value, like libadwaita
 // property rows) or a preformatted block.
 func (d *dialogs) sheet(icon, heading, intro string, rows [][2]string, pre string) {
+	if _, _, handled := d.nativeDialog(dialogSpec{Kind: "message", Heading: heading, Body: intro, Rows: rows, Pre: pre}); handled || d.tool == "" {
+		return
+	}
 	if !d.zenity {
 		var b strings.Builder
 		b.WriteString(heading + "\n\n")
@@ -192,6 +251,12 @@ func (d *dialogs) sheet(icon, heading, intro string, rows [][2]string, pre strin
 
 // password returns the entered text; the dialog prints it on stdout, never in argv.
 func (d *dialogs) password(heading, body, label, ok string) ([]byte, bool) {
+	if out, accepted, handled := d.nativeDialog(dialogSpec{Kind: "password", Heading: heading, Body: body, Label: label, Yes: ok}); handled {
+		return out, accepted
+	}
+	if d.tool == "" {
+		return nil, false
+	}
 	var cmd *exec.Cmd
 	if d.zenity {
 		cmd = exec.CommandContext(ctx, d.tool, d.zenityArgs("--forms", iconDisk, "--text="+d.text(heading, body),

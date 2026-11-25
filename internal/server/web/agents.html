@@ -16,7 +16,7 @@
       <tbody>{{range .Releases}}<tr>
         <td class="mono">{{.Version}}</td><td class="nowrap">{{fmtTime .PublishedAt}}</td>
         <td>{{if .Blocked}}<span class="pill bad">{{t "blocked"}}</span><span class="sub">{{.BlockedReason}}</span>{{else if .ApprovedAt}}<span class="pill ok">{{t "approved"}}</span><span class="sub">{{fmtTime (derefTime .ApprovedAt)}}</span>{{else}}<span class="pill">{{t "available"}}</span>{{end}}</td>
-        <td class="num">{{.Devices}}</td><td class="num">{{if .Failed}}<span class="pill bad">{{.Failed}}</span>{{else}}0{{end}}</td>
+        <td class="num">{{if .Devices}}<a class="count" href="/devices?agent={{.Version}}">{{.Devices}}</a>{{else}}0{{end}}</td><td class="num">{{if .Failed}}<span class="pill bad">{{.Failed}}</span>{{else}}0{{end}}</td>
         <td>{{if .SumsSig}}<span class="pill ok">{{t "signed"}}</span>{{else}}<span class="pill warn">{{t "unsigned"}}</span>{{end}}</td>
         {{if eq $.Sess.Role "admin"}}<td class="row-actions inline-actions">
           {{if or (not .ApprovedAt) .Blocked}}<form method="post" action="/agents/{{.Version}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary small">{{t "Approve"}}</button></form>{{end}}
@@ -46,7 +46,7 @@
       <div class="card-head"><h2>{{t "Fleet"}}</h2></div>
       <div class="scroll"><table>
         <thead><tr><th>{{t "Agent version"}}</th><th class="num">{{t "Devices"}}</th></tr></thead>
-        <tbody>{{range .Fleet}}<tr><td class="mono">{{.Version}}</td><td class="num">{{.N}}</td></tr>{{else}}<tr><td colspan="2" class="empty">{{t "No devices enrolled."}}</td></tr>{{end}}</tbody>
+        <tbody>{{range .Fleet}}<tr><td class="mono">{{.Version}}</td><td class="num"><a class="count" href="/devices?agent={{.Version}}">{{.N}}</a></td></tr>{{else}}<tr><td colspan="2" class="empty">{{t "No devices enrolled."}}</td></tr>{{end}}</tbody>
       </table></div>
     </section>
   </div>

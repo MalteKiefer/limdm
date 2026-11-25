@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -255,6 +256,20 @@ func TestDefaultCatalogValid(t *testing.T) {
 	bad := api.CatalogApp{ID: "x", Name: "X", Mode: api.AppAvailable, Sources: []api.AppSource{{Kind: "package", Debian: "rm -rf /"}}}
 	if bad.Validate() == nil {
 		t.Fatal("invalid package list accepted")
+	}
+}
+
+func TestVendorIcons(t *testing.T) {
+	files, err := vendorIcons.ReadDir("vendoricons")
+	if err != nil || len(files) != 3 {
+		t.Fatalf("vendor icons: %v %d", err, len(files))
+	}
+	for _, f := range files {
+		png, _ := vendorIcons.ReadFile("vendoricons/" + f.Name())
+		slug := strings.TrimSuffix(f.Name(), ".png")
+		if err := validLogo(png); err != nil || !slices.ContainsFunc(moreCatalog, func(a api.CatalogApp) bool { return a.ID == slug }) {
+			t.Errorf("%s: %v", f.Name(), err)
+		}
 	}
 }
 

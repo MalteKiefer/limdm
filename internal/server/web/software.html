@@ -19,7 +19,7 @@
     <td>{{.Category}}</td>
     <td>{{if eq .Mode "required"}}<span class="pill warn">{{t "required"}}</span>{{else if eq .Mode "request"}}<span class="pill">{{t "on request"}}</span>{{else}}<span class="pill ok">{{t "available"}}</span>{{end}}</td>
     <td class="muted">{{appSources .Sources}}</td>
-    <td class="num">{{.Installs}}</td>
+    <td class="num">{{if .Installs}}<a class="count" href="/devices?app={{.ID}}">{{.Installs}}</a>{{else}}<span class="muted">0</span>{{end}}</td>
     <td>{{if .Scope}}{{len .Scope}} {{t "blueprints"}}{{else}}<span class="muted">{{t "all devices"}}</span>{{end}}</td>
   </tr>{{else}}<tr><td colspan="7" class="empty">{{t "The catalog is empty."}}</td></tr>{{end}}</tbody>
 </table></div></section>
@@ -30,7 +30,7 @@
   <p class="muted card-note">{{t "Flatpaks users or IT installed earlier. Added apps count as installed and managed on these devices; nothing is installed again. With the Flathub filter on, apps outside the catalog get no updates."}}</p>
   <div class="scroll"><table>
     <thead><tr><th></th><th>{{t "Application"}}</th><th>{{t "Flatpak ID"}}</th><th class="num">{{t "Devices"}}</th></tr></thead>
-    <tbody>{{range .Fleet}}<tr><td><input type="checkbox" name="flatpak" value="{{.ID}}" aria-label="{{.Name}}"></td><td>{{.Name}}</td><td class="mono">{{.ID}}</td><td class="num">{{.Devices}}</td></tr>{{end}}</tbody>
+    <tbody>{{range .Fleet}}<tr><td><input type="checkbox" name="flatpak" value="{{.ID}}" aria-label="{{.Name}}"></td><td>{{.Name}}</td><td class="mono">{{.ID}}</td><td class="num"><a class="count" href="/devices?flatpak={{.ID}}">{{.Devices}}</a></td></tr>{{end}}</tbody>
   </table></div>
 </form>
 {{end}}
@@ -41,7 +41,7 @@
     <thead><tr><th>{{t "Remote"}}</th><th>{{t "URL"}}</th><th>{{t "State"}}</th><th>{{t "Only catalog apps"}}</th><th class="num">{{t "Devices"}}</th>{{if eq $.Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
     <tbody>{{range .Remotes}}<tr><td>{{.Name}}{{if .Title}}<span class="sub">{{.Title}}</span>{{end}}</td><td class="mono">{{.URL}}</td>
       <td>{{if eq .State "blocked"}}<span class="pill bad">{{t "blocked"}}</span>{{else}}<span class="pill ok">{{t "allowed"}}</span>{{end}}</td>
-      <td>{{if .CatalogOnly}}{{t "yes"}}{{else}}<span class="muted">{{t "no"}}</span>{{end}}</td><td class="num">{{.Devices}}</td>
+      <td>{{if .CatalogOnly}}{{t "yes"}}{{else}}<span class="muted">{{t "no"}}</span>{{end}}</td><td class="num">{{if .Devices}}<a class="count" href="/devices?remote={{.Name}}">{{.Devices}}</a>{{else}}<span class="muted">0</span>{{end}}</td>
       {{if eq $.Sess.Role "admin"}}<td class="row-actions inline-actions">
         {{if eq .State "blocked"}}<form method="post" action="/software/remotes/{{.Name}}/allow"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary small">{{t "Allow"}}</button></form>
         {{else}}<form method="post" action="/software/remotes/{{.Name}}/block"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary small">{{t "Block"}}</button></form>{{end}}
@@ -54,7 +54,7 @@
   <div class="card-head"><h2>{{t "Found on devices, not managed"}}</h2></div>
   <div class="scroll"><table>
     <thead><tr><th>{{t "Remote"}}</th><th>{{t "URL"}}</th><th class="num">{{t "Devices"}}</th>{{if eq $.Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
-    <tbody>{{range .Found}}<tr><td>{{.Name}}{{if .Title}}<span class="sub">{{.Title}}</span>{{end}}</td><td class="mono">{{.URL}}</td><td class="num">{{.Devices}}</td>
+    <tbody>{{range .Found}}<tr><td>{{.Name}}{{if .Title}}<span class="sub">{{.Title}}</span>{{end}}</td><td class="mono">{{.URL}}</td><td class="num">{{if .Devices}}<a class="count" href="/devices?remote={{.Name}}">{{.Devices}}</a>{{else}}<span class="muted">0</span>{{end}}</td>
       {{if eq $.Sess.Role "admin"}}<td class="row-actions inline-actions">
         <form method="post" action="/software/remotes"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="url" value="{{.URL}}"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="state" value="allowed"><button class="small">{{t "Take over"}}</button></form>
         <form method="post" action="/software/remotes"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="url" value="{{.URL}}"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="state" value="blocked"><button class="secondary small">{{t "Block"}}</button></form>

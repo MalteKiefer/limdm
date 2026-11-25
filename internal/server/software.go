@@ -487,6 +487,7 @@ func (s *Server) appImport(w http.ResponseWriter, r *http.Request, sess session)
 		s.fail(w, err)
 		return
 	}
+	go s.fetchIcons(context.WithoutCancel(ctx)) // icon, summary and category from Flathub
 	back := "/software"
 	if d := r.FormValue("device"); d != "" {
 		back = "/devices/" + d + "?tab=software&sub=flatpak"

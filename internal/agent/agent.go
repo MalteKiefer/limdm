@@ -710,6 +710,8 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = allowUninstall()
 	case "message":
 		out, err = a.showMessage(c.Payload)
+	case "app_install", "app_remove":
+		out, err = a.appCommand(strings.TrimPrefix(c.Type, "app_"), c.Payload)
 	case "script":
 		if !a.cfg.AllowScripts {
 			err = errors.New("remote scripts are disabled on this device (allow_scripts)")

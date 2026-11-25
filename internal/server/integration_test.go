@@ -1453,4 +1453,42 @@ func TestAgentUpdates(t *testing.T) {
 	if err := unsigned.Validate(); err == nil || !strings.Contains(err.Error(), "unsigned repositories are not allowed") {
 		t.Fatalf("unsigned repository accepted: %v", err)
 	}
+
+	// bulk actions on the device list: tag two devices, install an app, filter by tag
+	bulk := func(form url.Values, role string) int {
+		rq := httptest.NewRequest("POST", "/devices/bulk", strings.NewReader(form.Encode()))
+		rq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rc := httptest.NewRecorder()
+		s.devicesBulk(rc, rq, session{Email: "admin@firma.de", Role: role})
+		return rc.Code
+	}
+	if code := bulk(url.Values{"id": {"d3", "d5"}, "action": {"tag-add"}, "tag": {"Finance"}}, "admin"); code != http.StatusSeeOther {
+		t.Fatalf("bulk tag: %d", code)
+	}
+	if code := bulk(url.Values{"id": {"d3"}, "action": {"tag-add"}, "tag": {"finance"}}, "helpdesk"); code != http.StatusForbidden {
+		t.Fatalf("helpdesk must not tag: %d", code)
+	}
+	if code := bulk(url.Values{"id": {"d3", "d5"}, "action": {"command:app_install"}, "app": {"firefox"}}, "admin"); code != http.StatusSeeOther {
+		t.Fatalf("bulk install: %d", code)
+	}
+	if code := bulk(url.Values{"id": {"d3"}, "action": {"command:wipe"}, "confirm": {"x"}}, "admin"); code != http.StatusBadRequest {
+		t.Fatalf("wipe must not run in bulk: %d", code)
+	}
+	if code := bulk(url.Values{"id": {"d3", "nope"}, "action": {"command:sync"}}, "admin"); code != http.StatusBadRequest {
+		t.Fatalf("unknown device accepted: %d", code)
+	}
+	db.QueryRow(ctx, `SELECT count(*) FROM commands WHERE type='app_install' AND payload='firefox' AND device_id IN ('d3','d5')`).Scan(&n)
+	if n != 2 {
+		t.Fatalf("app install commands: %d", n)
+	}
+	for _, f := range deviceFilters {
+		if f.Key == "tag" {
+			tagged, err := s.listDevicesWhere(ctx, f.Where, "finance")
+			if err != nil || len(tagged) != 2 {
+				t.Fatalf("tag filter: %v %d", err, len(tagged))
+			}
+		} else if _, err := s.listDevicesWhere(ctx, f.Where, "x"); err != nil {
+			t.Fatalf("filter %s: %v", f.Key, err)
+		}
+	}
 }

@@ -188,16 +188,18 @@ light or dark style; the button next to the logo switches between system, dark a
 Without GTK 4 and libadwaita 1.4 (Ubuntu 22.04) the tray falls back to simple dialogs.
 
 `limdm-desktop` shows a tray icon (the LiMDM logo with a status dot) with the device state: green (compliant), amber (checks
-failing), red (no contact to the server or locked). Its menu opens the device details
-(host, device ID, server, agent version, last check in, failing checks, escrowed keys, last
-error), starts a check in (at most every 30 seconds) and shows the agent's latest warnings
-and errors from the journal. The tray uses StatusNotifierItem: sway with waybar, KDE Plasma,
+failing), red (no contact to the server or locked). Its menu names who manages the device,
+shows the state and the last check in, opens the app (overview, software, compliance),
+starts a check in (at most every 30 seconds), shows the agent log and, at the bottom, the
+agent version; the tooltip carries the version too. The tray uses StatusNotifierItem: sway with waybar, KDE Plasma,
 Xfce, Cinnamon and Ubuntu show it; stock GNOME needs the AppIndicator extension. Without a
 tray host the reminders still work; `limdm-desktop --no-tray` runs only those.
 
 It also asks the user for what only they can provide, currently the disk passphrase
-to escrow a LUKS recovery key. It uses zenity (kdialog on KDE Plasma); the agent installs
-the right one on every device with a desktop and retries daily if that fails. Texts follow
+to escrow a LUKS recovery key. Dialogs are libadwaita message dialogs from the LiMDM app
+(`limdm-desktop-ui --dialog`, the same look as GNOME's own); without GTK 4 and libadwaita
+1.4 it uses zenity (kdialog on KDE Plasma), which the agent installs on every device with a
+desktop and retries daily if that fails. Texts follow
 the session language and fall back to the system locale (English and German). Dialogs
 follow the GNOME HIG: a short heading, one sentence, buttons named after their action.
 
@@ -210,6 +212,25 @@ one instance per user. Manually: `limdm-desktop --now` asks for a missing recove
 Users see a notification when IT schedules a restart or shutdown (with the time), locks the
 device, or needs a recovery key. **Send message…** on a device page shows a notification and
 a dialog to everyone signed in on the desktop.
+
+## Device list, tags and bulk actions
+
+**Devices** lists every device with its tags. Select devices with the checkboxes (or all
+shown) and run an action on all of them, like in RMM tools:
+
+* **Run**: sync now, install all updates, update the agent to the newest version, reboot
+  now, lock, unlock.
+* **Software**: install or remove a catalog app (also per device under **Software**,
+  **Catalog**).
+* **Tags**: add or remove a tag.
+
+Lost mode, wipe and scripts stay single device actions. Filter the list by tag, or follow a
+count from another page: every device count in the console (catalog installs, Flatpaks and
+remotes on devices, blueprints, agent versions, failing checks) opens the list filtered to
+those devices, ready for a bulk action. Tags are also blueprint conditions.
+
+The action menu on a device page groups actions in submenus that open on hover or keyboard
+focus.
 
 ## Command delivery
 

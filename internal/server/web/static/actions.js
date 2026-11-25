@@ -3,6 +3,7 @@
 //
 // Device actions: menu entries with data-open show their dialog instead of
 // following the link (the link to the commands tab stays as fallback).
+document.documentElement.classList.add('js'); // hides what only makes sense with a selection
 document.addEventListener('click', (e) => {
   const open = e.target.closest('[data-open]');
   if (open) {
@@ -133,3 +134,39 @@ document.addEventListener('submit', async (e) => {
     out.append(card);
   }
 });
+
+// device list: select all, selection count, bulk bar only with a selection
+const bulkSync = () => {
+  const form = document.querySelector('form[data-bulk]');
+  if (!form) return;
+  const fid = form.getAttribute('id'); // form.id is the id checkboxes (named elements)
+  const boxes = document.querySelectorAll('input[form="' + fid + '"][name=id]');
+  const n = [...boxes].filter((b) => b.checked).length;
+  form.querySelector('[data-bulk-count]').textContent = n;
+  form.classList.toggle('active', n > 0);
+  const all = document.querySelector('[data-select-all="' + fid + '"]');
+  if (all) { all.checked = n > 0 && n === boxes.length; all.indeterminate = n > 0 && n < boxes.length; }
+};
+document.addEventListener('change', (e) => {
+  const all = e.target.closest('[data-select-all]');
+  if (all) document.querySelectorAll('input[form="' + all.dataset.selectAll + '"][name=id]').forEach((b) => { b.checked = all.checked; });
+  if (all || e.target.matches('input[name=id][form]')) bulkSync();
+  if (e.target.matches('select[data-autosubmit]')) e.target.form.submit();
+});
+document.addEventListener('DOMContentLoaded', bulkSync);
+
+// buttons with data-confirm ask first
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-confirm]');
+  if (b && !window.confirm(b.dataset.confirm)) e.preventDefault();
+});
+
+// flyout submenus open to the side with room
+const placeSub = (e) => {
+  const sub = e.target.closest('.menu-list .sub');
+  if (!sub) return;
+  const r = sub.getBoundingClientRect();
+  sub.classList.toggle('right', r.left < 250 && window.innerWidth - r.right > r.left);
+};
+document.addEventListener('mouseover', placeSub);
+document.addEventListener('focusin', placeSub);
