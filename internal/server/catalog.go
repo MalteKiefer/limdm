@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -61,10 +62,97 @@ var defaultCatalog = []api.CatalogApp{
 	{ID: "postman", Name: "Postman", Category: "Development", Summary: "API client", Sources: []api.AppSource{fp("com.getpostman.Postman")}},
 }
 
+//go:embed vendorkeys
+var vendorKeys embed.FS
+
+func vendorKey(name string) string {
+	b, err := vendorKeys.ReadFile("vendorkeys/" + name + ".asc")
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+// vendorPkg is a package source from the vendor's own repositories.
+func vendorPkg(debian, fedora string, repos ...api.Repository) api.AppSource {
+	src := pkg(debian, fedora)
+	src.Repos = repos
+	return src
+}
+
+// moreCatalog came with migration 7: 50 further apps and VPN clients from
+// their vendors' repositories (they need a system service, so no Flatpak).
+var moreCatalog = append([]api.CatalogApp{
+	{ID: "mullvad-vpn", Name: "Mullvad VPN", Category: "Security", Summary: "VPN client by Mullvad", Sources: []api.AppSource{vendorPkg("mullvad-vpn", "mullvad-vpn",
+		api.Repository{Name: "mullvad", Family: "debian", URL: "https://repository.mullvad.net/deb/stable", Suites: "stable", Components: "main", Key: vendorKey("mullvad")},
+		api.Repository{Name: "mullvad", Family: "fedora", URL: "https://repository.mullvad.net/rpm/stable/$basearch", Key: vendorKey("mullvad")})}},
+	// ponytail: one Debian suite for every Debian family distribution; Tailscale's
+	// packages are static and identical across suites. Per codename suites if that changes.
+	{ID: "tailscale", Name: "Tailscale", Category: "Security", Summary: "Mesh VPN based on WireGuard", Sources: []api.AppSource{vendorPkg("tailscale", "tailscale",
+		api.Repository{Name: "tailscale", Family: "debian", URL: "https://pkgs.tailscale.com/stable/debian", Suites: "bookworm", Components: "main", Key: vendorKey("tailscale")},
+		api.Repository{Name: "tailscale", Family: "fedora", URL: "https://pkgs.tailscale.com/stable/fedora/$basearch", Key: vendorKey("tailscale")})}},
+	{ID: "netbird", Name: "NetBird", Category: "Security", Summary: "Mesh VPN based on WireGuard, with tray app", Sources: []api.AppSource{vendorPkg("netbird netbird-ui", "netbird netbird-ui",
+		api.Repository{Name: "netbird", Family: "debian", URL: "https://pkgs.netbird.io/debian", Suites: "stable", Components: "main", Key: vendorKey("netbird-debian")},
+		api.Repository{Name: "netbird", Family: "fedora", URL: "https://pkgs.netbird.io/yum/", Key: vendorKey("netbird-fedora"), SignedMetadata: true})}, Detect: []string{"netbird"}},
+}, []api.CatalogApp{
+	{ID: "anydesk", Name: "AnyDesk", Category: "Utilities", Summary: "Remote desktop", Sources: []api.AppSource{fp("com.anydesk.Anydesk")}},
+	{ID: "brave", Name: "Brave", Category: "Internet", Summary: "Web browser with ad blocking", Sources: []api.AppSource{fp("com.brave.Browser")}},
+	{ID: "calibre", Name: "calibre", Category: "Office", Summary: "E-book library and reader", Sources: []api.AppSource{fp("com.calibre_ebook.calibre"), pkg("calibre", "calibre")}},
+	{ID: "cryptomator", Name: "Cryptomator", Category: "Security", Summary: "Encryption for cloud storage", Sources: []api.AppSource{fp("org.cryptomator.Cryptomator")}},
+	{ID: "darktable", Name: "darktable", Category: "Graphics", Summary: "Photo workflow and raw developer", Sources: []api.AppSource{fp("org.darktable.Darktable"), pkg("darktable", "darktable")}},
+	{ID: "dbeaver", Name: "DBeaver Community", Category: "Development", Summary: "Database tool", Sources: []api.AppSource{fp("io.dbeaver.DBeaverCommunity")}},
+	{ID: "deja-dup", Name: "Déjà Dup", Category: "Utilities", Summary: "Backups", Sources: []api.AppSource{fp("org.gnome.DejaDup"), pkg("deja-dup", "deja-dup")}},
+	{ID: "drawio", Name: "draw.io", Category: "Office", Summary: "Diagrams", Sources: []api.AppSource{fp("com.jgraph.drawio.desktop")}},
+	{ID: "evince", Name: "Document Viewer", Category: "Office", Summary: "PDF and document viewer", Sources: []api.AppSource{fp("org.gnome.Evince"), pkg("evince", "evince")}},
+	{ID: "flameshot", Name: "Flameshot", Category: "Utilities", Summary: "Screenshots with annotations", Sources: []api.AppSource{fp("org.flameshot.Flameshot"), pkg("flameshot", "flameshot")}},
+	{ID: "freecad", Name: "FreeCAD", Category: "Graphics", Summary: "Parametric 3D CAD", Sources: []api.AppSource{fp("org.freecad.FreeCAD"), pkg("freecad", "freecad")}},
+	{ID: "github-desktop", Name: "GitHub Desktop", Category: "Development", Summary: "Git client for GitHub", Sources: []api.AppSource{fp("io.github.shiftey.Desktop")}},
+	{ID: "gnome-boxes", Name: "Boxes", Category: "Utilities", Summary: "Virtual machines", Sources: []api.AppSource{fp("org.gnome.Boxes"), pkg("gnome-boxes", "gnome-boxes")}},
+	{ID: "handbrake", Name: "HandBrake", Category: "Multimedia", Summary: "Video transcoder", Sources: []api.AppSource{fp("fr.handbrake.ghb"), pkg("handbrake", "")}},
+	{ID: "intellij-idea", Name: "IntelliJ IDEA", Category: "Development", Summary: "Java and Kotlin IDE", Sources: []api.AppSource{fp("com.jetbrains.IntelliJ-IDEA-Community")}},
+	{ID: "jitsi-meet", Name: "Jitsi Meet", Category: "Communication", Summary: "Video meetings", Sources: []api.AppSource{fp("org.jitsi.jitsi-meet")}},
+	{ID: "joplin", Name: "Joplin", Category: "Office", Summary: "Notes and to-dos", Sources: []api.AppSource{fp("net.cozic.joplin_desktop")}},
+	{ID: "kate", Name: "Kate", Category: "Development", Summary: "Text editor", Sources: []api.AppSource{fp("org.kde.kate"), pkg("kate", "kate")}},
+	{ID: "kdenlive", Name: "Kdenlive", Category: "Multimedia", Summary: "Video editor", Sources: []api.AppSource{fp("org.kde.kdenlive"), pkg("kdenlive", "kdenlive")}},
+	{ID: "kicad", Name: "KiCad", Category: "Development", Summary: "Schematic and circuit board design", Sources: []api.AppSource{fp("org.kicad.KiCad"), pkg("kicad", "kicad")}},
+	{ID: "krita", Name: "Krita", Category: "Graphics", Summary: "Digital painting", Sources: []api.AppSource{fp("org.kde.krita"), pkg("krita", "krita")}},
+	{ID: "localsend", Name: "LocalSend", Category: "Utilities", Summary: "Share files with nearby devices", Sources: []api.AppSource{fp("org.localsend.localsend_app")}},
+	{ID: "mattermost", Name: "Mattermost", Category: "Communication", Summary: "Team chat", Sources: []api.AppSource{fp("com.mattermost.Desktop")}},
+	{ID: "meld", Name: "Meld", Category: "Development", Summary: "Compare and merge files", Sources: []api.AppSource{fp("org.gnome.meld"), pkg("meld", "meld")}},
+	{ID: "microsoft-edge", Name: "Microsoft Edge", Category: "Internet", Summary: "Web browser by Microsoft", Sources: []api.AppSource{fp("com.microsoft.Edge")}},
+	{ID: "mpv", Name: "mpv", Category: "Multimedia", Summary: "Media player", Sources: []api.AppSource{fp("io.mpv.Mpv"), pkg("mpv", "mpv")}},
+	{ID: "mullvad-browser", Name: "Mullvad Browser", Category: "Internet", Summary: "Privacy focused web browser", Sources: []api.AppSource{fp("net.mullvad.MullvadBrowser")}},
+	{ID: "obsidian", Name: "Obsidian", Category: "Office", Summary: "Markdown knowledge base", Sources: []api.AppSource{fp("md.obsidian.Obsidian")}},
+	{ID: "okular", Name: "Okular", Category: "Office", Summary: "Document viewer with annotations", Sources: []api.AppSource{fp("org.kde.okular"), pkg("okular", "okular")}},
+	{ID: "onlyoffice", Name: "ONLYOFFICE", Category: "Office", Summary: "Documents, spreadsheets and presentations", Sources: []api.AppSource{fp("org.onlyoffice.desktopeditors")}},
+	{ID: "pdfarranger", Name: "PDF Arranger", Category: "Office", Summary: "Merge, sort and crop PDFs", Sources: []api.AppSource{fp("com.github.jeromerobert.pdfarranger"), pkg("pdfarranger", "pdfarranger")}},
+	{ID: "podman-desktop", Name: "Podman Desktop", Category: "Development", Summary: "Containers and Kubernetes", Sources: []api.AppSource{fp("io.podman_desktop.PodmanDesktop")}},
+	{ID: "proton-pass", Name: "Proton Pass", Category: "Security", Summary: "Password manager", Sources: []api.AppSource{fp("me.proton.Pass")}},
+	{ID: "proton-vpn", Name: "Proton VPN", Category: "Security", Summary: "VPN client", Sources: []api.AppSource{fp("com.protonvpn.www")}},
+	{ID: "pycharm", Name: "PyCharm", Category: "Development", Summary: "Python IDE", Sources: []api.AppSource{fp("com.jetbrains.PyCharm-Community")}},
+	{ID: "rocketchat", Name: "Rocket.Chat", Category: "Communication", Summary: "Team chat", Sources: []api.AppSource{fp("chat.rocket.RocketChat")}},
+	{ID: "rustdesk", Name: "RustDesk", Category: "Utilities", Summary: "Remote desktop", Sources: []api.AppSource{fp("com.rustdesk.RustDesk")}},
+	{ID: "teams-for-linux", Name: "Teams for Linux", Category: "Communication", Summary: "Unofficial Microsoft Teams client", Sources: []api.AppSource{fp("com.github.IsmaelMartinez.teams_for_linux")}},
+	{ID: "tor-browser", Name: "Tor Browser", Category: "Internet", Summary: "Anonymous web browser", Sources: []api.AppSource{fp("org.torproject.torbrowser-launcher"), pkg("torbrowser-launcher", "torbrowser-launcher")}},
+	{ID: "trayscale", Name: "Trayscale", Category: "Utilities", Summary: "Tray app for Tailscale", Sources: []api.AppSource{fp("dev.deedles.Trayscale")}},
+	{ID: "virt-manager", Name: "Virtual Machine Manager", Category: "Utilities", Summary: "Manage KVM virtual machines", Sources: []api.AppSource{fp("org.virt_manager.virt-manager"), pkg("virt-manager", "virt-manager")}},
+	{ID: "vivaldi", Name: "Vivaldi", Category: "Internet", Summary: "Web browser", Sources: []api.AppSource{fp("com.vivaldi.Vivaldi")}},
+	{ID: "vscodium", Name: "VSCodium", Category: "Development", Summary: "Code editor without telemetry", Sources: []api.AppSource{fp("com.vscodium.codium")}, Detect: []string{"codium"}},
+	{ID: "wireshark", Name: "Wireshark", Category: "Development", Summary: "Network protocol analyzer", Sources: []api.AppSource{fp("org.wireshark.Wireshark"), pkg("wireshark", "wireshark")}},
+	{ID: "xournalpp", Name: "Xournal++", Category: "Office", Summary: "Handwritten notes and PDF annotation", Sources: []api.AppSource{fp("com.github.xournalpp.xournalpp"), pkg("xournalpp", "xournalpp")}},
+	{ID: "zotero", Name: "Zotero", Category: "Education", Summary: "Research and citations", Sources: []api.AppSource{fp("org.zotero.Zotero")}},
+	{ID: "zulip", Name: "Zulip", Category: "Communication", Summary: "Team chat", Sources: []api.AppSource{fp("org.zulip.Zulip")}},
+	{ID: "bruno", Name: "Bruno", Category: "Development", Summary: "API client", Sources: []api.AppSource{fp("com.usebruno.Bruno")}},
+	{ID: "shotcut", Name: "Shotcut", Category: "Multimedia", Summary: "Video editor", Sources: []api.AppSource{fp("org.shotcut.Shotcut")}},
+	{ID: "scribus", Name: "Scribus", Category: "Graphics", Summary: "Desktop publishing", Sources: []api.AppSource{fp("net.scribus.Scribus"), pkg("scribus", "scribus")}},
+}...)
+
 // seedCatalog adds the default apps once (migration 5); apps an admin
 // deletes stay deleted.
-func seedCatalog(ctx context.Context, tx pgx.Tx) error {
-	for _, a := range defaultCatalog {
+func seedCatalog(ctx context.Context, tx pgx.Tx) error { return seedApps(ctx, tx, defaultCatalog) }
+
+func seedApps(ctx context.Context, tx pgx.Tx, apps []api.CatalogApp) error {
+	for _, a := range apps {
 		src, _ := json.Marshal(a.Sources)
 		if _, err := tx.Exec(ctx, `INSERT INTO catalog_apps(slug, name, summary, category, mode, sources, detect)
 			VALUES ($1,$2,$3,$4,'available',$5,$6) ON CONFLICT (slug) DO NOTHING`,
@@ -138,7 +226,8 @@ func (s *Server) deviceCatalog(ctx context.Context, tx pgx.Tx, deviceID string, 
 		return nil, err
 	}
 	reqs := map[string]string{}
-	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (app) app, status FROM catalog_requests WHERE device_id=$1 ORDER BY app, created_at DESC`, deviceID)
+	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (app) app, status FROM catalog_requests WHERE device_id=$1 AND app IS NOT NULL AND flatpak=''
+		ORDER BY app, created_at DESC`, deviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -153,6 +242,19 @@ func (s *Server) deviceCatalog(ctx context.Context, tx pgx.Tx, deviceID string, 
 	rows.Close()
 	c := &api.Catalog{Apps: []api.CatalogApp{}, RestrictFlathub: set.RestrictFlathub, StoresReadOnly: set.StoresReadOnly,
 		Remotes: remotes, OnlyManagedRemotes: set.OnlyManagedRemotes}
+	rows, err = tx.Query(ctx, `SELECT DISTINCT ON (flatpak) flatpak, app_name, status, coalesce(app, '') FROM catalog_requests
+		WHERE device_id=$1 AND flatpak <> '' AND created_at > now() - interval '90 days' ORDER BY flatpak, created_at DESC`, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	if c.Requests, err = pgx.CollectRows(rows, pgx.RowToStructByPos[api.RequestState]); err != nil {
+		return nil, err
+	}
+	for _, r := range c.Requests { // an approved request makes the new app this device's approved app
+		if r.Status == "approved" && r.App != "" {
+			reqs[r.App] = "approved"
+		}
+	}
 	for _, a := range apps {
 		if len(a.Scope) > 0 && !slices.ContainsFunc(chain, func(b blueprintRec) bool { return slices.Contains(a.Scope, b.ID) }) {
 			continue
@@ -171,8 +273,17 @@ func (s *Server) deviceCatalog(ctx context.Context, tx pgx.Tx, deviceID string, 
 // in; an open or approved request is not duplicated.
 func recordAppRequests(ctx context.Context, tx pgx.Tx, deviceID string, reqs []api.AppRequest, catalog *api.Catalog) error {
 	for _, r := range reqs {
+		if len(r.User) > 64 || len(r.Note) > 500 || len(r.Name) > 80 {
+			continue
+		}
+		if r.App == "" && r.Flatpak != "" {
+			if err := recordNewAppRequest(ctx, tx, deviceID, r, catalog); err != nil {
+				return err
+			}
+			continue
+		}
 		allowed := slices.ContainsFunc(catalog.Apps, func(a api.CatalogApp) bool { return a.ID == r.App && a.Mode == api.AppOnRequest })
-		if !allowed || len(r.User) > 64 || len(r.Note) > 500 {
+		if !allowed {
 			continue
 		}
 		var open bool
@@ -267,4 +378,38 @@ func (s *Server) catalogRemotes(ctx context.Context, q querier) ([]api.CatalogRe
 		return nil, err
 	}
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[api.CatalogRemote])
+}
+
+// recordNewAppRequest stores a request for a Flatpak outside the catalog,
+// from Flathub or another allowed remote. Apps already in the catalog and
+// open requests are not recorded again.
+func recordNewAppRequest(ctx context.Context, tx pgx.Tx, deviceID string, r api.AppRequest, catalog *api.Catalog) error {
+	remote := r.Remote
+	if remote == "" {
+		remote = "flathub"
+	}
+	if !api.ValidFlatpakID(r.Flatpak) || !api.ValidRemoteName(remote) {
+		return nil
+	}
+	allowed := remote == "flathub" && len(catalog.Remotes) == 0
+	for _, rem := range catalog.Remotes {
+		allowed = allowed || (rem.Name == remote && rem.State == "allowed")
+	}
+	if !allowed || slices.Contains(catalog.Flatpaks(remote), r.Flatpak) {
+		return nil
+	}
+	var open bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM catalog_requests WHERE device_id=$1 AND flatpak=$2 AND status='pending')`,
+		deviceID, r.Flatpak).Scan(&open); err != nil || open {
+		return err
+	}
+	name := strings.TrimSpace(r.Name)
+	if name == "" {
+		name = r.Flatpak
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO catalog_requests(device_id, flatpak, remote, app_name, username, note) VALUES ($1,$2,$3,$4,$5,$6)`,
+		deviceID, r.Flatpak, remote, name, r.User, r.Note); err != nil {
+		return err
+	}
+	return audit(ctx, tx, "device:"+deviceID, "catalog.request", deviceID, r.Flatpak+" ("+remote+") for "+r.User+": "+truncate(r.Note, 200))
 }

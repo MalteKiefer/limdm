@@ -346,3 +346,8 @@ CREATE TABLE IF NOT EXISTS catalog_remotes (
     catalog_only BOOLEAN NOT NULL DEFAULT true,
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- requests for Flatpaks outside the catalog: app is set when approved
+ALTER TABLE catalog_requests ALTER COLUMN app DROP NOT NULL;
+ALTER TABLE catalog_requests ADD COLUMN IF NOT EXISTS flatpak TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog_requests ADD COLUMN IF NOT EXISTS remote TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog_requests ADD COLUMN IF NOT EXISTS app_name TEXT NOT NULL DEFAULT '';

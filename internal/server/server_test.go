@@ -232,11 +232,17 @@ func TestAddUploadedCerts(t *testing.T) {
 }
 
 func TestDefaultCatalogValid(t *testing.T) {
-	if len(defaultCatalog) != 25 {
-		t.Fatalf("%d default apps", len(defaultCatalog))
+	if len(defaultCatalog) != 25 || len(moreCatalog) != 53 {
+		t.Fatalf("%d default apps, %d more", len(defaultCatalog), len(moreCatalog))
 	}
-	seen := map[string]bool{}
-	for _, a := range defaultCatalog {
+	seen, flatpaks := map[string]bool{}, map[string]bool{}
+	for _, a := range append(append([]api.CatalogApp{}, defaultCatalog...), moreCatalog...) {
+		for _, s := range a.Sources {
+			if s.Flatpak != "" && flatpaks[s.Flatpak] {
+				t.Errorf("Flatpak %s twice", s.Flatpak)
+			}
+			flatpaks[s.Flatpak] = true
+		}
 		a.Mode = api.AppAvailable
 		if err := a.Validate(); err != nil {
 			t.Error(err)

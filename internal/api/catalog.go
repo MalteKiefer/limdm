@@ -41,6 +41,9 @@ type AppSource struct {
 	Remote  string `json:"remote,omitempty"`  // Flatpak remote, flathub when empty
 	Debian  string `json:"debian,omitempty"`  // package name(s), space separated
 	Fedora  string `json:"fedora,omitempty"`
+	// Repos are vendor package repositories the packages come from, at
+	// most one per family; the agent adds it before installing.
+	Repos []Repository `json:"repos,omitempty"`
 }
 
 // Catalog is what a device receives in the check in.
@@ -52,6 +55,7 @@ type Catalog struct {
 	StoresReadOnly     bool            `json:"stores_read_only"` // GNOME Software and KDE Discover cannot install
 	Remotes            []CatalogRemote `json:"remotes,omitempty"`
 	OnlyManagedRemotes bool            `json:"only_managed_remotes,omitempty"` // other remotes are disabled, also users'
+	Requests           []RequestState  `json:"requests,omitempty"`             // this device's requests for apps outside the catalog
 	Hash               string          `json:"hash"`
 }
 
@@ -89,12 +93,42 @@ func (s AppSource) RemoteOf() string {
 	return s.Remote
 }
 
-// AppRequest is a user's request for a "request" app, sent with the check in.
+// AppRequest is a user's request, sent with the check in: for a catalog app
+// in "request" mode (App), or for a Flatpak that is not in the catalog yet
+// (Flatpak, Remote, Name).
 type AppRequest struct {
-	App  string `json:"app"`
-	User string `json:"user"`
-	Note string `json:"note,omitempty"`
+	App     string `json:"app,omitempty"`
+	Flatpak string `json:"flatpak,omitempty"`
+	Remote  string `json:"remote,omitempty"`
+	Name    string `json:"name,omitempty"`
+	User    string `json:"user"`
+	Note    string `json:"note,omitempty"`
 }
+
+// RequestState is a device's request for an app outside the catalog.
+type RequestState struct {
+	Flatpak string `json:"flatpak"`
+	Name    string `json:"name"`
+	Status  string `json:"status"`        // pending | approved | denied
+	App     string `json:"app,omitempty"` // catalog app created on approval
+}
+
+// FlatpakHit is a search result for apps outside the catalog.
+type FlatpakHit struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Summary   string `json:"summary,omitempty"`
+	Remote    string `json:"remote"`
+	Icon      string `json:"icon,omitempty"` // https URL on dl.flathub.org
+	Category  string `json:"category,omitempty"`
+	Developer string `json:"developer,omitempty"`
+}
+
+// ValidFlatpakID reports whether id is a Flatpak application ID.
+func ValidFlatpakID(id string) bool { return flatpakIDRe.MatchString(id) }
+
+// ValidRemoteName reports whether name is a Flatpak remote name.
+func ValidRemoteName(name string) bool { return remoteNameRe.MatchString(name) }
 
 // AppState is the catalog state of one app on a device (inventory).
 type AppState struct {
@@ -139,6 +173,16 @@ func (a CatalogApp) Validate() error {
 				if p != "" && !pkgListRe.MatchString(p) {
 					return fmt.Errorf("app %s: invalid package list %q", a.ID, p)
 				}
+			}
+			fams := map[string]bool{}
+			for _, r := range s.Repos {
+				if err := r.Validate(); err != nil {
+					return fmt.Errorf("app %s: %w", a.ID, err)
+				}
+				if fams[r.Family] {
+					return fmt.Errorf("app %s: one repository per family", a.ID)
+				}
+				fams[r.Family] = true
 			}
 		default:
 			return fmt.Errorf("app %s: source kind is flatpak or package", a.ID)

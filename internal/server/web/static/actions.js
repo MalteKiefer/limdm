@@ -88,3 +88,48 @@ document.addEventListener('change', (e) => {
   if (card) card.textContent = ex;
   sel.dataset.prevExample = ex;
 });
+
+// add app: search Flathub through the server and add a hit with one click
+document.addEventListener('submit', async (e) => {
+  const form = e.target.closest('form[data-flathub-search]');
+  if (!form) return;
+  e.preventDefault();
+  const box = form.closest('.flathub-search');
+  const out = box.querySelector('[data-flathub-results]');
+  const q = form.q.value.trim();
+  out.replaceChildren();
+  out.setAttribute('aria-busy', 'true');
+  let hits = [];
+  try {
+    const r = await fetch('/software/flathub/search?q=' + encodeURIComponent(q), { credentials: 'same-origin' });
+    if (r.ok) hits = await r.json();
+  } catch { /* shown as empty */ }
+  out.removeAttribute('aria-busy');
+  if (!hits.length) {
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = out.dataset.empty;
+    out.append(p);
+    return;
+  }
+  for (const h of hits) {
+    const card = document.createElement('form');
+    card.method = 'post';
+    card.action = '/software/flathub';
+    card.className = 'flathub-hit';
+    const add = (tag, cls, text) => { const el = document.createElement(tag); if (cls) el.className = cls; if (text) el.textContent = text; card.append(el); return el; };
+    const icon = add('img', 'hit-icon');
+    icon.alt = '';
+    if (h.icon) icon.src = '/software/flathub/icon?u=' + encodeURIComponent(h.icon);
+    const text = add('div', 'hit-text');
+    const name = document.createElement('strong'); name.textContent = h.name; text.append(name);
+    const sum = document.createElement('span'); sum.className = 'muted'; sum.textContent = h.summary || ''; text.append(sum);
+    const meta = document.createElement('span'); meta.className = 'sub mono'; meta.textContent = [h.id, h.category, h.developer].filter(Boolean).join(' · '); text.append(meta);
+    for (const [n, v] of [['csrf', box.dataset.csrf], ['id', h.id], ['mode', form.mode.value]]) {
+      const i = document.createElement('input'); i.type = 'hidden'; i.name = n; i.value = v; card.append(i);
+    }
+    const b = add('button', 'small', out.dataset.add);
+    b.type = 'submit';
+    out.append(card);
+  }
+});

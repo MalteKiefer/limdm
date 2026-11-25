@@ -75,10 +75,11 @@
 <section class="tablecard"><div class="scroll"><table>
   <thead><tr><th>{{t "App"}}</th><th>{{t "Device"}}</th><th>{{t "User"}}</th><th>{{t "Note"}}</th><th>{{t "Requested"}}</th><th>{{t "State"}}</th>{{if eq $.Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
   <tbody>{{range .Requests}}<tr>
-    <td>{{.AppName}}</td><td><a href="/devices/{{.DeviceID}}">{{.Hostname}}</a></td><td class="mono">{{.User}}</td><td>{{.Note}}</td><td class="nowrap">{{fmtTime .CreatedAt}}</td>
+    <td>{{.AppName}}{{if .Flatpak}}<span class="sub mono">{{.Flatpak}} · {{.Remote}}</span>{{if not .App}} <span class="pill">{{t "not in catalog"}}</span>{{end}}{{end}}</td><td><a href="/devices/{{.DeviceID}}">{{.Hostname}}</a></td><td class="mono">{{.User}}</td><td>{{.Note}}</td><td class="nowrap">{{fmtTime .CreatedAt}}</td>
     <td>{{if eq .Status "pending"}}<span class="pill warn">{{t "pending"}}</span>{{else if eq .Status "approved"}}<span class="pill ok">{{t "approved"}}</span>{{else}}<span class="pill bad">{{t "denied"}}</span>{{end}}{{if .DecidedBy}}<span class="sub">{{derefStr .DecidedBy}}</span>{{end}}</td>
     {{if eq $.Sess.Role "admin"}}<td class="row-actions inline-actions">{{if eq .Status "pending"}}
-      <form method="post" action="/software/requests/{{.ID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="small">{{t "Approve"}}</button></form>
+      <form method="post" action="/software/requests/{{.ID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="small">{{if .Flatpak}}{{t "Approve for this device"}}{{else}}{{t "Approve"}}{{end}}</button></form>
+      {{if .Flatpak}}<form method="post" action="/software/requests/{{.ID}}/approve-all"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary small">{{t "Approve for everyone"}}</button></form>{{end}}
       <form method="post" action="/software/requests/{{.ID}}/deny"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary small">{{t "Deny"}}</button></form>{{end}}</td>{{end}}
   </tr>{{else}}<tr><td colspan="7" class="empty">{{t "No requests yet."}}</td></tr>{{end}}</tbody>
 </table></div></section>

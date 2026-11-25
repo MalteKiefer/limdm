@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -1302,10 +1303,10 @@ func TestAgentUpdates(t *testing.T) {
 		t.Fatal("an admin request must retry the update")
 	}
 
-	// software catalog: 25 seeded apps, scope by blueprint, requests
+	// software catalog: 78 seeded apps, scope by blueprint, requests
 	var seeded int
 	db.QueryRow(ctx, `SELECT count(*) FROM catalog_apps`).Scan(&seeded)
-	if seeded != 25 {
+	if seeded != len(defaultCatalog)+len(moreCatalog) {
 		t.Fatalf("seeded catalog: %d", seeded)
 	}
 	db.Exec(ctx, `UPDATE catalog_apps SET mode='request' WHERE slug='slack'`)
@@ -1317,7 +1318,7 @@ func TestAgentUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cat.Apps) != 24 || !cat.RestrictFlathub || cat.Hash == "" {
+	if len(cat.Apps) != seeded-1 || !cat.RestrictFlathub || cat.Hash == "" {
 		t.Fatalf("catalog: %d apps, restrict=%v", len(cat.Apps), cat.RestrictFlathub)
 	}
 	reqs := []api.AppRequest{{App: "slack", User: "bob", Note: "team chat"}, {App: "slack", User: "bob"}, {App: "firefox", User: "bob"}}
@@ -1399,5 +1400,57 @@ func TestAgentUpdates(t *testing.T) {
 	}
 	if names["flathub"] != "allowed" || names["flatpark"] != "allowed" || !cat.OnlyManagedRemotes {
 		t.Fatalf("catalog remotes: %+v only=%v", cat.Remotes, cat.OnlyManagedRemotes)
+	}
+
+	// requests for apps outside the catalog: recorded once, approved for everyone as a new app
+	tx5, _ := db.Begin(ctx)
+	cat, _ = s.deviceCatalog(ctx, tx5, "d3", nil, nil)
+	newReqs := []api.AppRequest{{Flatpak: "org.example.Notes", Name: "Notes", User: "bob"}, {Flatpak: "org.example.Notes", User: "bob"},
+		{Flatpak: "org.mozilla.firefox", User: "bob"}, {Flatpak: "bad id", User: "bob"}, {Flatpak: "org.example.Other", Remote: "nowhere", User: "bob"}}
+	if err := recordAppRequests(ctx, tx5, "d3", newReqs, cat); err != nil {
+		t.Fatal(err)
+	}
+	tx5.Commit(ctx)
+	var reqID int64
+	db.QueryRow(ctx, `SELECT count(*), max(id) FROM catalog_requests WHERE device_id='d3' AND flatpak<>''`).Scan(&n, &reqID)
+	if n != 1 {
+		t.Fatalf("one request for the unknown Flatpak expected, got %d", n)
+	}
+	mux = http.NewServeMux()
+	mux.HandleFunc("POST /software/requests/{id}/{op}", func(w http.ResponseWriter, r *http.Request) {
+		s.requestDecide(w, r, session{Email: "admin@firma.de", Role: "admin"})
+	})
+	rq := httptest.NewRequest("POST", fmt.Sprintf("/software/requests/%d/approve-all", reqID), nil)
+	rc := httptest.NewRecorder()
+	mux.ServeHTTP(rc, rq)
+	var mode, linked string
+	db.QueryRow(ctx, `SELECT a.mode, q.app FROM catalog_requests q JOIN catalog_apps a ON a.slug=q.app WHERE q.id=$1`, reqID).Scan(&mode, &linked)
+	if rc.Code != http.StatusSeeOther || mode != "available" || linked != "notes" {
+		t.Fatalf("approve for everyone: %d mode=%q app=%q", rc.Code, mode, linked)
+	}
+
+	// an app from a vendor repository keeps its repository through the editor
+	save := func(form url.Values) (int, string) {
+		rq := httptest.NewRequest("POST", "/software/apps", strings.NewReader(form.Encode()))
+		rq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rq.ParseForm()
+		rc := httptest.NewRecorder()
+		s.appSave(rc, rq, session{Email: "admin@firma.de", Role: "admin"})
+		return rc.Code, rc.Body.String()
+	}
+	if code, body := save(url.Values{"new": {"1"}, "id": {"vendor-vpn"}, "name": {"Vendor VPN"}, "mode": {"available"}, "enabled": {"on"},
+		"debian": {"vendor-vpn"}, "deb_repo_url": {"https://repo.example.com/apt"}, "deb_repo_suite": {"stable"}, "deb_repo_components": {"main"},
+		"deb_repo_key": {"-----BEGIN PGP PUBLIC KEY BLOCK-----\nx\n-----END PGP PUBLIC KEY BLOCK-----"}}); code != http.StatusSeeOther {
+		t.Fatalf("save app with repository: %d %s", code, body)
+	}
+	var srcJSON string
+	db.QueryRow(ctx, `SELECT sources::text FROM catalog_apps WHERE slug='vendor-vpn'`).Scan(&srcJSON)
+	if !strings.Contains(srcJSON, `"url": "https://repo.example.com/apt"`) || !strings.Contains(srcJSON, `"name": "vendor-vpn"`) {
+		t.Fatalf("repository not stored: %s", srcJSON)
+	}
+	unsigned := api.CatalogApp{ID: "unsigned", Name: "Unsigned", Mode: api.AppAvailable, Sources: []api.AppSource{{Kind: "package", Debian: "x",
+		Repos: []api.Repository{{Name: "unsigned", Family: "debian", URL: "https://repo.example.com/apt", Suites: "stable"}}}}}
+	if err := unsigned.Validate(); err == nil || !strings.Contains(err.Error(), "unsigned repositories are not allowed") {
+		t.Fatalf("unsigned repository accepted: %v", err)
 	}
 }

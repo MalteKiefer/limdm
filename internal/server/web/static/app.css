@@ -447,3 +447,33 @@ td.icon-cell { width: 48px; padding-right: 0; }
 td.icon-cell img { display: block; border-radius: 6px; }
 #catalog-table td:last-child { white-space: nowrap; }
 .card-note { padding: 0 20px 12px; margin: 0; }
+
+/* ---- check lists and file inputs ---- */
+fieldset.checklist { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+fieldset.checklist legend { font-weight: 500; font-size: 13px; padding: 0; margin-bottom: 8px; width: 100%; }
+label.chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line-strong);
+  border-radius: 999px; background: var(--surface); font-weight: 400; cursor: pointer; margin: 0; }
+label.chip:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+label.chip input { margin: 0; }
+input[type=file] { padding: 6px; font-size: 13px; color: var(--text-2); }
+input[type=file]::file-selector-button { font: inherit; font-weight: 500; color: var(--text); background: var(--surface-2);
+  border: 1px solid var(--line-strong); border-radius: 6px; padding: 6px 12px; margin-right: 12px; cursor: pointer; }
+input[type=file]::file-selector-button:hover { background: var(--surface); }
+.logo-preview { display: flex; align-items: center; gap: 14px; }
+.logo-preview img { width: 48px; height: 48px; border-radius: 10px; border: 1px solid var(--line); padding: 4px; background: var(--surface); }
+
+/* ---- Flathub search ---- */
+.flathub-search .filters select { width: auto; }
+.flathub-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; margin-top: 12px; }
+.flathub-hit { display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 0; background: var(--surface); }
+.flathub-hit .hit-icon { width: 44px; height: 44px; flex: none; border-radius: 8px; }
+.flathub-hit .hit-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.flathub-hit .hit-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flathub-hit button { flex: none; margin: 0; }
+.section-title { margin: 24px 0 12px; font-size: 15px; }
+
+/* vendor package repository of a catalog app */
+.vendor-repo { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; margin: 4px 0 14px; }
+.vendor-repo > summary { cursor: pointer; font-weight: 600; }
+.vendor-repo > summary .hint { font-weight: 400; }
+.vendor-repo[open] > summary { margin-bottom: 10px; }

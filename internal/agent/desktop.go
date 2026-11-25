@@ -42,6 +42,7 @@ type desktopInfo struct {
 	Certs    []api.CertInfo
 	Apps     []DesktopApp // catalog snapshot of the last cycle
 	Store    *StoreInfo
+	Requests []api.RequestState // requests for apps outside the catalog
 }
 
 // DesktopCheck is one compliance check as the desktop app lists it.
@@ -68,8 +69,12 @@ type DesktopStatus struct {
 
 // DesktopRequest and DesktopResponse are the socket protocol (one JSON line each).
 type DesktopRequest struct {
-	Op         string `json:"op"` // status | info | sync | escrow | catalog | app-install | app-remove | app-request
+	Op         string `json:"op"` // status | info | sync | escrow | catalog | app-install | app-remove | app-request | search | app-request-new
 	App        string `json:"app,omitempty"`
+	Query      string `json:"query,omitempty"`   // search
+	Flatpak    string `json:"flatpak,omitempty"` // app-request-new
+	Remote     string `json:"remote,omitempty"`
+	Name       string `json:"name,omitempty"`
 	Note       string `json:"note,omitempty"`
 	UUID       string `json:"uuid,omitempty"`
 	Passphrase string `json:"passphrase,omitempty"`
@@ -81,18 +86,20 @@ type DesktopVolume struct {
 }
 
 type DesktopResponse struct {
-	Company  string           `json:"company,omitempty"`
-	Logo     string           `json:"logo,omitempty"`
-	Need     []DesktopVolume  `json:"need,omitempty"`
-	OK       bool             `json:"ok,omitempty"`
-	Error    string           `json:"error,omitempty"`
-	Status   *DesktopStatus   `json:"status,omitempty"`    // info
-	Log      []string         `json:"log,omitempty"`       // info: recent warnings and errors of the agent
-	LogLines []DesktopLogLine `json:"log_lines,omitempty"` // info: latest journal entries, every level
-	Profiles []DesktopProfile `json:"profiles,omitempty"`  // info: declarations in force
-	Certs    []api.CertInfo   `json:"certificates,omitempty"`
-	Apps     []DesktopApp     `json:"apps,omitempty"` // catalog
-	Store    *StoreInfo       `json:"store,omitempty"`
+	Company  string             `json:"company,omitempty"`
+	Logo     string             `json:"logo,omitempty"`
+	Need     []DesktopVolume    `json:"need,omitempty"`
+	OK       bool               `json:"ok,omitempty"`
+	Error    string             `json:"error,omitempty"`
+	Status   *DesktopStatus     `json:"status,omitempty"`    // info
+	Log      []string           `json:"log,omitempty"`       // info: recent warnings and errors of the agent
+	LogLines []DesktopLogLine   `json:"log_lines,omitempty"` // info: latest journal entries, every level
+	Profiles []DesktopProfile   `json:"profiles,omitempty"`  // info: declarations in force
+	Certs    []api.CertInfo     `json:"certificates,omitempty"`
+	Apps     []DesktopApp       `json:"apps,omitempty"` // catalog
+	Store    *StoreInfo         `json:"store,omitempty"`
+	Requests []api.RequestState `json:"requests,omitempty"` // catalog: requests for apps outside it
+	Hits     []DesktopHit       `json:"hits,omitempty"`     // search
 }
 
 // StoreInfo tells the desktop app about the store policy.
@@ -112,6 +119,7 @@ type desktopServer struct {
 	inflight map[string]bool        // uuids with a cryptsetup run in progress
 	failures map[uint32][]time.Time // wrong passphrases per uid
 	lastSync time.Time              // last check in requested from the desktop
+	searches []time.Time            // recent searches, for the rate limit
 }
 
 // agentLog returns the latest warnings and errors of the agent and its
@@ -166,6 +174,7 @@ func (a *Agent) publishDesktop() {
 	info.Apps = a.desktopCatalog(a.lastFlatpaks)
 	if c := a.state.Catalog; c != nil {
 		info.Store = &StoreInfo{RestrictFlathub: c.RestrictFlathub, ReadOnly: c.StoresReadOnly}
+		info.Requests = slices.Clone(c.Requests)
 	}
 	info.Certs = certInfo(a.pol.Extra.Certificates)
 	for _, c := range a.lastChecks {
@@ -279,7 +288,25 @@ func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 				}
 			}
 		}
-		return DesktopResponse{Company: info.Company, OK: true, Apps: apps, Store: info.Store}
+		return DesktopResponse{Company: info.Company, OK: true, Apps: apps, Store: info.Store, Requests: d.a.withQueued(info.Requests)}
+	case "search":
+		d.mu.Lock()
+		d.searches = slices.DeleteFunc(d.searches, func(t time.Time) bool { return time.Since(t) > time.Minute })
+		limited := len(d.searches) >= 20
+		if !limited {
+			d.searches = append(d.searches, time.Now())
+		}
+		d.mu.Unlock()
+		if limited {
+			return DesktopResponse{Error: "too many searches, wait a minute"}
+		}
+		return d.a.searchApps(req.Query)
+	case "app-request-new":
+		name := itoa(uid)
+		if u, err := user.LookupId(name); err == nil {
+			name = u.Username
+		}
+		return d.a.requestNewApp(api.AppRequest{Flatpak: req.Flatpak, Remote: req.Remote, Name: req.Name, User: name, Note: req.Note})
 	case "app-install", "app-remove", "app-request":
 		name := itoa(uid)
 		if u, err := user.LookupId(name); err == nil {
