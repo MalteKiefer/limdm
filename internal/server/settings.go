@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -99,7 +100,10 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 		return nil, err
 	}
 	var auth *oidcAuth
-	if set.OIDCIssuer != "" {
+	if cur := s.rt.Load(); cur != nil && set.OIDCIssuer != "" && cur.set.OIDCIssuer == set.OIDCIssuer &&
+		cur.set.OIDCClientID == set.OIDCClientID && cur.set.OIDCClientSecret == set.OIDCClientSecret {
+		auth = cur.auth // unchanged provider: no new discovery when another tab is saved
+	} else if set.OIDCIssuer != "" {
 		if !strings.HasPrefix(set.OIDCIssuer, "https://") || set.OIDCClientID == "" {
 			return nil, errors.New("OIDC needs an https issuer and a client ID")
 		}
@@ -123,19 +127,41 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, sess sessi
 }
 
 func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess session, set Settings, msg, errMsg string) {
+	tab := r.FormValue("section")
+	if tab == "" {
+		tab = r.URL.Query().Get("tab")
+	}
+	if !slices.Contains(settingsTabs, tab) {
+		tab = "general"
+	}
 	s.render(w, r, sess, "settings", map[string]any{"Set": set, "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
+		"Tab": tab, "Tabs": settingsTabs,
 		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": s.webhookSecretHex()})
 }
+
+// settingsTabs are the sections of the settings page; each tab saves only
+// its own fields.
+var settingsTabs = []string{"general", "sso", "monitoring", "branding", "integrations"}
 
 func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
 	cur := s.settings()
-	stale, _ := strconv.Atoi(r.FormValue("stale_hours"))
-	set := Settings{
-		OIDCIssuer: strings.TrimRight(strings.TrimSpace(r.FormValue("oidc_issuer")), "/"), OIDCClientID: strings.TrimSpace(r.FormValue("oidc_client_id")),
-		OIDCClientSecret: cur.OIDCClientSecret, AllowedDomain: strings.ToLower(strings.TrimSpace(r.FormValue("allowed_domain"))),
-		LocalLogin: r.FormValue("local_login") == "on", StaleHours: stale, WebhookURL: strings.TrimSpace(r.FormValue("webhook_url")),
-		CompanyName: strings.TrimSpace(r.FormValue("company_name")), Logo: cur.Logo,
+	set := cur
+	switch r.FormValue("section") {
+	case "general":
+		set.LocalLogin = r.FormValue("local_login") == "on"
+		set.StaleHours, _ = strconv.Atoi(r.FormValue("stale_hours"))
+	case "sso":
+		set.OIDCIssuer = strings.TrimRight(strings.TrimSpace(r.FormValue("oidc_issuer")), "/")
+		set.OIDCClientID = strings.TrimSpace(r.FormValue("oidc_client_id"))
+		set.AllowedDomain = strings.ToLower(strings.TrimSpace(r.FormValue("allowed_domain")))
+	case "monitoring":
+		set.WebhookURL = strings.TrimSpace(r.FormValue("webhook_url"))
+	case "branding":
+		set.CompanyName = strings.TrimSpace(r.FormValue("company_name"))
+	default:
+		http.Error(w, "unknown settings section", http.StatusBadRequest)
+		return
 	}
 	if f, _, err := r.FormFile("logo"); err == nil {
 		b, err := io.ReadAll(io.LimitReader(f, maxLogo+1))

@@ -101,6 +101,10 @@ type Agent struct {
 	failedUpdate                string    // release version whose update already failed, reported once
 	osqueryTried                time.Time // last osquery install attempt
 	syncNow                     bool
+	// for the desktop tray
+	lastCheckin *time.Time
+	lastError   string
+	lastChecks  []api.CheckResult
 }
 
 func validServerURL(s string) error {
@@ -448,6 +452,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	a.collectTamper()
 	a.guardWatchdog()
 	checks := a.converge()
+	a.lastChecks = checks
 	a.collectAuthEvents()
 
 	status := api.Status{Inventory: a.host.inventory(a.pol.Privacy), Checks: checks, Declarations: a.declarationStatus()}
@@ -478,9 +483,12 @@ func (a *Agent) cycle(ctx context.Context) {
 	var resp api.CheckinResponse
 	if err := a.post(ctx, "/api/v1/checkin", req, &resp); err != nil {
 		a.log.Error("checkin failed, enforcing stored declarations", "err", err)
+		a.lastError = err.Error()
 		a.enforceOffline(false)
 		return
 	}
+	now := time.Now()
+	a.lastCheckin, a.lastError = &now, ""
 	a.enforceOffline(true)
 	// drop only what was sent: entries added meanwhile (unlock events, desktop) stay
 	a.state.Results = a.state.Results[len(req.Results):]

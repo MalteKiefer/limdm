@@ -31,7 +31,8 @@ an administrator, or when the console would listen publicly without a certificat
 
 ## Console settings
 
-**Settings** (admins edit, auditors read):
+**Settings** (admins edit, auditors read) has the tabs General, SSO, Monitoring, Branding
+and Integrations; each tab saves only its own fields:
 
 * **Single sign on (OIDC).** Issuer, client ID, client secret (stored AES-256-GCM encrypted)
   and allowed domain. Changes are checked against the provider's discovery document before

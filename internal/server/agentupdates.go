@@ -382,8 +382,41 @@ func (s *Server) renderAgents(w http.ResponseWriter, r *http.Request, sess sessi
 		s.fail(w, err)
 		return
 	}
+	// devices behind the newest approved version (or the newest known one)
+	latest := ""
+	for _, rel := range rels {
+		if !rel.Blocked && (rel.ApprovedAt != nil || latest == "") {
+			if rel.ApprovedAt != nil {
+				latest = rel.Version
+				break
+			}
+			latest = rel.Version
+		}
+	}
+	type outdatedDevice struct {
+		ID, Hostname, Version string
+		LastSeen              *time.Time
+	}
+	var outdated []outdatedDevice
+	if latest != "" {
+		rows, err = s.db.Query(ctx, `SELECT id, hostname, agent_version, last_seen FROM devices WHERE NOT retired ORDER BY hostname`)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		all, err := pgx.CollectRows(rows, pgx.RowToStructByPos[outdatedDevice])
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		for _, d := range all {
+			if api.NewerVersion(latest, d.Version) {
+				outdated = append(outdated, d)
+			}
+		}
+	}
 	s.render(w, r, sess, "agents", map[string]any{"Policy": pol, "Releases": rels, "Fleet": fleet, "Repo": s.cfg.ReleaseRepo,
-		"Msg": msg, "Error": errMsg})
+		"Msg": msg, "Error": errMsg, "Latest": latest, "Outdated": outdated})
 }
 
 func (s *Server) agentsPolicy(w http.ResponseWriter, r *http.Request, sess session) {

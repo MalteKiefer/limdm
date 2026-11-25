@@ -39,6 +39,8 @@
   </div>
   {{end}}
 </div>
+<dialog id="dlg-key" class="modal" aria-label="{{t "Recovery key"}}"><div data-dialog-body></div>
+  <div class="form-foot"><span></span><button type="button" data-close>{{t "Close"}}</button></div></dialog>
 {{if and (eq .Sess.Role "admin") (ne .D.Status "retired")}}
 <dialog id="dlg-reboot" class="modal" aria-labelledby="dlg-reboot-h"><form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="reboot">
   <h2 id="dlg-reboot-h">{{t "Reboot later"}}</h2>
@@ -59,7 +61,6 @@
   <p class="notice error">{{t "Erases the disk encryption headers: all data on the device is lost for good. Devices without disk encryption are refused."}}</p>
   <label>{{t "Type the host name to confirm"}} <span class="mono">{{.D.Hostname}}</span><input name="confirm" autocomplete="off" spellcheck="false" required></label>
   <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button class="danger">{{t "Wipe device"}}</button></div></form></dialog>
-<script src="/static/actions.js" defer></script>
 {{end}}
 <nav class="tabs" aria-label="{{t "Device sections"}}">
   {{$tab := .Tab}}{{$failing := .Failing}}
@@ -160,7 +161,7 @@
     <thead><tr><th>{{t "Device"}}</th><th>{{t "Volume UUID"}}</th><th>{{t "Escrowed"}}</th><th>{{t "Last viewed"}}</th><th></th></tr></thead>
     <tbody>{{range .Recovery}}<tr><td class="mono">{{.Device}}</td><td class="mono">{{.UUID}}</td><td>{{fmtTime .Escrowed}}</td>
       <td>{{if .ViewedAt}}{{fmtTime (derefTime .ViewedAt)}}{{if .ViewedBy}} · {{deref2 .ViewedBy}}{{end}}{{if .Rotate}} <span class="pill warn">{{t "rotation pending"}}</span>{{end}}{{else}}<span class="muted">{{t "never"}}</span>{{end}}</td>
-      <td>{{if ne $.Sess.Role "auditor"}}<form method="post" action="/devices/{{$id}}/recovery"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="uuid" value="{{.UUID}}"><button class="secondary small">{{t "Show key"}}</button></form>{{end}}</td></tr>
+      <td>{{if ne $.Sess.Role "auditor"}}<form method="post" action="/devices/{{$id}}/recovery" data-dialog-post="dlg-key"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="uuid" value="{{.UUID}}"><button class="secondary small">{{t "Show key"}}</button></form>{{end}}</td></tr>
     {{else}}<tr><td colspan="5" class="empty">{{t "No recovery key escrowed. Declare disk encryption recovery; the user is then asked on the desktop."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
