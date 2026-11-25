@@ -292,3 +292,6 @@ button.ghost.danger { color: var(--bad); }
 
 /* ---- recovery key ---- */
 .recovery-key { font-size: 20px; letter-spacing: .04em; word-break: break-all; user-select: all; margin: 0 0 12px; }
+
+/* ---- spacing: submit buttons below stacked fields ---- */
+.card form > button, .card form > .actions { margin-top: 12px; }
