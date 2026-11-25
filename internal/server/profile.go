@@ -132,7 +132,7 @@ func (s *Server) renderProfile(w http.ResponseWriter, r *http.Request, sess sess
 	for _, k := range []string{"iso", "de", "uk", "us"} {
 		formats = append(formats, dateChoice{k, now.Format(dateFormats[k])})
 	}
-	s.render(w, r, sess, "profile", map[string]any{"P": v, "Msg": msg, "Error": errMsg, "Tab": tab, "Tabs": tabs, "PwMin": s.settings().Password.Min(),
+	s.render(w, r, sess, "profile", map[string]any{"P": v, "Msg": msg, "Error": errMsg, "Tab": tab, "Tabs": tabs, "PwMin": s.settings().Rules.Min(),
 		"DateFormats": formats, "DateFmt": requestDateFormat(r)})
 }
 
@@ -183,7 +183,7 @@ func (s *Server) profilePassword(w http.ResponseWriter, r *http.Request, sess se
 		return
 	}
 	pw, again := r.FormValue("new"), r.FormValue("repeat")
-	if msg := s.settings().Password.Check(pw, name); msg != "" {
+	if msg := s.settings().Rules.Check(pw, name); msg != "" {
 		s.renderProfile(w, r, sess, profileView{Tab: "password"}, "", msg)
 		return
 	}
