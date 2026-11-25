@@ -1,13 +1,13 @@
-{{define "title"}}Audit log · LiMDM{{end}}
+{{define "title"}}{{t "Audit log · LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>Audit log</h1><div class="meta"><span>Append only, hash chained</span><span>latest 300 entries</span></div></div>
-  <div class="actions"><a class="button secondary" href="/export/audit.csv">Full log as CSV</a></div>
+  <div><h1>{{t "Audit log"}}</h1><div class="meta"><span>{{t "Append only, hash chained"}}</span><span>{{t "latest 300 entries"}}</span></div></div>
+  <div class="actions"><a class="button secondary" href="/export/audit.csv">{{t "Full log as CSV"}}</a></div>
 </div>
-{{if .BrokenAt}}<div class="notice error" role="alert"><strong>Integrity failure.</strong> The hash chain breaks at entry {{.BrokenAt}}; the log was modified outside LiMDM.</div>
-{{else}}<div class="notice ok" role="status">Hash chain verified end to end: the log is intact.</div>{{end}}
+{{if .BrokenAt}}<div class="notice error" role="alert"><strong>{{t "Integrity failure."}}</strong> {{t "The hash chain breaks at entry"}} {{.BrokenAt}}{{t "; the log was modified outside LiMDM."}}</div>
+{{else}}<div class="notice ok" role="status">{{t "Hash chain verified end to end: the log is intact."}}</div>{{end}}
 <div class="tablecard"><div class="scroll"><table>
-  <thead><tr><th class="num">#</th><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
+  <thead><tr><th class="num">#</th><th>{{t "Time"}}</th><th>{{t "Actor"}}</th><th>{{t "Action"}}</th><th>{{t "Target"}}</th><th>{{t "Detail"}}</th></tr></thead>
   <tbody>{{range .Entries}}<tr><td class="num muted">{{.ID}}</td><td>{{fmtTime .At}}</td><td>{{.Actor}}</td><td class="mono">{{.Action}}</td><td class="mono">{{.Target}}</td><td><pre>{{.Detail}}</pre></td></tr>{{end}}</tbody>
 </table></div></div>
 {{end}}

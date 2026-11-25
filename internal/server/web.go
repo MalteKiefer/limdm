@@ -27,21 +27,26 @@ var webFS embed.FS
 
 var staticFS, _ = fs.Sub(webFS, "web")
 
-var pages = func() map[string]*template.Template {
+var pages = map[string]map[string]*template.Template{"en": parsePages("en"), "de": parsePages("de")}
+
+func parsePages(lang string) map[string]*template.Template {
+	T := func(s string) string { return translate(lang, s) }
 	funcs := template.FuncMap{
+		"t":    T,
+		"lang": func() string { return lang },
 		"ago": func(t *time.Time) string {
 			if t == nil {
-				return "never"
+				return T("never")
 			}
 			switch d := time.Since(*t); {
 			case d < time.Minute:
-				return "just now"
+				return T("just now")
 			case d < time.Hour:
-				return fmt.Sprintf("%d min ago", int(d.Minutes()))
+				return fmt.Sprintf(T("%d min ago"), int(d.Minutes()))
 			case d < 48*time.Hour:
-				return fmt.Sprintf("%d h ago", int(d.Hours()))
+				return fmt.Sprintf(T("%d h ago"), int(d.Hours()))
 			default:
-				return fmt.Sprintf("%d d ago", int(d.Hours()/24))
+				return fmt.Sprintf(T("%d d ago"), int(d.Hours()/24))
 			}
 		},
 		"frac":      func(v uint64, pct uint64) uint64 { return v * pct / 100 },
@@ -52,19 +57,19 @@ var pages = func() map[string]*template.Template {
 		"derefTime": func(p *time.Time) time.Time { return *p },
 		"typeLabel": func(t string) string {
 			if l, ok := typeLabels[t]; ok {
-				return l
+				return T(l)
 			}
 			return t
 		},
 		"actionLabel": func(a string) string {
-			return map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot in 1 minute",
-				"shutdown": "Shut down in 1 minute", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script"}[a]
+			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot in 1 minute",
+				"shutdown": "Shut down in 1 minute", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script"}[a])
 		},
 		"join":    strings.Join,
 		"fmtTime": func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") },
 		"gib": func(mb uint64) string {
 			if mb == 0 {
-				return "n/a"
+				return T("n/a")
 			}
 			return fmt.Sprintf("%.1f GiB", float64(mb)/1024)
 		},
@@ -87,7 +92,7 @@ var pages = func() map[string]*template.Template {
 		m[key] = template.Must(template.New("layout.html").Funcs(funcs).ParseFS(webFS, "web/layout.html", n))
 	}
 	return m
-}()
+}
 
 type handler func(w http.ResponseWriter, r *http.Request, sess session)
 
@@ -140,7 +145,7 @@ var typeLabels = map[string]string{
 	api.TypeFlatpak: "Flatpak apps", api.TypeScripts: "Recurring scripts",
 }
 
-func (s *Server) render(w http.ResponseWriter, sess session, name string, data map[string]any) {
+func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, name string, data map[string]any) {
 	if data == nil {
 		data = map[string]any{}
 	}
@@ -148,7 +153,7 @@ func (s *Server) render(w http.ResponseWriter, sess session, name string, data m
 	data["CSRF"] = s.csrfToken(sess)
 	data["Page"] = name
 	var buf bytes.Buffer
-	if err := pages[name].Execute(&buf, data); err != nil {
+	if err := pages[requestLang(r)][name].Execute(&buf, data); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -257,7 +262,7 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 		}
 		shown = append(shown, d)
 	}
-	s.render(w, sess, "devices", map[string]any{"Devices": shown, "Total": len(list), "Counts": counts, "Q": q, "Status": status,
+	s.render(w, r, sess, "devices", map[string]any{"Devices": shown, "Total": len(list), "Counts": counts, "Q": q, "Status": status,
 		"Statuses": []string{"compliant", "in grace", "non-compliant", "stale", "pending", "retired"}})
 }
 
@@ -321,7 +326,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 		s.fail(w, err)
 		return
 	}
-	s.render(w, sess, "overview", map[string]any{"Trend": trend, "Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
+	s.render(w, r, sess, "overview", map[string]any{"Trend": trend, "Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
 		"Recent": recent, "StaleHours": s.settings().StaleHours})
 }
 
@@ -505,7 +510,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		}
 		declRows = append(declRows, row)
 	}
-	s.render(w, sess, "device", map[string]any{
+	s.render(w, r, sess, "device", map[string]any{
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
@@ -657,7 +662,7 @@ func (s *Server) tokenPage(w http.ResponseWriter, r *http.Request, sess session,
 		s.fail(w, err)
 		return
 	}
-	s.render(w, sess, "tokens", map[string]any{"Tokens": list, "Blueprints": bps, "Created": created,
+	s.render(w, r, sess, "tokens", map[string]any{"Tokens": list, "Blueprints": bps, "Created": created,
 		"AgentURL": s.cfg.AgentURL, "Fingerprint": s.ca.Fingerprint()})
 }
 
@@ -718,7 +723,7 @@ func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session
 	f := complianceFilter{Q: strings.ToLower(strings.TrimSpace(q.Get("q"))), State: q.Get("state"), Level: q.Get("level"),
 		Framework: q.Get("framework"), Sort: q.Get("sort")}
 	checks, controls := f.apply(fc.Checks, fc.Controls)
-	s.render(w, sess, "compliance", map[string]any{
+	s.render(w, r, sess, "compliance", map[string]any{
 		"F": f, "Shown": len(checks), "All": len(fc.Checks),
 		"Checks": checks, "Controls": controls, "Total": fc.Total, "Compliant": fc.Compliant, "Stale": fc.Stale,
 		"NonCompliant": fc.Noncompl, "Pending": fc.Pending, "StaleHours": s.settings().StaleHours,
@@ -878,7 +883,7 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session)
 		s.fail(w, err)
 		return
 	}
-	s.render(w, sess, "audit", map[string]any{"Entries": list, "BrokenAt": brokenAt})
+	s.render(w, r, sess, "audit", map[string]any{"Entries": list, "BrokenAt": brokenAt})
 }
 
 // verifyAudit recomputes the hash chain. Returns the first broken id or 0.

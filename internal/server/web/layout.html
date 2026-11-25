@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{lang}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,35 +11,36 @@
 {{if .Sess.Email}}
 <div class="shell">
   <aside class="side">
-    <div class="brand"><img src="/static/logo.svg" alt=""> LiMDM</div>
-    <nav class="nav" aria-label="Main">
-      <a href="/" {{if eq .Page "overview"}}class="on" aria-current="page"{{end}}>Overview</a>
-      <a href="/devices" {{if or (eq .Page "devices") (eq .Page "device")}}class="on" aria-current="page"{{end}}>Devices</a>
-      <a href="/compliance" {{if eq .Page "compliance"}}class="on" aria-current="page"{{end}}>Compliance</a>
-      <span class="group">Configuration</span>
-      <a href="/library" {{if or (eq .Page "library") (eq .Page "item")}}class="on" aria-current="page"{{end}}>Library</a>
-      <a href="/directory" {{if eq .Page "directory"}}class="on" aria-current="page"{{end}}>Directory</a>
-      <a href="/blueprints" {{if or (eq .Page "blueprints") (eq .Page "blueprint")}}class="on" aria-current="page"{{end}}>Blueprints</a>
-      <a href="/tokens" {{if eq .Page "tokens"}}class="on" aria-current="page"{{end}}>Enrollment</a>
-      <span class="group">Evidence</span>
-      <a href="/audit" {{if eq .Page "audit"}}class="on" aria-current="page"{{end}}>Audit log</a>
+    <div class="brand"><img src="/static/logo.svg" alt=""> {{t "LiMDM"}}</div>
+    <nav class="nav" aria-label="{{t "Main"}}">
+      <a href="/" {{if eq .Page "overview"}}class="on" aria-current="page"{{end}}>{{t "Overview"}}</a>
+      <a href="/devices" {{if or (eq .Page "devices") (eq .Page "device")}}class="on" aria-current="page"{{end}}>{{t "Devices"}}</a>
+      <a href="/compliance" {{if eq .Page "compliance"}}class="on" aria-current="page"{{end}}>{{t "Compliance"}}</a>
+      <span class="group">{{t "Configuration"}}</span>
+      <a href="/library" {{if or (eq .Page "library") (eq .Page "item")}}class="on" aria-current="page"{{end}}>{{t "Library"}}</a>
+      <a href="/directory" {{if eq .Page "directory"}}class="on" aria-current="page"{{end}}>{{t "Directory"}}</a>
+      <a href="/blueprints" {{if or (eq .Page "blueprints") (eq .Page "blueprint")}}class="on" aria-current="page"{{end}}>{{t "Blueprints"}}</a>
+      <a href="/tokens" {{if eq .Page "tokens"}}class="on" aria-current="page"{{end}}>{{t "Enrollment"}}</a>
+      <span class="group">{{t "Evidence"}}</span>
+      <a href="/audit" {{if eq .Page "audit"}}class="on" aria-current="page"{{end}}>{{t "Audit log"}}</a>
       {{if ne .Sess.Role "helpdesk"}}
-      <span class="group">Administration</span>
-      <a href="/users" {{if eq .Page "users"}}class="on" aria-current="page"{{end}}>Users</a>
-      <a href="/settings" {{if eq .Page "settings"}}class="on" aria-current="page"{{end}}>Settings</a>
+      <span class="group">{{t "Administration"}}</span>
+      <a href="/users" {{if eq .Page "users"}}class="on" aria-current="page"{{end}}>{{t "Users"}}</a>
+      <a href="/settings" {{if eq .Page "settings"}}class="on" aria-current="page"{{end}}>{{t "Settings"}}</a>
       {{end}}
     </nav>
     <form class="who" method="post" action="/logout">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <div class="name" title="{{.Sess.Email}}">{{.Sess.Email}}</div>
-      <div class="role">{{.Sess.Role}}</div>
-      <button>Sign out</button>
+      <div class="role">{{t .Sess.Role}}</div>
+      <button>{{t "Sign out"}}</button>
     </form>
+    <div class="langs" aria-label="{{t "Language"}}"><a href="/lang/de" {{if eq lang "de"}}aria-current="true"{{end}}>DE</a><a href="/lang/en" {{if eq lang "en"}}aria-current="true"{{end}}>EN</a></div>
   </aside>
   <main class="main">{{template "content" .}}</main>
 </div>
 {{else}}
-<main class="login-shell">{{template "content" .}}</main>
+<main class="login-shell">{{template "content" .}}<div class="langs"><a href="/lang/de" {{if eq lang "de"}}aria-current="true"{{end}}>DE</a><a href="/lang/en" {{if eq lang "en"}}aria-current="true"{{end}}>EN</a></div></main>
 {{end}}
 </body>
 </html>

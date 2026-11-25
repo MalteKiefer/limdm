@@ -113,7 +113,7 @@ func (s *Server) renderDirectory(w http.ResponseWriter, r *http.Request, sess se
 		s.fail(w, err)
 		return
 	}
-	s.render(w, sess, "directory", map[string]any{"Users": users, "Groups": groups, "Blueprints": bps, "Q": q,
+	s.render(w, r, sess, "directory", map[string]any{"Users": users, "Groups": groups, "Blueprints": bps, "Q": q,
 		"Token": token, "Msg": msg, "Error": errMsg, "SCIMSet": scimSet, "SCIMURL": s.cfg.PublicURL + "/scim/v2",
 		"Google": gs, "GoogleConfigured": gs.KeyEnc != ""})
 }

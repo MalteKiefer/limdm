@@ -1,50 +1,50 @@
-{{define "title"}}Overview · LiMDM{{end}}
+{{define "title"}}{{t "Overview · LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>Overview</h1><div class="meta"><span>{{.Active}} active devices</span></div></div>
-  <div class="actions"><a class="button secondary" href="/export/compliance.csv">Evidence CSV</a><a class="button" href="/tokens">Enroll device</a></div>
+  <div><h1>{{t "Overview"}}</h1><div class="meta"><span>{{.Active}} {{t "active devices"}}</span></div></div>
+  <div class="actions"><a class="button secondary" href="/export/compliance.csv">{{t "Evidence CSV"}}</a><a class="button" href="/tokens">{{t "Enroll device"}}</a></div>
 </div>
 <div class="stats">
-  <a class="stat" href="/devices?status=compliant"><div class="label"><span class="dot ok"></span>Compliant</div><div class="value">{{index .Counts "compliant"}}</div><div class="hint">{{pct (index .Counts "compliant") .Active}}% of active</div></a>
-  <a class="stat" href="/devices?status=non-compliant"><div class="label"><span class="dot bad"></span>Non-compliant</div><div class="value">{{index .Counts "non-compliant"}}</div><div class="hint">at least one failing check</div></a>
-  <a class="stat" href="/devices?status=stale"><div class="label"><span class="dot warn"></span>Stale</div><div class="value">{{index .Counts "stale"}}</div><div class="hint">silent for {{.StaleHours}} h</div></a>
-  <a class="stat" href="/devices?status=pending"><div class="label"><span class="dot na"></span>Pending</div><div class="value">{{index .Counts "pending"}}</div><div class="hint">no report yet</div></a>
+  <a class="stat" href="/devices?status=compliant"><div class="label"><span class="dot ok"></span>{{t "Compliant"}}</div><div class="value">{{index .Counts "compliant"}}</div><div class="hint">{{pct (index .Counts "compliant") .Active}}{{t "% of active"}}</div></a>
+  <a class="stat" href="/devices?status=non-compliant"><div class="label"><span class="dot bad"></span>{{t "Non-compliant"}}</div><div class="value">{{index .Counts "non-compliant"}}</div><div class="hint">{{t "at least one failing check"}}</div></a>
+  <a class="stat" href="/devices?status=stale"><div class="label"><span class="dot warn"></span>{{t "Stale"}}</div><div class="value">{{index .Counts "stale"}}</div><div class="hint">{{t "silent for"}} {{.StaleHours}} {{t "h"}}</div></a>
+  <a class="stat" href="/devices?status=pending"><div class="label"><span class="dot na"></span>{{t "Pending"}}</div><div class="value">{{index .Counts "pending"}}</div><div class="hint">{{t "no report yet"}}</div></a>
 </div>
 <div class="grid side-right">
   <div>
     <section class="card chart-card">
-      <div class="card-head"><h2>Fleet status</h2></div>
+      <div class="card-head"><h2>{{t "Fleet status"}}</h2></div>
       <div class="chart-row">{{.Donut}}
         <ul class="legend">
-          <li><span class="dot ok"></span>Compliant<b>{{index .Counts "compliant"}}</b></li>
-          <li><span class="dot bad"></span>Non-compliant<b>{{index .Counts "non-compliant"}}</b></li>
-          <li><span class="dot warn"></span>In grace period<b>{{index .Counts "in grace"}}</b></li>
-          <li><span class="dot warn"></span>Stale<b>{{index .Counts "stale"}}</b></li>
-          <li><span class="dot na"></span>Pending<b>{{index .Counts "pending"}}</b></li>
+          <li><span class="dot ok"></span>{{t "Compliant"}}<b>{{index .Counts "compliant"}}</b></li>
+          <li><span class="dot bad"></span>{{t "Non-compliant"}}<b>{{index .Counts "non-compliant"}}</b></li>
+          <li><span class="dot warn"></span>{{t "In grace period"}}<b>{{index .Counts "in grace"}}</b></li>
+          <li><span class="dot warn"></span>{{t "Stale"}}<b>{{index .Counts "stale"}}</b></li>
+          <li><span class="dot na"></span>{{t "Pending"}}<b>{{index .Counts "pending"}}</b></li>
         </ul>
       </div>
     </section>
-    {{if .Trend}}<section class="card"><div class="card-head"><h2>Compliance trend</h2><span class="muted">daily, 30 days</span></div>{{.Trend}}
-      <ul class="legend inline-legend"><li><span class="dot ok"></span>compliant</li><li><span class="dot bad"></span>non-compliant</li><li><span class="dot warn"></span>in grace</li><li><span class="dot na"></span>stale or pending</li></ul></section>{{end}}
+    {{if .Trend}}<section class="card"><div class="card-head"><h2>{{t "Compliance trend"}}</h2><span class="muted">{{t "daily, 30 days"}}</span></div>{{.Trend}}
+      <ul class="legend inline-legend"><li><span class="dot ok"></span>{{t "compliant"}}</li><li><span class="dot bad"></span>{{t "non-compliant"}}</li><li><span class="dot warn"></span>{{t "in grace"}}</li><li><span class="dot na"></span>{{t "stale or pending"}}</li></ul></section>{{end}}
     <section class="tablecard">
-      <div class="card-head"><h2>Most failing checks</h2><a class="muted" href="/compliance">All checks</a></div>
+      <div class="card-head"><h2>{{t "Most failing checks"}}</h2><a class="muted" href="/compliance">{{t "All checks"}}</a></div>
       {{if .Failing}}
       <div class="scroll"><table>
-        <thead><tr><th>Check</th><th>Level</th><th class="num">Failing</th><th>Devices</th></tr></thead>
-        <tbody>{{range .Failing}}<tr><td>{{.Title}}<span class="sub mono">{{.ID}}</span></td><td>L{{.Level}}</td><td class="num"><span class="pill fail">{{.Fail}}</span></td><td class="muted">{{join .FailingHosts ", "}}</td></tr>{{end}}</tbody>
+        <thead><tr><th>{{t "Check"}}</th><th>{{t "Level"}}</th><th class="num">{{t "Failing"}}</th><th>{{t "Devices"}}</th></tr></thead>
+        <tbody>{{range .Failing}}<tr><td>{{.Title}}<span class="sub mono">{{.ID}}</span></td><td>{{t "L"}}{{.Level}}</td><td class="num"><span class="pill fail">{{.Fail}}</span></td><td class="muted">{{join .FailingHosts ", "}}</td></tr>{{end}}</tbody>
       </table></div>
-      {{else}}<div class="empty">No failing checks across the fleet.</div>{{end}}
+      {{else}}<div class="empty">{{t "No failing checks across the fleet."}}</div>{{end}}
     </section>
     <section class="card">
-      <div class="card-head"><h2>Operating systems</h2></div>
+      <div class="card-head"><h2>{{t "Operating systems"}}</h2></div>
       {{if .OSes}}<div class="bars">{{$total := .Active}}{{range .OSes}}<div class="row"><span>{{.Name}}</span><span class="muted">{{.Count}}</span><meter min="0" max="{{$total}}" value="{{.Count}}"></meter></div>{{end}}</div>
-      {{else}}<p class="muted">No devices enrolled.</p>{{end}}
+      {{else}}<p class="muted">{{t "No devices enrolled."}}</p>{{end}}
     </section>
   </div>
   <section class="card">
-    <div class="card-head"><h2>Recent activity</h2><a class="muted" href="/audit">Audit log</a></div>
+    <div class="card-head"><h2>{{t "Recent activity"}}</h2><a class="muted" href="/audit">{{t "Audit log"}}</a></div>
     {{if .Recent}}<ul class="feed">{{range .Recent}}<li><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{fmtTime .At}}</time><div class="what"><b>{{.Action}}</b><span class="actor">{{.Actor}}</span>{{if .Detail}}<span class="sub muted">{{.Detail}}</span>{{end}}</div></li>{{end}}</ul>
-    {{else}}<p class="muted">Nothing recorded yet.</p>{{end}}
+    {{else}}<p class="muted">{{t "Nothing recorded yet."}}</p>{{end}}
   </section>
 </div>
 {{end}}

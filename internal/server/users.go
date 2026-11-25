@@ -67,7 +67,7 @@ func (s *Server) renderUsers(w http.ResponseWriter, r *http.Request, sess sessio
 		s.fail(w, err)
 		return
 	}
-	s.render(w, sess, "users", map[string]any{"Users": users, "Roles": roles, "Creds": creds, "Error": errMsg,
+	s.render(w, r, sess, "users", map[string]any{"Users": users, "Roles": roles, "Creds": creds, "Error": errMsg,
 		"LocalLogin": s.settings().LocalLogin, "OIDC": s.oidc() != nil})
 }
 

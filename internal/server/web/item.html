@@ -1,28 +1,28 @@
-{{define "title"}}{{if .It.Name}}{{.It.Name}}{{else}}New item{{end}} · LiMDM{{end}}
+{{define "title"}}{{if .It.Name}}{{.It.Name}}{{else}}{{t "New item"}}{{end}} {{t "· LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><div class="eyebrow"><a href="/library">Library</a></div><h1>{{if .It.Name}}{{.It.Name}}{{else}}New {{typeLabel .It.Type}}{{end}}</h1>
-  <div class="meta"><span class="mono">{{.It.Type}}</span>{{if .UsedBy}}<span>used by {{join .UsedBy ", "}}</span>{{end}}</div></div>
+  <div><div class="eyebrow"><a href="/library">{{t "Library"}}</a></div><h1>{{if .It.Name}}{{.It.Name}}{{else}}{{t "New"}} {{typeLabel .It.Type}}{{end}}</h1>
+  <div class="meta"><span class="mono">{{.It.Type}}</span>{{if .UsedBy}}<span>{{t "used by"}} {{join .UsedBy ", "}}</span>{{end}}</div></div>
 </div>
-{{if .Error}}<div class="notice error" role="alert">{{.Error}}</div>{{end}}
+{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
 <div class="grid side-right">
   <form class="card" method="post" action="/library">
     <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.It.ID}}">
     <div class="inline">
-      <label>Name<input name="name" value="{{.It.Name}}" required maxlength="100"></label>
-      <label>Type<select name="type">{{$cur := .It.Type}}{{range .AllTypes}}<option value="{{.}}" {{if eq . $cur}}selected{{end}}>{{typeLabel .}}</option>{{end}}</select></label>
+      <label>{{t "Name"}}<input name="name" value="{{.It.Name}}" required maxlength="100"></label>
+      <label>{{t "Type"}}<select name="type">{{$cur := .It.Type}}{{range .AllTypes}}<option value="{{.}}" {{if eq . $cur}}selected{{end}}>{{typeLabel .}}</option>{{end}}</select></label>
     </div>
-    <label>Description<input name="description" value="{{.It.Description}}" maxlength="300"></label>
-    <label>Settings <span class="hint">JSON, validated strictly before saving</span>
+    <label>{{t "Description"}}<input name="description" value="{{.It.Description}}" maxlength="300"></label>
+    <label>{{t "Settings"}} <span class="hint">{{t "JSON, validated strictly before saving"}}</span>
       <textarea name="payload" rows="16" class="code" spellcheck="false">{{.Payload}}</textarea></label>
-    {{if eq .Sess.Role "admin"}}<div class="form-foot"><span class="muted">Devices pick up changes at their next check in.</span><button>Save item</button></div>{{end}}
+    {{if eq .Sess.Role "admin"}}<div class="form-foot"><span class="muted">{{t "Devices pick up changes at their next check in."}}</span><button>{{t "Save item"}}</button></div>{{end}}
   </form>
   <div>
-    <section class="card"><h2>Example</h2><pre class="fp">{{.Example}}</pre>
-      <p class="muted">Lists (packages, services, files, firewall rules, OS minimums) from several items are merged; for every other type the item evaluated last in the blueprint wins.</p></section>
+    <section class="card"><h2>{{t "Example"}}</h2><pre class="fp">{{.Example}}</pre>
+      <p class="muted">{{t "Lists (packages, services, files, firewall rules, OS minimums) from several items are merged; for every other type the item evaluated last in the blueprint wins."}}</p></section>
     {{if and .It.ID (eq .Sess.Role "admin") (not .UsedBy)}}
     <form class="card" method="post" action="/library/{{.It.ID}}/delete"><input type="hidden" name="csrf" value="{{.CSRF}}">
-      <h2>Delete item</h2><p class="muted">Not used by any blueprint.</p><button class="danger">Delete</button></form>
+      <h2>{{t "Delete item"}}</h2><p class="muted">{{t "Not used by any blueprint."}}</p><button class="danger">{{t "Delete"}}</button></form>
     {{end}}
   </div>
 </div>

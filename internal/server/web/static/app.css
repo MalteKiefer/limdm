@@ -283,3 +283,9 @@ button.ghost.danger { color: var(--bad); }
 .charts figcaption { font-size: 12px; color: var(--text-3); margin-top: 4px; }
 .inline-legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; min-width: 0; }
 .inline-legend li { display: flex; gap: 6px; }
+
+/* ---- language switch ---- */
+.langs { display: flex; gap: 8px; font-size: 12px; margin-top: 12px; }
+.langs a { color: var(--text-3); text-decoration: none; }
+.langs a[aria-current] { color: var(--text-1); font-weight: 600; }
+.login-shell .langs { justify-content: center; }

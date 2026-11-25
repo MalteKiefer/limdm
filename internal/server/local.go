@@ -177,15 +177,15 @@ func clientIP(r *http.Request) string {
 const loginCookie = "limdm_login"
 
 func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
-	s.renderLogin(w, "")
+	s.renderLogin(w, r, "")
 }
 
-func (s *Server) renderLogin(w http.ResponseWriter, msg string) {
+func (s *Server) renderLogin(w http.ResponseWriter, r *http.Request, msg string) {
 	tok := randToken(24)
 	// double submit token against login CSRF
 	http.SetCookie(w, &http.Cookie{Name: loginCookie, Value: tok, Path: "/login", HttpOnly: true, Secure: true,
 		SameSite: http.SameSiteStrictMode, MaxAge: 600})
-	s.render(w, session{}, "login", map[string]any{"OIDC": s.oidc() != nil, "Local": s.settings().LocalLogin, "LoginCSRF": tok, "Error": msg})
+	s.render(w, r, session{}, "login", map[string]any{"OIDC": s.oidc() != nil, "Local": s.settings().LocalLogin, "LoginCSRF": tok, "Error": msg})
 }
 
 func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
@@ -211,7 +211,7 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 	role, err := s.checkLocal(r.Context(), name, r.FormValue("password"), r.FormValue("totp"), clientIP(r))
 	if err != nil {
 		s.log.Warn("local login failed", "user", name, "remote", clientIP(r), "err", err)
-		s.renderLogin(w, "Sign in failed.")
+		s.renderLogin(w, r, "Sign in failed.")
 		return
 	}
 	now := time.Now()

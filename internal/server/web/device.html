@@ -1,76 +1,76 @@
-{{define "title"}}{{.D.Hostname}} · LiMDM{{end}}
+{{define "title"}}{{.D.Hostname}} {{t "· LiMDM"}}{{end}}
 {{define "content"}}
 {{$id := .D.ID}}
 <div class="page-head">
   <div>
-    <div class="eyebrow"><a href="/devices">Devices</a></div>
-    <h1>{{.D.Hostname}} <span class="pill {{.D.Class}}">{{.D.Status}}</span></h1>
-    <div class="meta"><span>{{.Inv.OSName}}</span><span>last seen {{ago .D.LastSeen}}</span><span>agent {{.D.AgentVersion}}</span>{{if .Inv.Source}}<span>inventory via {{.Inv.Source}}</span>{{end}}</div>
+    <div class="eyebrow"><a href="/devices">{{t "Devices"}}</a></div>
+    <h1>{{.D.Hostname}} <span class="pill {{.D.Class}}">{{t .D.Status}}</span></h1>
+    <div class="meta"><span>{{.Inv.OSName}}</span><span>{{t "last seen"}} {{ago .D.LastSeen}}</span><span>{{t "agent"}} {{.D.AgentVersion}}</span>{{if .Inv.Source}}<span>{{t "inventory via"}} {{.Inv.Source}}</span>{{end}}</div>
   </div>
   {{if and (eq .Sess.Role "admin") (ne .D.Status "retired")}}
   <div class="actions">
-    <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="sync"><button class="secondary">Sync now</button></form>
+    <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="type" value="sync"><button class="secondary">{{t "Sync now"}}</button></form>
     <details class="menu">
-      <summary class="button secondary">Actions</summary>
+      <summary class="button secondary">{{t "Actions"}}</summary>
       <div class="menu-list" role="menu">
         {{range $a := (list "update" "reboot" "shutdown" "lock" "unlock")}}
         <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="{{$a}}">
           <button role="menuitem" class="menu-item{{if or (eq $a "shutdown") (eq $a "lock")}} warn{{end}}">{{actionLabel $a}}</button></form>
         {{end}}
-        <a role="menuitem" class="menu-item" href="/devices/{{$id}}?tab=commands">Run script…</a>
+        <a role="menuitem" class="menu-item" href="/devices/{{$id}}?tab=commands">{{t "Run script…"}}</a>
       </div>
     </details>
   </div>
   {{end}}
 </div>
-<nav class="tabs" aria-label="Device sections">
+<nav class="tabs" aria-label="{{t "Device sections"}}">
   {{$tab := .Tab}}{{$failing := .Failing}}
   {{range .Tabs}}<a href="/devices/{{$id}}?tab={{.}}" {{if eq $tab .}}class="on" aria-current="page"{{end}}>{{.}}{{if and (eq . "compliance") $failing}}<span class="count">{{$failing}}</span>{{end}}</a>{{end}}
 </nav>
 
 {{if eq .Tab "overview"}}
-{{if .D.AutoLocked}}<div class="notice error" role="status"><strong>Locked by compliance policy.</strong> Logins are blocked until the device is compliant again or an admin unlocks it.</div>{{end}}
-{{if .Since}}<div class="notice">Failing compliance since {{fmtTime (derefTime .Since)}}{{if .D.GraceUntil}}; grace period {{if eq .D.Status "in grace"}}ends{{else}}ended{{end}} {{fmtTime (derefTime .D.GraceUntil)}}{{end}}.</div>{{end}}
+{{if .D.AutoLocked}}<div class="notice error" role="status"><strong>{{t "Locked by compliance policy."}}</strong> {{t "Logins are blocked until the device is compliant again or an admin unlocks it."}}</div>{{end}}
+{{if .Since}}<div class="notice">{{t "Failing compliance since"}} {{fmtTime (derefTime .Since)}}{{if .D.GraceUntil}}{{t "; grace period"}} {{if eq .D.Status "in grace"}}{{t "ends"}}{{else}}{{t "ended"}}{{end}} {{fmtTime (derefTime .D.GraceUntil)}}{{end}}.</div>{{end}}
 <div class="stats">
-  <div class="stat"><div class="label">Failing checks</div><div class="value">{{.Failing}}</div><div class="hint">of {{len .Checks}} evaluated</div></div>
-  <div class="stat"><div class="label">Memory</div><div class="value">{{gib .Inv.MemoryMB}}</div><div class="hint">{{if .Inv.SwapMB}}swap {{gib .Inv.SwapMB}}{{else}}no swap{{end}}</div></div>
-  <div class="stat"><div class="label">CPU</div><div class="value">{{if .Inv.CPUThreads}}{{.Inv.CPUThreads}}{{else}}n/a{{end}}</div><div class="hint">{{if .Inv.CPUCores}}{{.Inv.CPUCores}} cores, {{end}}threads</div></div>
-  <div class="stat"><div class="label">Root filesystem</div><div class="value">{{.Inv.DiskGB}} GB</div><div class="hint">{{len .Inv.Volumes}} volumes, {{len .Inv.Disks}} disks</div></div>
+  <div class="stat"><div class="label">{{t "Failing checks"}}</div><div class="value">{{.Failing}}</div><div class="hint">{{t "of"}} {{len .Checks}} {{t "evaluated"}}</div></div>
+  <div class="stat"><div class="label">{{t "Memory"}}</div><div class="value">{{gib .Inv.MemoryMB}}</div><div class="hint">{{if .Inv.SwapMB}}{{t "swap"}} {{gib .Inv.SwapMB}}{{else}}{{t "no swap"}}{{end}}</div></div>
+  <div class="stat"><div class="label">{{t "CPU"}}</div><div class="value">{{if .Inv.CPUThreads}}{{.Inv.CPUThreads}}{{else}}{{t "n/a"}}{{end}}</div><div class="hint">{{if .Inv.CPUCores}}{{.Inv.CPUCores}} {{t "cores,"}} {{end}}{{t "threads"}}</div></div>
+  <div class="stat"><div class="label">{{t "Root filesystem"}}</div><div class="value">{{.Inv.DiskGB}} {{t "GB"}}</div><div class="hint">{{len .Inv.Volumes}} {{t "volumes,"}} {{len .Inv.Disks}} {{t "disks"}}</div></div>
 </div>
-{{if .Charts}}<section class="card"><div class="card-head"><h2>Last 7 days</h2><span class="muted">sampled every 15 minutes</span></div>
-  <div class="charts"><figure>{{index .Charts 0}}<figcaption>Memory used</figcaption></figure><figure>{{index .Charts 1}}<figcaption>Root filesystem used</figcaption></figure><figure>{{index .Charts 2}}<figcaption>Load (1 min)</figcaption></figure></div></section>{{end}}
+{{if .Charts}}<section class="card"><div class="card-head"><h2>{{t "Last 7 days"}}</h2><span class="muted">{{t "sampled every 15 minutes"}}</span></div>
+  <div class="charts"><figure>{{index .Charts 0}}<figcaption>{{t "Memory used"}}</figcaption></figure><figure>{{index .Charts 1}}<figcaption>{{t "Root filesystem used"}}</figcaption></figure><figure>{{index .Charts 2}}<figcaption>{{t "Load (1 min)"}}</figcaption></figure></div></section>{{end}}
 <div class="grid side-right">
   <section class="card">
-    <h2>System</h2>
+    <h2>{{t "System"}}</h2>
     <dl class="kv">
-      <dt>Operating system</dt><dd>{{.Inv.OSName}}{{if .Inv.OSCodename}} <span class="muted">({{.Inv.OSCodename}})</span>{{end}}</dd>
-      <dt>Kernel</dt><dd class="mono">{{.Inv.Kernel}}</dd>
-      <dt>Architecture</dt><dd>{{.Inv.Arch}}</dd>
-      <dt>Desktop</dt><dd>{{if .Inv.Desktop}}{{.Inv.Desktop}}{{if .Inv.DisplayManager}} <span class="muted">via {{.Inv.DisplayManager}}</span>{{end}}{{else}}<span class="muted">none (server)</span>{{end}}</dd>
-      <dt>Hardware</dt><dd>{{.Inv.Vendor}} {{.Inv.Model}}</dd>
-      <dt>Serial number</dt><dd class="mono">{{.Inv.Serial}}</dd>
-      <dt>Booted</dt><dd>{{if .Inv.BootTime}}{{fmtTime (unix .Inv.BootTime)}}{{end}}</dd>
-      <dt>Device ID</dt><dd class="mono">{{.D.ID}}</dd>
-      <dt>Enrolled</dt><dd>{{fmtTime .Enrolled}}</dd>
-      <dt>Certificate</dt><dd>valid until {{fmtTime .CertExp}}</dd>
+      <dt>{{t "Operating system"}}</dt><dd>{{.Inv.OSName}}{{if .Inv.OSCodename}} <span class="muted">({{.Inv.OSCodename}})</span>{{end}}</dd>
+      <dt>{{t "Kernel"}}</dt><dd class="mono">{{.Inv.Kernel}}</dd>
+      <dt>{{t "Architecture"}}</dt><dd>{{.Inv.Arch}}</dd>
+      <dt>{{t "Desktop"}}</dt><dd>{{if .Inv.Desktop}}{{.Inv.Desktop}}{{if .Inv.DisplayManager}} <span class="muted">{{t "via"}} {{.Inv.DisplayManager}}</span>{{end}}{{else}}<span class="muted">{{t "none (server)"}}</span>{{end}}</dd>
+      <dt>{{t "Hardware"}}</dt><dd>{{.Inv.Vendor}} {{.Inv.Model}}</dd>
+      <dt>{{t "Serial number"}}</dt><dd class="mono">{{.Inv.Serial}}</dd>
+      <dt>{{t "Booted"}}</dt><dd>{{if .Inv.BootTime}}{{fmtTime (unix .Inv.BootTime)}}{{end}}</dd>
+      <dt>{{t "Device ID"}}</dt><dd class="mono">{{.D.ID}}</dd>
+      <dt>{{t "Enrolled"}}</dt><dd>{{fmtTime .Enrolled}}</dd>
+      <dt>{{t "Certificate"}}</dt><dd>{{t "valid until"}} {{fmtTime .CertExp}}</dd>
     </dl>
   </section>
   <section class="card">
-    <h2>Assignment</h2>
+    <h2>{{t "Assignment"}}</h2>
     {{if eq .Sess.Role "admin"}}
     <form method="post" action="/devices/{{$id}}/assign">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <label>Blueprint<select name="blueprint_id">{{range .Blueprints}}<option value="{{if eq .Name "default"}}0{{else}}{{.ID}}{{end}}" {{if .Assigned}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
-      <label>Primary user <span class="hint">from the directory; brings groups and department into blueprint rules</span>
-        <input name="primary_user" value="{{.Primary}}" list="people" autocomplete="off" placeholder="jane.doe@example.com"></label>
+      <label>{{t "Blueprint"}}<select name="blueprint_id">{{range .Blueprints}}<option value="{{if eq .Name "default"}}0{{else}}{{.ID}}{{end}}" {{if .Assigned}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+      <label>{{t "Primary user"}} <span class="hint">{{t "from the directory; brings groups and department into blueprint rules"}}</span>
+        <input name="primary_user" value="{{.Primary}}" list="people" autocomplete="off" placeholder="{{t "jane.doe@example.com"}}"></label>
       <datalist id="people">{{range .People}}<option value="{{.}}">{{end}}</datalist>
-      <label>Tags <span class="hint">comma separated, usable in blueprint conditions</span><input name="tags" value="{{.Tags}}" placeholder="finance, berlin"></label>
-      <label>Desktop users <span class="hint">one per line: username email [admin]</span>
+      <label>{{t "Tags"}} <span class="hint">{{t "comma separated, usable in blueprint conditions"}}</span><input name="tags" value="{{.Tags}}" placeholder="{{t "finance, berlin"}}"></label>
+      <label>{{t "Desktop users"}} <span class="hint">{{t "one per line: username email [admin]"}}</span>
         <textarea name="users" rows="4" class="code" placeholder="jdoe jane.doe@example.com admin">{{.Users}}</textarea></label>
-      <button>Save assignment</button>
+      <button>{{t "Save assignment"}}</button>
     </form>
     {{else}}
-    <dl class="kv">{{range .Blueprints}}{{if .Assigned}}<dt>Blueprint</dt><dd>{{.Name}}</dd>{{end}}{{end}}<dt>Tags</dt><dd>{{.Tags}}</dd></dl>
+    <dl class="kv">{{range .Blueprints}}{{if .Assigned}}<dt>{{t "Blueprint"}}</dt><dd>{{.Name}}</dd>{{end}}{{end}}<dt>{{t "Tags"}}</dt><dd>{{.Tags}}</dd></dl>
     {{end}}
   </section>
 </div>
@@ -79,44 +79,44 @@
 {{if eq .Tab "hardware"}}
 <div class="grid two">
   <section class="card">
-    <h2>System board</h2>
+    <h2>{{t "System board"}}</h2>
     <dl class="kv">
-      <dt>Vendor</dt><dd>{{.Inv.Vendor}}</dd><dt>Model</dt><dd>{{.Inv.Model}}</dd>
-      <dt>Serial number</dt><dd class="mono">{{.Inv.Serial}}</dd>
-      <dt>Firmware</dt><dd>{{.Inv.BIOSVendor}} {{.Inv.BIOSVersion}}</dd>
+      <dt>{{t "Vendor"}}</dt><dd>{{.Inv.Vendor}}</dd><dt>{{t "Model"}}</dt><dd>{{.Inv.Model}}</dd>
+      <dt>{{t "Serial number"}}</dt><dd class="mono">{{.Inv.Serial}}</dd>
+      <dt>{{t "Firmware"}}</dt><dd>{{.Inv.BIOSVendor}} {{.Inv.BIOSVersion}}</dd>
     </dl>
   </section>
   <section class="card">
-    <h2>Processor and memory</h2>
+    <h2>{{t "Processor and memory"}}</h2>
     <dl class="kv">
-      <dt>CPU</dt><dd>{{.Inv.CPU}}</dd>
-      <dt>Cores / threads</dt><dd>{{if .Inv.CPUCores}}{{.Inv.CPUCores}} / {{.Inv.CPUThreads}}{{else}}n/a{{end}}</dd>
-      <dt>Memory</dt><dd>{{gib .Inv.MemoryMB}}</dd><dt>Swap</dt><dd>{{gib .Inv.SwapMB}}</dd>
+      <dt>{{t "CPU"}}</dt><dd>{{.Inv.CPU}}</dd>
+      <dt>{{t "Cores / threads"}}</dt><dd>{{if .Inv.CPUCores}}{{.Inv.CPUCores}} / {{.Inv.CPUThreads}}{{else}}{{t "n/a"}}{{end}}</dd>
+      <dt>{{t "Memory"}}</dt><dd>{{gib .Inv.MemoryMB}}</dd><dt>{{t "Swap"}}</dt><dd>{{gib .Inv.SwapMB}}</dd>
     </dl>
   </section>
 </div>
 <section class="tablecard">
-  <div class="card-head"><h2>Disks</h2></div>
+  <div class="card-head"><h2>{{t "Disks"}}</h2></div>
   <div class="scroll"><table>
-    <thead><tr><th>Device</th><th>Model</th><th>Type</th><th class="num">Size</th></tr></thead>
-    <tbody>{{range .Inv.Disks}}<tr><td class="mono">{{.Name}}</td><td>{{.Model}}</td><td>{{.Type}}</td><td class="num">{{.SizeGB}} GB</td></tr>{{else}}<tr><td colspan="4" class="empty">No disk data reported.</td></tr>{{end}}</tbody>
+    <thead><tr><th>{{t "Device"}}</th><th>{{t "Model"}}</th><th>{{t "Type"}}</th><th class="num">{{t "Size"}}</th></tr></thead>
+    <tbody>{{range .Inv.Disks}}<tr><td class="mono">{{.Name}}</td><td>{{.Model}}</td><td>{{.Type}}</td><td class="num">{{.SizeGB}} {{t "GB"}}</td></tr>{{else}}<tr><td colspan="4" class="empty">{{t "No disk data reported."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 <section class="tablecard">
-  <div class="card-head"><h2>Volumes</h2></div>
+  <div class="card-head"><h2>{{t "Volumes"}}</h2></div>
   <div class="scroll"><table>
-    <thead><tr><th>Mount point</th><th>Device</th><th>Filesystem</th><th>Encryption</th><th>Usage</th><th class="num">Free</th></tr></thead>
+    <thead><tr><th>{{t "Mount point"}}</th><th>{{t "Device"}}</th><th>{{t "Filesystem"}}</th><th>{{t "Encryption"}}</th><th>{{t "Usage"}}</th><th class="num">{{t "Free"}}</th></tr></thead>
     <tbody>{{range .Inv.Volumes}}<tr><td class="mono">{{.Mount}}</td><td class="mono">{{.Device}}</td><td>{{.FS}}</td>
-      <td>{{if .Encrypted}}<span class="pill ok">LUKS</span>{{else}}<span class="pill bad">none</span>{{end}}</td>
-      <td><meter min="0" max="{{.SizeGB}}" value="{{used .SizeGB .FreeGB}}" low="{{frac .SizeGB 80}}" high="{{frac .SizeGB 90}}" optimum="0"></meter> <span class="muted">{{used .SizeGB .FreeGB}} of {{.SizeGB}} GB</span></td>
-      <td class="num">{{.FreeGB}} GB</td></tr>{{else}}<tr><td colspan="6" class="empty">No volume data reported.</td></tr>{{end}}</tbody>
+      <td>{{if .Encrypted}}<span class="pill ok">{{t "LUKS"}}</span>{{else}}<span class="pill bad">{{t "none"}}</span>{{end}}</td>
+      <td><meter min="0" max="{{.SizeGB}}" value="{{used .SizeGB .FreeGB}}" low="{{frac .SizeGB 80}}" high="{{frac .SizeGB 90}}" optimum="0"></meter> <span class="muted">{{used .SizeGB .FreeGB}} {{t "of"}} {{.SizeGB}} {{t "GB"}}</span></td>
+      <td class="num">{{.FreeGB}} {{t "GB"}}</td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No volume data reported."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 <section class="tablecard">
-  <div class="card-head"><h2>Network</h2><span class="muted">collected only with privacy network_info</span></div>
+  <div class="card-head"><h2>{{t "Network"}}</h2><span class="muted">{{t "collected only with privacy network_info"}}</span></div>
   <div class="scroll"><table>
-    <thead><tr><th>Interface</th><th>MAC</th><th>Addresses</th></tr></thead>
-    <tbody>{{range .Inv.Interfaces}}<tr><td class="mono">{{.Name}}</td><td class="mono">{{.MAC}}</td><td>{{range .IPs}}<span class="tag">{{.}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="3" class="empty">Not collected on this device.</td></tr>{{end}}</tbody>
+    <thead><tr><th>{{t "Interface"}}</th><th>{{t "MAC"}}</th><th>{{t "Addresses"}}</th></tr></thead>
+    <tbody>{{range .Inv.Interfaces}}<tr><td class="mono">{{.Name}}</td><td class="mono">{{.MAC}}</td><td>{{range .IPs}}<span class="tag">{{.}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="3" class="empty">{{t "Not collected on this device."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 {{end}}
@@ -124,105 +124,105 @@
 {{if eq .Tab "software"}}
 <div class="grid two">
   <section class="card">
-    <h2>Operating system</h2>
+    <h2>{{t "Operating system"}}</h2>
     <dl class="kv">
-      <dt>Distribution</dt><dd>{{.Inv.OSName}}</dd><dt>Version</dt><dd>{{.Inv.OSVersion}} {{.Inv.OSCodename}}</dd>
-      <dt>Kernel</dt><dd class="mono">{{.Inv.Kernel}}</dd>
-      <dt>Desktop</dt><dd>{{if .Inv.Desktop}}{{.Inv.Desktop}}{{else}}<span class="muted">none</span>{{end}}</dd>
-      <dt>Display manager</dt><dd>{{if .Inv.DisplayManager}}{{.Inv.DisplayManager}}{{else}}<span class="muted">none</span>{{end}}</dd>
+      <dt>{{t "Distribution"}}</dt><dd>{{.Inv.OSName}}</dd><dt>{{t "Version"}}</dt><dd>{{.Inv.OSVersion}} {{.Inv.OSCodename}}</dd>
+      <dt>{{t "Kernel"}}</dt><dd class="mono">{{.Inv.Kernel}}</dd>
+      <dt>{{t "Desktop"}}</dt><dd>{{if .Inv.Desktop}}{{.Inv.Desktop}}{{else}}<span class="muted">{{t "none"}}</span>{{end}}</dd>
+      <dt>{{t "Display manager"}}</dt><dd>{{if .Inv.DisplayManager}}{{.Inv.DisplayManager}}{{else}}<span class="muted">{{t "none"}}</span>{{end}}</dd>
     </dl>
   </section>
   <section class="tablecard">
-    <div class="card-head"><h2>Accounts</h2><span class="muted">{{len .Inv.Accounts}} login accounts</span></div>
+    <div class="card-head"><h2>{{t "Accounts"}}</h2><span class="muted">{{len .Inv.Accounts}} {{t "login accounts"}}</span></div>
     <div class="scroll"><table>
-      <thead><tr><th>Account</th><th class="num">UID</th><th>Shell</th><th>Rights</th></tr></thead>
+      <thead><tr><th>{{t "Account"}}</th><th class="num">{{t "UID"}}</th><th>{{t "Shell"}}</th><th>{{t "Rights"}}</th></tr></thead>
       <tbody>{{range .Inv.Accounts}}<tr><td class="mono">{{.Name}}</td><td class="num">{{.UID}}</td><td class="mono muted">{{.Shell}}</td>
-        <td>{{if .Admin}}<span class="pill warn">admin</span>{{else}}<span class="pill">user</span>{{end}}</td></tr>{{else}}<tr><td colspan="4" class="empty">No account data reported.</td></tr>{{end}}</tbody>
+        <td>{{if .Admin}}<span class="pill warn">{{t "admin"}}</span>{{else}}<span class="pill">{{t "user"}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="4" class="empty">{{t "No account data reported."}}</td></tr>{{end}}</tbody>
     </table></div>
-    <div class="empty">Logged in now: {{range .Inv.Users}}<span class="tag">{{.}}</span>{{else}}not collected (privacy){{end}}</div>
+    <div class="empty">{{t "Logged in now:"}} {{range .Inv.Users}}<span class="tag">{{.}}</span>{{else}}{{t "not collected (privacy)"}}{{end}}</div>
   </section>
 </div>
 <section class="tablecard">
-  <div class="card-head"><h2>Package sources</h2><span class="muted">{{len .Inv.Repos}} configured</span></div>
+  <div class="card-head"><h2>{{t "Package sources"}}</h2><span class="muted">{{len .Inv.Repos}} {{t "configured"}}</span></div>
   <div class="scroll"><table>
-    <thead><tr><th>Source</th><th>URL</th><th>Suites</th><th>State</th><th>Signature</th></tr></thead>
+    <thead><tr><th>{{t "Source"}}</th><th>{{t "URL"}}</th><th>{{t "Suites"}}</th><th>{{t "State"}}</th><th>{{t "Signature"}}</th></tr></thead>
     <tbody>{{range .Inv.Repos}}<tr><td>{{.Name}}<span class="sub mono">{{.File}}</span></td><td class="mono">{{.URL}}</td><td>{{.Suites}}</td>
-      <td>{{if .Enabled}}<span class="pill ok">enabled</span>{{else}}<span class="pill">disabled</span>{{end}}</td>
-      <td>{{if .Signed}}<span class="pill ok">pinned key</span>{{else}}<span class="pill warn">global keyring</span>{{end}}</td></tr>{{else}}<tr><td colspan="5" class="empty">No package sources reported.</td></tr>{{end}}</tbody>
+      <td>{{if .Enabled}}<span class="pill ok">{{t "enabled"}}</span>{{else}}<span class="pill">{{t "disabled"}}</span>{{end}}</td>
+      <td>{{if .Signed}}<span class="pill ok">{{t "pinned key"}}</span>{{else}}<span class="pill warn">{{t "global keyring"}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="5" class="empty">{{t "No package sources reported."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 <section class="tablecard">
-  <div class="card-head"><h2>Packages</h2><span class="muted">{{.PackageCount}} installed</span></div>
+  <div class="card-head"><h2>{{t "Packages"}}</h2><span class="muted">{{.PackageCount}} {{t "installed"}}</span></div>
   <form class="filters" method="get" action="/devices/{{$id}}">
     <input type="hidden" name="tab" value="software">
-    <input type="search" name="q" value="{{.PkgQ}}" placeholder="Filter by package name" aria-label="Filter packages">
-    <button class="secondary">Filter</button>
+    <input type="search" name="q" value="{{.PkgQ}}" placeholder="{{t "Filter by package name"}}" aria-label="{{t "Filter packages"}}">
+    <button class="secondary">{{t "Filter"}}</button>
   </form>
   <div class="scroll"><table>
-    <thead><tr><th>Package</th><th>Version</th><th>Architecture</th></tr></thead>
-    <tbody>{{range .Packages}}<tr><td class="mono">{{.Name}}</td><td class="mono">{{.Version}}</td><td>{{.Arch}}</td></tr>{{else}}<tr><td colspan="3" class="empty">No matching packages.</td></tr>{{end}}</tbody>
+    <thead><tr><th>{{t "Package"}}</th><th>{{t "Version"}}</th><th>{{t "Architecture"}}</th></tr></thead>
+    <tbody>{{range .Packages}}<tr><td class="mono">{{.Name}}</td><td class="mono">{{.Version}}</td><td>{{.Arch}}</td></tr>{{else}}<tr><td colspan="3" class="empty">{{t "No matching packages."}}</td></tr>{{end}}</tbody>
   </table></div>
-  {{if gt .PkgPages 1}}<nav class="pager" aria-label="Package pages">
-    <span class="muted">{{.PkgFrom}}–{{.PkgTo}} of {{.PkgMatched}}</span>
-    {{if gt .PkgPage 1}}<a class="button secondary" href="/devices/{{$id}}?tab=software&amp;q={{.PkgQ}}&amp;page={{dec .PkgPage}}">Previous</a>{{end}}
-    <span>Page {{.PkgPage}} of {{.PkgPages}}</span>
-    {{if lt .PkgPage .PkgPages}}<a class="button secondary" href="/devices/{{$id}}?tab=software&amp;q={{.PkgQ}}&amp;page={{inc .PkgPage}}">Next</a>{{end}}
+  {{if gt .PkgPages 1}}<nav class="pager" aria-label="{{t "Package pages"}}">
+    <span class="muted">{{.PkgFrom}}–{{.PkgTo}} {{t "of"}} {{.PkgMatched}}</span>
+    {{if gt .PkgPage 1}}<a class="button secondary" href="/devices/{{$id}}?tab=software&amp;q={{.PkgQ}}&amp;page={{dec .PkgPage}}">{{t "Previous"}}</a>{{end}}
+    <span>{{t "Page"}} {{.PkgPage}} {{t "of"}} {{.PkgPages}}</span>
+    {{if lt .PkgPage .PkgPages}}<a class="button secondary" href="/devices/{{$id}}?tab=software&amp;q={{.PkgQ}}&amp;page={{inc .PkgPage}}">{{t "Next"}}</a>{{end}}
   </nav>{{end}}
 </section>
 {{end}}
 
 {{if eq .Tab "compliance"}}
-<div class="filters"><a class="button secondary" href="/export/compliance.csv">Evidence CSV</a></div>
+<div class="filters"><a class="button secondary" href="/export/compliance.csv">{{t "Evidence CSV"}}</a></div>
 <section class="tablecard"><div class="scroll"><table>
-  <thead><tr><th>Status</th><th>Check</th><th>Level</th><th>Detail</th><th>BSI</th><th>ISO 27001</th><th>CIS</th></tr></thead>
+  <thead><tr><th>{{t "Status"}}</th><th>{{t "Check"}}</th><th>{{t "Level"}}</th><th>{{t "Detail"}}</th><th>{{t "BSI"}}</th><th>{{t "ISO 27001"}}</th><th>{{t "CIS"}}</th></tr></thead>
   <tbody>{{range .Checks}}<tr>
-    <td><span class="pill {{.Status}}">{{.Status}}</span>{{if .Remediated}}<span class="sub">remediated</span>{{end}}</td>
-    <td>{{.Title}}<span class="sub mono">{{.ID}}</span></td><td>L{{.Level}}</td><td class="muted">{{.Detail}}</td>
+    <td><span class="pill {{.Status}}">{{t .Status}}</span>{{if .Remediated}}<span class="sub">{{t "remediated"}}</span>{{end}}</td>
+    <td>{{.Title}}<span class="sub mono">{{.ID}}</span></td><td>{{t "L"}}{{.Level}}</td><td class="muted">{{.Detail}}</td>
     <td>{{range .Refs.BSI}}<span class="tag">{{.}}</span>{{end}}</td><td>{{range .Refs.ISO}}<span class="tag">{{.}}</span>{{end}}</td>
-    <td class="muted">{{join .Refs.CIS "; "}}</td></tr>{{else}}<tr><td colspan="7" class="empty">No report yet.</td></tr>{{end}}</tbody>
+    <td class="muted">{{join .Refs.CIS "; "}}</td></tr>{{else}}<tr><td colspan="7" class="empty">{{t "No report yet."}}</td></tr>{{end}}</tbody>
 </table></div></section>
 {{end}}
 
 {{if eq .Tab "declarations"}}
 <section class="card">
-  <div class="card-head"><h2>Resolved configuration</h2><span class="muted">{{range $i, $b := .Resolved.Chain}}{{if $i}} → {{end}}<a href="/blueprints/{{$b.ID}}">{{$b.Name}}</a>{{end}}</span></div>
+  <div class="card-head"><h2>{{t "Resolved configuration"}}</h2><span class="muted">{{range $i, $b := .Resolved.Chain}}{{if $i}} → {{end}}<a href="/blueprints/{{$b.ID}}">{{$b.Name}}</a>{{end}}</span></div>
   <div class="scroll"><table>
-    <thead><tr><th>#</th><th>Library item</th><th>Type</th></tr></thead>
-    <tbody>{{range $i, $it := .Resolved.Items}}<tr><td class="num muted">{{inc $i}}</td><td><a href="/library/{{$it.ID}}">{{$it.Name}}</a></td><td>{{typeLabel $it.Type}}</td></tr>{{else}}<tr><td colspan="3" class="empty">No items match this device.</td></tr>{{end}}</tbody>
+    <thead><tr><th>#</th><th>{{t "Library item"}}</th><th>{{t "Type"}}</th></tr></thead>
+    <tbody>{{range $i, $it := .Resolved.Items}}<tr><td class="num muted">{{inc $i}}</td><td><a href="/library/{{$it.ID}}">{{$it.Name}}</a></td><td>{{typeLabel $it.Type}}</td></tr>{{else}}<tr><td colspan="3" class="empty">{{t "No items match this device."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 <section class="tablecard"><div class="scroll"><table>
-  <thead><tr><th>Status</th><th>Identifier</th><th>Type</th><th>Reasons</th></tr></thead>
-  <tbody>{{range .Decl}}<tr><td><span class="pill {{.Class}}">{{.State}}</span></td><td class="mono">{{.Identifier}}</td><td class="mono">{{.Type}}</td><td class="muted">{{join .Reasons "; "}}</td></tr>{{else}}<tr><td colspan="4" class="empty">No declarations.</td></tr>{{end}}</tbody>
+  <thead><tr><th>{{t "Status"}}</th><th>{{t "Identifier"}}</th><th>{{t "Type"}}</th><th>{{t "Reasons"}}</th></tr></thead>
+  <tbody>{{range .Decl}}<tr><td><span class="pill {{.Class}}">{{t .State}}</span></td><td class="mono">{{.Identifier}}</td><td class="mono">{{.Type}}</td><td class="muted">{{join .Reasons "; "}}</td></tr>{{else}}<tr><td colspan="4" class="empty">{{t "No declarations."}}</td></tr>{{end}}</tbody>
 </table></div></section>
 {{end}}
 
 {{if eq .Tab "commands"}}
 {{if and (eq .Sess.Role "admin") (ne .D.Status "retired")}}
 <section class="card">
-  <h2>Send command</h2>
+  <h2>{{t "Send command"}}</h2>
   <form method="post" action="/devices/{{$id}}/command">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <div class="inline">
-      <label>Command<select name="type">{{range .CommandTypes}}<option value="{{.}}">{{actionLabel .}}</option>{{end}}</select></label>
+      <label>{{t "Command"}}<select name="type">{{range .CommandTypes}}<option value="{{.}}">{{actionLabel .}}</option>{{end}}</select></label>
     </div>
-    <label class="script-only">Script <span class="hint">runs as root, only if the device allows scripts</span><textarea name="payload" rows="6" class="code" placeholder="#!/bin/sh"></textarea></label>
-    <button>Send</button>
+    <label class="script-only">{{t "Script"}} <span class="hint">{{t "runs as root, only if the device allows scripts"}}</span><textarea name="payload" rows="6" class="code" placeholder="#!/bin/sh"></textarea></label>
+    <button>{{t "Send"}}</button>
   </form>
 </section>
 {{end}}
 <section class="tablecard">
-  <div class="card-head"><h2>History</h2></div>
+  <div class="card-head"><h2>{{t "History"}}</h2></div>
   <div class="scroll"><table>
-    <thead><tr><th>#</th><th>Command</th><th>Status</th><th>By</th><th>Created</th><th>Output</th></tr></thead>
-    <tbody>{{range .Commands}}<tr><td class="num">{{.ID}}</td><td>{{.Type}}</td><td><span class="pill {{if eq .Status "ok"}}ok{{else if eq .Status "failed"}}bad{{else}}warn{{end}}">{{.Status}}</span></td><td>{{.By}}</td><td>{{fmtTime .At}}</td><td><pre>{{.Output}}</pre></td></tr>{{else}}<tr><td colspan="6" class="empty">No commands sent.</td></tr>{{end}}</tbody>
+    <thead><tr><th>#</th><th>{{t "Command"}}</th><th>{{t "Status"}}</th><th>{{t "By"}}</th><th>{{t "Created"}}</th><th>{{t "Output"}}</th></tr></thead>
+    <tbody>{{range .Commands}}<tr><td class="num">{{.ID}}</td><td>{{.Type}}</td><td><span class="pill {{if eq .Status "ok"}}ok{{else if eq .Status "failed"}}bad{{else}}warn{{end}}">{{t .Status}}</span></td><td>{{.By}}</td><td>{{fmtTime .At}}</td><td><pre>{{.Output}}</pre></td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No commands sent."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 {{if and (eq .Sess.Role "admin") (ne .D.Status "retired")}}
 <section class="card">
-  <h2>Retire device</h2>
-  <p class="muted">Revokes the client certificate immediately. The device can no longer check in; history is kept.</p>
-  <form method="post" action="/devices/{{$id}}/retire"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger">Retire and revoke certificate</button></form>
+  <h2>{{t "Retire device"}}</h2>
+  <p class="muted">{{t "Revokes the client certificate immediately. The device can no longer check in; history is kept."}}</p>
+  <form method="post" action="/devices/{{$id}}/retire"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger">{{t "Retire and revoke certificate"}}</button></form>
 </section>
 {{end}}
 {{end}}

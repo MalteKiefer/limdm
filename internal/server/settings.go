@@ -167,11 +167,11 @@ func (s *Server) activate(ctx context.Context, set Settings) error {
 // ---- settings page ----
 
 func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, sess session) {
-	s.renderSettings(w, sess, s.settings(), "", "")
+	s.renderSettings(w, r, sess, s.settings(), "", "")
 }
 
-func (s *Server) renderSettings(w http.ResponseWriter, sess session, set Settings, msg, errMsg string) {
-	s.render(w, sess, "settings", map[string]any{"Set": set, "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
+func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess session, set Settings, msg, errMsg string) {
+	s.render(w, r, sess, "settings", map[string]any{"Set": set, "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
 		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": s.webhookSecretHex()})
 }
 
@@ -198,16 +198,16 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 			return
 		}
 		if set.OIDCIssuer == "" || oidcAdmins == 0 {
-			s.renderSettings(w, sess, set, "", "Local login can only be disabled when OIDC is configured and at least one OIDC administrator exists.")
+			s.renderSettings(w, r, sess, set, "", "Local login can only be disabled when OIDC is configured and at least one OIDC administrator exists.")
 			return
 		}
 		if strings.HasPrefix(sess.Email, localPrefix) {
-			s.renderSettings(w, sess, set, "", "You are signed in with a local account; sign in with OIDC before disabling local login.")
+			s.renderSettings(w, r, sess, set, "", "You are signed in with a local account; sign in with OIDC before disabling local login.")
 			return
 		}
 	}
 	if err := s.activate(ctx, set); err != nil {
-		s.renderSettings(w, sess, set, "", err.Error())
+		s.renderSettings(w, r, sess, set, "", err.Error())
 		return
 	}
 	enc, err := s.seal32(set.OIDCClientSecret)
@@ -226,5 +226,5 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		s.fail(w, err)
 		return
 	}
-	s.renderSettings(w, sess, set, "Settings saved and active.", "")
+	s.renderSettings(w, r, sess, set, "Settings saved and active.", "")
 }

@@ -367,7 +367,7 @@ func (s *Server) library(w http.ResponseWriter, r *http.Request, sess session) {
 		}
 		groups[it.Type] = append(groups[it.Type], row{it, use[it.ID]})
 	}
-	s.render(w, sess, "library", map[string]any{"Groups": groups, "Types": types, "AllTypes": sortedTypes()})
+	s.render(w, r, sess, "library", map[string]any{"Groups": groups, "Types": types, "AllTypes": sortedTypes()})
 }
 
 func sortedTypes() []string {
@@ -409,7 +409,7 @@ func (s *Server) libraryEdit(w http.ResponseWriter, r *http.Request, sess sessio
 		s.fail(w, err)
 		return
 	}
-	s.render(w, sess, "item", map[string]any{"It": it, "Payload": pretty.String(), "AllTypes": sortedTypes(),
+	s.render(w, r, sess, "item", map[string]any{"It": it, "Payload": pretty.String(), "AllTypes": sortedTypes(),
 		"Example": api.Types[it.Type], "UsedBy": use[it.ID]})
 }
 
@@ -418,7 +418,7 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 	it := api.LibraryItem{ID: id, Name: strings.TrimSpace(r.FormValue("name")), Type: r.FormValue("type"),
 		Description: strings.TrimSpace(r.FormValue("description")), Payload: json.RawMessage(r.FormValue("payload"))}
 	fail := func(err error) {
-		s.render(w, sess, "item", map[string]any{"It": it, "Payload": r.FormValue("payload"), "AllTypes": sortedTypes(),
+		s.render(w, r, sess, "item", map[string]any{"It": it, "Payload": r.FormValue("payload"), "AllTypes": sortedTypes(),
 			"Example": api.Types[it.Type], "Error": err.Error()})
 	}
 	if err := it.Validate(); err != nil {
@@ -506,7 +506,7 @@ func (s *Server) blueprints(w http.ResponseWriter, r *http.Request, sess session
 	for _, b := range bps {
 		names[b.ID] = b.Name
 	}
-	s.render(w, sess, "blueprints", map[string]any{"Blueprints": bps, "Names": names})
+	s.render(w, r, sess, "blueprints", map[string]any{"Blueprints": bps, "Names": names})
 }
 
 func (s *Server) blueprintEdit(w http.ResponseWriter, r *http.Request, sess session) {
@@ -545,7 +545,7 @@ func (s *Server) renderBlueprint(w http.ResponseWriter, r *http.Request, sess se
 	if bp.Parent != nil {
 		parent = *bp.Parent
 	}
-	s.render(w, sess, "blueprint", map[string]any{"BP": bp, "Tree": tree, "Error": errMsg, "Items": items, "Blueprints": bps,
+	s.render(w, r, sess, "blueprint", map[string]any{"BP": bp, "Tree": tree, "Error": errMsg, "Items": items, "Blueprints": bps,
 		"ParentID": parent, "ItemsJSON": items, "FieldsJSON": api.RuleFields})
 }
 

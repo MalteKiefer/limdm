@@ -238,6 +238,7 @@ func (s *Server) AdminHandler() http.Handler {
 	})
 	s.scimRoutes(mux)
 	mux.HandleFunc("GET /login", s.loginPage)
+	mux.HandleFunc("GET /lang/{lang}", s.setLang)
 	mux.HandleFunc("GET /login/oidc", s.login)
 	mux.HandleFunc("POST /login/local", s.localLogin)
 	mux.HandleFunc("GET /auth/callback", s.callback)
