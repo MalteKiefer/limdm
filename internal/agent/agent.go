@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	mrand "math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -358,8 +359,11 @@ func (a *Agent) Run(ctx context.Context) error {
 		if wait <= 0 {
 			wait = 5 * time.Minute
 		}
+		// jitter spreads the fleet: after a blueprint change every device would
+		// otherwise check in at the same moment
+		wait += time.Duration(mrand.Int64N(int64(wait/10) + 1))
 		if a.syncNow {
-			a.syncNow, wait = false, 5*time.Second
+			a.syncNow, wait = false, 5*time.Second+time.Duration(mrand.Int64N(int64(55*time.Second)))
 		}
 		select {
 		case <-ctx.Done():

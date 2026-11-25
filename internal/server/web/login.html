@@ -13,7 +13,7 @@
       <input type="hidden" name="csrf" value="{{.LoginCSRF}}">
       <label>{{t "Username"}}<input name="username" required autocomplete="username" autocapitalize="none" spellcheck="false"></label>
       <label>{{t "Password"}}<input name="password" type="password" required autocomplete="current-password"></label>
-      <label>{{t "Authenticator code"}}<input name="totp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code"></label>
+      <label>{{t "Authenticator code"}} <span class="hint">{{t "or a recovery code"}}</span><input name="totp" pattern="[0-9]{6}|[A-Za-z2-7]{4}(-[A-Za-z2-7]{4}){2}|[A-Za-z2-7]{4}(-[A-Za-z2-7]{4}){5}" maxlength="29" required autocomplete="one-time-code" spellcheck="false"></label>
       <button>{{t "Sign in"}}</button>
     </form>
     {{end}}

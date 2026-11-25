@@ -37,9 +37,11 @@ func validLogo(b []byte) error {
 	return nil
 }
 
-// branding returns what devices receive; Hash changes with name or logo.
-func (s *Server) branding() api.Branding {
-	set := s.settings()
+// branding returns what devices receive; computed when settings are activated.
+func (s *Server) branding() api.Branding { return s.rt.Load().branding }
+
+// computeBranding derives the branding and a hash that changes with name or logo.
+func computeBranding(set Settings) api.Branding {
 	if set.CompanyName == "" && len(set.Logo) == 0 {
 		return api.Branding{}
 	}

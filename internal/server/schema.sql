@@ -201,3 +201,15 @@ CREATE TABLE IF NOT EXISTS local_recovery_codes (
     used_at TIMESTAMPTZ,
     PRIMARY KEY (name, hash)
 );
+
+-- Indexes for check in and console paths (lookups by member, inactive directory
+-- users, blueprint and primary user, metric retention).
+CREATE INDEX IF NOT EXISTS dir_members_user ON dir_members(user_id, group_id);
+CREATE INDEX IF NOT EXISTS dir_users_inactive ON dir_users(email) WHERE NOT active;
+CREATE INDEX IF NOT EXISTS dir_users_scim_username ON dir_users(lower(user_name)) WHERE source = 'scim';
+CREATE INDEX IF NOT EXISTS dir_users_source_ext ON dir_users(source, external_id);
+CREATE INDEX IF NOT EXISTS devices_blueprint ON devices(blueprint_id);
+CREATE INDEX IF NOT EXISTS devices_primary_user ON devices(primary_user_id);
+CREATE INDEX IF NOT EXISTS device_metrics_at ON device_metrics USING brin(at);
+-- last_seen and status updates change no indexed column: leave room for HOT updates
+ALTER TABLE devices SET (fillfactor = 70);

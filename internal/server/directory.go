@@ -439,7 +439,11 @@ func activeUsers(ctx context.Context, tx pgx.Tx, users []api.User) ([]api.User, 
 	if len(users) == 0 {
 		return users, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT lower(email) FROM dir_users WHERE NOT active`)
+	emails := make([]string, len(users))
+	for i, u := range users {
+		emails[i] = strings.ToLower(u.Email)
+	}
+	rows, err := tx.Query(ctx, `SELECT lower(email) FROM dir_users WHERE NOT active AND lower(email) = ANY($1)`, emails)
 	if err != nil {
 		return nil, err
 	}

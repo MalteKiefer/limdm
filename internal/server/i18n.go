@@ -308,4 +308,5 @@ var deCatalog = map[string]string{
 	"Hide system accounts": "Systemkonten ausblenden", "Show system accounts": "Systemkonten anzeigen",
 	"Resolved through NSS: local files and directory sources such as sssd, LDAP, winbind, systemd-homed and DynamicUser. Sources that disable enumeration only list known entries.": "Über NSS aufgelöst: lokale Dateien und Verzeichnisquellen wie sssd, LDAP, winbind, systemd-homed und DynamicUser. Quellen ohne Aufzählung zeigen nur bekannte Einträge.",
 	"system": "System", "local": "lokal", "directory / NSS": "Verzeichnis / NSS", "Home": "Home",
+	"or a recovery code": "oder ein Recovery Code",
 }

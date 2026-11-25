@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/maltekiefer/limdm/internal/api"
 )
 
 // Settings are the server options editable in the web UI. Bootstrap values
@@ -43,8 +45,9 @@ type storedSettings struct {
 }
 
 type runtimeState struct {
-	set  Settings
-	auth *oidcAuth // nil when OIDC is not configured
+	set      Settings
+	auth     *oidcAuth    // nil when OIDC is not configured
+	branding api.Branding // derived from set once, sent to agents and shown in the console
 }
 
 func (s *Server) settings() Settings { return s.rt.Load().set }
@@ -169,7 +172,7 @@ func (s *Server) activate(ctx context.Context, set Settings) error {
 	if auth == nil && !set.LocalLogin {
 		return errors.New("enable at least one login method: OIDC or local accounts")
 	}
-	s.rt.Store(&runtimeState{set: set, auth: auth})
+	s.rt.Store(&runtimeState{set: set, auth: auth, branding: computeBranding(set)})
 	return nil
 }
 

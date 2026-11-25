@@ -81,10 +81,16 @@ func (s *Server) mac(p string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// setCookie sets a cookie for maxAge; maxAge <= 0 deletes it (Max-Age=0 on
+// the wire, RFC 6265 5.2.2).
 func (s *Server) setCookie(w http.ResponseWriter, name, val string, maxAge time.Duration) {
+	age := int(maxAge / time.Second)
+	if maxAge <= 0 {
+		age, val = -1, ""
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name: name, Value: val, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
-		Secure: true, MaxAge: int(maxAge.Seconds()),
+		Secure: true, MaxAge: age,
 	})
 }
 

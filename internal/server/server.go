@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -181,6 +182,10 @@ type Server struct {
 	limit limiter
 	rt    atomic.Pointer[runtimeState] // settings editable in the UI and the OIDC client built from them
 	hooks *http.Client                 // webhook client; nil uses http.DefaultClient (tests inject one)
+
+	relMu  sync.Mutex // release manifest, reloaded when its modification time changes
+	relMod time.Time
+	rels   []api.Release
 }
 
 func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
@@ -188,6 +193,13 @@ func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	// explicit limits instead of the pgx default of max(4, CPUs); a pool_max_conns
+	// parameter in the URL still wins
+	if !strings.Contains(databaseURL, "pool_max_conns") {
+		pc.MaxConns = 32
+	}
+	pc.MinConns = 2
+	pc.MaxConnIdleTime = 5 * time.Minute
 	return pc, requireDBTLS(pc)
 }
 
@@ -586,14 +598,20 @@ func (s *Server) releaseFor(arch string) (api.Release, bool) {
 	if s.cfg.ReleaseDir == "" {
 		return api.Release{}, false
 	}
-	b, err := os.ReadFile(filepath.Join(s.cfg.ReleaseDir, "manifest.json"))
+	path := filepath.Join(s.cfg.ReleaseDir, "manifest.json")
+	st, err := os.Stat(path)
 	if err != nil {
 		return api.Release{}, false
 	}
-	var rels []api.Release
-	if json.Unmarshal(b, &rels) != nil {
-		return api.Release{}, false
+	s.relMu.Lock()
+	if !st.ModTime().Equal(s.relMod) {
+		var rels []api.Release
+		if b, err := os.ReadFile(path); err == nil && json.Unmarshal(b, &rels) == nil {
+			s.rels, s.relMod = rels, st.ModTime()
+		}
 	}
+	rels := s.rels
+	s.relMu.Unlock()
 	for _, r := range rels {
 		if r.Arch == arch {
 			return r, true

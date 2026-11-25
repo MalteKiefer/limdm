@@ -26,16 +26,23 @@ import (
 
 const recoveryCount = 10
 
-var recoveryCodeRe = regexp.MustCompile(`^[a-z2-7]{4}-[a-z2-7]{4}-[a-z2-7]{4}$`)
+// Recovery codes carry 120 bits (24 base32 characters), above the 112 bits
+// NIST SP 800-63B 5.1.2.2 requires for lookup secrets stored as plain hashes.
+// Codes from v0.6.0 (12 characters) are still accepted until they are replaced.
+var recoveryCodeRe = regexp.MustCompile(`^[a-z2-7]{4}(-[a-z2-7]{4}){5}$|^[a-z2-7]{4}(-[a-z2-7]{4}){2}$`)
 
 // selfPage lets every role post to its own profile.
 func (s *Server) selfPage(h handler) http.HandlerFunc { return s.pageFor(h, "self") }
 
 func newRecoveryCode() string {
-	b := make([]byte, 8)
+	b := make([]byte, 15) // 120 bits, exactly 24 base32 characters
 	rand.Read(b)
-	s := strings.ToLower(b32.EncodeToString(b))[:12]
-	return s[:4] + "-" + s[4:8] + "-" + s[8:]
+	s := strings.ToLower(b32.EncodeToString(b))
+	parts := make([]string, 0, 6)
+	for i := 0; i < len(s); i += 4 {
+		parts = append(parts, s[i:i+4])
+	}
+	return strings.Join(parts, "-")
 }
 
 func hashCode(c string) string {
