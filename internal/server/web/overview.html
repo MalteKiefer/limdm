@@ -24,6 +24,8 @@
         </ul>
       </div>
     </section>
+    {{if .Trend}}<section class="card"><div class="card-head"><h2>Compliance trend</h2><span class="muted">daily, 30 days</span></div>{{.Trend}}
+      <ul class="legend inline-legend"><li><span class="dot ok"></span>compliant</li><li><span class="dot bad"></span>non-compliant</li><li><span class="dot warn"></span>in grace</li><li><span class="dot na"></span>stale or pending</li></ul></section>{{end}}
     <section class="tablecard">
       <div class="card-head"><h2>Most failing checks</h2><a class="muted" href="/compliance">All checks</a></div>
       {{if .Failing}}

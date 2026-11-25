@@ -37,6 +37,8 @@
   <div class="stat"><div class="label">CPU</div><div class="value">{{if .Inv.CPUThreads}}{{.Inv.CPUThreads}}{{else}}n/a{{end}}</div><div class="hint">{{if .Inv.CPUCores}}{{.Inv.CPUCores}} cores, {{end}}threads</div></div>
   <div class="stat"><div class="label">Root filesystem</div><div class="value">{{.Inv.DiskGB}} GB</div><div class="hint">{{len .Inv.Volumes}} volumes, {{len .Inv.Disks}} disks</div></div>
 </div>
+{{if .Charts}}<section class="card"><div class="card-head"><h2>Last 7 days</h2><span class="muted">sampled every 15 minutes</span></div>
+  <div class="charts"><figure>{{index .Charts 0}}<figcaption>Memory used</figcaption></figure><figure>{{index .Charts 1}}<figcaption>Root filesystem used</figcaption></figure><figure>{{index .Charts 2}}<figcaption>Load (1 min)</figcaption></figure></div></section>{{end}}
 <div class="grid side-right">
   <section class="card">
     <h2>System</h2>

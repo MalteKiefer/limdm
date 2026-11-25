@@ -792,3 +792,54 @@ func TestWebhookSignature(t *testing.T) {
 		t.Fatal("webhook not delivered")
 	}
 }
+
+func TestHistory(t *testing.T) {
+	dsn := os.Getenv("LIMDM_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("LIMDM_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	db.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname) VALUES ('d1', 's', now(), 'pc1')`)
+	rec := func(m *api.Metrics) {
+		t.Helper()
+		tx, _ := db.Begin(ctx)
+		if err := recordMetrics(ctx, tx, "d1", m); err != nil {
+			t.Fatal(err)
+		}
+		tx.Commit(ctx)
+	}
+	rec(&api.Metrics{MemUsedMB: 900, MemTotalMB: 100}) // implausible, ignored
+	rec(&api.Metrics{MemUsedMB: 1000, MemTotalMB: 4000, RootUsedPct: 40, Load1: 0.5})
+	rec(&api.Metrics{MemUsedMB: 2000, MemTotalMB: 4000, RootUsedPct: 41, Load1: 0.7}) // within 15 min, dropped
+	var n int
+	db.QueryRow(ctx, `SELECT count(*) FROM device_metrics`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("want 1 sample, got %d", n)
+	}
+	db.Exec(ctx, `UPDATE device_metrics SET at = at - interval '1 hour'`)
+	rec(&api.Metrics{MemUsedMB: 2000, MemTotalMB: 4000, RootUsedPct: 41, Load1: 0.7})
+	s := &Server{db: db, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	charts, err := s.deviceCharts(ctx, "d1")
+	if err != nil || len(charts) != 3 || !strings.Contains(string(charts[0]), "<polyline") {
+		t.Fatalf("device charts: %v %d", err, len(charts))
+	}
+	if err := s.snapshotFleet(ctx); err != nil {
+		t.Fatal(err)
+	}
+	db.Exec(ctx, `INSERT INTO fleet_history VALUES (current_date - 1, 3, 1, 0, 0, 0)`)
+	chart, err := s.fleetChart(ctx)
+	if err != nil || !strings.Contains(string(chart), `class="line bad"`) {
+		t.Fatalf("fleet chart: %v", err)
+	}
+}

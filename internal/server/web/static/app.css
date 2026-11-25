@@ -269,3 +269,17 @@ button.ghost.danger { color: var(--bad); }
 .inline-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0; }
 .inline-form select { width: auto; margin: 0; }
 .inline-form label.check { margin: 0; }
+
+/* ---- line charts ---- */
+.chart { width: 100%; height: auto; display: block; }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .axis { font-size: 10px; fill: var(--text-3); text-anchor: end; }
+.chart .axis.start { text-anchor: start; }
+.chart polyline { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .line.accent { stroke: var(--accent); } .chart .line.ok { stroke: var(--ok); } .chart .line.bad { stroke: var(--bad); }
+.chart .line.warn { stroke: var(--warn); } .chart .line.na { stroke: var(--na); stroke-dasharray: 4 3; }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.charts figure { margin: 0; }
+.charts figcaption { font-size: 12px; color: var(--text-3); margin-top: 4px; }
+.inline-legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; min-width: 0; }
+.inline-legend li { display: flex; gap: 6px; }

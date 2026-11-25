@@ -324,6 +324,34 @@ func (h *host) adminGroup() string {
 	return "wheel"
 }
 
+// metrics reads memory, root filesystem usage and load for history charts.
+func metrics() *api.Metrics {
+	m := &api.Metrics{}
+	var total, avail uint64
+	for _, line := range strings.Split(readFile("/proc/meminfo"), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			continue
+		}
+		v, _ := strconv.ParseUint(f[1], 10, 64)
+		switch f[0] {
+		case "MemTotal:":
+			total = v
+		case "MemAvailable:":
+			avail = v
+		}
+	}
+	m.MemTotalMB, m.MemUsedMB = total/1024, (total-min(avail, total))/1024
+	var st syscall.Statfs_t
+	if syscall.Statfs("/", &st) == nil && st.Blocks > 0 {
+		m.RootUsedPct = float64(st.Blocks-st.Bfree) * 100 / float64(st.Blocks)
+	}
+	if f := strings.Fields(readFile("/proc/loadavg")); len(f) > 0 {
+		m.Load1, _ = strconv.ParseFloat(f[0], 64)
+	}
+	return m
+}
+
 // ---- inventory ----
 
 // inventory collects hardware and OS facts. Personal data (IPs, logged in

@@ -223,6 +223,7 @@ func (s *Server) Close() { s.db.Close() }
 // Background runs periodic jobs until ctx ends.
 func (s *Server) Background(ctx context.Context) {
 	go s.googleSyncLoop(ctx)
+	go s.historyLoop(ctx)
 }
 
 // AdminHandler serves the web UI.
@@ -470,6 +471,10 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		statusHash = req.StatusHash
+	}
+	if err := recordMetrics(ctx, tx, id, req.Metrics); err != nil {
+		s.fail(w, err)
+		return
 	}
 	if req.Packages != nil {
 		pk, _ := json.Marshal(req.Packages)

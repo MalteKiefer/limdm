@@ -83,6 +83,25 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS notified_at TIMESTAMPTZ;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS auto_locked BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS primary_user_id BIGINT REFERENCES dir_users(id) ON DELETE SET NULL;
 
+-- History for charts: per device at most every 15 minutes, fleet once a day; 30 days kept.
+CREATE TABLE IF NOT EXISTS device_metrics (
+    device_id     TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    at            TIMESTAMPTZ NOT NULL,
+    mem_used_mb   BIGINT NOT NULL,
+    mem_total_mb  BIGINT NOT NULL,
+    root_used_pct REAL NOT NULL,
+    load1         REAL NOT NULL,
+    PRIMARY KEY (device_id, at)
+);
+CREATE TABLE IF NOT EXISTS fleet_history (
+    day           DATE PRIMARY KEY,
+    compliant     INT NOT NULL,
+    noncompliant  INT NOT NULL,
+    in_grace      INT NOT NULL,
+    stale         INT NOT NULL,
+    pending       INT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version    INT PRIMARY KEY,
     applied_at TIMESTAMPTZ NOT NULL DEFAULT now()

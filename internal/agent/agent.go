@@ -396,7 +396,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	sum := sha256.Sum256(sb)
 	statusHash := hex.EncodeToString(sum[:])
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
-		StatusHash: statusHash, Results: a.state.Results, Events: a.state.Events}
+		StatusHash: statusHash, Results: a.state.Results, Events: a.state.Events, Metrics: metrics()}
 	if statusHash != a.sentStatusHash {
 		req.Status = &status
 	}

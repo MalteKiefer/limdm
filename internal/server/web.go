@@ -316,7 +316,12 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 	}
 	donut := donutChart([]donutPart{{"compliant", counts["compliant"], "ok"}, {"non-compliant", counts["non-compliant"], "bad"},
 		{"in grace", counts["in grace"], "warn"}, {"stale", counts["stale"], "warn"}, {"pending", counts["pending"], "na"}})
-	s.render(w, sess, "overview", map[string]any{"Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
+	trend, err := s.fleetChart(ctx)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.render(w, sess, "overview", map[string]any{"Trend": trend, "Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
 		"Recent": recent, "StaleHours": s.settings().StaleHours})
 }
 
@@ -420,6 +425,11 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		s.fail(w, err)
 		return
 	}
+	charts, err := s.deviceCharts(ctx, id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	// expected declarations, to show what the device has not confirmed yet
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -501,7 +511,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
 		"CommandTypes": api.CommandTypes,
 		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab,
-		"Resolved": res, "Tags": strings.Join(tags, ", "), "Primary": primary, "People": people, "Since": since,
+		"Resolved": res, "Tags": strings.Join(tags, ", "), "Primary": primary, "People": people, "Since": since, "Charts": charts,
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "software", "compliance", "declarations", "commands"},
 	})
 }

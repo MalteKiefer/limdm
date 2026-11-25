@@ -535,7 +535,16 @@ type CheckinRequest struct {
 	Packages          []Package       `json:"packages,omitempty"`
 	PackagesHash      string          `json:"packages_hash"`
 	Results           []CommandResult `json:"results,omitempty"`
+	Metrics           *Metrics        `json:"metrics,omitempty"` // sent every check in, outside the status hash
 	Events            []string        `json:"events,omitempty"`
+}
+
+// Metrics are point in time measurements for history charts.
+type Metrics struct {
+	MemUsedMB   uint64  `json:"mem_used_mb"`
+	MemTotalMB  uint64  `json:"mem_total_mb"`
+	RootUsedPct float64 `json:"root_used_pct"`
+	Load1       float64 `json:"load1"`
 }
 
 type CheckinResponse struct {
