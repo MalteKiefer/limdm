@@ -3,7 +3,7 @@
 <div class="page-head"><div><h1>{{t "Settings"}}</h1><div class="meta"><span>{{t "Database, listeners and keys stay in the server environment"}}</span></div></div></div>
 {{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
 {{if .Msg}}<div class="notice ok" role="status">{{t .Msg}}</div>{{end}}
-<form method="post" action="/settings">
+<form method="post" action="/settings" enctype="multipart/form-data">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <div class="grid two">
     <section class="card">
@@ -20,6 +20,10 @@
       <label class="check"><input type="checkbox" name="local_login" {{if .Set.LocalLogin}}checked{{end}}> {{t "allow local accounts (password + TOTP)"}}</label>
       <label>{{t "Device counts as stale after (hours)"}}<input name="stale_hours" type="number" min="1" max="2160" value="{{.Set.StaleHours}}"></label>
       <label>{{t "Compliance webhook"}} <span class="hint">{{t "https URL receiving JSON when a device becomes non-compliant"}}</span><input name="webhook_url" value="{{.Set.WebhookURL}}" placeholder="{{t "https://hooks.example.com/limdm"}}" spellcheck="false"></label>
+      <h2>{{t "Branding"}}</h2>
+      <label>{{t "Company name"}} <span class="hint">{{t "shown in the console and in dialogs on devices"}}</span><input name="company_name" value="{{.Set.CompanyName}}" maxlength="80"></label>
+      <label>{{t "Logo"}} <span class="hint">{{t "PNG, square, up to 256 KiB"}}</span><input type="file" name="logo" accept="image/png"></label>
+      {{if .Set.Logo}}<div class="logo-preview"><img src="/branding/logo.png?v={{.Brand.V}}" alt=""><label class="check"><input type="checkbox" name="remove_logo"> {{t "remove logo"}}</label></div>{{end}}
       <dl class="kv"><dt>{{t "Public URL"}}</dt><dd class="mono">{{.PublicURL}}</dd>
         {{if eq .Sess.Role "admin"}}<dt>{{t "Webhook signing key"}}</dt><dd><span class="fp">{{.WebhookSecret}}</span><span class="sub">verify X-LiMDM-Signature: sha256=HMAC-SHA256(key, body)</span></dd>{{end}}</dl>
     </section>

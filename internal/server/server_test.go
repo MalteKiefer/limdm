@@ -8,6 +8,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -140,5 +142,21 @@ func TestLineChartEscapes(t *testing.T) {
 	}
 	if !strings.Contains(out, ">250%<") { // axis grows to the max value
 		t.Fatalf("axis not scaled: %s", out)
+	}
+}
+
+func TestValidLogo(t *testing.T) {
+	var buf bytes.Buffer
+	png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 64, 64)))
+	if err := validLogo(buf.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if validLogo([]byte(`<svg onload="alert(1)"/>`)) == nil {
+		t.Fatal("SVG accepted")
+	}
+	buf.Reset()
+	png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 4000, 10)))
+	if validLogo(buf.Bytes()) == nil {
+		t.Fatal("oversized logo accepted")
 	}
 }

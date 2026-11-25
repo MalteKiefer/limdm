@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -31,6 +32,8 @@ type Settings struct {
 	LocalLogin       bool   `json:"local_login"`
 	StaleHours       int    `json:"stale_hours"`
 	WebhookURL       string `json:"webhook_url"`
+	CompanyName      string `json:"company_name,omitempty"` // shown in the console and on devices
+	Logo             []byte `json:"logo_png,omitempty"`     // PNG, at most 256 KiB and 1024 px
 }
 
 // storedSettings is the database form; the client secret is AES-GCM sealed.
@@ -145,6 +148,12 @@ func (s *Server) activate(ctx context.Context, set Settings) error {
 			return errors.New("webhook URL must be https")
 		}
 	}
+	if len(set.CompanyName) > 80 || strings.ContainsAny(set.CompanyName, "\x00\n\r\t") {
+		return errors.New("company name: up to 80 characters on one line")
+	}
+	if err := validLogo(set.Logo); err != nil {
+		return err
+	}
 	var auth *oidcAuth
 	if set.OIDCIssuer != "" {
 		if !strings.HasPrefix(set.OIDCIssuer, "https://") || set.OIDCClientID == "" {
@@ -183,6 +192,19 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		OIDCIssuer: strings.TrimRight(strings.TrimSpace(r.FormValue("oidc_issuer")), "/"), OIDCClientID: strings.TrimSpace(r.FormValue("oidc_client_id")),
 		OIDCClientSecret: cur.OIDCClientSecret, AllowedDomain: strings.ToLower(strings.TrimSpace(r.FormValue("allowed_domain"))),
 		LocalLogin: r.FormValue("local_login") == "on", StaleHours: stale, WebhookURL: strings.TrimSpace(r.FormValue("webhook_url")),
+		CompanyName: strings.TrimSpace(r.FormValue("company_name")), Logo: cur.Logo,
+	}
+	if f, _, err := r.FormFile("logo"); err == nil {
+		b, err := io.ReadAll(io.LimitReader(f, maxLogo+1))
+		f.Close()
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		set.Logo = b
+	}
+	if r.FormValue("remove_logo") == "on" {
+		set.Logo = nil
 	}
 	if v := r.FormValue("oidc_client_secret"); v != "" {
 		set.OIDCClientSecret = v
@@ -216,8 +238,9 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		return
 	}
 	doc, _ := json.Marshal(storedSettings{Settings: set, SecretEnc: enc})
-	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v",
-		set.OIDCIssuer, set.AllowedDomain, set.LocalLogin, set.StaleHours, set.WebhookURL != "", set.OIDCClientSecret != cur.OIDCClientSecret)
+	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d",
+		set.OIDCIssuer, set.AllowedDomain, set.LocalLogin, set.StaleHours, set.WebhookURL != "", set.OIDCClientSecret != cur.OIDCClientSecret,
+		set.CompanyName, len(set.Logo))
 	err = s.auditAction(ctx, sess.Email, "settings.save", "server", detail, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
 		return err

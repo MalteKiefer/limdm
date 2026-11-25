@@ -72,6 +72,8 @@ type State struct {
 	PendingKeys    []pendingKey         `json:"pending_keys,omitempty"` // recovery keys not yet escrowed
 	Escrowed       map[string]time.Time `json:"escrowed,omitempty"`     // LUKS UUID: escrowed at
 	EscrowNotified time.Time            `json:"escrow_notified"`
+	Company        string               `json:"company,omitempty"`
+	BrandingHash   string               `json:"branding_hash,omitempty"`
 }
 
 type Agent struct {
@@ -82,6 +84,8 @@ type Agent struct {
 	state  State
 
 	pol        api.Policy
+	desktop    *desktopServer
+	kick       chan struct{}
 	declStatus []api.DeclarationStatus
 	users      []api.User
 	reasons    map[string][]string // declaration type -> why it is not active
@@ -341,6 +345,9 @@ func (a *Agent) Run(ctx context.Context) error {
 	wake := make(chan os.Signal, 1)
 	signal.Notify(wake, syscall.SIGUSR1) // "recovery-key" asks for an immediate check in
 	defer signal.Stop(wake)
+	a.kick = make(chan struct{}, 1)
+	a.desktop = &desktopServer{a: a, queued: map[string]bool{}, failures: map[uint32][]time.Time{}}
+	go a.serveDesktop(ctx)
 	for {
 		a.cycle(ctx)
 		wait := time.Duration(a.pol.CheckinSeconds) * time.Second
@@ -356,6 +363,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			return nil
 		case <-time.After(wait):
 		case <-wake:
+		case <-a.kick:
 		}
 	}
 }
@@ -398,6 +406,7 @@ func (a *Agent) declarationStatus() []api.DeclarationStatus {
 
 func (a *Agent) cycle(ctx context.Context) {
 	defer a.saveState()
+	defer a.publishDesktop()
 	a.renewIdentity(ctx)
 	a.takeEscrowRequests()
 	checks := a.converge()
@@ -408,7 +417,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	sum := sha256.Sum256(sb)
 	statusHash := hex.EncodeToString(sum[:])
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
-		StatusHash: statusHash, Results: a.state.Results, Events: a.state.Events, Metrics: metrics()}
+		StatusHash: statusHash, Results: a.state.Results, Events: a.state.Events, Metrics: metrics(), BrandingHash: a.state.BrandingHash}
 	// an invalid key would make the server reject every check in
 	a.state.PendingKeys = slices.DeleteFunc(a.state.PendingKeys, func(k pendingKey) bool { return !k.Valid() })
 	sentKeys := slices.Clone(a.state.PendingKeys)
@@ -436,6 +445,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	if len(sentKeys) > 0 {
 		a.escrowConfirmed(sentKeys)
 	}
+	a.applyBranding(resp.Branding)
 	if len(resp.RecoveryRotate) > 0 {
 		a.rotateRecovery(resp.RecoveryRotate)
 	}

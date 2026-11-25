@@ -537,7 +537,15 @@ type CheckinRequest struct {
 	Results           []CommandResult `json:"results,omitempty"`
 	Metrics           *Metrics        `json:"metrics,omitempty"`       // sent every check in, outside the status hash
 	RecoveryKeys      []RecoveryKey   `json:"recovery_keys,omitempty"` // new LUKS recovery keys to escrow
+	BrandingHash      string          `json:"branding_hash,omitempty"`
 	Events            []string        `json:"events,omitempty"`
+}
+
+// Branding is the company name and PNG logo shown by the desktop helper.
+type Branding struct {
+	Name string `json:"name"`
+	Logo []byte `json:"logo,omitempty"`
+	Hash string `json:"hash"`
 }
 
 // Metrics are point in time measurements for history charts.
@@ -560,6 +568,8 @@ type CheckinResponse struct {
 	// RecoveryRotate carries escrowed keys the agent should replace (after
 	// they were viewed); the current key unlocks the slot for the new one.
 	RecoveryRotate []RecoveryKey `json:"recovery_rotate,omitempty"`
+	// Branding is sent when it differs from the agent's BrandingHash.
+	Branding *Branding `json:"branding,omitempty"`
 }
 
 // ---- signed agent releases ----

@@ -398,13 +398,14 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 	inv.Accounts = accounts(readPasswdGroup())
 	inv.Repos = h.repos()
 	inv.Desktop, inv.DisplayManager = desktop()
-	if addrs, err := net.Interfaces(); err == nil && priv.NetworkInfo {
+	// interfaces and MACs are hardware inventory; addresses only with consent
+	if addrs, err := net.Interfaces(); err == nil {
 		for _, ifc := range addrs {
 			if ifc.Flags&net.FlagLoopback != 0 {
 				continue
 			}
 			n := api.NIC{Name: ifc.Name, MAC: ifc.HardwareAddr.String()}
-			if as, err := ifc.Addrs(); err == nil {
+			if as, err := ifc.Addrs(); err == nil && priv.NetworkInfo {
 				for _, a := range as {
 					if ipn, ok := a.(*net.IPNet); ok && !ipn.IP.IsLinkLocalUnicast() {
 						n.IPs = append(n.IPs, ipn.IP.String())

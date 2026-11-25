@@ -295,3 +295,13 @@ button.ghost.danger { color: var(--bad); }
 
 /* ---- spacing: submit buttons below stacked fields ---- */
 .card form > button, .card form > .actions { margin-top: 12px; }
+
+/* ---- branding ---- */
+.brand img, .brand-row img { max-height: 28px; max-width: 120px; object-fit: contain; }
+.logo-preview { display: flex; align-items: center; gap: 12px; margin: 4px 0 12px; }
+.logo-preview img { width: 48px; height: 48px; object-fit: contain; border: 1px solid var(--line); border-radius: 6px; padding: 4px; background: var(--surface, #fff); }
+
+/* ---- header actions: select and button on one line, same height ---- */
+.page-head form.actions { align-items: stretch; flex-wrap: nowrap; }
+.page-head form.actions select { width: auto; min-width: 220px; margin: 0; }
+.page-head form.actions button { margin: 0; white-space: nowrap; }

@@ -282,3 +282,28 @@ func TestPolkitAndSudoRendering(t *testing.T) {
 		t.Fatalf("sudo line: %q", line)
 	}
 }
+
+func TestDesktopServer(t *testing.T) {
+	a := &Agent{kick: make(chan struct{}, 1)}
+	d := &desktopServer{a: a, queued: map[string]bool{"u2": true}, failures: map[uint32][]time.Time{}}
+	d.info.Store(&desktopInfo{Company: "ACME", Need: []luksVolume{{"/dev/sda3", "u1"}, {"/dev/sdb1", "u2"}}})
+	st := d.serve(1000, DesktopRequest{Op: "status"})
+	if st.Company != "ACME" || len(st.Need) != 1 || st.Need[0].UUID != "u1" {
+		t.Fatalf("status: %+v", st)
+	}
+	if r := d.serve(1000, DesktopRequest{Op: "escrow", UUID: "u2", Passphrase: "x"}); r.OK || r.Error == "" {
+		t.Fatal("queued volume accepted again")
+	}
+	if r := d.serve(1000, DesktopRequest{Op: "escrow", UUID: "u1"}); r.OK {
+		t.Fatal("empty passphrase accepted")
+	}
+	for range 5 {
+		d.recordFailure(1000)
+	}
+	if r := d.serve(1000, DesktopRequest{Op: "escrow", UUID: "u1", Passphrase: "x"}); !strings.Contains(r.Error, "too many") {
+		t.Fatalf("rate limit: %+v", r)
+	}
+	if !d.allowAttempt(1001) {
+		t.Fatal("rate limit must be per user")
+	}
+}

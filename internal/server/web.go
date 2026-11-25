@@ -155,6 +155,8 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, na
 	data["Sess"] = sess
 	data["CSRF"] = s.csrfToken(sess)
 	data["Page"] = name
+	b := s.branding()
+	data["Brand"] = map[string]any{"Name": b.Name, "Logo": len(b.Logo) > 0, "V": b.Hash}
 	var buf bytes.Buffer
 	if err := pages[requestLang(r)][name].Execute(&buf, data); err != nil {
 		s.fail(w, err)

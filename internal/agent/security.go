@@ -273,6 +273,8 @@ func luksRemoveKey(dev, key string) error {
 
 // takeEscrowRequests moves keys created by "limdm-agent recovery-key" into state.
 func (a *Agent) takeEscrowRequests() {
+	escrowMu.Lock()
+	defer escrowMu.Unlock()
 	b, err := os.ReadFile(escrowRequest)
 	if err != nil {
 		return
@@ -363,7 +365,7 @@ func runRecoveryEscrow(a *Agent) (string, string) {
 		for _, v := range m {
 			p = append(p, v.Path)
 		}
-		return fail, "no recovery key escrowed for " + strings.Join(p, ", ") + "; run: pkexec limdm-agent recovery-key"
+		return fail, "no recovery key escrowed for " + strings.Join(p, ", ") + "; the user is asked on the desktop"
 	}
 	return pass, strconv.Itoa(len(vols)) + " LUKS volume(s) with escrowed recovery key"
 }
@@ -379,6 +381,10 @@ func (a *Agent) notifyEscrow() {
 	if err != nil {
 		return
 	}
+	company := a.state.Company
+	if company == "" {
+		company = "IT"
+	}
 	sent := false
 	for _, l := range strings.Split(out, "\n") {
 		f := strings.Fields(l)
@@ -392,9 +398,14 @@ func (a *Agent) notifyEscrow() {
 		if _, err := os.Stat("/run/user/" + uid + "/bus"); err != nil {
 			continue
 		}
-		if _, err := run(15*time.Second, "runuser", "-u", user, "--", "env", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"+uid+"/bus",
-			"notify-send", "--urgency=critical", "--app-name=LiMDM", "Disk recovery key required",
-			"Your IT department needs a recovery key for the disk encryption. Open a terminal and run: pkexec limdm-agent recovery-key"); err == nil {
+		args := []string{"-u", user, "--", "env", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/" + uid + "/bus",
+			"notify-send", "--urgency=critical", "--app-name=" + company}
+		if _, err := os.Stat(brandingLogo); err == nil {
+			args = append(args, "--icon="+brandingLogo)
+		}
+		args = append(args, "Disk recovery key required",
+			company+" needs a recovery key for your disk encryption. Open \"Disk recovery key\" in the applications menu.")
+		if _, err := run(15*time.Second, "runuser", args...); err == nil {
 			sent = true
 		}
 	}
