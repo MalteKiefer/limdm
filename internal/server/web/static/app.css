@@ -527,5 +527,46 @@ a.pill { text-decoration: none; }
 
 /* notification channel form: fields by kind (CSS :has, no JavaScript) */
 .channel-form .kind-email { display: none; }
-.channel-form:has(select[name=kind] option[value=email]:checked) .kind-email { display: block; }
-.channel-form:has(select[name=kind] option[value=email]:checked) .kind-url { display: none; }
+.channel-form:has(input[name=kind][value=email]:checked) .kind-email { display: block; }
+.channel-form:has(input[name=kind][value=email]:checked) .kind-url { display: none; }
+.channel-form:has(input[name=kind][value=slack]:checked) .kind-url input::placeholder { color: transparent; }
+.card-head.stacked { display: block; }
+.card-head.stacked p { margin: 4px 0 0; font-size: 13px; }
+.tablecard > .card-head.stacked { padding: 16px 18px 14px; margin: 0; border-bottom: 1px solid var(--line); }
+.empty-state { padding: 32px 24px; text-align: center; }
+.empty-state p { margin: 6px auto 0; max-width: 46ch; font-size: 13px; }
+.field-hint { display: block; margin-top: 6px; font-size: 12px; font-weight: 400; color: var(--text-3); }
+legend .field-hint { display: inline; margin: 0 0 0 8px; }
+.form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.form-row:has(.grow) { grid-template-columns: minmax(0, 1fr) 110px 140px; }
+@media (max-width: 640px) { .form-row:has(.grow) { grid-template-columns: 1fr; } }
+fieldset.kind-picker, fieldset.event-grid { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
+fieldset.kind-picker legend, fieldset.event-grid legend { font-size: 13px; font-weight: 500; color: var(--text-2); padding: 0; margin-bottom: 8px; }
+fieldset.kind-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+fieldset.kind-picker legend { grid-column: 1 / -1; }
+.kind-picker label { position: relative; margin: 0; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius);
+  background: var(--surface); cursor: pointer; display: grid; gap: 2px; transition: border-color .12s, background .12s; }
+.kind-picker label:hover { border-color: var(--text-3); }
+.kind-picker label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent) inset; }
+.kind-picker label:has(input:focus-visible) { box-shadow: 0 0 0 3px var(--accent-soft); }
+.kind-picker input { position: absolute; opacity: 0; pointer-events: none; }
+.kind-picker strong { color: var(--text); font-size: 14px; }
+.kind-picker span { font-size: 12px; font-weight: 400; color: var(--text-3); }
+fieldset.event-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; }
+fieldset.event-grid legend { grid-column: 1 / -1; }
+.event-grid label.check { align-items: flex-start; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); cursor: pointer; }
+.event-grid label.check:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.event-grid label.check input { margin-top: 2px; accent-color: var(--accent); }
+.event-grid code { display: block; margin-top: 2px; font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+.kind-badge { display: inline-block; font-size: 12px; font-weight: 500; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); }
+
+table.channels td { vertical-align: middle; }
+table.channels td:first-child { font-weight: 500; }
+.event-tags { display: flex; flex-wrap: wrap; gap: 4px; max-width: 360px; }
+.event-tags .tag { font-family: inherit; font-size: 12px; white-space: nowrap; margin: 0; padding: 1px 8px; border-radius: 999px; }
+table.channels td.delivery { min-width: 220px; }
+table.channels td.delivery .sub { max-width: 320px; }
+/* an open row menu must not be clipped by the scrolling table card */
+.tablecard:has(details.menu[open]), .scroll:has(details.menu[open]) { overflow: visible; }
+td.row-actions .menu-list form { display: block; }
+td.row-actions .menu-list { text-align: left; }

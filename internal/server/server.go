@@ -3,6 +3,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -30,6 +31,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -194,7 +196,10 @@ type Server struct {
 	hooks  *http.Client                 // webhook client; nil uses http.DefaultClient (tests inject one)
 	geoSem chan struct{}                // one location lookup at a time
 
-	saveMu sync.Mutex // serializes settings saves
+	saveMu     sync.Mutex  // serializes settings saves
+	rediscover atomic.Bool // OIDC discovery failed at startup and is retried
+	// ponytail: per process; a database row lock when SCIM runs on several instances
+	scimMu sync.Mutex // serializes SCIM PATCH read-modify-write
 	fleet  atomic.Pointer[fleetCache]
 	// first broken audit entry found by the last full verification, 0 = intact
 	auditBroken atomic.Int64
@@ -270,6 +275,7 @@ func (s *Server) Background(ctx context.Context) {
 		"releases": s.releaseLoop, "catalog icons": s.iconLoop} {
 		go s.background(ctx, name, loop)
 	}
+	go s.rediscoverLoop(ctx)
 }
 
 // background runs a loop for the life of the server: a panic is logged and
@@ -354,15 +360,30 @@ func (s *Server) AgentHandler() http.Handler {
 // expired certificate.
 func (s *Server) AgentTLSConfig() (*tls.Config, error) {
 	u, _ := url.Parse(s.cfg.AgentURL)
-	cert, err := s.ca.serverCert(append([]string{u.Hostname()}, s.cfg.AgentHosts...))
+	names := append([]string{u.Hostname()}, s.cfg.AgentHosts...)
+	cert, err := s.ca.serverCert(names)
 	if err != nil {
 		return nil, err
 	}
+	var mu sync.Mutex
 	return &tls.Config{
-		MinVersion:   tls.VersionTLS13,
-		Certificates: []tls.Certificate{cert},
-		ClientAuth:   tls.RequestClientCert,
-		ClientCAs:    s.ca.pool(),
+		MinVersion: tls.VersionTLS13,
+		// the certificate lives a year; a server running longer issues a new
+		// one a month before it expires instead of failing every handshake
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if time.Until(cert.Leaf.NotAfter) < 30*24*time.Hour {
+				if next, err := s.ca.serverCert(names); err == nil {
+					cert = next
+				} else {
+					s.log.Error("renew agent TLS certificate", "err", err)
+				}
+			}
+			return &cert, nil
+		},
+		ClientAuth: tls.RequestClientCert,
+		ClientCAs:  s.ca.pool(),
 	}, nil
 }
 
@@ -456,6 +477,9 @@ func (s *Server) deviceAuth(next http.HandlerFunc, allowExpired bool) http.Handl
 		var pending *string
 		err = s.db.QueryRow(r.Context(), `SELECT cert_serial, pending_serial FROM devices WHERE id=$1 AND NOT retired`, id).Scan(&current, &pending)
 		switch {
+		case err != nil && !errors.Is(err, pgx.ErrNoRows):
+			s.failAPI(w, err) // a database outage is not a revoked certificate
+			return
 		case err == nil && serial == current:
 		case err == nil && pending != nil && serial == *pending:
 			// first use of a renewed certificate: it replaces (and revokes) the previous one
@@ -478,7 +502,8 @@ func (s *Server) deviceAuth(next http.HandlerFunc, allowExpired bool) http.Handl
 
 func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	// unauthenticated: limit attempts per address before touching the database
-	if !s.limit.allow("enroll:"+clientIP(r), 20, 5*time.Minute) {
+	// only failures count: a mass rollout behind one office NAT must not hit it
+	if s.limit.over("enroll:"+rateKey(r), 20, 5*time.Minute) {
 		problem(w, http.StatusTooManyRequests, "too many enrollment attempts, try again later")
 		return
 	}
@@ -498,6 +523,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRow(ctx, `UPDATE enroll_tokens SET uses_left = uses_left - 1
 		WHERE token_hash=$1 AND uses_left > 0 AND expires_at > now() RETURNING blueprint_id`, sha(req.Token)).Scan(&blueprintID)
 	if err != nil {
+		s.limit.allow("enroll:"+rateKey(r), 20, 5*time.Minute) // counts the failure
 		s.log.Warn("enroll rejected", "remote", clientIP(r))
 		problem(w, http.StatusForbidden, "invalid or expired token")
 		return
@@ -601,7 +627,8 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 		if err := s.db.QueryRow(ctx, `SELECT EXISTS (
 			SELECT 1 FROM devices d, jsonb_array_elements(d.users) u
 			WHERE d.id=$1 AND d.last_seen IS NOT NULL AND (
-				EXISTS (SELECT 1 FROM dir_users du WHERE lower(du.email)=lower(u->>'email') AND NOT du.active AND du.updated_at > d.last_seen)
+				EXISTS (SELECT 1 FROM dir_users du WHERE (lower(du.email)=lower(u->>'email') OR lower(u->>'email') = ANY(du.previous_emails))
+					AND NOT du.active AND du.updated_at > d.last_seen)
 				OR EXISTS (SELECT 1 FROM dir_tombstones t WHERE t.email=lower(u->>'email') AND t.removed_at > d.last_seen)))`, id).Scan(&pending); err != nil {
 			s.failAPI(w, err)
 			return
@@ -655,11 +682,8 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st := req.Status; st != nil {
-		inv, _ := json.Marshal(st.Inventory)
-		checks, _ := json.Marshal(st.Checks)
-		decl, _ := json.Marshal(st.Declarations)
 		if _, err := tx.Exec(ctx, `UPDATE devices SET hostname=$2, inventory=$3, checks=$4, decl_status=$5, failing=$6, status_hash=$7 WHERE id=$1`,
-			id, truncate(st.Inventory.Hostname, 255), string(inv), string(checks), string(decl), countFailing(st.Checks), req.StatusHash); err != nil {
+			id, truncate(st.Inventory.Hostname, 255), jsonb(st.Inventory), jsonb(st.Checks), jsonb(st.Declarations), countFailing(st.Checks), req.StatusHash); err != nil {
 			s.failAPI(w, err)
 			return
 		}
@@ -674,8 +698,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Packages != nil {
-		pk, _ := json.Marshal(req.Packages)
-		if _, err := tx.Exec(ctx, `UPDATE devices SET packages=$2, packages_hash=$3 WHERE id=$1`, id, string(pk), req.PackagesHash); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE devices SET packages=$2, packages_hash=$3 WHERE id=$1`, id, jsonb(req.Packages), req.PackagesHash); err != nil {
 			s.failAPI(w, err)
 			return
 		}
@@ -765,16 +788,35 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		s.failAPI(w, err)
 		return
 	}
+	// notify once per disabled user and device, not at every check in
+	var notified, disabled []string
+	if err := tx.QueryRow(ctx, `SELECT users_disabled FROM devices WHERE id=$1`, id).Scan(&notified); err != nil {
+		s.failAPI(w, err)
+		return
+	}
 	for _, u := range listed {
 		if !slices.ContainsFunc(resp.Users, func(k api.User) bool { return k.Username == u.Username }) {
-			notices = append(notices, notice{Type: "directory.user_disabled", Severity: "warning",
-				Title: "Device user disabled: " + u.Email, Text: "The account " + u.Username + " is locked on the device and its sessions end."})
+			disabled = append(disabled, u.Username)
+			if !slices.Contains(notified, u.Username) {
+				notices = append(notices, notice{Type: "directory.user_disabled", Severity: "warning",
+					Title: "Device user disabled: " + u.Email, Text: "The account " + u.Username + " is locked on the device and its sessions end."})
+			}
+		}
+	}
+	if !slices.Equal(notified, disabled) {
+		if _, err := tx.Exec(ctx, `UPDATE devices SET users_disabled=$2 WHERE id=$1`, id, append([]string{}, disabled...)); err != nil {
+			s.failAPI(w, err)
+			return
 		}
 	}
 	if len(req.AppRequests) > 0 {
 		var apps []string
-		for _, ar := range req.AppRequests {
-			apps = append(apps, firstNonEmpty(ar.App, ar.Name, ar.Flatpak)+" ("+ar.User+")")
+		for i, ar := range req.AppRequests {
+			if i == 5 {
+				apps = append(apps, fmt.Sprintf("and %d more", len(req.AppRequests)-5))
+				break
+			}
+			apps = append(apps, truncate(firstNonEmpty(ar.App, ar.Name, ar.Flatpak), 80)+" ("+truncate(ar.User, 64)+")")
 		}
 		notices = append(notices, notice{Type: "catalog.request", Severity: "info", Title: "App requested",
 			Text: strings.Join(apps, ", ") + ". Decide under Software, Requests."})
@@ -887,11 +929,60 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
 
+// truncate makes text from devices and users storable: PostgreSQL TEXT takes
+// neither NUL bytes nor invalid UTF-8. The result is at most n bytes and cut
+// on a character boundary.
 func truncate(s string, n int) string {
+	s = strings.ToValidUTF8(strings.ReplaceAll(s, "\x00", ""), "\uFFFD")
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "\n[truncated]"
+	suffix := "…"
+	if n >= 1000 {
+		suffix = "\n[truncated]"
+	}
+	cut := max(n-len(suffix), 0)
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + suffix
+}
+
+// jsonb encodes v for a JSONB column: nil slices become [] (not the JSON
+// null that jsonb_array_* functions reject) and NUL characters, which JSONB
+// refuses, are dropped from every string.
+func jsonb(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil || string(b) == "null" {
+		return "[]"
+	}
+	if !bytes.Contains(b, []byte(`\u0000`)) {
+		return string(b)
+	}
+	var x any
+	if json.Unmarshal(b, &x) != nil {
+		return "[]"
+	}
+	var clean func(any) any
+	clean = func(v any) any {
+		switch t := v.(type) {
+		case string:
+			return strings.ReplaceAll(t, "\x00", "")
+		case []any:
+			for i := range t {
+				t[i] = clean(t[i])
+			}
+		case map[string]any:
+			m := make(map[string]any, len(t))
+			for k, e := range t {
+				m[strings.ReplaceAll(k, "\x00", "")] = clean(e)
+			}
+			return m
+		}
+		return v
+	}
+	b, _ = json.Marshal(clean(x))
+	return string(b)
 }
 
 // consoleFilter refuses console requests from networks outside the allowed
@@ -968,8 +1059,10 @@ func (s *Server) deliverCommands(ctx context.Context, tx pgx.Tx, id string) ([]a
 		WHERE device_id=$1 AND status IN ('pending','sent') AND created_at < now() - interval '7 days'`, id); err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `UPDATE commands SET status='sent', updated_at=now() WHERE device_id=$1 AND status IN ('pending','sent')
-		RETURNING id, type, payload, created_at, signature`, id)
+	// RETURNING has no order; the agent runs commands in the order received,
+	// so "install updates" before "restart" must stay in that order
+	rows, err := tx.Query(ctx, `WITH sent AS (UPDATE commands SET status='sent', updated_at=now() WHERE device_id=$1 AND status IN ('pending','sent')
+		RETURNING id, type, payload, created_at, signature) SELECT * FROM sent ORDER BY id`, id)
 	if err != nil {
 		return nil, err
 	}

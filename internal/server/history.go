@@ -15,7 +15,7 @@ import (
 
 // recordMetrics stores at most one sample per device every 15 minutes.
 func recordMetrics(ctx context.Context, tx pgx.Tx, deviceID string, m *api.Metrics) error {
-	if m == nil || m.MemTotalMB == 0 || m.MemUsedMB > m.MemTotalMB || m.RootUsedPct < 0 || m.RootUsedPct > 100 ||
+	if m == nil || m.MemTotalMB == 0 || m.MemTotalMB > 1<<40 || m.MemUsedMB > m.MemTotalMB || m.RootUsedPct < 0 || m.RootUsedPct > 100 ||
 		m.Load1 < 0 || m.Load1 > 10000 || math.IsNaN(m.Load1) || math.IsNaN(m.RootUsedPct) {
 		return nil // ignore implausible values instead of failing the check in
 	}

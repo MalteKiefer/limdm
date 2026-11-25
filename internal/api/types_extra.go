@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -397,12 +398,22 @@ func (d Declaration) applyExtra(p *Policy) (bool, error) {
 // mergeExtra merges list types of the additional library types.
 func mergeExtra(typ string, a, b json.RawMessage) (json.RawMessage, bool, error) {
 	byName := func(key string) (json.RawMessage, error) {
-		var x, y map[string][]map[string]any
-		if err := errors.Join(json.Unmarshal(a, &x), json.Unmarshal(b, &y)); err != nil {
+		// only the list itself: other fields of the payload (repositories'
+		// "disable") have other shapes
+		list := func(raw json.RawMessage) ([]map[string]any, error) {
+			var m map[string]json.RawMessage
+			var l []map[string]any
+			if err := json.Unmarshal(raw, &m); err != nil || len(m[key]) == 0 {
+				return nil, err
+			}
+			return l, json.Unmarshal(m[key], &l)
+		}
+		out, errA := list(a)
+		in, errB := list(b)
+		if err := errors.Join(errA, errB); err != nil {
 			return nil, err
 		}
-		out := x[key]
-		for _, it := range y[key] {
+		for _, it := range in {
 			replaced := false
 			for i, e := range out {
 				if e["name"] == it["name"] {
@@ -470,9 +481,14 @@ func mergeExtra(typ string, a, b json.RawMessage) (json.RawMessage, bool, error)
 	case TypeFlatpak:
 		var x, y Flatpak
 		if err = errors.Join(json.Unmarshal(a, &x), json.Unmarshal(b, &y)); err == nil {
-			remotes := x.Remotes
+			// a later item wins for the same remote, as for every other list
+			remotes := slices.Clone(x.Remotes)
 			for _, r := range y.Remotes {
-				if !containsRemote(remotes, r) {
+				if i := slices.IndexFunc(remotes, func(e FlatpakRemote) bool {
+					return e.Name == r.Name && e.InstallationScope() == r.InstallationScope()
+				}); i >= 0 {
+					remotes[i] = r
+				} else {
 					remotes = append(remotes, r)
 				}
 			}
@@ -483,15 +499,6 @@ func mergeExtra(typ string, a, b json.RawMessage) (json.RawMessage, bool, error)
 		return mergeSecurity(typ, a, b)
 	}
 	return out, true, err
-}
-
-func containsRemote(rs []FlatpakRemote, x FlatpakRemote) bool {
-	for _, r := range rs {
-		if r.Name == x.Name && r.InstallationScope() == x.InstallationScope() {
-			return true
-		}
-	}
-	return false
 }
 
 // sysctlForbidden lists kernel parameters that name programs the kernel runs

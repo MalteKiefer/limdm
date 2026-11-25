@@ -132,7 +132,7 @@ func (s *Server) recoveryView(w http.ResponseWriter, r *http.Request, sess sessi
 	}
 	pol, _ := api.Compose(decls)
 	rotate := pol.Extra.DiskEncryption != nil && pol.Extra.DiskEncryption.RotateAfterView
-	if _, err := tx.Exec(ctx, `UPDATE recovery_keys SET viewed_at=now(), viewed_by=$3, rotate=$4 WHERE device_id=$1 AND uuid=$2`,
+	if _, err := tx.Exec(ctx, `UPDATE recovery_keys SET viewed_at=now(), viewed_by=$3, rotate=rotate OR $4 WHERE device_id=$1 AND uuid=$2`,
 		id, uuid, sess.Email, rotate); err != nil {
 		s.fail(w, err)
 		return

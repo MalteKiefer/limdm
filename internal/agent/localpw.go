@@ -75,6 +75,8 @@ func deviceLocked() bool {
 	return s == nologinText || strings.HasPrefix(s, lostPrefix)
 }
 
+func inLostMode() bool { return strings.HasPrefix(readFile(nologinFile), lostPrefix) }
+
 func recordSSO(user string, at time.Time) error {
 	m := readSSO()
 	m[user] = at.UTC()
@@ -200,6 +202,9 @@ func (a *Agent) syncPasswordLocks() {
 	}
 	now := time.Now()
 	for user := range readUsers() {
+		if a.state.UserLocked[user] {
+			continue // locked by IT; only user_unlock releases it
+		}
 		want := a.state.OfflineLocked || deviceLocked() || ssoLockWanted(p, user, now)
 		has := passwordLocked(user)
 		switch {
@@ -228,7 +233,7 @@ func (a *Agent) enforceOffline(contact bool) {
 	switch {
 	case overdue && !a.state.OfflineLocked:
 		a.state.OfflineLocked = true
-		if readFile(nologinFile) != nologinText { // a manual lock keeps its own message
+		if !deviceLocked() { // a manual lock and lost mode keep their own message
 			if _, err := writeIfChanged(nologinFile, offlineText, 0o644); err != nil {
 				a.event("offline lock: %v", err)
 			}

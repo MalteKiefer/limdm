@@ -86,8 +86,10 @@ func (s *Server) dueUpdate(ctx context.Context, q querier, deviceID, running str
 		return nil, false, err
 	}
 	if requested && target != "" {
-		// a version an admin picked for this device counts as its approval
-		if target == running {
+		// a version an admin picked for this device counts as its approval;
+		// agents never downgrade, so an older pick is dropped instead of
+		// being offered (and making the device poll) forever
+		if target == running || !api.NewerVersion(target, running) {
 			return nil, true, nil
 		}
 		var r agentRelease
@@ -256,11 +258,19 @@ func (s *Server) fetchReleases(ctx context.Context) (int, error) {
 		if rel.Draft || rel.Prerelease || !api.PackageRe.MatchString(api.PackageName(version, "amd64", "deb")) {
 			continue
 		}
-		var exists bool
-		if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_releases WHERE version=$1)`, version).Scan(&exists); err != nil {
+		if time.Since(rel.PublishedAt) < 10*time.Minute {
+			continue // the release workflow uploads the signature after publishing
+		}
+		var sig *string
+		if err := s.db.QueryRow(ctx, `SELECT sums_sig FROM agent_releases WHERE version=$1`, version).Scan(&sig); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return n, err
 		}
-		if exists {
+		if sig != nil {
+			if *sig == "" { // fetched before the signature was uploaded
+				if err := s.addReleaseSignature(ctx, version, rel); err != nil {
+					s.log.Warn("release signature", "version", version, "err", err)
+				}
+			}
 			continue
 		}
 		if err := s.fetchRelease(ctx, version, rel); err != nil {
@@ -269,6 +279,23 @@ func (s *Server) fetchReleases(ctx context.Context) (int, error) {
 		n++
 	}
 	return n, nil
+}
+
+// addReleaseSignature stores the SHA256SUMS signature of a release that was
+// imported without one.
+func (s *Server) addReleaseSignature(ctx context.Context, version string, rel ghRelease) error {
+	name := "limdm_" + version + "_SHA256SUMS.sig"
+	for _, a := range rel.Assets {
+		if a.Name == name {
+			sig, err := getBytes(ctx, a.URL, 4<<10)
+			if err != nil {
+				return err
+			}
+			_, err = s.db.Exec(ctx, `UPDATE agent_releases SET sums_sig=$2 WHERE version=$1 AND sums_sig=''`, version, strings.TrimSpace(string(sig)))
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Server) fetchRelease(ctx context.Context, version string, rel ghRelease) error {

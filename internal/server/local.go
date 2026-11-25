@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"slices"
@@ -128,8 +129,37 @@ func totpURI(name, secret string) string {
 
 // ponytail: in memory, per process; move to the database when running more than one server.
 type limiter struct {
-	mu   sync.Mutex
-	hits map[string][]time.Time
+	mu    sync.Mutex
+	hits  map[string][]time.Time
+	swept time.Time
+}
+
+// limiterTTL bounds every window in use; keys without a hit inside it are
+// dropped, so rotating source addresses cannot grow the map without end.
+const limiterTTL = time.Hour
+
+// sweep drops idle keys; called with mu held.
+func (l *limiter) sweep(now time.Time) {
+	if now.Sub(l.swept) < time.Minute && len(l.hits) < 50000 {
+		return
+	}
+	l.swept = now
+	for k, ts := range l.hits {
+		if len(ts) == 0 || now.Sub(ts[len(ts)-1]) > limiterTTL {
+			delete(l.hits, k)
+		}
+	}
+}
+
+// rateKey is the client's address for rate limits: IPv6 clients by their
+// /64, since every host gets a whole prefix to pick addresses from.
+func rateKey(r *http.Request) string {
+	ip := clientIP(r)
+	if a, err := netip.ParseAddr(ip); err == nil && a.Is6() && !a.Is4In6() {
+		p, _ := a.Prefix(64)
+		return p.String()
+	}
+	return ip
 }
 
 // over reports whether key reached max hits within window, without counting.
@@ -152,6 +182,7 @@ func (l *limiter) allow(key string, max int, window time.Duration) bool {
 		l.hits = map[string][]time.Time{}
 	}
 	now := time.Now()
+	l.sweep(now)
 	recent := l.hits[key][:0]
 	for _, t := range l.hits[key] {
 		if now.Sub(t) < window {
@@ -175,11 +206,14 @@ func clientIP(r *http.Request) string {
 		host = r.RemoteAddr
 	}
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// the entry the proxy appended: the last of all header lines (a proxy
+		// may add its own line instead of extending the client's)
+		if xff := strings.Join(r.Header.Values("X-Forwarded-For"), ","); xff != "" {
 			parts := strings.Split(xff, ",")
 			if fwd := net.ParseIP(strings.TrimSpace(parts[len(parts)-1])); fwd != nil {
 				return fwd.String()
 			}
+			return "0.0.0.0" // unparsable: never fall back to the always allowed loopback peer
 		}
 	}
 	return host
@@ -212,7 +246,7 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "login form expired, reload the page", http.StatusForbidden)
 		return
 	}
-	if !s.limit.allow(clientIP(r), 10, 5*time.Minute) {
+	if !s.limit.allow("login:"+rateKey(r), 10, 5*time.Minute) {
 		http.Error(w, "too many attempts, try again later", http.StatusTooManyRequests)
 		return
 	}

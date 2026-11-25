@@ -179,6 +179,12 @@ func TestIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// httptest puts its own certificate in when Certificates is empty
+	first, err := tc.GetCertificate(&tls.ClientHelloInfo{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tc.Certificates = []tls.Certificate{*first}
 	agentSrv := httptest.NewUnstartedServer(s.AgentHandler())
 	agentSrv.TLS = tc
 	agentSrv.StartTLS()

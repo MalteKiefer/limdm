@@ -626,6 +626,10 @@ var deCatalog = map[string]string{
 	// tamper protection
 	"Tamper attempt reported": "Manipulationsversuch gemeldet", "Details are in the audit log (agent.tamper).": "Details stehen im Audit Log (agent.tamper).",
 	"Allow uninstall for 1 hour": "Deinstallation für 1 Stunde erlauben",
-	"Device events":              "Geräteereignisse", "latest 100, kept 365 days": "letzte 100, 365 Tage aufbewahrt",
+	"Connect Slack, Discord, email or a signed webhook to hear about non-compliant devices, tamper attempts and failed commands.": "Verbinde Slack, Discord, E-Mail oder einen signierten Webhook, um über nicht konforme Geräte, Manipulationsversuche und fehlgeschlagene Befehle informiert zu werden.",
+	"Incoming webhook": "Eingehender Webhook", "Channel webhook": "Kanal Webhook", "Your SMTP server": "Eigener SMTP Server",
+	"Signed JSON to any HTTPS endpoint":                                      "Signiertes JSON an einen HTTPS Endpunkt",
+	"Stored encrypted. Only https targets on public addresses are accepted.": "Wird verschlüsselt gespeichert. Nur https Ziele mit öffentlicher Adresse sind erlaubt.",
+	"Device events": "Geräteereignisse", "kept 365 days": "365 Tage aufbewahrt", "Event pages": "Ereignisseiten",
 	"and": "und", "more": "weitere",
 }

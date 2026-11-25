@@ -172,7 +172,7 @@ func (s *Server) flathubSearch(ctx context.Context, query string) ([]api.Flatpak
 		}
 	}
 	rows.Close()
-	var hits []api.FlatpakHit
+	hits := []api.FlatpakHit{} // never JSON null: the console script reads .length
 	for _, h := range res.Hits {
 		if !api.ValidFlatpakID(h.AppID) || known[h.AppID] {
 			continue

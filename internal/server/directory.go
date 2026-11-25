@@ -210,9 +210,9 @@ func (s *Server) googleSettings(ctx context.Context) (googleSettings, error) {
 	return g, json.Unmarshal(raw, &g)
 }
 
-func (s *Server) saveGoogle(ctx context.Context, g googleSettings) error {
+func saveGoogle(ctx context.Context, tx pgx.Tx, g googleSettings) error {
 	doc, _ := json.Marshal(g)
-	_, err := s.db.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('google', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
+	_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('google', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
 	return err
 }
 
@@ -246,7 +246,7 @@ func (s *Server) googleConfigure(w http.ResponseWriter, r *http.Request, sess se
 		s.renderDirectory(w, r, sess, "", "", "service account key and an admin email for delegation are required")
 		return
 	}
-	if err := s.auditAction(ctx, sess.Email, "directory.google_configure", g.AdminEmail, "service account updated", func(pgx.Tx) error { return s.saveGoogle(ctx, g) }); err != nil {
+	if err := s.auditAction(ctx, sess.Email, "directory.google_configure", g.AdminEmail, "service account updated", func(tx pgx.Tx) error { return saveGoogle(ctx, tx, g) }); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -309,6 +309,7 @@ func (s *Server) syncGoogle(ctx context.Context) (string, error) {
 		ID           string `json:"id"`
 		PrimaryEmail string `json:"primaryEmail"`
 		Suspended    bool   `json:"suspended"`
+		Archived     bool   `json:"archived"` // former employees kept for their data
 		Name         struct {
 			FullName string `json:"fullName"`
 		} `json:"name"`
@@ -329,6 +330,18 @@ func (s *Server) syncGoogle(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// every HTTP call before the transaction: a transaction idle while
+	// paging through large groups runs into the idle timeout
+	type member struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+	}
+	groupMembers := make([][]member, len(groups))
+	for i, gr := range groups {
+		if groupMembers[i], err = googleList[member](ctx, client, "https://admin.googleapis.com/admin/directory/v1/groups/"+url.PathEscape(gr.ID)+"/members?maxResults=200", "members"); err != nil {
+			return "", err
+		}
+	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -344,11 +357,25 @@ func (s *Server) syncGoogle(ctx context.Context) (string, error) {
 		}
 		var id int64
 		email := strings.ToLower(u.PrimaryEmail)
-		if err := tx.QueryRow(ctx, `INSERT INTO dir_users(external_id, source, user_name, email, display_name, department, title, active)
-			VALUES ($1,'google',$2,$2,$3,$4,$5,$6)
-			ON CONFLICT (email) DO UPDATE SET external_id=EXCLUDED.external_id, source='google', display_name=EXCLUDED.display_name,
-			department=EXCLUDED.department, title=EXCLUDED.title, active=EXCLUDED.active, updated_at=now() RETURNING id`,
-			u.ID, email, u.Name.FullName, dept, title, !u.Suspended).Scan(&id); err != nil {
+		active := !u.Suspended && !u.Archived
+		// the Google ID first: a renamed primary email updates the same row
+		// (the old address goes to previous_emails) instead of leaving an
+		// orphan that stays active
+		err := tx.QueryRow(ctx, `UPDATE dir_users SET user_name=$2, email=$2, display_name=$3, department=$4, title=$5, active=$6, updated_at=now()
+			WHERE source='google' AND external_id=$1 RETURNING id`, u.ID, email, u.Name.FullName, dept, title, active).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// a row of another source (SCIM) with this email stays with that source
+			err = tx.QueryRow(ctx, `INSERT INTO dir_users(external_id, source, user_name, email, display_name, department, title, active)
+				VALUES ($1,'google',$2,$2,$3,$4,$5,$6)
+				ON CONFLICT (email) DO UPDATE SET external_id=EXCLUDED.external_id, display_name=EXCLUDED.display_name,
+				department=EXCLUDED.department, title=EXCLUDED.title, active=EXCLUDED.active, updated_at=now()
+				WHERE dir_users.source='google' RETURNING id`,
+				u.ID, email, u.Name.FullName, dept, title, active).Scan(&id)
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue // provisioned through SCIM
+			}
+		}
+		if err != nil {
 			return "", err
 		}
 		seen[u.ID] = id
@@ -361,23 +388,18 @@ func (s *Server) syncGoogle(ctx context.Context) (string, error) {
 	if _, err := tx.Exec(ctx, `UPDATE dir_users SET active=false, updated_at=now() WHERE source='google' AND NOT (external_id = ANY($1))`, ids); err != nil {
 		return "", err
 	}
-	for _, gr := range groups {
+	groupIDs := make([]string, 0, len(groups))
+	for i, gr := range groups {
+		groupIDs = append(groupIDs, gr.ID)
 		var gid int64
 		if err := tx.QueryRow(ctx, `INSERT INTO dir_groups(external_id, source, name) VALUES ($1,'google',$2)
 			ON CONFLICT (source, external_id) DO UPDATE SET name=EXCLUDED.name, updated_at=now() RETURNING id`, gr.ID, firstNonEmpty(gr.Email, gr.Name)).Scan(&gid); err != nil {
 			return "", err
 		}
-		members, err := googleList[struct {
-			ID   string `json:"id"`
-			Type string `json:"type"`
-		}](ctx, client, "https://admin.googleapis.com/admin/directory/v1/groups/"+url.PathEscape(gr.ID)+"/members?maxResults=200", "members")
-		if err != nil {
-			return "", err
-		}
 		if _, err := tx.Exec(ctx, `DELETE FROM dir_members WHERE group_id=$1`, gid); err != nil {
 			return "", err
 		}
-		for _, m := range members {
+		for _, m := range groupMembers[i] {
 			if uid, ok := seen[m.ID]; ok && m.Type == "USER" {
 				if _, err := tx.Exec(ctx, `INSERT INTO dir_members(group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, gid, uid); err != nil {
 					return "", err
@@ -385,10 +407,18 @@ func (s *Server) syncGoogle(ctx context.Context) (string, error) {
 			}
 		}
 	}
+	// groups deleted in Google stop selecting blueprints (members and the
+	// group's blueprint assignment go with it); an empty answer deletes
+	// nothing, it is more likely an API hiccup than no groups at all
+	if len(groupIDs) > 0 {
+		if _, err := tx.Exec(ctx, `DELETE FROM dir_groups WHERE source='google' AND NOT (external_id = ANY($1))`, groupIDs); err != nil {
+			return "", err
+		}
+	}
 	res := fmt.Sprintf("%d users, %d groups", len(users), len(groups))
-	g.LastSync, g.LastResult = time.Now().UTC(), res
-	doc, _ := json.Marshal(g)
-	if _, err := tx.Exec(ctx, `UPDATE settings SET value=$1, updated_at=now() WHERE key='google'`, string(doc)); err != nil {
+	// only the sync fields: a key or admin saved while the sync ran must stay
+	if _, err := tx.Exec(ctx, `UPDATE settings SET value = value || jsonb_build_object('last_sync', $1::timestamptz, 'last_result', $2::text), updated_at=now() WHERE key='google'`,
+		time.Now().UTC(), res); err != nil {
 		return "", err
 	}
 	if err := audit(ctx, tx, "system", "directory.google_sync", "google", res); err != nil {
@@ -456,8 +486,9 @@ func activeUsers(ctx context.Context, tx pgx.Tx, users []api.User) ([]api.User, 
 	for i, u := range users {
 		emails[i] = strings.ToLower(u.Email)
 	}
-	rows, err := tx.Query(ctx, `SELECT lower(email) FROM dir_users WHERE NOT active AND lower(email) = ANY($1)
-		UNION SELECT email FROM dir_tombstones WHERE email = ANY($1)`, emails)
+	rows, err := tx.Query(ctx, `SELECT e FROM unnest($1::text[]) e WHERE
+		EXISTS (SELECT 1 FROM dir_users WHERE NOT active AND (lower(email) = e OR e = ANY(previous_emails)))
+		OR EXISTS (SELECT 1 FROM dir_tombstones WHERE email = e)`, emails)
 	if err != nil {
 		return nil, err
 	}

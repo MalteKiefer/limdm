@@ -61,6 +61,21 @@ func TestLimiter(t *testing.T) {
 	if l.allow("a", 3, time.Minute) || !l.allow("b", 3, time.Minute) {
 		t.Fatal("limit not per key")
 	}
+	// idle keys are dropped
+	l.mu.Lock()
+	l.hits["old"] = []time.Time{time.Now().Add(-2 * limiterTTL)}
+	l.swept = time.Time{}
+	l.mu.Unlock()
+	l.allow("c", 3, time.Minute)
+	if _, ok := l.hits["old"]; ok {
+		t.Fatal("idle key kept")
+	}
+	// IPv6 clients share the budget of their /64
+	r1, r2 := httptest.NewRequest("GET", "/", nil), httptest.NewRequest("GET", "/", nil)
+	r1.RemoteAddr, r2.RemoteAddr = "[2001:db8:1:2::1]:4000", "[2001:db8:1:2::ffff]:4000"
+	if rateKey(r1) != rateKey(r2) || rateKey(r1) != "2001:db8:1:2::/64" {
+		t.Fatalf("rate keys %s %s", rateKey(r1), rateKey(r2))
+	}
 }
 
 func TestClientIP(t *testing.T) {

@@ -18,21 +18,32 @@ ISO/IEC 27001:2022 Annex A.
 ## Features
 
 * **Library items and blueprints.** Reusable, strictly validated configuration items
-  (packages, firewall, SSH, sudo, polkit, package sources, certificates, proxy and more)
-  are assigned through blueprints with nested conditions and inheritance.
-* **Compliance** with automatic remediation, grace periods, signed webhooks, automatic
-  lock and CSV evidence for auditors.
+  (packages, firewall, SSH, sudo, polkit, package sources, certificates, proxy, screen lock
+  and more) are assigned through blueprints with nested conditions and inheritance.
+* **Compliance** with automatic remediation, grace periods, automatic lock and CSV evidence
+  for auditors.
+* **Device commands** for lock and unlock, lost mode, wipe, restart, scripts, updates,
+  software removal and local accounts (create, admin rights, password, lock). Every command
+  is signed with Ed25519 and checked by the agent before it runs.
 * **Single sign on** for the console (OIDC, for example Google Workspace) and for the
-  desktop login, with a local password after SSO, mandatory reconfirmation and an
-  offline lock.
+  desktop login, either for every login or as a session model like Platform SSO, with
+  configurable reconfirmation and offline grace.
 * **Directory** sync via SCIM 2.0 or the Google Directory API; groups select blueprints,
   deactivated people lose their device accounts.
+* **Software store** in the desktop app: a curated catalog from Flathub and vendor
+  repositories (for example Tailscale, Mullvad, NetBird), requests for other apps and
+  approval in the console.
+* **Notifications** to email, Slack, Discord and signed webhooks for non compliant devices,
+  tamper attempts, failed commands and more.
 * **Disk encryption recovery keys** created on the device with the user's passphrase in a
   branded desktop dialog, escrowed and sealed on the server.
-* **Inventory** via osquery: hardware, disks, volumes, packages, accounts, network
-  interfaces, package sources.
-* **mTLS only** between agent and server (TLS 1.3, private device CA, pinned fingerprint),
-  append only and hash chained audit log, console in English and German.
+* **Inventory** via osquery: hardware, disks, volumes, packages, Flatpaks, snaps, accounts,
+  network interfaces, package sources.
+* **Security by default:** mTLS only between agent and server (TLS 1.3, private device CA,
+  pinned fingerprint), signed library items, DNS over HTTPS fallback on the agent, IP allow
+  and block lists for the console, append only and hash chained audit log.
+* **Agent self updates** with signed checksums and automatic rollback; packages for deb,
+  rpm, Arch and Alpine, systemd and OpenRC. Console in English and German.
 
 ## Quick start
 
@@ -52,7 +63,7 @@ enrollment token and install the agent on a device:
 curl -fsSL https://mdm.example.com/install.sh | sudo LIMDM_TOKEN=lmt_... sh
 ```
 
-Host installation with deb or rpm packages behind Caddy, OIDC and all options:
+Host installation with deb, rpm, Arch or Alpine packages behind Caddy, OIDC and all options:
 [docs/installation.md](docs/installation.md).
 
 ## Documentation
@@ -64,11 +75,13 @@ Host installation with deb or rpm packages behind Caddy, OIDC and all options:
 | [Concepts](docs/concepts.md) | Declarations, library, blueprints, conditions, inheritance, directory |
 | [Declarations](docs/declarations.md) | Reference of every library item type |
 | [Agent deployment](docs/agent.md) | Install script, mass deployment with `enroll.conf`, desktop helper, updates |
-| [Desktop login](docs/desktop-login.md) | SSO login, local password, reconfirmation, offline lock |
+| [Desktop login](docs/desktop-login.md) | SSO login and session mode, reconfirmation, offline grace |
 | [Disk encryption](docs/disk-encryption.md) | Recovery key escrow and rotation |
 | [Compliance](docs/compliance.md) | Checks, frameworks, policies, webhooks, evidence |
-| [Software catalog](docs/software.md) | Self service apps in the desktop app, requests, Flathub filter |
-| [Security](docs/security.md) | Architecture, mTLS, sessions, audit log, privacy |
+| [Software catalog](docs/software.md) | Self service apps in the desktop app, requests, Flathub and vendor repositories |
+| [Notifications](docs/notifications.md) | Email, Slack, Discord and webhook channels, events, delivery log |
+| [Security](docs/security.md) | Architecture, mTLS, signed commands, sessions, audit log, privacy |
+| [Agent API](docs/api.md) | Endpoints, problem details, integrity of commands and items |
 | [Operations](docs/operations.md) | Backup, restore, releases, troubleshooting |
 | [Development](docs/development.md) | Building, tests, release process |
 

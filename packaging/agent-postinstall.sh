@@ -1,6 +1,7 @@
 #!/bin/sh
 # deb: configure (install and upgrade); rpm: $1 = 1 install, 2 upgrade;
-# pacman and apk run it after install and upgrade as well.
+# pacman and apk run it as post install and, configured in .goreleaser.yml,
+# as post upgrade hook.
 set -e
 if ! [ -d /run/systemd/system ] && command -v rc-update >/dev/null 2>&1; then
     # OpenRC (Alpine)

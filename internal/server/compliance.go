@@ -166,10 +166,9 @@ func (s *Server) sendWebhook(ev *webhookEvent) {
 
 // webhookClient does not follow redirects: a redirect could point the server
 // at internal addresses (blind SSRF).
-var webhookClient = &http.Client{
-	Timeout:       10 * time.Second,
-	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-}
+// It shares the notification transport: no loopback, link-local or metadata
+// targets (the legacy webhook URL is set in the console like a channel).
+var webhookClient = notifyClient
 
 // insertCommand stores a command with its signature: the ID and creation
 // time come from the insert, the signature covers them with the payload.

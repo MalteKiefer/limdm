@@ -381,9 +381,10 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 	if q != "" {
 		keep.Set("q", q)
 	}
+	keepURL := template.URL(keep.Encode()) //nolint:gosec // url.Values.Encode escapes every key and value
 	s.render(w, r, sess, "devices", map[string]any{"Devices": shown, "Total": len(list), "Counts": counts, "Q": q, "Status": status,
 		"Statuses": []string{"compliant", "in grace", "non-compliant", "stale", "pending", "retired"},
-		"Filter":   filter, "FilterKey": filterKey, "FilterVal": filterVal, "Keep": keep.Encode(), "Tags": tags, "Apps": apps,
+		"Filter":   filter, "FilterKey": filterKey, "FilterVal": filterVal, "Keep": keepURL, "Tags": tags, "Apps": apps,
 		"Back": r.URL.RequestURI()})
 }
 
@@ -658,8 +659,17 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		Detail string
 	}
 	var events []deviceEvent
+	const evSize = 50
+	evPage, evTotal := 1, 0
 	if r.URL.Query().Get("tab") == "commands" {
-		rows, err := s.db.Query(ctx, `SELECT at, detail FROM device_events WHERE device_id=$1 ORDER BY id DESC LIMIT 100`, id)
+		if err := s.db.QueryRow(ctx, `SELECT count(*) FROM device_events WHERE device_id=$1`, id).Scan(&evTotal); err != nil {
+			s.fail(w, err)
+			return
+		}
+		if n, err := strconv.Atoi(r.URL.Query().Get("evpage")); err == nil && n > 1 {
+			evPage = min(n, max(1, (evTotal+evSize-1)/evSize))
+		}
+		rows, err := s.db.Query(ctx, `SELECT at, detail FROM device_events WHERE device_id=$1 ORDER BY id DESC LIMIT $2 OFFSET $3`, id, evSize, (evPage-1)*evSize)
 		if err == nil {
 			events, err = pgx.CollectRows(rows, pgx.RowToStructByPos[deviceEvent])
 		}
@@ -668,6 +678,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 			return
 		}
 	}
+	evPages := max(1, (evTotal+evSize-1)/evSize)
 	// the latest protective action per kind (lock, lost mode, wipe, uninstall
 	// release) stays visible on the device page until the next one replaces it
 	type protective struct {
@@ -724,6 +735,18 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		s.fail(w, err)
 		return
 	}
+	encExcluded := func(string) bool { return false }
+	if tab == "hardware" {
+		if decls, err := effectiveDeclarations(ctx, tx, id); err == nil {
+			if pol, _ := api.Compose(decls); pol.Extra.DiskEncryption != nil {
+				encExcluded = pol.Extra.DiskEncryption.Excluded
+			}
+		}
+	}
+	// end the transaction before the queries below take further pool
+	// connections: holding one while waiting for another starves the pool
+	// under many parallel page loads
+	_ = tx.Rollback(ctx)
 	type declRow struct {
 		Identifier, Type, State, Class string
 		Reasons                        []string
@@ -777,17 +800,6 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		}
 		declRows = append(declRows, row)
 	}
-	encExcluded := func(string) bool { return false }
-	if tab == "hardware" {
-		if tx, err := s.db.Begin(ctx); err == nil {
-			if decls, err := effectiveDeclarations(ctx, tx, id); err == nil {
-				if pol, _ := api.Compose(decls); pol.Extra.DiskEncryption != nil {
-					encExcluded = pol.Extra.DiskEncryption.Excluded
-				}
-			}
-			_ = tx.Rollback(ctx)
-		}
-	}
 	var agentVersions []string
 	if rows, err := s.db.Query(ctx, `SELECT version FROM agent_releases WHERE NOT blocked`); err == nil {
 		agentVersions, _ = pgx.CollectRows(rows, pgx.RowTo[string])
@@ -824,7 +836,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
 		"CommandTypes": commandTypesFor(sess.Role),
 		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
-		"Resolved": res, "Tags": strings.Join(tags, ", "), "TagList": tags, "Protective": protect, "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery, "Tampered": tampered, "Events": events,
+		"Resolved": res, "Tags": strings.Join(tags, ", "), "TagList": tags, "Protective": protect, "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery, "Tampered": tampered, "Events": events, "EvPage": evPage, "EvPages": evPages, "EvTotal": evTotal, "EvFrom": min((evPage-1)*evSize+1, evTotal), "EvTo": min(evPage*evSize, evTotal),
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"},
 		"Sub": sub, "ShowSystem": r.URL.Query().Get("system") == "1", "NetworkInfo": len(data.Inv.DNS)+len(data.Inv.Routes) > 0 || hasIPs(data.Inv.Interfaces),
 	})
@@ -1463,16 +1475,28 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 		http.NotFound(w, r)
 		return
 	}
-	rows, err := s.db.Query(ctx, q)
+	if err := s.auditAction(ctx, sess.Email, "export", kind, "", nil); err != nil {
+		s.fail(w, err)
+		return
+	}
+	// one connection for the whole stream; a slow download must not run into
+	// the pool's 30 second statement timeout and silently cut the evidence
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = '15min'`); err != nil {
+		s.fail(w, err)
+		return
+	}
+	rows, err := tx.Query(ctx, q)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	defer rows.Close()
-	if err := s.auditAction(ctx, sess.Email, "export", kind, "", nil); err != nil {
-		s.fail(w, err)
-		return
-	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="limdm-%s-%s"`, time.Now().Format("20060102"), kind))
 	cw := csv.NewWriter(w)
@@ -1492,6 +1516,12 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 			out[i] = csvSafe(v)
 		}
 		cw.Write(out)
+	}
+	if err := rows.Err(); err != nil {
+		// the header is sent already: mark the file as incomplete instead of
+		// handing out a truncated export that looks complete
+		s.log.Error("export incomplete", "kind", kind, "err", err)
+		cw.Write([]string{"ERROR: export incomplete, run it again"})
 	}
 	cw.Flush()
 }
