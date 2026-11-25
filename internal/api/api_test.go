@@ -145,3 +145,28 @@ func TestFlatpakScope(t *testing.T) {
 		}
 	}
 }
+
+func TestCatalogRemotes(t *testing.T) {
+	for r, ok := range map[CatalogRemote]bool{
+		{Name: "flathub", URL: "https://dl.flathub.org/repo/flathub.flatpakrepo", State: "allowed"}: true,
+		{Name: "fedora", URL: "oci+https://registry.fedoraproject.org", State: "blocked"}:           true,
+		{Name: "evil", URL: "http://plain.example/repo", State: "allowed"}:                          false,
+		{Name: "bad name", URL: "https://x.example", State: "allowed"}:                              false,
+		{Name: "x", URL: "https://x.example", State: "maybe"}:                                       false,
+		{Name: "x", URL: "https://x.example/a b", State: "allowed"}:                                 false,
+	} {
+		if (r.Validate() == nil) != ok {
+			t.Errorf("%+v: valid=%v", r, !ok)
+		}
+	}
+	c := Catalog{Apps: []CatalogApp{
+		{Sources: []AppSource{{Kind: "flatpak", Flatpak: "org.mozilla.firefox"}}},
+		{Sources: []AppSource{{Kind: "flatpak", Flatpak: "org.fedoraproject.Thing", Remote: "fedora"}}},
+	}}
+	if f := c.Flatpaks("flathub"); len(f) != 1 || f[0] != "org.mozilla.firefox" {
+		t.Fatalf("flathub: %v", f)
+	}
+	if f := c.Flatpaks("fedora"); len(f) != 1 || f[0] != "org.fedoraproject.Thing" {
+		t.Fatalf("fedora: %v", f)
+	}
+}

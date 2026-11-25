@@ -19,7 +19,10 @@
     </div>
     <datalist id="categories"><option value="Internet"><option value="Office"><option value="Communication"><option value="Multimedia"><option value="Graphics"><option value="Development"><option value="Security"><option value="Utilities"></datalist>
     <h2>{{t "Sources"}}</h2>
-    <label>{{t "Flatpak ID"}} <span class="hint">{{t "from Flathub, e.g. org.mozilla.firefox"}}</span><input name="flatpak" value="{{.Flatpak}}" spellcheck="false"></label>
+    <div class="inline">
+      <label>{{t "Flatpak ID"}} <span class="hint">{{t "from Flathub, e.g. org.mozilla.firefox"}}</span><input name="flatpak" value="{{.Flatpak}}" spellcheck="false"></label>
+      <label>{{t "Remote"}}<select name="flatpak_remote">{{$cur := .Remote}}<option value="flathub" {{if eq $cur "flathub"}}selected{{end}}>flathub</option>{{range .Remotes}}{{if ne .Name "flathub"}}<option value="{{.Name}}" {{if eq $cur .Name}}selected{{end}}>{{.Name}}</option>{{end}}{{end}}</select></label>
+    </div>
     <div class="inline">
       <label>{{t "Debian and Ubuntu packages"}}<input name="debian" value="{{.Debian}}" spellcheck="false"></label>
       <label>{{t "Fedora packages"}}<input name="fedora" value="{{.Fedora}}" spellcheck="false"></label>

@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // Software catalog (self service). The console keeps a catalog of apps; the
@@ -36,17 +37,56 @@ type CatalogApp struct {
 // AppSource is a way to install an app.
 type AppSource struct {
 	Kind    string `json:"kind"`              // flatpak | package
-	Flatpak string `json:"flatpak,omitempty"` // application ID on Flathub
+	Flatpak string `json:"flatpak,omitempty"` // application ID
+	Remote  string `json:"remote,omitempty"`  // Flatpak remote, flathub when empty
 	Debian  string `json:"debian,omitempty"`  // package name(s), space separated
 	Fedora  string `json:"fedora,omitempty"`
 }
 
 // Catalog is what a device receives in the check in.
 type Catalog struct {
-	Apps            []CatalogApp `json:"apps"`
-	RestrictFlathub bool         `json:"restrict_flathub"` // Flathub only offers catalog apps (remote filter)
-	StoresReadOnly  bool         `json:"stores_read_only"` // GNOME Software and KDE Discover cannot install
-	Hash            string       `json:"hash"`
+	Apps []CatalogApp `json:"apps"`
+	// RestrictFlathub limits every remote marked CatalogOnly (Flathub by
+	// default) to the catalog's apps with a remote filter.
+	RestrictFlathub    bool            `json:"restrict_flathub"`
+	StoresReadOnly     bool            `json:"stores_read_only"` // GNOME Software and KDE Discover cannot install
+	Remotes            []CatalogRemote `json:"remotes,omitempty"`
+	OnlyManagedRemotes bool            `json:"only_managed_remotes,omitempty"` // other remotes are disabled, also users'
+	Hash               string          `json:"hash"`
+}
+
+// CatalogRemote is a Flatpak remote IT manages for all devices.
+type CatalogRemote struct {
+	Name        string `json:"name"`
+	URL         string `json:"url"` // .flatpakrepo file, repository or oci+https URL
+	Title       string `json:"title,omitempty"`
+	State       string `json:"state"`        // allowed | blocked
+	CatalogOnly bool   `json:"catalog_only"` // with RestrictFlathub only catalog apps
+}
+
+var remoteNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+// Validate checks a remote before it is stored.
+func (r CatalogRemote) Validate() error {
+	switch {
+	case !remoteNameRe.MatchString(r.Name):
+		return fmt.Errorf("remote name %q: letters, digits, dots, dashes", r.Name)
+	case !strings.HasPrefix(r.URL, "https://") && !strings.HasPrefix(r.URL, "oci+https://"):
+		return fmt.Errorf("remote %s: URL must start with https:// or oci+https://", r.Name)
+	case len(r.URL) > 512 || strings.ContainsAny(r.URL, " \n\x00") || len(r.Title) > 80:
+		return fmt.Errorf("remote %s: URL up to 512 characters without spaces, title up to 80", r.Name)
+	case r.State != "allowed" && r.State != "blocked":
+		return fmt.Errorf("remote %s: state is allowed or blocked", r.Name)
+	}
+	return nil
+}
+
+// RemoteOf is the remote a Flatpak source installs from.
+func (s AppSource) RemoteOf() string {
+	if s.Remote == "" {
+		return "flathub"
+	}
+	return s.Remote
 }
 
 // AppRequest is a user's request for a "request" app, sent with the check in.
@@ -88,6 +128,9 @@ func (a CatalogApp) Validate() error {
 			if !flatpakIDRe.MatchString(s.Flatpak) {
 				return fmt.Errorf("app %s: invalid Flatpak ID %q", a.ID, s.Flatpak)
 			}
+			if s.Remote != "" && !remoteNameRe.MatchString(s.Remote) {
+				return fmt.Errorf("app %s: invalid remote %q", a.ID, s.Remote)
+			}
 		case "package":
 			if s.Debian == "" && s.Fedora == "" {
 				return fmt.Errorf("app %s: a package source needs a Debian or Fedora package", a.ID)
@@ -109,12 +152,12 @@ func (a CatalogApp) Validate() error {
 	return nil
 }
 
-// Flatpaks returns the Flatpak IDs of the catalog, for the Flathub filter.
-func (c Catalog) Flatpaks() []string {
+// Flatpaks returns the Flatpak IDs the catalog installs from a remote.
+func (c Catalog) Flatpaks(remote string) []string {
 	var ids []string
 	for _, a := range c.Apps {
 		for _, s := range a.Sources {
-			if s.Kind == "flatpak" {
+			if s.Kind == "flatpak" && s.RemoteOf() == remote {
 				ids = append(ids, s.Flatpak)
 			}
 		}
@@ -124,6 +167,7 @@ func (c Catalog) Flatpaks() []string {
 
 // SoftwareStore is the store policy of a device (com.limdm.softwarestore).
 type SoftwareStore struct {
-	RestrictFlathub bool `json:"restrict_flathub"` // Flathub offers only catalog apps
-	StoresReadOnly  bool `json:"stores_read_only"` // GNOME Software and KDE Discover cannot install
+	RestrictFlathub    bool `json:"restrict_flathub"`               // remotes marked catalog only offer only catalog apps
+	StoresReadOnly     bool `json:"stores_read_only"`               // GNOME Software and KDE Discover cannot install
+	OnlyManagedRemotes bool `json:"only_managed_remotes,omitempty"` // every other Flatpak remote is disabled
 }

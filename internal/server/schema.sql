@@ -335,3 +335,14 @@ CREATE TABLE IF NOT EXISTS catalog_requests (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS catalog_requests_device ON catalog_requests(device_id, app, created_at DESC);
+
+-- Flatpak remotes IT manages (software catalog): allowed ones are added on
+-- devices, blocked ones disabled; catalog_only remotes get the catalog filter.
+CREATE TABLE IF NOT EXISTS catalog_remotes (
+    name         TEXT PRIMARY KEY,
+    url          TEXT NOT NULL,
+    title        TEXT NOT NULL DEFAULT '',
+    state        TEXT NOT NULL DEFAULT 'allowed',
+    catalog_only BOOLEAN NOT NULL DEFAULT true,
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);

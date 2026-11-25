@@ -18,7 +18,19 @@ import (
 
 // Console pages of the software catalog.
 
-var softwareTabs = []struct{ Key, Label string }{{"catalog", "Catalog"}, {"requests", "Requests"}, {"settings", "Settings"}}
+var softwareTabs = []struct{ Key, Label string }{{"catalog", "Catalog"}, {"requests", "Requests"}, {"remotes", "Remotes"}, {"settings", "Settings"}}
+
+// remoteRow is a managed remote with the number of devices that have it.
+type remoteRow struct {
+	api.CatalogRemote
+	Devices int
+}
+
+// foundRemote is a remote on devices that IT does not manage yet.
+type foundRemote struct {
+	Name, URL, Title string
+	Devices          int
+}
 
 type appRequestRow struct {
 	ID                      int64
@@ -88,6 +100,48 @@ func (s *Server) renderSoftware(w http.ResponseWriter, r *http.Request, sess ses
 			return
 		}
 		data["Requests"] = reqs
+	case "remotes":
+		managed, err := s.catalogRemotes(ctx, s.db)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		counts := map[string]int{}
+		rows, err := s.db.Query(ctx, `SELECT r->>'name', count(DISTINCT d.id) FROM devices d, jsonb_array_elements(coalesce(d.inventory->'flatpak_remotes', '[]'::jsonb)) r
+			WHERE NOT d.retired AND NOT coalesce((r->>'disabled')::boolean, false) GROUP BY 1`)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		for rows.Next() {
+			var n string
+			var c int
+			if err := rows.Scan(&n, &c); err != nil {
+				rows.Close()
+				s.fail(w, err)
+				return
+			}
+			counts[n] = c
+		}
+		rows.Close()
+		var list []remoteRow
+		for _, m := range managed {
+			list = append(list, remoteRow{m, counts[m.Name]})
+		}
+		rows, err = s.db.Query(ctx, `SELECT r->>'name', max(r->>'url'), max(coalesce(r->>'title', '')), count(DISTINCT d.id)
+			FROM devices d, jsonb_array_elements(coalesce(d.inventory->'flatpak_remotes', '[]'::jsonb)) r
+			WHERE NOT d.retired AND NOT EXISTS (SELECT 1 FROM catalog_remotes c WHERE c.name = r->>'name')
+			GROUP BY 1 ORDER BY 4 DESC, 1`)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		found, err := pgx.CollectRows(rows, pgx.RowToStructByPos[foundRemote])
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		data["Remotes"], data["Found"] = list, found
 	case "settings":
 		set, err := s.softwareSettings(ctx, s.db)
 		if err != nil {
@@ -124,11 +178,11 @@ func (s *Server) renderApp(w http.ResponseWriter, r *http.Request, sess session,
 		return
 	}
 	var fl, deb, rpm string
-	prefer := "flatpak"
+	remote, prefer := "flathub", "flatpak"
 	for i, src := range app.Sources {
 		switch src.Kind {
 		case "flatpak":
-			fl = src.Flatpak
+			fl, remote = src.Flatpak, src.RemoteOf()
 		case "package":
 			deb, rpm = src.Debian, src.Fedora
 			if i == 0 {
@@ -136,7 +190,12 @@ func (s *Server) renderApp(w http.ResponseWriter, r *http.Request, sess session,
 			}
 		}
 	}
-	s.render(w, r, sess, "app", map[string]any{"App": app, "New": isNew, "Blueprints": bps, "Error": errMsg,
+	remotes, err := s.catalogRemotes(r.Context(), s.db)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.render(w, r, sess, "app", map[string]any{"App": app, "New": isNew, "Blueprints": bps, "Error": errMsg, "Remotes": remotes, "Remote": remote,
 		"Flatpak": fl, "Debian": deb, "Fedora": rpm, "Prefer": prefer, "Detect": strings.Join(app.Detect, " ")})
 }
 
@@ -148,6 +207,9 @@ func (s *Server) appSave(w http.ResponseWriter, r *http.Request, sess session) {
 		Summary: strings.TrimSpace(r.FormValue("summary")), Category: strings.TrimSpace(r.FormValue("category")), Mode: r.FormValue("mode")},
 		Enabled: r.FormValue("enabled") == "on"}
 	flatpak := api.AppSource{Kind: "flatpak", Flatpak: strings.TrimSpace(r.FormValue("flatpak"))}
+	if rem := r.FormValue("flatpak_remote"); rem != "" && rem != "flathub" {
+		flatpak.Remote = rem
+	}
 	pkgs := api.AppSource{Kind: "package", Debian: strings.Join(strings.Fields(r.FormValue("debian")), " "), Fedora: strings.Join(strings.Fields(r.FormValue("fedora")), " ")}
 	var srcs []api.AppSource
 	if flatpak.Flatpak != "" {
@@ -266,7 +328,8 @@ func (s *Server) requestDecide(w http.ResponseWriter, r *http.Request, sess sess
 }
 
 func (s *Server) softwareSettingsSave(w http.ResponseWriter, r *http.Request, sess session) {
-	set := SoftwareSettings{RestrictFlathub: r.FormValue("restrict_flathub") == "on", StoresReadOnly: r.FormValue("stores_read_only") == "on"}
+	set := SoftwareSettings{RestrictFlathub: r.FormValue("restrict_flathub") == "on", StoresReadOnly: r.FormValue("stores_read_only") == "on",
+		OnlyManagedRemotes: r.FormValue("only_managed_remotes") == "on"}
 	doc, _ := json.Marshal(set)
 	err := s.auditAction(r.Context(), sess.Email, "catalog.settings", "software", string(doc), func(tx pgx.Tx) error {
 		_, err := tx.Exec(r.Context(), `INSERT INTO settings(key, value) VALUES ('software', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
@@ -282,13 +345,13 @@ func (s *Server) softwareSettingsSave(w http.ResponseWriter, r *http.Request, se
 
 // fleetFlatpak is a Flatpak app installed somewhere in the fleet.
 type fleetFlatpak struct {
-	ID, Name string
-	Devices  int
+	ID, Name, Origin string
+	Devices          int
 }
 
 // fleetFlatpaks lists installed Flatpak apps that no catalog app covers yet.
 func (s *Server) fleetFlatpaks(ctx context.Context) ([]fleetFlatpak, error) {
-	rows, err := s.db.Query(ctx, `SELECT f->>'id', max(coalesce(nullif(f->>'name', ''), f->>'id')), count(DISTINCT d.id)
+	rows, err := s.db.Query(ctx, `SELECT f->>'id', max(coalesce(nullif(f->>'name', ''), f->>'id')), max(coalesce(f->>'origin', '')), count(DISTINCT d.id)
 		FROM devices d, jsonb_array_elements(coalesce(d.inventory->'flatpaks', '[]'::jsonb)) f
 		WHERE NOT d.retired AND f->>'id' IS NOT NULL
 		  AND NOT EXISTS (SELECT 1 FROM catalog_apps a, jsonb_array_elements(a.sources) src WHERE src->>'flatpak' = f->>'id')
@@ -331,9 +394,9 @@ func (s *Server) appImport(w http.ResponseWriter, r *http.Request, sess session)
 		s.fail(w, err)
 		return
 	}
-	names := map[string]string{}
+	names, origins := map[string]string{}, map[string]string{}
 	for _, f := range fleet {
-		names[f.ID] = f.Name
+		names[f.ID], origins[f.ID] = f.Name, f.Origin
 	}
 	var added []string
 	err = s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
@@ -342,7 +405,11 @@ func (s *Server) appImport(w http.ResponseWriter, r *http.Request, sess session)
 			if !ok {
 				continue // unknown, or already in the catalog
 			}
-			app := api.CatalogApp{Name: truncate(name, 80), Mode: api.AppAvailable, Sources: []api.AppSource{{Kind: "flatpak", Flatpak: id}}}
+			src := api.AppSource{Kind: "flatpak", Flatpak: id}
+			if o := origins[id]; o != "" && o != "flathub" {
+				src.Remote = o // keeps installing from where it came from
+			}
+			app := api.CatalogApp{Name: truncate(name, 80), Mode: api.AppAvailable, Sources: []api.AppSource{src}}
 			slug, err := s.slugFor(ctx, tx, name)
 			if err != nil {
 				return "", "", "", "", err
@@ -351,8 +418,8 @@ func (s *Server) appImport(w http.ResponseWriter, r *http.Request, sess session)
 			if err := app.Validate(); err != nil {
 				continue
 			}
-			src, _ := json.Marshal(app.Sources)
-			if _, err := tx.Exec(ctx, `INSERT INTO catalog_apps(slug, name, mode, sources) VALUES ($1,$2,'available',$3)`, app.ID, app.Name, src); err != nil {
+			doc, _ := json.Marshal(app.Sources)
+			if _, err := tx.Exec(ctx, `INSERT INTO catalog_apps(slug, name, mode, sources) VALUES ($1,$2,'available',$3)`, app.ID, app.Name, doc); err != nil {
 				return "", "", "", "", err
 			}
 			added = append(added, id)
@@ -368,4 +435,62 @@ func (s *Server) appImport(w http.ResponseWriter, r *http.Request, sess session)
 		back = "/devices/" + d + "?tab=software&sub=flatpak"
 	}
 	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
+// remoteSave adds or changes a managed remote (also to take over one found
+// on devices, as allowed or blocked).
+func (s *Server) remoteSave(w http.ResponseWriter, r *http.Request, sess session) {
+	rem := api.CatalogRemote{Name: strings.TrimSpace(r.FormValue("name")), URL: strings.TrimSpace(r.FormValue("url")),
+		Title: strings.TrimSpace(r.FormValue("title")), State: r.FormValue("state"), CatalogOnly: r.FormValue("catalog_only") == "on"}
+	if rem.State == "" {
+		rem.State = "allowed"
+	}
+	if err := rem.Validate(); err != nil {
+		r.Form.Set("tab", "remotes")
+		s.renderSoftware(w, r, sess, "", err.Error())
+		return
+	}
+	doc, _ := json.Marshal(rem)
+	err := s.auditAction(r.Context(), sess.Email, "catalog.remote", rem.Name, string(doc), func(tx pgx.Tx) error {
+		_, err := tx.Exec(r.Context(), `INSERT INTO catalog_remotes(name, url, title, state, catalog_only) VALUES ($1,$2,$3,$4,$5)
+			ON CONFLICT (name) DO UPDATE SET url=EXCLUDED.url, title=EXCLUDED.title, state=EXCLUDED.state, catalog_only=EXCLUDED.catalog_only, updated_at=now()`,
+			rem.Name, rem.URL, rem.Title, rem.State, rem.CatalogOnly)
+		return err
+	})
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/software?tab=remotes", http.StatusSeeOther)
+}
+
+// remoteOp allows, blocks, switches the catalog filter of, or stops managing a remote.
+func (s *Server) remoteOp(w http.ResponseWriter, r *http.Request, sess session) {
+	name, op := r.PathValue("name"), r.PathValue("op")
+	q := map[string]string{
+		"allow":    `UPDATE catalog_remotes SET state='allowed', updated_at=now() WHERE name=$1`,
+		"block":    `UPDATE catalog_remotes SET state='blocked', updated_at=now() WHERE name=$1`,
+		"filter":   `UPDATE catalog_remotes SET catalog_only=NOT catalog_only, updated_at=now() WHERE name=$1`,
+		"unmanage": `DELETE FROM catalog_remotes WHERE name=$1`,
+	}[op]
+	if q == "" {
+		http.NotFound(w, r)
+		return
+	}
+	err := s.auditAction(r.Context(), sess.Email, "catalog.remote."+op, name, "", func(tx pgx.Tx) error {
+		tag, err := tx.Exec(r.Context(), q, name)
+		if err == nil && tag.RowsAffected() == 0 {
+			err = pgx.ErrNoRows
+		}
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/software?tab=remotes", http.StatusSeeOther)
 }

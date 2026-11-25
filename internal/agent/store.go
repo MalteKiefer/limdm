@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -20,7 +21,6 @@ import (
 
 const (
 	flathubURL      = "https://dl.flathub.org/repo/flathub.flatpakrepo"
-	flathubFilter   = "/etc/flatpak/limdm-flathub.filter"
 	storeReadOnly   = "/etc/polkit-1/rules.d/60-limdm-store-readonly.rules"
 	catalogIconsDir = "/var/cache/limdm/catalog"
 	appRetry        = time.Hour // a failed required or approved app is tried again after this
@@ -141,28 +141,17 @@ func (a *Agent) catalogApp(id string) (api.CatalogApp, bool) {
 	return api.CatalogApp{}, false
 }
 
-// ensureFlathub adds the Flathub remote to the system installation.
-func (a *Agent) ensureFlathub() error {
-	if !hasCmd("flatpak") {
-		if err := a.host.install("flatpak"); err != nil {
-			return err
-		}
-	}
-	_, err := flatpakCmd(nil, 5*time.Minute, "remote-add", "--if-not-exists", "flathub", flathubURL)
-	return err
-}
-
 // installApp installs from the first source that works.
 func (a *Agent) installApp(app api.CatalogApp) error {
 	var errs []error
 	for _, src := range app.Sources {
 		switch src.Kind {
 		case "flatpak":
-			if err := a.ensureFlathub(); err != nil {
+			if err := a.ensureRemote(src.RemoteOf()); err != nil {
 				errs = append(errs, err)
 				continue
 			}
-			if _, err := flatpakCmd(nil, time.Hour, "install", "-y", "--noninteractive", "flathub", src.Flatpak); err != nil {
+			if _, err := flatpakCmd(nil, time.Hour, "install", "-y", "--noninteractive", src.RemoteOf(), src.Flatpak); err != nil {
 				errs = append(errs, fmt.Errorf("flatpak: %w", err))
 				continue
 			}
@@ -226,7 +215,7 @@ func (a *Agent) applyCatalog(flatpaks []api.FlatpakApp) {
 	if c == nil {
 		return
 	}
-	a.applyFlathubFilter(c)
+	a.applyRemotes(c)
 	a.applyStoreLock(c.StoresReadOnly)
 	fl := installedFlatpaks(flatpaks)
 	var due []api.CatalogApp
@@ -257,38 +246,118 @@ func (a *Agent) applyCatalog(flatpaks []api.FlatpakApp) {
 	a.cacheCatalogIcons(c)
 }
 
-// applyFlathubFilter limits Flathub to the catalog's Flatpaks (runtimes stay
-// allowed), for the system and for user installations.
-func (a *Agent) applyFlathubFilter(c *api.Catalog) {
+// applyRemotes manages Flatpak remotes in the system and in users'
+// installations: allowed remotes exist and are enabled (system), blocked
+// ones and, with OnlyManagedRemotes, unmanaged ones are disabled, and remotes
+// marked catalog only get the catalog filter while RestrictFlathub is on.
+// It runs every cycle, so a user's changes do not last.
+func (a *Agent) applyRemotes(c *api.Catalog) {
 	if !hasCmd("flatpak") {
 		return
 	}
+	managed := map[string]api.CatalogRemote{}
+	for _, r := range c.Remotes {
+		managed[r.Name] = r
+	}
+	if len(c.Remotes) == 0 { // server before 0.10.1: Flathub, catalog only
+		managed["flathub"] = api.CatalogRemote{Name: "flathub", URL: flathubURL, State: "allowed", CatalogOnly: true}
+	}
 	accts, _ := nssAccounts()
-	users := flatpakUsers(accts, false)
-	if !c.RestrictFlathub {
-		if exists(flathubFilter) {
-			_, _ = flatpakCmd(nil, time.Minute, "remote-modify", "--no-filter", "flathub")
-			for _, u := range users {
-				_, _ = flatpakCmd(&u, time.Minute, "remote-modify", "--no-filter", "flathub")
-			}
-			_ = os.Remove(flathubFilter)
+	installs := []*api.Account{nil}
+	for _, u := range flatpakUsers(accts, false) {
+		installs = append(installs, &u)
+	}
+	for _, inst := range installs {
+		out, _ := flatpakCmd(inst, time.Minute, "remotes", "--show-disabled", "--columns=name,url,title,options")
+		present := map[string]api.FlatpakRemoteInfo{}
+		for _, r := range parseFlatpakRemotes(out, "") {
+			present[r.Name] = r
 		}
-		return
+		for name, r := range present {
+			m, ok := managed[name]
+			switch {
+			case ok && m.State == "blocked", !ok && c.OnlyManagedRemotes:
+				if !r.Disabled {
+					if _, err := flatpakCmd(inst, time.Minute, "remote-modify", "--disable", name); err == nil {
+						a.event("disabled Flatpak remote %s (%s)", name, installName(inst))
+					}
+				}
+			case ok && r.Disabled:
+				if _, err := flatpakCmd(inst, time.Minute, "remote-modify", "--enable", name); err == nil {
+					a.event("enabled Flatpak remote %s (%s)", name, installName(inst))
+				}
+			}
+		}
+		if inst == nil { // allowed remotes are set up system wide
+			for name, m := range managed {
+				if _, ok := present[name]; !ok && m.State == "allowed" {
+					if _, err := flatpakCmd(nil, 5*time.Minute, "remote-add", "--if-not-exists", name, m.URL); err != nil {
+						a.event("adding Flatpak remote %s failed: %v", name, err)
+					} else {
+						a.event("added Flatpak remote %s", name)
+						present[name] = api.FlatpakRemoteInfo{Name: name}
+					}
+				}
+			}
+		}
+		for name := range present {
+			m := managed[name]
+			file := "/etc/flatpak/limdm-" + name + ".filter"
+			if c.RestrictFlathub && m.CatalogOnly && m.State == "allowed" {
+				if _, err := writeIfChanged(file, flathubFilterContent(c.Flatpaks(name)), 0o644); err == nil {
+					_, _ = flatpakCmd(inst, time.Minute, "remote-modify", "--filter="+file, name)
+				}
+			} else if exists(file) {
+				_, _ = flatpakCmd(inst, time.Minute, "remote-modify", "--no-filter", name)
+			}
+		}
 	}
-	ids := c.Flatpaks()
-	changed, err := writeIfChanged(flathubFilter, flathubFilterContent(ids), 0o644)
-	if err != nil {
-		a.event("Flathub filter: %v", err)
-		return
+	// filter files of remotes that no longer need one
+	files, _ := filepath.Glob("/etc/flatpak/limdm-*.filter")
+	for _, f := range files {
+		name := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(f), "limdm-"), ".filter")
+		if m := managed[name]; !c.RestrictFlathub || !m.CatalogOnly || m.State != "allowed" {
+			_ = os.Remove(f)
+		}
 	}
-	if !changed && exists(flathubFilter) {
-		return
+}
+
+func installName(inst *api.Account) string {
+	if inst == nil {
+		return "system"
 	}
-	_, _ = flatpakCmd(nil, time.Minute, "remote-modify", "--filter="+flathubFilter, "flathub")
-	for _, u := range users {
-		_, _ = flatpakCmd(&u, time.Minute, "remote-modify", "--filter="+flathubFilter, "flathub")
+	return inst.Name
+}
+
+// ensureRemote makes the remote of a Flatpak source available system wide.
+func (a *Agent) ensureRemote(name string) error {
+	if !hasCmd("flatpak") {
+		if err := a.host.install("flatpak"); err != nil {
+			return err
+		}
 	}
-	a.event("Flathub limited to %d catalog apps", len(ids))
+	url := ""
+	if c := a.state.Catalog; c != nil {
+		for _, r := range c.Remotes {
+			if r.Name == name {
+				if r.State != "allowed" {
+					return fmt.Errorf("remote %s is blocked", name)
+				}
+				url = r.URL
+			}
+		}
+	}
+	if url == "" && name == "flathub" {
+		url = flathubURL
+	}
+	if url == "" {
+		return fmt.Errorf("remote %s is not managed", name)
+	}
+	if _, err := flatpakCmd(nil, 5*time.Minute, "remote-add", "--if-not-exists", name, url); err != nil {
+		return err
+	}
+	_, err := flatpakCmd(nil, time.Minute, "remote-modify", "--enable", name)
+	return err
 }
 
 const storeLockRule = `// Managed by LiMDM: software is installed through the LiMDM catalog only.
@@ -330,9 +399,12 @@ func (a *Agent) applyStoreLock(on bool) {
 
 // cacheCatalogIcons fetches app icons for the desktop app (readable by users).
 func (a *Agent) cacheCatalogIcons(c *api.Catalog) {
+	// explicit chmod of both levels: the agent runs with UMask=0077, and the
+	// desktop app reads the icons as the user
 	if err := os.MkdirAll(catalogIconsDir, 0o755); err != nil { //nolint:gosec // icons are read by the user's desktop app
 		return
 	}
+	_ = os.Chmod(brandingDir, 0o755)     //nolint:gosec // see above
 	_ = os.Chmod(catalogIconsDir, 0o755) //nolint:gosec // see above
 	for _, app := range c.Apps {
 		if app.IconHash == "" {
@@ -341,6 +413,7 @@ func (a *Agent) cacheCatalogIcons(c *api.Catalog) {
 		f := catalogIconsDir + "/" + app.ID + ".png"
 		stamp := f + "." + app.IconHash[:12]
 		if exists(stamp) {
+			_ = os.Chmod(f, 0o644) //nolint:gosec // repairs icons cached before the permission fix
 			continue
 		}
 		var png []byte
@@ -449,10 +522,10 @@ func truncateString(s string, n int) string {
 	return s
 }
 
-// flathubFilterContent allows runtimes and the catalog's apps, nothing else.
+// flathubFilterContent allows runtimes and the catalog's apps of a remote, nothing else.
 func flathubFilterContent(ids []string) string {
 	var b strings.Builder
-	b.WriteString("# Managed by LiMDM: Flathub offers only the software catalog.\ndeny *\nallow runtime/*\n")
+	b.WriteString("# Managed by LiMDM: this remote offers only the software catalog.\ndeny *\nallow runtime/*\n")
 	ids = slices.Clone(ids)
 	slices.Sort(ids)
 	for _, id := range slices.Compact(ids) {
