@@ -10,6 +10,8 @@ import (
 	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/pem"
+	"io"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
@@ -365,5 +367,18 @@ func TestLocalPasswordRules(t *testing.T) {
 	got, err := insertPAMLine(old, "auth sufficient "+pamLine("/usr/bin/limdm-agent"))
 	if err != nil || strings.Count(got, "pam-auth") != 1 || !strings.Contains(got, "expose_authtok") {
 		t.Fatalf("PAM line not replaced: %v\n%s", err, got)
+	}
+}
+
+func TestCommandsRunOnce(t *testing.T) {
+	a := &Agent{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	a.state.DoneCommands = map[int64]time.Time{7: time.Now()}
+	a.runCommands([]api.Command{{ID: 7, Type: "sync"}})
+	if len(a.state.Results) != 1 || a.state.Results[0].ID != 7 {
+		t.Fatalf("redelivered command must be answered, not rerun: %+v", a.state.Results)
+	}
+	a.runCommands([]api.Command{{ID: 7, Type: "sync"}})
+	if len(a.state.Results) != 1 {
+		t.Fatalf("pending result duplicated: %+v", a.state.Results)
 	}
 }

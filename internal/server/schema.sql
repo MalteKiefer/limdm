@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS commands (
     device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
     type       TEXT NOT NULL,
     payload    TEXT NOT NULL DEFAULT '',
-    status     TEXT NOT NULL DEFAULT 'pending', -- pending | sent | ok | failed
+    status     TEXT NOT NULL DEFAULT 'pending', -- pending | sent | ok | failed | expired
     output     TEXT NOT NULL DEFAULT '',
     created_by TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

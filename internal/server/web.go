@@ -572,8 +572,14 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 		return
 	}
 	err := s.auditAction(r.Context(), sess.Email, "command."+typ, id, truncate(payload, 2000), func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO commands(device_id, type, payload, created_by) VALUES ($1,$2,$3,$4)`, id, typ, payload, sess.Email)
-		return err
+		if _, err := tx.Exec(r.Context(), `INSERT INTO commands(device_id, type, payload, created_by) VALUES ($1,$2,$3,$4)`, id, typ, payload, sess.Email); err != nil {
+			return err
+		}
+		if typ == "unlock" || typ == "lock" { // a manual action takes over from the compliance policy
+			_, err := tx.Exec(r.Context(), `UPDATE devices SET auto_locked=false WHERE id=$1`, id)
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		s.fail(w, err)

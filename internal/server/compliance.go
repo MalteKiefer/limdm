@@ -43,6 +43,16 @@ func (s *Server) enforceCompliance(ctx context.Context, tx pgx.Tx, deviceID stri
 	if err != nil {
 		return nil, err
 	}
+	if locked && c.LockAfterHours == 0 {
+		// the lock action was removed from the policy: lift the automatic lock
+		if err := queuePolicyCommand(ctx, tx, deviceID, "unlock", false); err != nil {
+			return nil, err
+		}
+		if err := audit(ctx, tx, "policy", "compliance.unlock", deviceID, "lock action no longer declared"); err != nil {
+			return nil, err
+		}
+		locked = false
+	}
 	if failing == 0 {
 		if since == nil && !locked {
 			return nil, nil

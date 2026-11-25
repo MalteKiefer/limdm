@@ -781,6 +781,14 @@ func TestCompliancePolicy(t *testing.T) {
 	if audited != 3 {
 		t.Fatalf("notify, lock and unlock must be audited, got %d", audited)
 	}
+	// a removed lock action lifts an automatic lock even while failing
+	db.Exec(ctx, `UPDATE devices SET failing=1, auto_locked=true WHERE id='d1'`)
+	pol.LockAfterHours = 0
+	step(t0.Add(5 * time.Hour))
+	db.QueryRow(ctx, `SELECT auto_locked FROM devices WHERE id='d1'`).Scan(&locked)
+	if got := commands(); got[len(got)-1] != "unlock" || locked {
+		t.Fatalf("lock policy removed: cmds=%v locked=%v", got, locked)
+	}
 }
 
 func TestWebhookSignature(t *testing.T) {

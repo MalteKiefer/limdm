@@ -581,7 +581,15 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	rows, err := tx.Query(ctx, `UPDATE commands SET status='sent', updated_at=now() WHERE device_id=$1 AND status='pending' RETURNING id, type, payload`, id)
+	// Commands are delivered until a result arrives (the agent ignores IDs it
+	// already ran), so a lost response cannot drop them. After 7 days they expire.
+	if _, err := tx.Exec(ctx, `UPDATE commands SET status='expired', updated_at=now()
+		WHERE device_id=$1 AND status IN ('pending','sent') AND created_at < now() - interval '7 days'`, id); err != nil {
+		s.fail(w, err)
+		return
+	}
+	rows, err := tx.Query(ctx, `UPDATE commands SET status='sent', updated_at=now() WHERE device_id=$1 AND status IN ('pending','sent')
+		RETURNING id, type, payload`, id)
 	if err != nil {
 		s.fail(w, err)
 		return

@@ -78,6 +78,7 @@ type State struct {
 	Company        string               `json:"company,omitempty"`
 	BrandingHash   string               `json:"branding_hash,omitempty"`
 	LastContact    time.Time            `json:"last_contact"`
+	DoneCommands   map[int64]time.Time  `json:"done_commands,omitempty"` // executed command IDs: the server redelivers until it has the result
 	OfflineLocked  bool                 `json:"offline_locked,omitempty"`
 }
 
@@ -508,10 +509,7 @@ func (a *Agent) cycle(ctx context.Context) {
 		a.syncNow = true
 	}
 	a.compose()
-	for _, c := range resp.Commands {
-		a.state.Results = append(a.state.Results, a.execute(c))
-		a.syncNow = true
-	}
+	a.runCommands(resp.Commands)
 	if rel := resp.AgentUpdate; rel != nil && UpdatePubKey != "" && rel.Version != a.failedUpdate {
 		if err := a.selfUpdate(ctx, *rel); err != nil {
 			a.failedUpdate = rel.Version
@@ -943,4 +941,30 @@ func powerAction(typ, payload string) (string, error) {
 		when, text = "+"+strconv.Itoa(m), fmt.Sprintf("LiMDM: %s requested by administrator in %d minutes", word, m)
 	}
 	return sh("shutdown", flag, when, text)
+}
+
+// runCommands executes each command once. The server repeats commands until it
+// received their result, so IDs already executed are skipped.
+func (a *Agent) runCommands(cmds []api.Command) {
+	if a.state.DoneCommands == nil {
+		a.state.DoneCommands = map[int64]time.Time{}
+	}
+	for id, at := range a.state.DoneCommands {
+		if time.Since(at) > 30*24*time.Hour {
+			delete(a.state.DoneCommands, id)
+		}
+	}
+	for _, c := range cmds {
+		if _, done := a.state.DoneCommands[c.ID]; done {
+			// ran before, but its result never arrived (for example a reboot "now")
+			if !slices.ContainsFunc(a.state.Results, func(r api.CommandResult) bool { return r.ID == c.ID }) {
+				a.state.Results = append(a.state.Results, api.CommandResult{ID: c.ID, OK: true, Output: "executed; the device restarted before the result was sent"})
+			}
+			continue
+		}
+		a.state.DoneCommands[c.ID] = time.Now() // before running: a reboot must not repeat after restart
+		a.saveState()
+		a.state.Results = append(a.state.Results, a.execute(c))
+		a.syncNow = true
+	}
 }
