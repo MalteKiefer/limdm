@@ -63,11 +63,13 @@ func graphicalEnv(uid string) []string {
 // does not wait for it (dialogs stay open until the user answers; an
 // unanswered one closes after an hour).
 func launchInSession(user string, env []string, prog string, args ...string) error {
-	return startInSession(time.Hour, user, env, prog, args...)
+	_, err := startInSession(time.Hour, user, env, prog, args...)
+	return err
 }
 
 // startInSession is launchInSession with a lifetime; 0 runs until it exits.
-func startInSession(life time.Duration, user string, env []string, prog string, args ...string) error {
+// It returns the process, which ends when the program ends.
+func startInSession(life time.Duration, user string, env []string, prog string, args ...string) (*os.Process, error) {
 	argv := append([]string{"-u", user, "--", "env"}, env...)
 	argv = append(argv, prog)
 	ctx, cancel := context.Background(), context.CancelFunc(func() {})
@@ -78,10 +80,10 @@ func startInSession(life time.Duration, user string, env []string, prog string, 
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		cancel()
-		return err
+		return nil, err
 	}
 	go func() { _ = cmd.Wait(); cancel() }()
-	return nil
+	return cmd.Process, nil
 }
 
 // company is the branding name for texts on the device.
@@ -190,7 +192,7 @@ func (a *Agent) ensureHelpers() {
 		}
 		if _, err := run(30*time.Second, "systemd-run", append(args, "/usr/bin/limdm-desktop")...); err != nil {
 			a.log.Warn("starting the desktop helper with systemd-run failed, starting it directly", "user", s.user, "err", err)
-			if err := startInSession(0, s.user, s.env, "/usr/bin/limdm-desktop"); err != nil {
+			if _, err := startInSession(0, s.user, s.env, "/usr/bin/limdm-desktop"); err != nil {
 				a.log.Warn("starting the desktop helper failed", "user", s.user, "err", err)
 				continue
 			}

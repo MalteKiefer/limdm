@@ -179,6 +179,7 @@ Changes are tested with `sshd -t` and rolled back on error.
 ### `com.limdm.screenlock`
 
 ```json
+{"idle_seconds": 300}
 {"idle_seconds": 300, "hide_users": true, "allow_autologin": false}
 ```
 
@@ -193,13 +194,23 @@ way users cannot change:
 | sway, Hyprland, river, labwc, niri, Wayfire | `swayidle` with `swaylock`; for sway also `/etc/sway/config.d` |
 | i3, bspwm, openbox, awesome, herbstluftwm | `xss-lock` with `i3lock` and the X screensaver timeout |
 
-For compositors and window managers the agent starts the locker in every session (as the user
-unit `limdm-idle-lock`) and starts it again within a minute when it is ended; the check
-`desktop.screenlock` fails for a session without one. Missing tools are installed.
+For compositors and window managers the agent starts its own locker in every session (user
+unit `limdm-idle-lock`, or directly where the user's service manager is out of reach) and
+starts it again within a minute when it is ended. Only that locker counts, not any process
+with a locker's name; on X11 the screensaver timeout is set again every minute, so
+`xset s off` does not help. Like every remediation this only happens with `remediate` on
+and `desktop.screenlock` not excluded. The check fails for a session without the locker, for
+desktops LiMDM cannot enforce (COSMIC, LXQt) and for Xfce without xfce4-screensaver. Missing
+tools are installed.
 
-Login screen privacy for GDM, SDDM and LightDM: automatic login is switched off unless
-`allow_autologin` is set; `hide_users` hides the user list (GDM `disable-user-list`, LightDM
-`greeter-hide-users`, SDDM does not remember the last user). Guest sessions are off.
+Login screen privacy is optional: without `hide_users` and `allow_autologin` the login
+manager is left as it is. With `"allow_autologin": false` automatic and timed login are
+switched off in GDM (`AutomaticLoginEnable`, `TimedLoginEnable`), SDDM and LightDM, in their
+drop-in directories and in the main files (`/etc/sddm.conf`, `/etc/lightdm/lightdm.conf`),
+which would otherwise win. `"hide_users": true` hides the user list (GDM
+`disable-user-list`, LightDM `greeter-hide-users`, SDDM does not remember the last user).
+LightDM guest sessions are off whenever the login screen is managed. Agents before 0.9.2
+reject the two keys as unknown, so add them only after the fleet runs 0.9.2.
 
 ### `com.limdm.sudo` (list)
 

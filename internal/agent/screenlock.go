@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -116,9 +118,9 @@ func swayLockFile(seconds int) string {
 		"'swaylock -f -c 000000'", "before-sleep", "'swaylock -f -c 000000'", "lock", "'swaylock -f -c 000000'"}, " ") + "\n"
 }
 
-func gdmFiles(hideUsers bool) (profile, settings string) {
+func gdmFiles() (profile, settings string) {
 	profile = "user-db:user\nsystem-db:gdm\nfile-db:/usr/share/gdm/greeter-dconf-defaults\n"
-	settings = managedHeader + fmt.Sprintf("[org/gnome/login-screen]\ndisable-user-list=%t\n", hideUsers)
+	settings = managedHeader + "[org/gnome/login-screen]\ndisable-user-list=true\n"
 	return
 }
 
@@ -144,13 +146,17 @@ func lightdmFile(sl screenLockPolicy) string {
 	return s
 }
 
+// screenLockPolicy: the login screen is only touched when the declaration
+// has one of its keys (manageLogin); existing declarations keep greeters as
+// they are.
 type screenLockPolicy struct {
-	seconds                   int
-	hideUsers, allowAutologin bool
+	seconds                                int
+	manageLogin, hideUsers, allowAutologin bool
 }
 
 func (a *Agent) screenLockPolicy() screenLockPolicy {
-	return screenLockPolicy{a.pol.ScreenLockSeconds, a.pol.ScreenLock.HideUsers, a.pol.ScreenLock.AllowAutologin}
+	l := a.pol.ScreenLock
+	return screenLockPolicy{seconds: a.pol.ScreenLockSeconds, manageLogin: l.ManageLogin, hideUsers: l.HideUsers, allowAutologin: l.AllowAutologin || !l.ManageLogin}
 }
 
 // lockTargets is every managed file this device needs, by what is installed.
@@ -168,10 +174,13 @@ func lockTargets(sl screenLockPolicy) map[string]string {
 	if hasCmd("sway") {
 		t[swayLock] = swayLockFile(sl.seconds)
 	}
-	if hasCmd("gdm") || hasCmd("gdm3") || exists("/usr/sbin/gdm") || exists("/usr/sbin/gdm3") {
-		t[gdmProfile], t[gdmSettings] = gdmFiles(sl.hideUsers)
+	if !sl.manageLogin {
+		return t
 	}
-	if hasCmd("sddm") {
+	if sl.hideUsers && (hasCmd("gdm") || hasCmd("gdm3") || exists("/usr/sbin/gdm") || exists("/usr/sbin/gdm3")) {
+		t[gdmProfile], t[gdmSettings] = gdmFiles()
+	}
+	if hasCmd("sddm") && (sl.hideUsers || !sl.allowAutologin) {
 		t[sddmConf] = sddmFile(sl)
 	}
 	if hasCmd("lightdm") {
@@ -190,6 +199,51 @@ func gdmAutologinFile() string {
 	return ""
 }
 
+// autologinSetting is a key in a login manager's main file that turns on
+// automatic login. Main files are read after the conf.d drop-ins and win,
+// so they are checked and fixed directly.
+type autologinSetting struct {
+	file, section, key string
+	off                string // the value that switches it off
+	on                 func(string) bool
+}
+
+func truthy(v string) bool {
+	v = strings.ToLower(strings.TrimSpace(v))
+	return v == "true" || v == "1" || v == "yes"
+}
+
+func notEmpty(v string) bool { return strings.TrimSpace(v) != "" }
+
+func autologinSettings() []autologinSetting {
+	var s []autologinSetting
+	if f := gdmAutologinFile(); f != "" {
+		s = append(s, autologinSetting{f, "daemon", "AutomaticLoginEnable", "false", truthy},
+			autologinSetting{f, "daemon", "TimedLoginEnable", "false", truthy})
+	}
+	if exists("/etc/sddm.conf") {
+		s = append(s, autologinSetting{"/etc/sddm.conf", "Autologin", "User", "", notEmpty})
+	}
+	if exists("/etc/lightdm/lightdm.conf") {
+		s = append(s, autologinSetting{"/etc/lightdm/lightdm.conf", "Seat:*", "autologin-user", "", notEmpty},
+			autologinSetting{"/etc/lightdm/lightdm.conf", "SeatDefaults", "autologin-user", "", notEmpty})
+	}
+	return s
+}
+
+// unenforced names desktops installed here that no mechanism above covers.
+func unenforced(env string) []string {
+	var out []string
+	switch {
+	case strings.HasPrefix(env, "COSMIC"), strings.HasPrefix(env, "LXQt"):
+		out = append(out, "no screen lock enforcement for "+env)
+	}
+	if hasCmd("xfce4-session") && !hasCmd("xfce4-screensaver") {
+		out = append(out, "xfce4-screensaver not installed")
+	}
+	return out
+}
+
 func runScreenLock(a *Agent) (string, string) {
 	env, dm := desktop()
 	if env == "" && dm == "" {
@@ -199,21 +253,28 @@ func runScreenLock(a *Agent) (string, string) {
 	if sl.seconds == 0 {
 		return fail, "screen lock not declared"
 	}
-	var missing []string
+	missing := unenforced(env)
 	for f, want := range lockTargets(sl) {
 		if readFile(f) != want {
 			missing = append(missing, f)
 		}
 	}
-	if f := gdmAutologinFile(); f != "" && !sl.allowAutologin && strings.EqualFold(iniValue(readFile(f), "daemon", "AutomaticLoginEnable"), "true") {
-		missing = append(missing, f+" (automatic login)")
+	if !sl.allowAutologin {
+		for _, s := range autologinSettings() {
+			if s.on(iniValue(readFile(s.file), s.section, s.key)) {
+				missing = append(missing, s.file+" ("+s.key+")")
+			}
+		}
 	}
 	if exists(dconfSettings) && !strings.Contains(readFile("/etc/dconf/profile/user"), "system-db:local") {
 		missing = append(missing, "/etc/dconf/profile/user")
 	}
 	for _, s := range idleSessions() {
-		if !s.locked {
+		switch {
+		case !s.locked:
 			missing = append(missing, s.user+": no idle lock running in the "+s.kind+" session")
+		case s.kind == "x11" && xTimeout(s) != sl.seconds:
+			missing = append(missing, s.user+": X screensaver timeout is not "+strconv.Itoa(sl.seconds)+" s")
 		}
 	}
 	if len(missing) > 0 {
@@ -256,11 +317,19 @@ func fixScreenLock(a *Agent) error {
 			errs = append(errs, err)
 		}
 	}
-	if f := gdmAutologinFile(); f != "" && !sl.allowAutologin {
-		if s := readFile(f); strings.EqualFold(iniValue(s, "daemon", "AutomaticLoginEnable"), "true") {
-			if _, err := writeIfChanged(f, setINIValue(s, "daemon", "AutomaticLoginEnable", "false"), 0o644); err != nil {
-				errs = append(errs, err)
+	if !sl.allowAutologin {
+		for _, s := range autologinSettings() {
+			content := readFile(s.file)
+			if s.on(iniValue(content, s.section, s.key)) {
+				if _, err := writeIfChanged(s.file, setINIValue(content, s.section, s.key, s.off), 0o644); err != nil {
+					errs = append(errs, err)
+				}
 			}
+		}
+	}
+	if hasCmd("xfce4-session") && !hasCmd("xfce4-screensaver") {
+		if err := a.host.install("xfce4-screensaver"); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	a.ensureIdleLocks()
@@ -272,18 +341,43 @@ func fixScreenLock(a *Agent) error {
 type idleSession struct {
 	user, uid, kind string // kind: wayland (wlroots style) or x11
 	env             []string
-	locked          bool
+	locked          bool // the agent's own locker runs in this session
 }
 
 // compositors that need an external idle locker
 var (
 	waylandCompositors = []string{"sway", "Hyprland", "river", "labwc", "niri", "wayfire"}
 	x11WindowManagers  = []string{"i3", "bspwm", "openbox", "awesome", "herbstluftwm"}
-	idleLockers        = []string{"swayidle", "hypridle", "xss-lock", "xautolock"}
 )
 
+// idleFallback holds lockers started directly where systemd-run --user
+// could not reach the user's service manager (uid -> process).
+var (
+	idleMu       sync.Mutex
+	idleFallback = map[string]*os.Process{}
+)
+
+// ownLockerRuns: only the agent's own locker counts, never a process that
+// merely has a locker's name.
+func ownLockerRuns(s graphicalSession) bool {
+	if _, err := run(10*time.Second, "systemctl", "--user", "--machine="+s.user+"@.host", "is-active", "--quiet", "limdm-idle-lock"); err == nil {
+		return true
+	}
+	idleMu.Lock()
+	defer idleMu.Unlock()
+	p := idleFallback[s.uid]
+	if p == nil {
+		return false
+	}
+	if p.Signal(syscall.Signal(0)) != nil {
+		delete(idleFallback, s.uid)
+		return false
+	}
+	return true
+}
+
 // idleSessions lists graphical sessions of compositors and window managers
-// without a screen locker of their own, and whether a locker runs there.
+// without a screen locker of their own, and whether the agent's locker runs.
 func idleSessions() []idleSession {
 	procs := map[string]map[string]bool{} // uid -> process names
 	dirs, _ := filepath.Glob("/proc/[0-9]*")
@@ -319,23 +413,46 @@ func idleSessions() []idleSession {
 		if kind == "" {
 			continue // a desktop environment with its own locker, configured above
 		}
-		is := idleSession{user: s.user, uid: s.uid, kind: kind, env: s.env}
-		for _, l := range idleLockers {
-			is.locked = is.locked || p[l]
-		}
-		res = append(res, is)
+		res = append(res, idleSession{user: s.user, uid: s.uid, kind: kind, env: s.env, locked: ownLockerRuns(s)})
 	}
 	return res
 }
 
-// ensureIdleLocks starts the idle locker in sessions that lack one; run
-// every minute so ending it does not help.
+// xTimeout reads the X screensaver timeout of a session (seconds, 0 = off).
+func xTimeout(s idleSession) int {
+	out, err := run(10*time.Second, "runuser", append(append([]string{"-u", s.user, "--", "env"}, s.env...), "xset", "q")...)
+	if err != nil {
+		return -1
+	}
+	for _, l := range strings.Split(out, "\n") {
+		f := strings.Fields(l)
+		if len(f) >= 2 && f[0] == "timeout:" {
+			n, _ := strconv.Atoi(f[1])
+			return n
+		}
+	}
+	return -1
+}
+
+// remediatesScreenLock: the idle locker is a change on the device, so it
+// follows the same rules as every other remediation.
+func (a *Agent) remediatesScreenLock() bool {
+	p := a.pol.Compliance
+	return a.pol.ScreenLockSeconds > 0 && p.Remediate && p.Level >= 1 && !slices.Contains(p.Exclude, "desktop.screenlock")
+}
+
+// ensureIdleLocks starts the agent's locker in sessions that lack it and
+// sets the X screensaver timeout; run every minute so ending it does not help.
 func (a *Agent) ensureIdleLocks() {
-	seconds := a.pol.ScreenLockSeconds
-	if seconds == 0 {
+	if !a.remediatesScreenLock() {
 		return
 	}
+	seconds := a.pol.ScreenLockSeconds
 	for _, s := range idleSessions() {
+		if s.kind == "x11" && hasCmd("xset") && xTimeout(s) != seconds {
+			// xss-lock follows the X screensaver timeout; a user's "xset s off" is undone here
+			_, _ = run(10*time.Second, "runuser", append(append([]string{"-u", s.user, "--", "env"}, s.env...), "xset", "s", strconv.Itoa(seconds), strconv.Itoa(seconds))...)
+		}
 		if s.locked {
 			continue
 		}
@@ -344,8 +461,6 @@ func (a *Agent) ensureIdleLocks() {
 		case s.kind == "wayland" && hasCmd("swayidle") && hasCmd("swaylock"):
 			argv = append([]string{"swayidle"}, swayIdleArgs(seconds)...)
 		case s.kind == "x11" && hasCmd("xss-lock") && hasCmd("i3lock"):
-			// the X screensaver timeout drives xss-lock
-			_, _ = run(10*time.Second, "runuser", append(append([]string{"-u", s.user, "--", "env"}, s.env...), "xset", "s", strconv.Itoa(seconds), strconv.Itoa(seconds))...)
 			argv = []string{"xss-lock", "--transfer-sleep-lock", "--", "i3lock", "-n", "-c", "000000"}
 		default:
 			continue // tools missing: ensureDependencies installs them
@@ -355,8 +470,15 @@ func (a *Agent) ensureIdleLocks() {
 			args = append(args, "--setenv="+kv)
 		}
 		if _, err := run(30*time.Second, "systemd-run", append(args, argv...)...); err != nil {
-			a.log.Warn("starting the idle lock failed", "user", s.user, "err", err)
-			continue
+			// like the desktop helper: start it directly when the user manager is out of reach
+			proc, err2 := startInSession(0, s.user, s.env, argv[0], argv[1:]...)
+			if err2 != nil {
+				a.log.Warn("starting the idle lock failed", "user", s.user, "err", errors.Join(err, err2))
+				continue
+			}
+			idleMu.Lock()
+			idleFallback[s.uid] = proc
+			idleMu.Unlock()
 		}
 		a.event("started the idle screen lock for %s (%s session)", s.user, s.kind)
 	}
@@ -380,7 +502,7 @@ func iniValue(s, section, key string) string {
 }
 
 // setINIValue sets key in section, adding the section or key if needed.
-func setINIValue(s, section, key, value string) string { //nolint:unparam // a general INI helper, today only for GDM
+func setINIValue(s, section, key, value string) string {
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
 	cur, inserted := "", false
 	sectionEnd := -1

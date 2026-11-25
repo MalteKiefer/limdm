@@ -566,7 +566,7 @@ func TestScreenLockFiles(t *testing.T) {
 	if !strings.Contains(swayLockFile(300), "exec swayidle -w timeout 300 'swaylock -f -c 000000'") {
 		t.Fatal(swayLockFile(300))
 	}
-	strict := screenLockPolicy{seconds: 300, hideUsers: true}
+	strict := screenLockPolicy{seconds: 300, manageLogin: true, hideUsers: true}
 	if l := lightdmFile(strict); !strings.Contains(l, "greeter-hide-users=true") || !strings.Contains(l, "autologin-user=\n") {
 		t.Fatal(l)
 	}
@@ -576,7 +576,7 @@ func TestScreenLockFiles(t *testing.T) {
 	if s := sddmFile(strict); !strings.Contains(s, "[Autologin]\nUser=\n") || !strings.Contains(s, "RememberLastUser=false") {
 		t.Fatal(s)
 	}
-	if _, g := gdmFiles(true); !strings.Contains(g, "disable-user-list=true") {
+	if _, g := gdmFiles(); !strings.Contains(g, "disable-user-list=true") {
 		t.Fatal(g)
 	}
 }
@@ -594,5 +594,51 @@ func TestINI(t *testing.T) {
 	out = setINIValue("[daemon]\nWaylandEnable=false\n[security]\n", "daemon", "AutomaticLoginEnable", "false")
 	if iniValue(out, "daemon", "AutomaticLoginEnable") != "false" || iniValue(out, "security", "AutomaticLoginEnable") != "" {
 		t.Fatalf("add key in section: %q", out)
+	}
+}
+
+func TestScreenLockPolicyOptIn(t *testing.T) {
+	compose := func(payload string) screenLockPolicy {
+		t.Helper()
+		pol, st := api.Compose([]api.Declaration{{Identifier: "s", Type: api.TypeScreenLock, Payload: []byte(payload)}})
+		if !st[0].Valid {
+			t.Fatalf("%s: %v", payload, st[0].Reasons)
+		}
+		return (&Agent{pol: pol}).screenLockPolicy()
+	}
+	// existing declarations leave the login manager alone
+	if p := compose(`{"idle_seconds":300}`); p.manageLogin || !p.allowAutologin || p.hideUsers {
+		t.Fatalf("legacy declaration manages the login screen: %+v", p)
+	}
+	if p := compose(`{"idle_seconds":300,"hide_users":true}`); !p.manageLogin || !p.hideUsers || !p.allowAutologin {
+		t.Fatalf("hide_users alone must not touch autologin: %+v", p)
+	}
+	if p := compose(`{"idle_seconds":300,"allow_autologin":false}`); !p.manageLogin || p.allowAutologin || p.hideUsers {
+		t.Fatalf("allow_autologin false: %+v", p)
+	}
+	for _, v := range []string{"true", "True", "1", "yes"} {
+		if !truthy(v) {
+			t.Errorf("%q is true for GLib", v)
+		}
+	}
+	if truthy("false") || truthy("") {
+		t.Error("false values")
+	}
+}
+
+func TestIdleLockRespectsRemediation(t *testing.T) {
+	a := &Agent{}
+	a.pol.ScreenLockSeconds = 300
+	a.pol.Compliance.Level, a.pol.Compliance.Remediate = 1, true
+	if !a.remediatesScreenLock() {
+		t.Fatal("remediation on")
+	}
+	a.pol.Compliance.Exclude = []string{"desktop.screenlock"}
+	if a.remediatesScreenLock() {
+		t.Fatal("excluded check must not be enforced")
+	}
+	a.pol.Compliance.Exclude, a.pol.Compliance.Remediate = nil, false
+	if a.remediatesScreenLock() {
+		t.Fatal("remediation off must not start lockers")
 	}
 }
