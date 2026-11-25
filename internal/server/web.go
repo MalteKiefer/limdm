@@ -452,9 +452,10 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 		http.Error(w, "unknown action", http.StatusBadRequest)
 		return
 	}
-	back := r.FormValue("back")
-	if !strings.HasPrefix(back, "/devices") || strings.HasPrefix(back, "//") {
-		back = "/devices"
+	// back to the list with its filters; only the query is taken over
+	back := "/devices"
+	if u, err := url.Parse(r.FormValue("back")); err == nil && u.Path == "/devices" && len(u.Query()) > 0 {
+		back += "?" + u.Query().Encode()
 	}
 	http.Redirect(w, r, back, http.StatusSeeOther)
 }
