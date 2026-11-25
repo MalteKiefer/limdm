@@ -162,9 +162,13 @@ func (a *Agent) installPAM() error {
 		return err
 	}
 	if a.host.family == "debian" {
-		cfg := fmt.Sprintf("Name: LiMDM OIDC login\nDefault: yes\nPriority: 300\nAuth-Type: Primary\nAuth:\n\t[success=end default=ignore]\t%s\n", pamLine(exe))
-		if _, err := writeIfChanged(pamDebian, cfg, 0o644); err != nil {
-			return err
+		// the profile ships with the package (/usr/share is package owned);
+		// only older installs without it get it written here
+		if !exists(pamDebian) {
+			cfg := fmt.Sprintf("Name: LiMDM OIDC login\nDefault: no\nPriority: 300\nAuth-Type: Primary\nAuth:\n\t[success=end default=ignore]\t%s\n", pamLine(exe))
+			if _, err := writeIfChanged(pamDebian, cfg, 0o644); err != nil {
+				return err
+			}
 		}
 		if _, err := sh("pam-auth-update", "--package", "--enable", "limdm"); err != nil {
 			return err
@@ -184,7 +188,6 @@ func (a *Agent) removePAM() error {
 		if _, err := sh("pam-auth-update", "--package", "--remove", "limdm"); err != nil {
 			return err
 		}
-		os.Remove(pamDebian)
 	} else {
 		prev := strings.Fields(readTrim(authPrev))
 		if len(prev) == 0 {

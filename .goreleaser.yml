@@ -78,6 +78,11 @@ nfpms:
         dst: /usr/lib/systemd/system/limdm-watchdog.timer
         file_info:
           mode: 0o644
+      - src: packaging/limdm-pam-config
+        dst: /usr/share/pam-configs/limdm
+        packager: deb
+        file_info:
+          mode: 0o644
       - src: packaging/limdm-desktop-autostart.desktop
         dst: /etc/xdg/autostart/limdm-desktop.desktop
         file_info:
@@ -95,6 +100,7 @@ nfpms:
     scripts:
       postinstall: packaging/agent-postinstall.sh
       preremove: packaging/agent-preremove.sh
+      postremove: packaging/agent-postremove.sh
     overrides:
       deb:
         recommends: [unattended-upgrades, ufw, libpam-pwquality, auditd, zenity]

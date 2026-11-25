@@ -1,4 +1,6 @@
 #!/bin/sh
+# deb: configure (install and upgrade); rpm: $1 = 1 install, 2 upgrade.
+set -e
 systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl enable --now limdm-watchdog.timer >/dev/null 2>&1 || true
 if [ -f /etc/limdm/device.pem ]; then

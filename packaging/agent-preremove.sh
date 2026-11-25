@@ -21,10 +21,10 @@ done
 systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl disable --now limdm-watchdog.timer >/dev/null 2>&1 || true
 systemctl disable --now limdm-agent.service >/dev/null 2>&1 || true
-# PAM integration must not outlive the helper binary
+# PAM integration must not outlive the helper binary (the profile file
+# itself belongs to the package and is removed by dpkg)
 if [ -f /usr/share/pam-configs/limdm ]; then
     pam-auth-update --package --remove limdm || true
-    rm -f /usr/share/pam-configs/limdm
 fi
 if [ -f /var/lib/limdm/authselect.prev ]; then
     authselect select $(cat /var/lib/limdm/authselect.prev) --force || true

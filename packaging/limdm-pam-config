@@ -1,0 +1,6 @@
+Name: LiMDM OIDC login
+Default: no
+Priority: 300
+Auth-Type: Primary
+Auth:
+	[success=end default=ignore]	pam_exec.so quiet stdout expose_authtok /usr/bin/limdm-agent pam-auth
