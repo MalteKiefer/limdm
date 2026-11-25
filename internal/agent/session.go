@@ -110,6 +110,9 @@ func graphicalSessions() []graphicalSession {
 		if len(f) < 3 || seen[f[1]] || !userRe.MatchString(f[2]) {
 			continue
 		}
+		if uid, err := strconv.Atoi(f[1]); err != nil || uid < 1000 {
+			continue // display manager greeters (gdm, sddm) and system users
+		}
 		seen[f[1]] = true
 		if env := graphicalEnv(f[1]); env != nil {
 			res = append(res, graphicalSession{user: f[2], uid: f[1], env: env})
@@ -176,10 +179,22 @@ func (a *Agent) ensureHelpers() {
 		}
 	}
 	for _, s := range graphicalSessions() {
-		if !running[s.uid] {
-			if err := startInSession(0, s.user, s.env, "/usr/bin/limdm-desktop"); err == nil {
-				a.log.Info("started the desktop helper", "user", s.user)
+		if running[s.uid] {
+			continue
+		}
+		// in the user's own service manager: outside the agent's cgroup (an
+		// agent restart must not end it) and with its log in the user journal
+		args := []string{"--user", "--machine=" + s.user + "@.host", "--collect", "--quiet", "--unit=limdm-desktop-session"}
+		for _, kv := range s.env {
+			args = append(args, "--setenv="+kv)
+		}
+		if _, err := run(30*time.Second, "systemd-run", append(args, "/usr/bin/limdm-desktop")...); err != nil {
+			a.log.Warn("starting the desktop helper with systemd-run failed, starting it directly", "user", s.user, "err", err)
+			if err := startInSession(0, s.user, s.env, "/usr/bin/limdm-desktop"); err != nil {
+				a.log.Warn("starting the desktop helper failed", "user", s.user, "err", err)
+				continue
 			}
 		}
+		a.log.Info("started the desktop helper", "user", s.user)
 	}
 }

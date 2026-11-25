@@ -4,11 +4,14 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
 	"image/png"
+	"math"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -21,20 +24,55 @@ import (
 // Xfce, Cinnamon, Ubuntu's GNOME and GNOME with the AppIndicator extension
 // show it. Without a tray host the helper still runs its reminders.
 
-// statusIcon draws a round status light: green (compliant), amber (checks
-// failing), red (no contact or locked).
+// statusIcon draws the LiMDM logo (shield with prompt on a teal tile, see
+// packaging/artwork/limdm.svg) with a status dot: green (compliant), amber
+// (checks failing), red (no contact or locked). Drawn in code: the tray
+// needs pixels and the binary has no SVG renderer.
 func statusIcon(c color.RGBA) []byte {
 	const n = 64
 	img := image.NewRGBA(image.Rect(0, 0, n, n))
+	teal := color.RGBA{0x0f, 0x6e, 0x6e, 0xff}
+	white := color.RGBA{0xff, 0xff, 0xff, 0xff}
+	seg := func(px, py, ax, ay, bx, by float64) float64 { // distance point to segment
+		dx, dy := bx-ax, by-ay
+		t := math.Max(0, math.Min(1, ((px-ax)*dx+(py-ay)*dy)/(dx*dx+dy*dy)))
+		return math.Hypot(px-ax-t*dx, py-ay-t*dy)
+	}
 	for y := 0; y < n; y++ {
 		for x := 0; x < n; x++ {
-			dx, dy := float64(x)-31.5, float64(y)-31.5
-			switch d := dx*dx + dy*dy; {
-			case d <= 26*26:
-				img.SetRGBA(x, y, c)
-			case d <= 30*30:
-				img.SetRGBA(x, y, color.RGBA{255, 255, 255, 230})
+			// coordinates of the 128 unit logo
+			px, py := (float64(x)+0.5)*2, (float64(y)+0.5)*2
+			// rounded tile 8..120, radius 26
+			qx, qy := math.Max(math.Abs(px-64)-30, 0), math.Max(math.Abs(py-64)-30, 0)
+			if math.Hypot(qx, qy) > 26 {
+				continue
 			}
+			col := color.RGBA{uint8(0x16 - 10*py/128), uint8(0x85 - 42*py/128), uint8(0x7f - 39*py/128), 0xff}
+			// shield
+			half := 0.0
+			switch {
+			case py >= 24 && py < 36:
+				half = 34 * (py - 24) / 12
+			case py >= 36 && py < 62:
+				half = 34
+			case py >= 62 && py <= 108:
+				k := (py - 62) / 46
+				half = 34 * math.Sqrt(1-k*k)
+			}
+			if math.Abs(px-64) <= half {
+				col = white
+				if seg(px, py, 49, 55, 61, 65) < 3.5 || seg(px, py, 61, 65, 49, 75) < 3.5 || seg(px, py, 66, 78, 80, 78) < 3.5 {
+					col = teal
+				}
+			}
+			// status dot with a white ring
+			switch d := math.Hypot(px-102, py-102); {
+			case d <= 20:
+				col = c
+			case d <= 26:
+				col = white
+			}
+			img.SetRGBA(x, y, col)
 		}
 	}
 	var b bytes.Buffer
@@ -49,8 +87,8 @@ var (
 )
 
 type tray struct {
-	status, checkin, details, sync, recovery, logs *systray.MenuItem
-	last                                           agent.DesktopResponse
+	open, status, checkin, sync, recovery, logs *systray.MenuItem
+	last                                        agent.DesktopResponse
 }
 
 func runTray() {
@@ -58,12 +96,13 @@ func runTray() {
 		t := &tray{}
 		systray.SetIcon(iconWarn)
 		systray.SetTitle("LiMDM")
+		t.open = systray.AddMenuItem(tr("Open LiMDM", "LiMDM öffnen"), "")
+		systray.AddSeparator()
 		t.status = systray.AddMenuItem(tr("Checking status…", "Status wird geprüft…"), "")
 		t.status.Disable()
 		t.checkin = systray.AddMenuItem("", "")
 		t.checkin.Disable()
 		systray.AddSeparator()
-		t.details = systray.AddMenuItem(tr("Device Details", "Gerätedetails"), "")
 		t.sync = systray.AddMenuItem(tr("Check In Now", "Jetzt synchronisieren"), "")
 		t.recovery = systray.AddMenuItem(tr("Set Up Recovery Key…", "Wiederherstellungsschlüssel einrichten…"), "")
 		t.recovery.Hide()
@@ -81,9 +120,8 @@ func (t *tray) loop() {
 		select {
 		case <-tick.C:
 			t.refresh()
-		case <-t.details.ClickedCh:
-			t.refresh()
-			go showDetails(t.last)
+		case <-t.open.ClickedCh:
+			go openApp("overview", t.last, showDetails)
 		case <-t.sync.ClickedCh:
 			resp, err := call(agent.DesktopRequest{Op: "sync"})
 			d := dialogsFor(t.last)
@@ -99,13 +137,13 @@ func (t *tray) loop() {
 			}()
 			time.AfterFunc(20*time.Second, t.refresh)
 		case <-t.recovery.ClickedCh:
-			if err := run(true); err != nil {
-				dialogsFor(t.last).message(tr("Recovery Key", "Wiederherstellungsschlüssel"), err.Error(), true)
-			}
-			t.refresh()
+			go openApp("disk", t.last, func(last agent.DesktopResponse) {
+				if err := run(true); err != nil {
+					dialogsFor(last).message(tr("Recovery Key", "Wiederherstellungsschlüssel"), err.Error(), true)
+				}
+			})
 		case <-t.logs.ClickedCh:
-			t.refresh()
-			go showLog(t.last)
+			go openApp("log", t.last, showLog)
 		}
 	}
 }
@@ -209,6 +247,19 @@ func showMessage(title, text string) {
 		title = tr("Message from IT", "Nachricht der IT")
 	}
 	d.sheet("mail-unread", title, text, nil, "")
+}
+
+const appPath = "/usr/lib/limdm/limdm-desktop-ui"
+
+// openApp opens the GTK 4 window on a page. Without GTK 4 and libadwaita 1.4
+// (exit code 3, or the app missing) the simple dialogs are shown instead.
+func openApp(page string, last agent.DesktopResponse, fallback func(agent.DesktopResponse)) {
+	err := exec.CommandContext(ctx, appPath, "--page", page).Run()
+	var exit *exec.ExitError
+	if err == nil || (errors.As(err, &exit) && exit.ExitCode() != 3) {
+		return
+	}
+	fallback(last)
 }
 
 // reminders is the daily prompt for what the device needs from the user.

@@ -7,3 +7,4 @@ Comment[de]=Fragt nach dem, was Ihre IT von Ihnen benötigt, etwa einen Wiederhe
 Exec=/usr/bin/limdm-desktop
 NoDisplay=true
 X-GNOME-Autostart-enabled=true
+Icon=limdm

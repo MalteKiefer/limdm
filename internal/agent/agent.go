@@ -448,7 +448,6 @@ func (a *Agent) declarationStatus() []api.DeclarationStatus {
 func (a *Agent) cycle(ctx context.Context) {
 	defer a.saveState()
 	defer a.publishDesktop()
-	defer a.ensureHelpers()
 	a.renewIdentity(ctx)
 	a.takeEscrowRequests()
 	a.checkUpdateOutcome()
@@ -801,6 +800,7 @@ func (a *Agent) pollLoop(ctx context.Context) {
 			return
 		case <-t.C:
 		}
+		a.ensureHelpers() // within a minute of a desktop login
 		var resp api.PollResponse
 		pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		err := a.post(pctx, "/api/v1/poll", struct{}{}, &resp)

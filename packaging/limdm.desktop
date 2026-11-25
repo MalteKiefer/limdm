@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=LiMDM
+GenericName=Device Management
+GenericName[de]=Geräteverwaltung
+Comment=State of this managed device: compliance, disk encryption, agent log
+Comment[de]=Zustand dieses verwalteten Geräts: Compliance, Verschlüsselung, Agent Protokoll
+Exec=/usr/lib/limdm/limdm-desktop-ui
+Icon=limdm
+Categories=System;Settings;Security;
+Keywords=MDM;compliance;security;encryption;
+StartupNotify=true
+Terminal=false

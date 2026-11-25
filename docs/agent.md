@@ -95,7 +95,8 @@ The packages depend on the tools the agent calls (osquery, systemd, util-linux, 
 iproute, procps, kmod, gnupg) and recommend the ones compliance remediation uses (firewall,
 audit, nftables, unattended upgrades or dnf plugins). The agent does not rely on them being
 present: once a day it installs whatever is missing. On devices with a desktop that includes
-zenity (kdialog on KDE Plasma), libnotify and dconf; servers never get desktop packages.
+zenity (kdialog on KDE Plasma), libnotify, dconf and Python with GTK 4 and libadwaita for
+the desktop app; servers never get desktop packages.
 
 ## Desktop helper
 
@@ -176,7 +177,13 @@ well.
 
 ## Desktop helper
 
-`limdm-desktop` shows a tray icon with the device state: green (compliant), amber (checks
+**LiMDM** in the applications menu (or **Open LiMDM** in the tray) opens a window in the
+style of GNOME Settings (GTK 4, libadwaita 1.4): a sidebar with Overview (state, last check
+in, check in now), Compliance (every check with its result), Disk Encryption (store a recovery
+key right there), Agent Log and About. It runs as the user and talks only to the agent socket.
+Without GTK 4 and libadwaita 1.4 (Ubuntu 22.04) the tray falls back to simple dialogs.
+
+`limdm-desktop` shows a tray icon (the LiMDM logo with a status dot) with the device state: green (compliant), amber (checks
 failing), red (no contact to the server or locked). Its menu opens the device details
 (host, device ID, server, agent version, last check in, failing checks, escrowed keys, last
 error), starts a check in (at most every 30 seconds) and shows the agent's latest warnings

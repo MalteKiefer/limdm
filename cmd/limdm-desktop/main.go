@@ -296,12 +296,13 @@ func run(now bool) error {
 	if !now && time.Since(lastPrompt()) < 24*time.Hour {
 		return nil
 	}
-	d, err := newDialogs(company, st.Logo)
-	if err != nil {
-		return err
-	}
 	setLastPrompt()
-	escrow(st, d, company)
+	// the GTK 4 app asks on its disk page; simple dialogs where it cannot run
+	openApp("disk", st, func(st agent.DesktopResponse) {
+		if d, err := newDialogs(company, st.Logo); err == nil {
+			escrow(st, d, company)
+		}
+	})
 	return nil
 }
 

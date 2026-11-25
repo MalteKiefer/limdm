@@ -2,6 +2,7 @@ package agent
 
 import (
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -13,7 +14,7 @@ import (
 // devices with a desktop.
 
 type dependency struct {
-	cmd            string // program the agent calls
+	cmd            string // program the agent calls, or a file pattern (contains "/")
 	debian, fedora string // package providing it
 	desktop        bool   // only on devices with a desktop
 }
@@ -31,6 +32,11 @@ var dependencies = []dependency{
 	{cmd: "auditctl", debian: "auditd", fedora: "audit"},
 	{cmd: "notify-send", debian: "libnotify-bin", fedora: "libnotify", desktop: true},
 	{cmd: "dconf", debian: "dconf-cli", fedora: "dconf", desktop: true},
+	// the GTK 4 desktop app (packaging/limdm-desktop-ui)
+	{cmd: "python3", debian: "python3", fedora: "python3", desktop: true},
+	{cmd: "/usr/lib*/python3*/*-packages/gi/__init__.py", debian: "python3-gi", fedora: "python3-gobject", desktop: true},
+	{cmd: "/usr/lib*/*/girepository-1.0/Gtk-4.0.typelib", debian: "gir1.2-gtk-4.0", fedora: "gtk4", desktop: true},
+	{cmd: "/usr/lib*/*/girepository-1.0/Adw-1.typelib", debian: "gir1.2-adw-1", fedora: "libadwaita", desktop: true},
 }
 
 var depsChecked time.Time
@@ -74,10 +80,7 @@ func (a *Agent) ensureDependencies() {
 	}
 	depsChecked = time.Now()
 	env, dm := desktop()
-	pkgs := missingPackages(a.host.family, env != "" || dm != "", strings.HasPrefix(env, "KDE"), func(c string) bool {
-		_, err := exec.LookPath(c)
-		return err == nil
-	})
+	pkgs := missingPackages(a.host.family, env != "" || dm != "", strings.HasPrefix(env, "KDE"), present)
 	if len(pkgs) == 0 {
 		return
 	}
@@ -86,4 +89,17 @@ func (a *Agent) ensureDependencies() {
 		return
 	}
 	a.event("installed missing tools %v", pkgs)
+}
+
+// present reports whether a program is on PATH, or a file matching a pattern exists.
+func present(c string) bool {
+	if strings.Contains(c, "/") {
+		m, _ := filepath.Glob(c)
+		if len(m) == 0 && strings.HasPrefix(c, "/usr/lib*/*/") { // Fedora: /usr/lib64/girepository-1.0
+			m, _ = filepath.Glob(strings.Replace(c, "/usr/lib*/*/", "/usr/lib*/", 1))
+		}
+		return len(m) > 0
+	}
+	_, err := exec.LookPath(c)
+	return err == nil
 }
