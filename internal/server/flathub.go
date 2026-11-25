@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/maltekiefer/limdm/internal/api"
@@ -73,6 +74,46 @@ func catalogCategory(c string) string {
 
 var flathubClient = &http.Client{Timeout: 20 * time.Second}
 
+// flathubCache keeps search results and icons for an hour, so devices and
+// the console cannot make the server hammer Flathub (which would block the
+// server's address for everybody).
+type cacheEntry struct {
+	val []byte
+	at  time.Time
+}
+
+var (
+	flathubMu    sync.Mutex
+	flathubCache = map[string]cacheEntry{}
+)
+
+func cached(key string, fetch func() ([]byte, error)) ([]byte, error) {
+	flathubMu.Lock()
+	if e, ok := flathubCache[key]; ok && time.Since(e.at) < time.Hour {
+		flathubMu.Unlock()
+		return e.val, nil
+	}
+	flathubMu.Unlock()
+	b, err := fetch()
+	if err != nil {
+		return nil, err
+	}
+	flathubMu.Lock()
+	defer flathubMu.Unlock()
+	if len(flathubCache) > 2000 { // bounded: drop everything older than an hour, else all
+		for k, e := range flathubCache {
+			if time.Since(e.at) >= time.Hour {
+				delete(flathubCache, k)
+			}
+		}
+		if len(flathubCache) > 2000 {
+			flathubCache = map[string]cacheEntry{}
+		}
+	}
+	flathubCache[key] = cacheEntry{val: b, at: time.Now()}
+	return b, nil
+}
+
 func flathubJSON(ctx context.Context, method, path string, body, out any) error {
 	var rd io.Reader
 	if body != nil {
@@ -108,7 +149,15 @@ func (s *Server) flathubSearch(ctx context.Context, query string) ([]api.Flatpak
 	var res struct {
 		Hits []flathubHit `json:"hits"`
 	}
-	if err := flathubJSON(ctx, http.MethodPost, "/search", map[string]any{"query": query, "hits_per_page": 24, "page": 1}, &res); err != nil {
+	raw, err := cached("search:"+strings.ToLower(query), func() ([]byte, error) {
+		var r json.RawMessage
+		err := flathubJSON(ctx, http.MethodPost, "/search", map[string]any{"query": query, "hits_per_page": 24, "page": 1}, &r)
+		return r, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
 		return nil, err
 	}
 	known := map[string]bool{}
@@ -190,14 +239,20 @@ func (s *Server) flathubIcon(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	b, err := getBytes(ctx, u, maxLogo)
-	if err != nil || validLogo(b) != nil {
+	b, err := cached("icon:"+u, func() ([]byte, error) {
+		b, err := getBytes(ctx, u, maxLogo)
+		if err == nil {
+			err = validLogo(b)
+		}
+		return b, err
+	})
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "private, max-age=86400")
-	_, _ = w.Write(b) //nolint:gosec // a validated PNG, served as image/png with nosniff
+	_, _ = w.Write(b)
 }
 
 // flathubSearchPage shows search results on the "add app" page.

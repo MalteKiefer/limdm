@@ -3,12 +3,16 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -25,7 +29,8 @@ import (
 // ---- schema and migrations ----
 
 func migrate(ctx context.Context, db *pgxpool.Pool) error {
-	if _, err := db.Exec(ctx, schema); err != nil {
+	// schema changes may take longer than the request timeouts of the pool
+	if _, err := db.Exec(ctx, "SET statement_timeout = 0; SET lock_timeout = 0;\n"+schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
 	tx, err := db.Begin(ctx)
@@ -33,7 +38,7 @@ func migrate(ctx context.Context, db *pgxpool.Pool) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7364)`); err != nil { // one migrator at a time
+	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = 0; SELECT pg_advisory_xact_lock(7364)`); err != nil { // one migrator at a time
 		return err
 	}
 	for _, m := range migrations {
@@ -283,17 +288,31 @@ func libraryItems(ctx context.Context, q pgx.Tx, ids []int64) ([]api.LibraryItem
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	rows, err := q.Query(ctx, `SELECT id, name, type, description, payload FROM library_items WHERE id = ANY($1)`, ids)
-	if err != nil {
-		return nil, err
-	}
-	all, err := pgx.CollectRows(rows, scanItem)
+	rows, err := q.Query(ctx, `SELECT id, name, type, description, payload, signature FROM library_items WHERE id = ANY($1)`, ids)
 	if err != nil {
 		return nil, err
 	}
 	byID := map[int64]api.LibraryItem{}
-	for _, it := range all {
+	for rows.Next() {
+		var it api.LibraryItem
+		var raw []byte
+		var sig string
+		if err := rows.Scan(&it.ID, &it.Name, &it.Type, &it.Description, &raw, &sig); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		it.Payload = raw
+		if !itemSignatureOK(it.Name, it.Type, raw, sig) {
+			// changed outside the console (database write, restore of a foreign
+			// backup): never delivered, and loud in the log
+			slog.Error("library item signature invalid, item not delivered", "item", it.ID, "name", it.Name)
+			continue
+		}
 		byID[it.ID] = it
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	out := make([]api.LibraryItem, 0, len(ids))
 	for _, id := range ids {
@@ -479,17 +498,18 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		fail(err)
 		return
 	}
+	sig := signItem(it.Name, it.Type, compact.Bytes())
 	err := s.auditAction(r.Context(), sess.Email, "library.save", it.Name, it.Type+" "+compact.String(), func(tx pgx.Tx) error {
 		if id > 0 {
-			tag, err := tx.Exec(r.Context(), `UPDATE library_items SET name=$2, type=$3, description=$4, payload=$5, updated_at=now() WHERE id=$1`,
-				id, it.Name, it.Type, it.Description, compact.String())
+			tag, err := tx.Exec(r.Context(), `UPDATE library_items SET name=$2, type=$3, description=$4, payload=$5, signature=$6, updated_at=now() WHERE id=$1`,
+				id, it.Name, it.Type, it.Description, compact.String(), sig)
 			if err == nil && tag.RowsAffected() == 0 {
 				err = errors.New("library item not found")
 			}
 			return err
 		}
-		_, err := tx.Exec(r.Context(), `INSERT INTO library_items(name, type, description, payload) VALUES ($1,$2,$3,$4)`,
-			it.Name, it.Type, it.Description, compact.String())
+		_, err := tx.Exec(r.Context(), `INSERT INTO library_items(name, type, description, payload, signature) VALUES ($1,$2,$3,$4,$5)`,
+			it.Name, it.Type, it.Description, compact.String(), sig)
 		return err
 	})
 	if err != nil {
@@ -764,4 +784,69 @@ func itemExamples() map[string]string {
 		m[t] = prettyJSON(ex)
 	}
 	return m
+}
+
+// itemKey signs library items; it is command.key, set when the server starts.
+var itemKey ed25519.PrivateKey
+
+func signItem(name, typ string, payload []byte) string {
+	if itemKey == nil {
+		return ""
+	}
+	var c bytes.Buffer
+	if json.Compact(&c, payload) != nil {
+		c.Write(payload)
+	}
+	return hex.EncodeToString(ed25519.Sign(itemKey, api.ItemSigned(name, typ, c.Bytes())))
+}
+
+func itemSignatureOK(name, typ string, payload []byte, sig string) bool {
+	if itemKey == nil {
+		return true // no key (tools without the CA directory)
+	}
+	b, err := hex.DecodeString(sig)
+	if err != nil {
+		return false
+	}
+	var c bytes.Buffer
+	if json.Compact(&c, payload) != nil {
+		c.Write(payload)
+	}
+	return ed25519.Verify(itemKey.Public().(ed25519.PublicKey), api.ItemSigned(name, typ, c.Bytes()), b)
+}
+
+// signExistingItems signs every unsigned library item once: on the upgrade
+// that introduced signatures and on a fresh installation (items seeded by
+// migrations). A marker file next to the key, not a database row, records
+// it, so whoever can only write to the database cannot have items signed.
+func signExistingItems(ctx context.Context, db *pgxpool.Pool, caDir string) error {
+	marker := filepath.Join(caDir, "items-signed-v1")
+	if _, err := os.Stat(marker); err == nil {
+		return nil
+	}
+	rows, err := db.Query(ctx, `SELECT id, name, type, payload FROM library_items WHERE signature = ''`)
+	if err != nil {
+		return err
+	}
+	type item struct {
+		id        int64
+		name, typ string
+		payload   []byte
+	}
+	var todo []item
+	for rows.Next() {
+		var it item
+		if err := rows.Scan(&it.id, &it.name, &it.typ, &it.payload); err != nil {
+			rows.Close()
+			return err
+		}
+		todo = append(todo, it)
+	}
+	rows.Close()
+	for _, it := range todo {
+		if _, err := db.Exec(ctx, `UPDATE library_items SET signature=$2 WHERE id=$1`, it.id, signItem(it.name, it.typ, it.payload)); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(marker, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o600)
 }

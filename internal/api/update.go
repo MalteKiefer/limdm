@@ -87,3 +87,9 @@ func VerifyCommand(pub ed25519.PublicKey, deviceID string, c Command) error {
 	}
 	return nil
 }
+
+// ItemSigned is what a library item signature covers: name, type and the
+// compact payload. The server signs at saving and checks before delivery.
+func ItemSigned(name, typ string, payload []byte) []byte {
+	return fmt.Appendf(nil, "limdm-item-v1\n%s\n%s\n%s", name, typ, payload)
+}
