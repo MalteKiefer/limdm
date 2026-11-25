@@ -216,7 +216,7 @@ func TestAddUploadedCerts(t *testing.T) {
 	mw.Close()
 	r := httptest.NewRequest("POST", "/library", &body)
 	r.Header.Set("Content-Type", mw.FormDataContentType())
-	out, err := addUploadedCerts(r, json.RawMessage(`{"certificates":[]}`))
+	out, err := addUploadedCerts(r, json.RawMessage(api.Types[api.TypeCertificates])) // the editor's example: replaced by the upload
 	if err != nil {
 		t.Fatal(err)
 	}
