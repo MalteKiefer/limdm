@@ -225,9 +225,12 @@ func endTTYs() []string {
 }
 
 // procTTYs maps the terminals that processes of people run on to the user,
-// from the standard input of each process, keeping graphical sessions: a
-// virtual console running a compositor or X is locked, not ended, and so are
-// the terminals inside it. Pseudo terminals end only when they belong to SSH.
+// from the standard input of each process. Graphical sessions stay (they are
+// locked, not ended): a virtual console running a verified compositor or X
+// server, and pseudo terminals whose processes descend from one (terminal
+// emulators). Every other terminal ends, SSH included. Names and parents a
+// user can fake are not trusted: only the executable a process runs, when it
+// is a root owned file in a system directory.
 func procTTYs(people []string) map[string]string {
 	uids := map[uint32]string{}
 	for _, p := range people {
@@ -238,8 +241,8 @@ func procTTYs(people []string) map[string]string {
 		}
 	}
 	type ttyInfo struct {
-		user              string
-		graphical, remote bool
+		user      string
+		graphical bool
 	}
 	ttys := map[string]*ttyInfo{}
 	dirs, _ := filepath.Glob("/proc/[0-9]*")
@@ -265,28 +268,69 @@ func procTTYs(people []string) map[string]string {
 			info = &ttyInfo{user: name}
 			ttys[tty] = info
 		}
-		if graphicalComm[readTrim(d+"/comm")] {
+		if underCompositor(filepath.Base(d)) {
 			info.graphical = true
-		}
-		if f := strings.Fields(readFile(d + "/stat")); len(f) > 3 {
-			if strings.HasPrefix(readTrim("/proc/"+f[3]+"/comm"), "sshd") {
-				info.remote = true
-			}
 		}
 	}
 	out := map[string]string{}
 	for tty, info := range ttys {
-		if strings.HasPrefix(tty, "pts/") && info.remote || !strings.HasPrefix(tty, "pts/") && !info.graphical {
+		if !info.graphical {
 			out[tty] = info.user
 		}
 	}
 	return out
 }
 
-// graphicalComm are compositors and X servers started from a console.
-var graphicalComm = map[string]bool{"sway": true, "Hyprland": true, "Xorg": true, "X": true, "xinit": true, "startx": true,
+// underCompositor reports whether pid or one of its ancestors runs a
+// verified compositor or X server.
+func underCompositor(pid string) bool {
+	for range 32 {
+		if verifiedCompositor(pid) {
+			return true
+		}
+		f := strings.Fields(afterComm(readFile("/proc/" + pid + "/stat")))
+		if len(f) < 2 || f[1] == "0" || f[1] == "1" {
+			return false
+		}
+		pid = f[1] // the parent
+	}
+	return false
+}
+
+// afterComm drops "pid (comm) " from a /proc stat line; comm may contain
+// spaces and parentheses, the last ")" ends it.
+func afterComm(stat string) string {
+	if i := strings.LastIndexByte(stat, ')'); i >= 0 {
+		return stat[i+1:]
+	}
+	return ""
+}
+
+// verifiedCompositor: the process runs a known compositor or X server binary
+// that root owns in a system directory (a renamed user program fails both),
+// on a virtual console.
+func verifiedCompositor(pid string) bool {
+	exe, err := os.Readlink("/proc/" + pid + "/exe")
+	if err != nil || !graphicalExe[filepath.Base(exe)] {
+		return false
+	}
+	if dir := filepath.Dir(exe); !slices.Contains([]string{"/usr/bin", "/usr/local/bin", "/usr/libexec", "/usr/lib/xorg", "/bin"}, dir) {
+		return false
+	}
+	var st syscall.Stat_t
+	if syscall.Stat(exe, &st) != nil || st.Uid != 0 || st.Mode&0o022 != 0 {
+		return false
+	}
+	// started at the device: a compositor run headless over SSH has a
+	// pseudo terminal, not a virtual console
+	t, err := os.Readlink("/proc/" + pid + "/fd/0")
+	return err == nil && vtRe.MatchString(t)
+}
+
+// graphicalExe are compositors and X servers started from a console.
+var graphicalExe = map[string]bool{"sway": true, "Hyprland": true, "Xorg": true, "Xorg.wrap": true, "X": true, "xinit": true,
 	"weston": true, "labwc": true, "river": true, "wayfire": true, "niri": true, "cage": true, "gnome-shell": true,
-	"kwin_wayland": true, "startplasma-way": true, "startplasma-x11": true, "dwl": true, "hyprland": true}
+	"kwin_wayland": true, "dwl": true, "Xwayland": true}
 
 // lockSessions locks every graphical session: through logind first (the
 // desktop's own locker), then, where after a few seconds neither logind
