@@ -204,8 +204,17 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 	if !slices.Contains(settingsTabs, tab) {
 		tab = "general"
 	}
+	data := map[string]any{}
+	if tab == "integrations" {
+		views, err := s.channelViews(r.Context())
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		data["Channels"], data["NotifyEvents"] = views, notifyEvents
+	}
 	s.render(w, r, sess, "settings", map[string]any{"Set": set, "ClientIP": clientIP(r), "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
-		"Tab": tab, "Tabs": settingsTabLabels,
+		"Tab": tab, "Tabs": settingsTabLabels, "Channels": data["Channels"], "NotifyEvents": data["NotifyEvents"],
 		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": s.webhookSecretHex()})
 }
 

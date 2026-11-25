@@ -20,8 +20,24 @@
     // close open action menus when clicking elsewhere
     for (const m of document.querySelectorAll('details.menu[open]')) if (!m.contains(t)) m.removeAttribute('open');
 
+    // [data-confirm] asks in the console's own dialog, then submits with that button
     const confirmBtn = t.closest('[data-confirm]');
-    if (confirmBtn && !window.confirm(confirmBtn.dataset.confirm)) { e.preventDefault(); return; }
+    const dlg = document.getElementById('dlg-confirm');
+    if (confirmBtn && dlg && dlg.showModal && !confirmBtn.dataset.confirmed) {
+      e.preventDefault();
+      dlg.querySelector('[data-confirm-text]').textContent = confirmBtn.dataset.confirm;
+      const ok = dlg.querySelector('[data-confirm-ok]');
+      ok.className = confirmBtn.classList.contains('danger') || confirmBtn.classList.contains('warn') ? 'danger' : '';
+      ok.onclick = () => {
+        dlg.close();
+        confirmBtn.dataset.confirmed = '1';
+        if (confirmBtn.form) confirmBtn.form.requestSubmit(confirmBtn.type === 'submit' || confirmBtn.tagName === 'BUTTON' ? confirmBtn : undefined);
+        else confirmBtn.click();
+        delete confirmBtn.dataset.confirmed;
+      };
+      dlg.showModal();
+      return;
+    }
 
     // menu entries with data-open show their dialog instead of following the link
     const open = t.closest('[data-open]');

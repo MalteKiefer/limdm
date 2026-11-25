@@ -48,6 +48,11 @@
 {{else}}
 <main class="login-shell">{{template "content" .}}<div class="login-foot"><span class="version">LiMDM {{version}}</span><div class="langs"><a href="/lang/de" {{if eq lang "de"}}aria-current="true"{{end}}>DE</a><a href="/lang/en" {{if eq lang "en"}}aria-current="true"{{end}}>EN</a></div></div></main>
 {{end}}
+<dialog id="dlg-confirm" class="modal" aria-labelledby="dlg-confirm-h">
+  <h2 id="dlg-confirm-h">{{t "Please confirm"}}</h2>
+  <p data-confirm-text></p>
+  <div class="form-foot"><button type="button" class="secondary" data-close>{{t "Cancel"}}</button><button type="button" data-confirm-ok>{{t "Confirm"}}</button></div>
+</dialog>
 <script src="/static/actions.js" defer></script>
 </body>
 </html>

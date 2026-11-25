@@ -88,6 +88,7 @@ func parsePages(lang, layout string) map[string]*template.Template {
 		"appSources": appSourcesText,
 		"hasID":      func(ids []int64, id int64) bool { return slices.Contains(ids, id) },
 		"derefTime":  func(p *time.Time) time.Time { return *p },
+		"derefBool":  func(p *bool) bool { return p != nil && *p },
 		"deref2":     func(p *string) string { return *p },
 		"typeLabel": func(t string) string {
 			if l, ok := typeLabels[t]; ok {
@@ -244,6 +245,8 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /users/update", s.page(s.userUpdate))
 	mux.HandleFunc("POST /users/reset", s.page(s.userReset))
 	mux.HandleFunc("GET /settings", s.page(s.adminOrAuditor(s.settingsPage)))
+	mux.HandleFunc("POST /settings/notifications", s.page(s.channelSave))
+	mux.HandleFunc("POST /settings/notifications/{id}/{op}", s.page(s.channelOp))
 	mux.HandleFunc("POST /settings", s.page(s.settingsSave))
 	mux.HandleFunc("POST /devices/{id}/assign", s.page(s.deviceAssign))
 	mux.HandleFunc("POST /devices/{id}/retire", s.page(s.deviceRetire))

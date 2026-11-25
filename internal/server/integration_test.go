@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1525,6 +1526,44 @@ func TestAgentUpdates(t *testing.T) {
 	if len(busy) != 0 || len(notes) != 2 || !slices.ContainsFunc(notes, func(n appNote) bool { return n.App == "Firefox" && n.OK }) {
 		t.Fatalf("progress done: %v %+v", busy, notes)
 	}
+	// notification channels: stored with a sealed URL, delivered for subscribed events only
+	var hits []string
+	var hmu sync.Mutex
+	hook := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		hmu.Lock()
+		hits = append(hits, string(b))
+		hmu.Unlock()
+	}))
+	defer hook.Close()
+	s.cfg.SessionKey, s.hooks = bytes.Repeat([]byte{3}, 32), hook.Client()
+	form = url.Values{"name": {"siem"}, "kind": {"webhook"}, "url": {hook.URL}, "events": {"device.tamper"}}
+	rq = httptest.NewRequest("POST", "/settings/notifications", strings.NewReader(form.Encode()))
+	rq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rq.ParseForm()
+	rc = httptest.NewRecorder()
+	s.channelSave(rc, rq, session{Email: "admin@firma.de", Role: "admin"})
+	var sealedURL string
+	db.QueryRow(ctx, `SELECT secret FROM notification_channels WHERE name='siem'`).Scan(&sealedURL)
+	if rc.Code != http.StatusSeeOther || sealedURL == "" || strings.Contains(sealedURL, "127.0.0.1") {
+		t.Fatalf("channel save: %d, secret stored in clear: %q", rc.Code, sealedURL)
+	}
+	var chID int64
+	db.QueryRow(ctx, `SELECT id FROM notification_channels WHERE name='siem'`).Scan(&chID)
+	s.notify(notice{Type: "device.enrolled", Title: "not subscribed"})
+	s.notify(notice{Type: "device.tamper", Title: "tamper on d3"})
+	deadline := time.Now().Add(5 * time.Second)
+	var logged int
+	for time.Now().Before(deadline) && logged == 0 {
+		time.Sleep(50 * time.Millisecond)
+		db.QueryRow(ctx, `SELECT count(*) FROM notification_log WHERE channel_id=$1 AND ok`, chID).Scan(&logged)
+	}
+	hmu.Lock()
+	if logged != 1 || len(hits) != 1 || !strings.Contains(hits[0], "tamper on d3") {
+		t.Fatalf("delivery: logged %d, hits %q", logged, hits)
+	}
+	hmu.Unlock()
+	db.Exec(ctx, `DELETE FROM notification_channels`)
 	// a new local user's password never reaches the audit log
 	if err := s.queueCommand(ctx, "admin@firma.de", "d3", "user_create", `{"username":"anna","password":"correct horse battery"}`); err != nil {
 		t.Fatal(err)
