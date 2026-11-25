@@ -51,3 +51,6 @@
 <script src="/static/actions.js" defer></script>
 </body>
 </html>
+{{/* shared partials */}}
+{{define "csrf"}}<input type="hidden" name="csrf" value="{{.}}">{{end}}
+{{define "cmd"}}<form method="post" action="/devices/{{.ID}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="{{.Type}}">{{if .Now}}<input type="hidden" name="minutes" value="0">{{end}}<button role="menuitem" class="menu-item{{with .Class}} {{.}}{{end}}">{{t .Label}}</button></form>{{end}}

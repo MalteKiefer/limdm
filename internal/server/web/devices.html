@@ -21,7 +21,7 @@
 
 {{$admin := eq .Sess.Role "admin"}}
 <form id="bulk" method="post" action="/devices/bulk" class="bulkbar" data-bulk>
-  <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="back" value="{{.Back}}">
+  {{template "csrf" .CSRF}}<input type="hidden" name="back" value="{{.Back}}">
   <span class="bulk-count"><strong data-bulk-count>0</strong> {{t "selected"}}</span>
   <details class="menu"><summary class="button small">{{t "Run"}}</summary>
     <div class="menu-list left" role="menu">

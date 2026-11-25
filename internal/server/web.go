@@ -52,6 +52,13 @@ var pages = func() map[string]map[string]*template.Template {
 func parsePages(lang, layout string) map[string]*template.Template {
 	T := func(s string) string { return translate(lang, s) }
 	funcs := template.FuncMap{
+		"dict": func(kv ...any) map[string]any { // arguments for shared partials
+			m := make(map[string]any, len(kv)/2)
+			for i := 0; i+1 < len(kv); i += 2 {
+				m[kv[i].(string)] = kv[i+1]
+			}
+			return m
+		},
 		"t":       T,
 		"lang":    func() string { return lang },
 		"version": func() string { return Version },
@@ -603,33 +610,37 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		}
 		userLines = append(userLines, l)
 	}
-	rows, err := s.db.Query(ctx, `SELECT id, type, status, output, created_by, created_at FROM commands WHERE device_id=$1 ORDER BY id DESC LIMIT 50`, id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
+	tab := r.URL.Query().Get("tab")
 	type cmd struct {
 		ID                       int64
 		Type, Status, Output, By string
 		At                       time.Time
 	}
-	cmds, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (cmd, error) {
-		var c cmd
-		return c, row.Scan(&c.ID, &c.Type, &c.Status, &c.Output, &c.By, &c.At)
-	})
-	if err != nil {
-		s.fail(w, err)
-		return
+	var cmds []cmd
+	if tab == "commands" { // outputs can be large; only the commands tab shows them
+		rows, err := s.db.Query(ctx, `SELECT id, type, status, output, created_by, created_at FROM commands WHERE device_id=$1 ORDER BY id DESC LIMIT 50`, id)
+		if err == nil {
+			cmds, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (cmd, error) {
+				var c cmd
+				return c, row.Scan(&c.ID, &c.Type, &c.Status, &c.Output, &c.By, &c.At)
+			})
+		}
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
 	bps, err := s.allBlueprints(ctx, id)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	charts, err := s.deviceCharts(ctx, id)
-	if err != nil {
-		s.fail(w, err)
-		return
+	var charts []template.HTML
+	if tab == "" || tab == "overview" {
+		if charts, err = s.deviceCharts(ctx, id); err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
 	recovery, err := s.recoveryKeys(ctx, id)
 	if err != nil {
@@ -650,6 +661,29 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 			s.fail(w, err)
 			return
 		}
+	}
+	// the latest protective action per kind (lock, lost mode, wipe, uninstall
+	// release) stays visible on the device page until the next one replaces it
+	type protective struct {
+		Type, Status, By string
+		At               time.Time
+	}
+	var protect []protective
+	if rows, err := s.db.Query(ctx, `SELECT DISTINCT ON (k) type, status, created_by, created_at FROM (
+		SELECT *, CASE type WHEN 'unlock' THEN 'lock' WHEN 'found' THEN 'lost' ELSE type END AS k FROM commands
+		WHERE device_id=$1 AND type IN ('lock','unlock','lost','found','wipe','allow_uninstall')) c
+		ORDER BY k, id DESC`, id); err == nil {
+		protect, err = pgx.CollectRows(rows, pgx.RowToStructByPos[protective])
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		protect = slices.DeleteFunc(protect, func(p protective) bool { // the release ends after an hour
+			return p.Type == "allow_uninstall" && time.Since(p.At) > 2*time.Hour
+		})
+	} else {
+		s.fail(w, err)
+		return
 	}
 	var tampered *time.Time
 	if err := s.db.QueryRow(ctx, `SELECT tampered_at FROM devices WHERE id=$1 AND tampered_at > now() - interval '30 days'`, id).Scan(&tampered); err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -688,7 +722,6 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		Identifier, Type, State, Class string
 		Reasons                        []string
 	}
-	tab := r.URL.Query().Get("tab")
 	sub := r.URL.Query().Get("sub")
 	switch {
 	case tab == "software" && sub != "sources" && sub != "flatpak" && sub != "catalog":
@@ -779,7 +812,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
 		"CommandTypes": commandTypesFor(sess.Role),
 		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
-		"Resolved": res, "Tags": strings.Join(tags, ", "), "TagList": tags, "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery, "Tampered": tampered, "Events": events,
+		"Resolved": res, "Tags": strings.Join(tags, ", "), "TagList": tags, "Protective": protect, "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery, "Tampered": tampered, "Events": events,
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"},
 		"Sub": sub, "ShowSystem": r.URL.Query().Get("system") == "1", "NetworkInfo": len(data.Inv.DNS)+len(data.Inv.Routes) > 0 || hasIPs(data.Inv.Interfaces),
 	})

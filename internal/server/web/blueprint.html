@@ -5,7 +5,7 @@
 </div>
 {{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
 <form method="post" action="/blueprints" id="bp-form">
-  <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.BP.ID}}">
+  {{template "csrf" .CSRF}}<input type="hidden" name="id" value="{{.BP.ID}}">
   <section class="card">
     <div class="inline">
       <label>{{t "Name"}}<input name="name" value="{{.BP.Name}}" required pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}" {{if eq .BP.Name "default"}}readonly{{end}}></label>
@@ -24,7 +24,7 @@
   {{if eq .Sess.Role "admin"}}<div class="form-foot"><span class="muted">{{t "Validated on save: items must exist, rules must use known fields."}}</span><button>{{t "Save blueprint"}}</button></div>{{end}}
 </form>
 {{if and .BP.ID (ne .BP.Name "default") (eq .Sess.Role "admin")}}
-<form class="card" method="post" action="/blueprints/{{.BP.ID}}/delete"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<form class="card" method="post" action="/blueprints/{{.BP.ID}}/delete">{{template "csrf" .CSRF}}
   <h2>{{t "Delete blueprint"}}</h2><p class="muted">{{t "Devices assigned to it fall back to default."}}</p><button class="danger">{{t "Delete"}}</button></form>
 {{end}}
 <script type="application/json" id="bp-items">{{.ItemsJSON}}</script>

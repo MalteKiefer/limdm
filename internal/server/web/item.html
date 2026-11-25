@@ -8,7 +8,7 @@
 <div class="grid side-right">
   <script type="application/json" id="item-examples">{{.Examples}}</script>
   <form class="card" method="post" action="/library" enctype="multipart/form-data">
-    <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.It.ID}}">
+    {{template "csrf" .CSRF}}<input type="hidden" name="id" value="{{.It.ID}}">
     <div class="inline">
       <label>{{t "Name"}}<input name="name" value="{{.It.Name}}" required maxlength="100"></label>
       <label>{{t "Type"}}<select name="type" data-examples="item-examples" data-example-target="item-example">{{$cur := .It.Type}}{{range .AllTypes}}<option value="{{.}}" {{if eq . $cur}}selected{{end}}>{{typeLabel .}}</option>{{end}}</select></label>
@@ -23,7 +23,7 @@
     <section class="card"><h2>{{t "Example"}}</h2><pre class="fp" id="item-example">{{.Example}}</pre>
       <p class="muted">{{t "Lists (packages, services, files, firewall rules, OS minimums) from several items are merged; for every other type the item evaluated last in the blueprint wins."}}</p></section>
     {{if and .It.ID (eq .Sess.Role "admin") (not .UsedBy)}}
-    <form class="card" method="post" action="/library/{{.It.ID}}/delete"><input type="hidden" name="csrf" value="{{.CSRF}}">
+    <form class="card" method="post" action="/library/{{.It.ID}}/delete">{{template "csrf" .CSRF}}
       <h2>{{t "Delete item"}}</h2><p class="muted">{{t "Not used by any blueprint."}}</p><button class="danger">{{t "Delete"}}</button></form>
     {{end}}
   </div>

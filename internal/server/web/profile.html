@@ -33,7 +33,7 @@
 {{if and .P.Local (eq .Tab "password")}}
   <form class="card" method="post" action="/profile/password">
     <h2>{{t "Change password"}}</h2>
-    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    {{template "csrf" .CSRF}}
     <input type="hidden" name="username" value="{{.P.Name}}" autocomplete="username">
     <label>{{t "Current password"}}<input type="password" name="current" required autocomplete="current-password"></label>
     <label>{{t "New password"}} <span class="hint">{{t "at least 12 characters"}}</span><input type="password" name="new" required minlength="12" autocomplete="new-password"></label>
@@ -48,13 +48,13 @@
       <p>{{t "Scan the code with the new app, then confirm with a code it shows. Until then the current app stays valid."}}</p>
       <div class="qr-wrap">{{.P.PendingQR}}</div>
       <p class="muted">{{t "Secret for manual entry:"}} <span class="fp">{{.P.PendingSecret}}</span></p>
-      <form method="post" action="/profile/totp"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="confirm">
+      <form method="post" action="/profile/totp">{{template "csrf" .CSRF}}<input type="hidden" name="step" value="confirm">
         <label>{{t "Code from the new app"}}<input name="code" required inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code"></label>
         <div class="form-foot"><span></span><button>{{t "Confirm"}}</button></div></form>
-      <form method="post" action="/profile/totp"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="cancel"><button class="secondary">{{t "Cancel"}}</button></form>
+      <form method="post" action="/profile/totp">{{template "csrf" .CSRF}}<input type="hidden" name="step" value="cancel"><button class="secondary">{{t "Cancel"}}</button></form>
     {{else}}
       <p class="muted">{{t "Moves the sign in codes to a new authenticator app."}}</p>
-      <form method="post" action="/profile/totp"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="start">
+      <form method="post" action="/profile/totp">{{template "csrf" .CSRF}}<input type="hidden" name="step" value="start">
         <label>{{t "Current password"}}<input type="password" name="current" required autocomplete="current-password"></label>
         <div class="form-foot"><span></span><button>{{t "Set up a new app"}}</button></div></form>
     {{end}}
@@ -69,7 +69,7 @@
     {{else}}
       <p><strong>{{.P.RecoveryLeft}}</strong> {{t "unused codes left."}} <span class="muted">{{t "Codes are stored as hashes and cannot be shown again."}}</span></p>
     {{end}}
-    <form method="post" action="/profile/recovery"><input type="hidden" name="csrf" value="{{.CSRF}}">
+    <form method="post" action="/profile/recovery">{{template "csrf" .CSRF}}
       <label>{{t "Current password"}}<input type="password" name="current" required autocomplete="current-password"></label>
       <div class="form-foot"><span class="muted">{{t "New codes replace all previous ones."}}</span><button>{{if .P.RecoveryLeft}}{{t "Replace recovery codes"}}{{else}}{{t "Generate recovery codes"}}{{end}}</button></div></form>
   </section>
