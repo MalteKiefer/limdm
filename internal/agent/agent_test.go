@@ -521,10 +521,16 @@ func TestPowerDelay(t *testing.T) {
 
 func TestMaskSecrets(t *testing.T) {
 	var v any
-	json.Unmarshal([]byte(`{"issuer":"https://accounts.google.com","client_secret":"s3cret","nested":[{"password":"x","name":"n"}],"empty_secret":""}`), &v)
+	json.Unmarshal([]byte(`{"issuer":"https://accounts.google.com","client_secret":"s3cret","nested":[{"password":"x","name":"n"}],"empty_secret":"",
+		"scripts":[{"name":"s","body":"curl -H 'Authorization: abc'"}],"http":"http://bob:pw123@proxy:3128","wifi":{"psk":"wpa"},"api_key":"k1","otp_seed":["a"]}`), &v)
 	b, _ := json.Marshal(maskSecrets(v))
 	s := string(b)
-	if strings.Contains(s, "s3cret") || strings.Contains(s, `"password":"x"`) || !strings.Contains(s, "accounts.google.com") || !strings.Contains(s, `"name":"n"`) {
+	for _, leak := range []string{"s3cret", `"password":"x"`, "Authorization", "pw123", "wpa", "k1", `"a"`} {
+		if strings.Contains(s, leak) {
+			t.Fatalf("leaked %q: %s", leak, s)
+		}
+	}
+	if !strings.Contains(s, "accounts.google.com") || !strings.Contains(s, `"name":"n"`) || !strings.Contains(s, "proxy:3128") {
 		t.Fatalf("masked: %s", s)
 	}
 }

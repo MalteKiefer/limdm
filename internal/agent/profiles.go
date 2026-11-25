@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,28 +37,56 @@ type DesktopLogLine struct {
 	Text  string    `json:"text"`
 }
 
-var secretWords = []string{"secret", "password", "passphrase", "token", "private"}
+// Masking is deliberately broad: anything that may carry a credential is
+// hidden. Script bodies and file contents are never shown, URLs lose their
+// user info (proxy credentials).
+var secretWords = []string{"secret", "password", "passphrase", "token", "private", "key", "credential", "auth",
+	"psk", "pin", "apikey", "body", "content", "hash", "otp"}
 
-// maskSecrets replaces values of secret looking keys, at any depth.
+const masked = "••••••"
+
+func secretKey(k string) bool {
+	lk := strings.ToLower(k)
+	for _, w := range secretWords {
+		if strings.Contains(lk, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// stripUserinfo removes "user:password@" from URLs inside a string value.
+func stripUserinfo(s string) string {
+	if !strings.Contains(s, "://") || !strings.Contains(s, "@") {
+		return s
+	}
+	if u, err := url.Parse(s); err == nil && u.User != nil {
+		u.User = url.User(masked)
+		return u.String()
+	}
+	return s
+}
+
+// maskSecrets hides secret looking values at any depth.
 func maskSecrets(v any) any {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, x := range t {
-			lk := strings.ToLower(k)
-			secret := false
-			for _, w := range secretWords {
-				secret = secret || strings.Contains(lk, w)
+			if secretKey(k) && x != nil {
+				if s, ok := x.(string); ok && s == "" {
+					continue
+				}
+				t[k] = masked
+				continue
 			}
-			if s, ok := x.(string); secret && ok && s != "" {
-				t[k] = "••••••"
-			} else {
-				t[k] = maskSecrets(x)
-			}
+			t[k] = maskSecrets(x)
 		}
 	case []any:
 		for i := range t {
 			t[i] = maskSecrets(t[i])
 		}
+	case string:
+		return stripUserinfo(t)
 	}
 	return v
 }
