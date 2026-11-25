@@ -32,10 +32,12 @@ const (
 )
 
 type desktopInfo struct {
-	Company string
-	Logo    string
-	Need    []luksVolume
-	Status  DesktopStatus
+	Company  string
+	Logo     string
+	Need     []luksVolume
+	Status   DesktopStatus
+	Profiles []DesktopProfile
+	Certs    []api.CertInfo
 }
 
 // DesktopCheck is one compliance check as the desktop app lists it.
@@ -73,13 +75,16 @@ type DesktopVolume struct {
 }
 
 type DesktopResponse struct {
-	Company string          `json:"company,omitempty"`
-	Logo    string          `json:"logo,omitempty"`
-	Need    []DesktopVolume `json:"need,omitempty"`
-	OK      bool            `json:"ok,omitempty"`
-	Error   string          `json:"error,omitempty"`
-	Status  *DesktopStatus  `json:"status,omitempty"` // info
-	Log     []string        `json:"log,omitempty"`    // info: recent warnings and errors of the agent
+	Company  string           `json:"company,omitempty"`
+	Logo     string           `json:"logo,omitempty"`
+	Need     []DesktopVolume  `json:"need,omitempty"`
+	OK       bool             `json:"ok,omitempty"`
+	Error    string           `json:"error,omitempty"`
+	Status   *DesktopStatus   `json:"status,omitempty"`    // info
+	Log      []string         `json:"log,omitempty"`       // info: recent warnings and errors of the agent
+	LogLines []DesktopLogLine `json:"log_lines,omitempty"` // info: latest journal entries, every level
+	Profiles []DesktopProfile `json:"profiles,omitempty"`  // info: declarations in force
+	Certs    []api.CertInfo   `json:"certificates,omitempty"`
 }
 
 // addKeyFn is cryptsetup luksAddKey; tests replace it.
@@ -143,6 +148,8 @@ func (a *Agent) publishDesktop() {
 	info := &desktopInfo{Company: a.state.Company, Status: DesktopStatus{DeviceID: a.cfg.DeviceID, Server: a.cfg.Server,
 		Version: Version, LastCheckin: a.lastCheckin, LastError: a.lastError, Checks: len(a.lastChecks), Escrowed: len(a.state.Escrowed)}}
 	info.Status.Hostname, _ = os.Hostname()
+	info.Profiles = a.desktopProfiles()
+	info.Certs = certInfo(a.pol.Extra.Certificates)
 	for _, c := range a.lastChecks {
 		if c.Status == "fail" {
 			info.Status.Failing = append(info.Status.Failing, c.Title)
@@ -240,7 +247,8 @@ func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 		return DesktopResponse{Company: info.Company, Logo: info.Logo, Need: need}
 	case "info":
 		st := info.Status
-		return DesktopResponse{Company: info.Company, Logo: info.Logo, Need: need, Status: &st, Log: agentLog()}
+		return DesktopResponse{Company: info.Company, Logo: info.Logo, Need: need, Status: &st, Log: agentLog(),
+			LogLines: agentJournal(200), Profiles: info.Profiles, Certs: info.Certs}
 	case "sync":
 		d.mu.Lock()
 		recent := time.Since(d.lastSync) < 30*time.Second

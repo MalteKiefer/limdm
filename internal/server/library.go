@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -443,6 +446,14 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		s.render(w, r, sess, "item", map[string]any{"It": it, "Payload": r.FormValue("payload"), "AllTypes": sortedTypes(),
 			"Example": prettyJSON(api.Types[it.Type]), "Error": err.Error()})
 	}
+	if it.Type == api.TypeCertificates {
+		p, err := addUploadedCerts(r, it.Payload)
+		if err != nil {
+			fail(err)
+			return
+		}
+		it.Payload = p
+	}
 	if it.Type == api.TypeBootloader { // hash a plain password before it is validated and stored
 		p, err := api.PrepareBootloader(it.Payload)
 		if err != nil {
@@ -685,4 +696,52 @@ func prettyJSON(s string) string {
 		return s
 	}
 	return b.String()
+}
+
+// addUploadedCerts appends the certificates of an uploaded PEM file (one or
+// a bundle) to a certificates payload, named after the file.
+func addUploadedCerts(r *http.Request, payload json.RawMessage) (json.RawMessage, error) {
+	f, hdr, err := r.FormFile("pem_file")
+	if err != nil {
+		return payload, nil // no upload
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, 512<<10))
+	if err != nil {
+		return nil, err
+	}
+	var v struct {
+		Certificates []api.Certificate `json:"certificates"`
+	}
+	if len(bytes.TrimSpace(payload)) > 0 {
+		if err := json.Unmarshal(payload, &v); err != nil {
+			return nil, fmt.Errorf("settings: %w", err)
+		}
+	}
+	base := strings.ToLower(nonName.ReplaceAllString(strings.TrimSuffix(filepath.Base(hdr.Filename), filepath.Ext(hdr.Filename)), "-"))
+	base = strings.Trim(base, "-._")
+	if base == "" {
+		base = "certificate"
+	}
+	n := 0
+	for rest := raw; ; {
+		var b *pem.Block
+		b, rest = pem.Decode(rest)
+		if b == nil {
+			break
+		}
+		if b.Type != "CERTIFICATE" {
+			continue
+		}
+		name := base
+		if n > 0 {
+			name = fmt.Sprintf("%s-%d", base, n+1)
+		}
+		v.Certificates = append(v.Certificates, api.Certificate{Name: name, PEM: string(pem.EncodeToMemory(b))})
+		n++
+	}
+	if n == 0 {
+		return nil, errors.New("the uploaded file contains no PEM certificate")
+	}
+	return json.Marshal(v)
 }

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Additional library types. Each payload is validated strictly here, on the
@@ -42,6 +43,16 @@ type Repository struct {
 type Certificate struct {
 	Name string `json:"name"`
 	PEM  string `json:"pem"`
+}
+
+// CertInfo describes a CA certificate LiMDM installed on a device.
+type CertInfo struct {
+	Name      string    `json:"name"`
+	Subject   string    `json:"subject"`
+	Issuer    string    `json:"issuer"`
+	NotBefore time.Time `json:"not_before"`
+	NotAfter  time.Time `json:"not_after"`
+	SHA256    string    `json:"sha256"`
 }
 
 type FlatpakRemote struct {

@@ -7,16 +7,22 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"image"
 	"image/png"
 	"io"
+	"math/big"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/maltekiefer/limdm/internal/api"
 )
 
 func TestAuditHashChain(t *testing.T) {
@@ -194,5 +200,33 @@ func TestSplitOlder(t *testing.T) {
 	cur, old := splitOlder(rels, []versionCount{{"0.9.0", 1}, {"0.8.4", 1}})
 	if len(cur) != 4 || len(old) != 1 || old[0].Version != "0.8.3" {
 		t.Fatalf("current %v older %v", cur, old)
+	}
+}
+
+func TestAddUploadedCerts(t *testing.T) {
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Corp Root"}, IsCA: true, BasicConstraintsValid: true,
+		NotBefore: time.Now(), NotAfter: time.Now().Add(time.Hour)}
+	der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	one := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, _ := mw.CreateFormFile("pem_file", "Corp Root CA.pem")
+	fw.Write(append(append([]byte{}, one...), one...)) // a bundle of two
+	mw.Close()
+	r := httptest.NewRequest("POST", "/library", &body)
+	r.Header.Set("Content-Type", mw.FormDataContentType())
+	out, err := addUploadedCerts(r, json.RawMessage(`{"certificates":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct{ Certificates []api.Certificate }
+	json.Unmarshal(out, &v)
+	if len(v.Certificates) != 2 || v.Certificates[0].Name != "corp-root-ca" || v.Certificates[1].Name != "corp-root-ca-2" {
+		t.Fatalf("uploaded: %+v", v.Certificates)
+	}
+	d := api.Declaration{Identifier: "c", Type: api.TypeCertificates, Payload: out}
+	if _, st := api.Compose([]api.Declaration{d}); !st[0].Valid {
+		t.Fatalf("uploaded certificates must validate: %v", st[0].Reasons)
 	}
 }

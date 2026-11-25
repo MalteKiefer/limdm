@@ -6,7 +6,7 @@
 </div>
 {{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
 <div class="grid side-right">
-  <form class="card" method="post" action="/library">
+  <form class="card" method="post" action="/library" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.It.ID}}">
     <div class="inline">
       <label>{{t "Name"}}<input name="name" value="{{.It.Name}}" required maxlength="100"></label>
@@ -15,6 +15,7 @@
     <label>{{t "Description"}}<input name="description" value="{{.It.Description}}" maxlength="300"></label>
     <label>{{t "Settings"}} <span class="hint">{{t "JSON, validated strictly before saving"}}</span>
       <textarea name="payload" rows="16" class="code" spellcheck="false">{{.Payload}}</textarea></label>
+    <label class="cert-only">{{t "Add certificate file"}} <span class="hint">{{t "PEM or CRT, also bundles; added to the list above when saving"}}</span><input type="file" name="pem_file" accept=".pem,.crt,.cer,application/x-pem-file"></label>
     {{if eq .Sess.Role "admin"}}<div class="form-foot"><span class="muted">{{t "Devices pick up changes at their next check in."}}</span><button>{{t "Save item"}}</button></div>{{end}}
   </form>
   <div>

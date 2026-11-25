@@ -453,6 +453,7 @@ type Inventory struct {
 	Repos          []Repo              `json:"repos,omitempty"`           // configured package sources
 	Flatpaks       []FlatpakApp        `json:"flatpaks,omitempty"`        // installed Flatpak applications, system and per user
 	FlatpakRemotes []FlatpakRemoteInfo `json:"flatpak_remotes,omitempty"` // Flatpak remotes, system and per user
+	Certificates   []CertInfo          `json:"certificates,omitempty"`    // CA certificates installed by LiMDM
 	Interfaces     []NIC               `json:"interfaces,omitempty"`      // addresses only with privacy.network_info
 	DNS            []DNSConfig         `json:"dns,omitempty"`             // only with privacy.network_info
 	Routes         []Route             `json:"routes,omitempty"`          // only with privacy.network_info
