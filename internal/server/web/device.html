@@ -34,6 +34,8 @@
         <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="found">
           <button role="menuitem" class="menu-item">{{t "End lost mode"}}</button></form>
         <a role="menuitem" class="menu-item danger" href="/devices/{{$id}}?tab=commands&amp;type=wipe">{{t "Wipe device…"}}</a>
+        <form method="post" action="/devices/{{$id}}/command"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="type" value="allow_uninstall">
+          <button role="menuitem" class="menu-item">{{t "Allow uninstall for 1 hour"}}</button></form>
       </div>
     </details>
   </div>
@@ -45,6 +47,7 @@
 </nav>
 
 {{if eq .Tab "overview"}}
+{{if .Tampered}}<div class="notice error" role="status"><strong>{{t "Tamper attempt reported"}}</strong> {{fmtTime (derefTime .Tampered)}}. {{t "Details are in the audit log (agent.tamper)."}}</div>{{end}}
 {{if .D.AutoLocked}}<div class="notice error" role="status"><strong>{{t "Locked by compliance policy."}}</strong> {{t "Logins are blocked until the device is compliant again or an admin unlocks it."}}</div>{{end}}
 {{if .Since}}<div class="notice">{{t "Failing compliance since"}} {{fmtTime (derefTime .Since)}}{{if .D.GraceUntil}}{{t "; grace period"}} {{if eq .D.Status "in grace"}}{{t "ends"}}{{else}}{{t "ended"}}{{end}} {{fmtTime (derefTime .D.GraceUntil)}}{{end}}.</div>{{end}}
 <div class="stats">

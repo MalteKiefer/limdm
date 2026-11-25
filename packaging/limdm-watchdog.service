@@ -1,0 +1,9 @@
+[Unit]
+Description=LiMDM agent watchdog
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/limdm-agent watchdog
+RefuseManualStop=yes
+UMask=0077

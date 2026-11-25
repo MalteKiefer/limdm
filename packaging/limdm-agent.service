@@ -1,7 +1,6 @@
 [Unit]
 Description=LiMDM device agent
-
-Wants=network-online.target
+Wants=network-online.target limdm-watchdog.timer
 After=network-online.target
 
 [Service]
@@ -9,6 +8,11 @@ Type=simple
 ExecStart=/usr/bin/limdm-agent run
 Restart=always
 RestartSec=10
+# Tamper protection: "systemctl stop" is refused; killing the process
+# restarts it, and limdm-watchdog.timer re-enables and restarts a disabled
+# or masked agent. Removal goes through the package and needs a release
+# from the console. root can still defeat this; attempts are reported.
+RefuseManualStop=yes
 # The agent manages packages, users and system configuration, so it runs as
 # root without filesystem sandboxing. Kernel and clock stay untouchable.
 ProtectClock=yes

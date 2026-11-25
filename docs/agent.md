@@ -99,6 +99,22 @@ zenity. The menu entry "Disk recovery key" runs it on demand.
 The helper talks to the agent over `/run/limdm/agent.sock`. The agent identifies callers by
 their peer credentials and only serves users with an active local session.
 
+## Tamper protection
+
+* `limdm-agent.service` refuses `systemctl stop` (`RefuseManualStop`) and restarts after a
+  kill (`Restart=always`).
+* `limdm-watchdog.timer` runs `limdm-agent watchdog` every 5 minutes: it unmasks, enables and
+  starts the agent when needed. The agent in turn keeps the watchdog timer enabled.
+* Removing the package needs a release from the console (Actions, *Allow uninstall for 1
+  hour*); otherwise the package manager stops with an error. Upgrades are not affected.
+* Everything found and fixed, and every removal attempt, is reported as a tamper event: the
+  device page shows a notice, the audit log has an `agent.tamper` entry and the webhook sends
+  `device.tamper`.
+
+A root user can still defeat this, for example by deleting the binaries or overriding the
+units. The goal is detection and self healing, not an absolute barrier: a device whose agent
+was removed stops checking in, turns `stale` and, with `offline_lock_hours`, locks itself.
+
 ## Updates
 
 * **Package managers:** host the release packages in your repository or run the install

@@ -445,6 +445,8 @@ func (a *Agent) cycle(ctx context.Context) {
 	defer a.publishDesktop()
 	a.renewIdentity(ctx)
 	a.takeEscrowRequests()
+	a.collectTamper()
+	a.guardWatchdog()
 	checks := a.converge()
 	a.collectAuthEvents()
 
@@ -668,6 +670,8 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = a.foundMode()
 	case "wipe":
 		out, err = a.wipe()
+	case "allow_uninstall":
+		out, err = allowUninstall()
 	case "script":
 		if !a.cfg.AllowScripts {
 			err = errors.New("remote scripts are disabled on this device (allow_scripts)")

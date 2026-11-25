@@ -538,14 +538,29 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var tamper []string
 	for i, ev := range req.Events {
 		if i >= 500 {
 			break
 		}
-		if err := audit(ctx, tx, "device:"+id, "agent.event", id, truncate(ev, 2000)); err != nil {
+		action := "agent.event"
+		if _, msg, ok := strings.Cut(ev, " tamper: "); ok {
+			action, tamper = "agent.tamper", append(tamper, msg)
+		}
+		if err := audit(ctx, tx, "device:"+id, action, id, truncate(ev, 2000)); err != nil {
 			s.fail(w, err)
 			return
 		}
+	}
+	var tamperEvent *webhookEvent
+	if len(tamper) > 0 {
+		var host string
+		if err := tx.QueryRow(ctx, `UPDATE devices SET tampered_at=now() WHERE id=$1 RETURNING hostname`, id).Scan(&host); err != nil {
+			s.fail(w, err)
+			return
+		}
+		tamperEvent = &webhookEvent{Type: "device.tamper", DeviceID: id, Hostname: host, Detail: strings.Join(tamper, "; "),
+			Console: s.cfg.PublicURL + "/devices/" + id}
 	}
 
 	resp := api.CheckinResponse{ServerTime: time.Now().UTC(),
@@ -612,6 +627,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.sendWebhook(event)
+	s.sendWebhook(tamperEvent)
 	if rel, ok := s.releaseFor(req.Arch); ok && api.NewerVersion(rel.Version, req.AgentVersion) {
 		resp.AgentUpdate = &rel
 	}

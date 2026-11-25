@@ -66,7 +66,7 @@ func parsePages(lang string) map[string]*template.Template {
 		"actionLabel": func(a string) string {
 			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot",
 				"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script",
-				"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device"}[a])
+				"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour"}[a])
 		},
 		"join":      strings.Join,
 		"hasPrefix": strings.HasPrefix,
@@ -453,6 +453,11 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		s.fail(w, err)
 		return
 	}
+	var tampered *time.Time
+	if err := s.db.QueryRow(ctx, `SELECT tampered_at FROM devices WHERE id=$1 AND tampered_at > now() - interval '30 days'`, id).Scan(&tampered); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		s.fail(w, err)
+		return
+	}
 	// expected declarations, to show what the device has not confirmed yet
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -541,7 +546,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
 		"CommandTypes": commandTypesFor(sess.Role),
 		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
-		"Resolved": res, "Tags": strings.Join(tags, ", "), "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery,
+		"Resolved": res, "Tags": strings.Join(tags, ", "), "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery, "Tampered": tampered,
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"},
 		"Sub": sub, "ShowSystem": r.URL.Query().Get("system") == "1", "NetworkInfo": len(data.Inv.DNS)+len(data.Inv.Routes) > 0 || hasIPs(data.Inv.Interfaces),
 	})
@@ -566,13 +571,13 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 			return
 		}
 		payload = strconv.Itoa(m)
-	case typ == "lost" || typ == "wipe" || typ == "found":
+	case typ == "lost" || typ == "wipe" || typ == "found" || typ == "allow_uninstall":
 		// protective actions: admins only, lost and wipe confirmed by typing the host name
 		if sess.Role != "admin" {
 			http.Error(w, "this action requires the admin role", http.StatusForbidden)
 			return
 		}
-		if typ != "found" {
+		if typ == "lost" || typ == "wipe" {
 			var host string
 			if err := s.db.QueryRow(r.Context(), `SELECT hostname FROM devices WHERE id=$1`, id).Scan(&host); err != nil ||
 				!strings.EqualFold(strings.TrimSpace(r.FormValue("confirm")), host) {
@@ -1061,6 +1066,6 @@ func commandTypesFor(role string) []string {
 		return api.CommandTypes
 	}
 	return slices.DeleteFunc(slices.Clone(api.CommandTypes), func(t string) bool {
-		return t == "script" || t == "lost" || t == "found" || t == "wipe"
+		return t == "script" || t == "lost" || t == "found" || t == "wipe" || t == "allow_uninstall"
 	})
 }

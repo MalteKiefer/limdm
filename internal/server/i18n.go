@@ -315,4 +315,7 @@ var deCatalog = map[string]string{
 	"for example a phone number": "zum Beispiel eine Telefonnummer", "Type the host name to confirm": "Zur Bestätigung den Hostnamen eingeben",
 	"Blocks every login, ends running sessions and shows your message. With an escrowed recovery key, every other disk key slot is removed: after the next power off only IT can open the disk.": "Sperrt jede Anmeldung, beendet laufende Sitzungen und zeigt deine Nachricht. Mit hinterlegtem Wiederherstellungsschlüssel werden alle anderen Schlüssel der Festplatte entfernt: nach dem nächsten Ausschalten kann nur noch die IT die Festplatte öffnen.",
 	"Erases the disk encryption headers: all data on the device is lost for good. Devices without disk encryption are refused.":                                                                  "Löscht die Header der Festplattenverschlüsselung: alle Daten auf dem Gerät sind endgültig verloren. Geräte ohne Verschlüsselung werden abgelehnt.",
+	// tamper protection
+	"Tamper attempt reported": "Manipulationsversuch gemeldet", "Details are in the audit log (agent.tamper).": "Details stehen im Audit Log (agent.tamper).",
+	"Allow uninstall for 1 hour": "Deinstallation für 1 Stunde erlauben",
 }

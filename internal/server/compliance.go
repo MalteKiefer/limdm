@@ -27,8 +27,9 @@ type webhookEvent struct {
 	Type     string    `json:"type"` // device.noncompliant
 	DeviceID string    `json:"device_id"`
 	Hostname string    `json:"hostname"`
-	Failing  int       `json:"failing_checks"`
-	Since    time.Time `json:"noncompliant_since"`
+	Failing  int       `json:"failing_checks,omitempty"`
+	Since    time.Time `json:"noncompliant_since,omitzero"`
+	Detail   string    `json:"detail,omitempty"` // device.tamper: what was found
 	Console  string    `json:"console_url"`
 }
 

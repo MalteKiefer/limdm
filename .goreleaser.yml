@@ -68,6 +68,10 @@ nfpms:
     contents:
       - src: packaging/limdm-agent.service
         dst: /usr/lib/systemd/system/limdm-agent.service
+      - src: packaging/limdm-watchdog.service
+        dst: /usr/lib/systemd/system/limdm-watchdog.service
+      - src: packaging/limdm-watchdog.timer
+        dst: /usr/lib/systemd/system/limdm-watchdog.timer
       - src: packaging/limdm-desktop-autostart.desktop
         dst: /etc/xdg/autostart/limdm-desktop.desktop
         file_info:

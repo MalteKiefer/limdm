@@ -84,5 +84,6 @@ without LUKS are refused, because there is no fast way to guarantee deletion; us
 ## Limits
 
 * Only volumes visible to `lsblk` as `crypto_LUKS` are handled.
-* TPM or FIDO2 unlock (`systemd-cryptenroll`) is not managed; such slots are left alone.
+* TPM or FIDO2 unlock (`systemd-cryptenroll`) is not managed; such slots are left alone,
+  except in lost mode, which removes every slot but the recovery key.
 * Changing `LIMDM_SESSION_KEY` makes stored keys unreadable. Escrow again after a change.

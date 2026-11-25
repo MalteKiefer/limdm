@@ -84,7 +84,8 @@ ok = hmac.compare_digest("sha256=" + hmac.new(bytes.fromhex(key), msg, hashlib.s
      and abs(time.time() - int(ts)) < 300
 ```
 
-The server does not follow redirects for webhook requests.
+The server does not follow redirects for webhook requests. Tamper events are sent the same
+way with `"type": "device.tamper"` and a `detail` field.
 
 ## Evidence
 

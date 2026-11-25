@@ -585,7 +585,7 @@ type Command struct {
 }
 
 // CommandTypes are the one off actions an admin can send.
-var CommandTypes = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "script", "lost", "found", "wipe"}
+var CommandTypes = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "script", "lost", "found", "wipe", "allow_uninstall"}
 
 // LostMode is the payload of the "lost" command. The server adds the escrowed
 // recovery keys only when it delivers the command; they are never stored in

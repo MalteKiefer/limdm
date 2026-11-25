@@ -247,3 +247,6 @@ ALTER TABLE console_users ADD COLUMN IF NOT EXISTS from_env BOOLEAN NOT NULL DEF
 -- change and disable; sessions issued under an older generation end.
 ALTER TABLE console_users ADD COLUMN IF NOT EXISTS session_gen BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE local_admins ADD COLUMN IF NOT EXISTS session_gen BIGINT NOT NULL DEFAULT 0;
+
+-- Last tamper event reported by the agent or its watchdog.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS tampered_at TIMESTAMPTZ;

@@ -413,6 +413,17 @@ func TestIntegration(t *testing.T) {
 		t.Fatal("directory page")
 	}
 
+	// tamper events mark the device and are audited separately
+	if code := call(dev, "/api/v1/checkin", api.CheckinRequest{Events: []string{"2026-11-25T08:00:00Z tamper: watchdog: limdm-agent.service was disabled, enabled again"}}, nil); code != 200 {
+		t.Fatalf("checkin with tamper event: %d", code)
+	}
+	var tamperedAt *time.Time
+	var tamperAudits int
+	db.QueryRow(ctx, `SELECT tampered_at FROM devices WHERE id=$1`, er.DeviceID).Scan(&tamperedAt)
+	db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action='agent.tamper'`).Scan(&tamperAudits)
+	if tamperedAt == nil || tamperAudits != 1 {
+		t.Fatalf("tamper event: tampered_at=%v audits=%d", tamperedAt, tamperAudits)
+	}
 	// renewal: the old certificate stays valid until the new one is used (a lost
 	// response must not lock the device out), then it is revoked
 	key2, csr2 := newIdentity()

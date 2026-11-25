@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"golang.org/x/term"
@@ -22,6 +23,8 @@ const usage = `usage:
   limdm-agent run                 run the agent (systemd service)
   limdm-agent check [--level 2]   print local compliance report, changes nothing
   limdm-agent recovery-key [--all] create and escrow LUKS recovery keys (asks for the passphrase)
+  limdm-agent watchdog            used by limdm-watchdog.timer
+  limdm-agent tamper-report MSG   queue a tamper event (package scripts)
   limdm-agent pam-auth            PAM helper for desktop OIDC login (called by pam_exec)
   limdm-agent version`
 
@@ -85,6 +88,10 @@ func main() {
 		level := fs.Int("level", 0, "override compliance level (1 or 2)")
 		fs.Parse(os.Args[2:])
 		err = agent.Report(os.Stdout, *level)
+	case "watchdog":
+		err = agent.Watchdog()
+	case "tamper-report":
+		err = agent.TamperReport(strings.Join(os.Args[2:], " "))
 	case "recovery-key":
 		fs := flag.NewFlagSet("recovery-key", flag.ExitOnError)
 		all := fs.Bool("all", false, "also replace keys that are already escrowed")
