@@ -44,6 +44,40 @@ CREATE TABLE IF NOT EXISTS devices (
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS blueprint_id BIGINT REFERENCES blueprints(id) ON DELETE SET NULL;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
 
+-- Directory: people and groups from SCIM or Google Workspace.
+CREATE TABLE IF NOT EXISTS dir_users (
+    id           BIGSERIAL PRIMARY KEY,
+    external_id  TEXT NOT NULL DEFAULT '',
+    source       TEXT NOT NULL, -- scim | google
+    user_name    TEXT NOT NULL,
+    email        TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL DEFAULT '',
+    department   TEXT NOT NULL DEFAULT '',
+    title        TEXT NOT NULL DEFAULT '',
+    active       BOOLEAN NOT NULL DEFAULT true,
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS dir_groups (
+    id          BIGSERIAL PRIMARY KEY,
+    external_id TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (source, external_id)
+);
+CREATE TABLE IF NOT EXISTS dir_members (
+    group_id BIGINT NOT NULL REFERENCES dir_groups(id) ON DELETE CASCADE,
+    user_id  BIGINT NOT NULL REFERENCES dir_users(id) ON DELETE CASCADE,
+    PRIMARY KEY (group_id, user_id)
+);
+-- A device without an explicit blueprint gets the one of its primary user's group.
+CREATE TABLE IF NOT EXISTS blueprint_group_assignments (
+    group_id     BIGINT PRIMARY KEY REFERENCES dir_groups(id) ON DELETE CASCADE,
+    blueprint_id BIGINT NOT NULL REFERENCES blueprints(id) ON DELETE CASCADE,
+    priority     INT NOT NULL DEFAULT 100
+);
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS primary_user_id BIGINT REFERENCES dir_users(id) ON DELETE SET NULL;
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version    INT PRIMARY KEY,
     applied_at TIMESTAMPTZ NOT NULL DEFAULT now()

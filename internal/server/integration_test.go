@@ -311,6 +311,90 @@ func TestIntegration(t *testing.T) {
 		t.Fatal("device page must list declarations")
 	}
 
+	// ---- directory: SCIM provisioning and group based blueprint assignment ----
+	_, body = ui("POST", "/directory/scim-token", url.Values{}, adminSess)
+	scimTok := regexp.MustCompile(`lms_[A-Za-z0-9_-]+`).FindString(body)
+	if scimTok == "" {
+		t.Fatal("no SCIM token shown")
+	}
+	scim := func(method, path, tok string, in any, out any) int {
+		t.Helper()
+		var rd io.Reader
+		if in != nil {
+			b, _ := json.Marshal(in)
+			rd = bytes.NewReader(b)
+		}
+		req, _ := http.NewRequest(method, admin.URL+"/scim/v2"+path, rd)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		req.Header.Set("Content-Type", "application/scim+json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if out != nil {
+			json.NewDecoder(resp.Body).Decode(out)
+		}
+		return resp.StatusCode
+	}
+	if code := scim("GET", "/Users", "wrong", nil, nil); code != http.StatusUnauthorized {
+		t.Fatalf("SCIM without valid token: %d", code)
+	}
+	var created struct{ ID string }
+	if code := scim("POST", "/Users", scimTok, map[string]any{"schemas": []string{scimUserSchema}, "userName": "max@firma.de", "externalId": "ext-1",
+		"name": map[string]string{"givenName": "Max", "familyName": "Muster"}, "emails": []map[string]any{{"value": "Max@Firma.de", "primary": true}},
+		scimEnterprise: map[string]string{"department": "Finance"}}, &created); code != http.StatusCreated || created.ID == "" {
+		t.Fatalf("SCIM create user: %d", code)
+	}
+	if code := scim("POST", "/Users", scimTok, map[string]any{"userName": "max@firma.de", "emails": []map[string]any{{"value": "max@firma.de"}}}, nil); code != http.StatusConflict {
+		t.Fatalf("duplicate SCIM user: %d", code)
+	}
+	var list struct{ TotalResults int }
+	scim("GET", `/Users?filter=userName+eq+%22max@firma.de%22`, scimTok, nil, &list)
+	if list.TotalResults != 1 {
+		t.Fatalf("SCIM filter: %d", list.TotalResults)
+	}
+	var grp struct{ ID string }
+	if code := scim("POST", "/Groups", scimTok, map[string]any{"displayName": "finance-laptops", "members": []map[string]string{}}, &grp); code != http.StatusCreated {
+		t.Fatalf("SCIM create group: %d", code)
+	}
+	if code := scim("PATCH", "/Groups/"+grp.ID, scimTok, map[string]any{"schemas": []string{scimPatch}, "Operations": []map[string]any{
+		{"op": "Add", "path": "members", "value": []map[string]string{{"value": created.ID}}}}}, nil); code != 200 {
+		t.Fatalf("SCIM add member: %d", code)
+	}
+	var gid string
+	db.QueryRow(ctx, `SELECT id::text FROM dir_groups WHERE name='finance-laptops'`).Scan(&gid)
+	ui("POST", "/directory/groups", url.Values{"group_id": {gid}, "blueprint_id": {childID}, "priority": {"5"}}, adminSess)
+	// clear the explicit blueprint, set the primary user: the group's blueprint must win over default
+	if code, body := ui("POST", "/devices/"+er.DeviceID+"/assign", url.Values{"blueprint_id": {"0"}, "primary_user": {"max@firma.de"}, "tags": {"lab"}}, adminSess); code != http.StatusSeeOther {
+		t.Fatalf("assign primary user: %d %s", code, body)
+	}
+	tx0, _ := db.Begin(ctx)
+	resGroup, err := resolveDevice(ctx, tx0, er.DeviceID)
+	tx0.Rollback(ctx)
+	if err != nil || resGroup.Chain[len(resGroup.Chain)-1].Name != "child" {
+		t.Fatalf("group assignment not applied: %v %+v", err, resGroup.Chain)
+	}
+	txf, _ := db.Begin(ctx)
+	facts, _, _ := deviceFacts(ctx, txf, er.DeviceID)
+	txf.Rollback(ctx) // an open transaction would block later schema DDL
+	if len(facts.Groups) != 1 || facts.Department != "Finance" {
+		t.Fatalf("directory facts: %+v", facts)
+	}
+	// Entra deactivates with a string boolean; the device loses the group blueprint
+	if code := scim("PATCH", "/Users/"+created.ID, scimTok, map[string]any{"Operations": []map[string]any{{"op": "Replace", "path": "active", "value": "False"}}}, nil); code != 200 {
+		t.Fatalf("SCIM deactivate: %d", code)
+	}
+	tx1, _ := db.Begin(ctx)
+	resGroup, _ = resolveDevice(ctx, tx1, er.DeviceID)
+	tx1.Rollback(ctx)
+	if resGroup.Chain[len(resGroup.Chain)-1].Name != "default" {
+		t.Fatalf("inactive user must not bring a group blueprint: %+v", resGroup.Chain)
+	}
+	if code, _ := ui("GET", "/directory", nil, auditor); code != 200 {
+		t.Fatal("directory page")
+	}
+
 	// certificate renewal revokes the old certificate
 	key2, csr2 := newIdentity()
 	var rr api.EnrollResponse

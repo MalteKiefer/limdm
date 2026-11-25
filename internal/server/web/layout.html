@@ -18,6 +18,7 @@
       <a href="/compliance" {{if eq .Page "compliance"}}class="on" aria-current="page"{{end}}>Compliance</a>
       <span class="group">Configuration</span>
       <a href="/library" {{if or (eq .Page "library") (eq .Page "item")}}class="on" aria-current="page"{{end}}>Library</a>
+      <a href="/directory" {{if eq .Page "directory"}}class="on" aria-current="page"{{end}}>Directory</a>
       <a href="/blueprints" {{if or (eq .Page "blueprints") (eq .Page "blueprint")}}class="on" aria-current="page"{{end}}>Blueprints</a>
       <a href="/tokens" {{if eq .Page "tokens"}}class="on" aria-current="page"{{end}}>Enrollment</a>
       <span class="group">Evidence</span>

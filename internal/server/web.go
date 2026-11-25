@@ -157,6 +157,11 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /devices", s.page(s.devices))
 	mux.HandleFunc("GET /devices/{id}", s.page(s.device))
 	mux.HandleFunc("POST /devices/{id}/command", s.helpdeskPage(s.deviceCommand))
+	mux.HandleFunc("GET /directory", s.page(s.adminOrAuditor(s.directoryPage)))
+	mux.HandleFunc("POST /directory/groups", s.page(s.groupAssign))
+	mux.HandleFunc("POST /directory/scim-token", s.page(s.scimToken))
+	mux.HandleFunc("POST /directory/google", s.page(s.googleConfigure))
+	mux.HandleFunc("POST /directory/google/sync", s.page(s.googleSyncNow))
 	mux.HandleFunc("GET /users", s.page(s.adminOrAuditor(s.usersPage)))
 	mux.HandleFunc("POST /users", s.page(s.userAdd))
 	mux.HandleFunc("POST /users/update", s.page(s.userUpdate))
@@ -419,8 +424,18 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		return
 	}
 	want := res.Decls
-	var tags []string
-	if err := tx.QueryRow(ctx, `SELECT tags FROM devices WHERE id=$1`, id).Scan(&tags); err != nil {
+	var tags, people []string
+	var primary string
+	if err := tx.QueryRow(ctx, `SELECT d.tags, coalesce(u.email,'') FROM devices d LEFT JOIN dir_users u ON u.id=d.primary_user_id WHERE d.id=$1`, id).Scan(&tags, &primary); err != nil {
+		s.fail(w, err)
+		return
+	}
+	rowsP, err := tx.Query(ctx, `SELECT email FROM dir_users WHERE active ORDER BY email LIMIT 2000`)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if people, err = pgx.CollectRows(rowsP, pgx.RowTo[string]); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -477,7 +492,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
 		"CommandTypes": api.CommandTypes,
 		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab,
-		"Resolved": res, "Tags": strings.Join(tags, ", "),
+		"Resolved": res, "Tags": strings.Join(tags, ", "), "Primary": primary, "People": people,
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "software", "compliance", "declarations", "commands"},
 	})
 }
@@ -561,9 +576,18 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	var primary *int64
+	if email := strings.ToLower(strings.TrimSpace(r.FormValue("primary_user"))); email != "" {
+		var uid int64
+		if err := s.db.QueryRow(r.Context(), `SELECT id FROM dir_users WHERE email=$1`, email).Scan(&uid); err != nil {
+			http.Error(w, "primary user not found in the directory", http.StatusBadRequest)
+			return
+		}
+		primary = &uid
+	}
 	ub, _ := json.Marshal(users)
 	err = s.auditAction(r.Context(), sess.Email, "device.assign", id, fmt.Sprintf("blueprint=%v tags=%v users=%s", r.FormValue("blueprint_id"), tags, ub), func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `UPDATE devices SET users=$2, blueprint_id=$3, tags=$4 WHERE id=$1`, id, string(ub), bpID, tags)
+		_, err := tx.Exec(r.Context(), `UPDATE devices SET users=$2, blueprint_id=$3, tags=$4, primary_user_id=$5 WHERE id=$1`, id, string(ub), bpID, tags, primary)
 		return err
 	})
 	if err != nil {

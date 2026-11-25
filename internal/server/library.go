@@ -219,8 +219,12 @@ func deviceFacts(ctx context.Context, q pgx.Tx, deviceID string) (api.Facts, *in
 	if err := json.Unmarshal(inv, &i); err != nil {
 		return api.Facts{}, nil, err
 	}
+	groups, dept, err := directoryFacts(ctx, q, deviceID)
+	if err != nil {
+		return api.Facts{}, nil, err
+	}
 	return api.Facts{OSID: i.OSID, OSVersion: i.OSVersion, Arch: i.Arch, Desktop: i.Desktop, Vendor: i.Vendor,
-		Model: i.Model, Hostname: i.Hostname, Tags: tags}, bp, nil
+		Model: i.Model, Hostname: i.Hostname, Tags: tags, Groups: groups, Department: dept}, bp, nil
 }
 
 type resolved struct {
@@ -235,6 +239,11 @@ func resolveDevice(ctx context.Context, q pgx.Tx, deviceID string) (resolved, er
 	facts, bp, err := deviceFacts(ctx, q, deviceID)
 	if err != nil {
 		return res, err
+	}
+	if bp == nil { // explicit assignment first, then the primary user's group, then default
+		if bp, err = groupBlueprint(ctx, q, deviceID); err != nil {
+			return res, err
+		}
 	}
 	if bp == nil {
 		var def int64

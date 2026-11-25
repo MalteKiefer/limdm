@@ -57,6 +57,9 @@
     <form method="post" action="/devices/{{$id}}/assign">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <label>Blueprint<select name="blueprint_id">{{range .Blueprints}}<option value="{{if eq .Name "default"}}0{{else}}{{.ID}}{{end}}" {{if .Assigned}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+      <label>Primary user <span class="hint">from the directory; brings groups and department into blueprint rules</span>
+        <input name="primary_user" value="{{.Primary}}" list="people" autocomplete="off" placeholder="jane.doe@example.com"></label>
+      <datalist id="people">{{range .People}}<option value="{{.}}">{{end}}</datalist>
       <label>Tags <span class="hint">comma separated, usable in blueprint conditions</span><input name="tags" value="{{.Tags}}" placeholder="finance, berlin"></label>
       <label>Desktop users <span class="hint">one per line: username email [admin]</span>
         <textarea name="users" rows="4" class="code" placeholder="jdoe jane.doe@example.com admin">{{.Users}}</textarea></label>

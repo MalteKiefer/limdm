@@ -219,6 +219,11 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 
 func (s *Server) Close() { s.db.Close() }
 
+// Background runs periodic jobs until ctx ends.
+func (s *Server) Background(ctx context.Context) {
+	go s.googleSyncLoop(ctx)
+}
+
 // AdminHandler serves the web UI.
 func (s *Server) AdminHandler() http.Handler {
 	mux := http.NewServeMux()
@@ -229,6 +234,7 @@ func (s *Server) AdminHandler() http.Handler {
 		}
 		w.Write([]byte("ok"))
 	})
+	s.scimRoutes(mux)
 	mux.HandleFunc("GET /login", s.loginPage)
 	mux.HandleFunc("GET /login/oidc", s.login)
 	mux.HandleFunc("POST /login/local", s.localLogin)
