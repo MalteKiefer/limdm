@@ -212,6 +212,8 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /software/icons/{id}", s.page(func(w http.ResponseWriter, r *http.Request, _ session) { s.catalogIcon(w, r) }))
 	mux.HandleFunc("POST /software/apps", s.page(s.appSave))
 	mux.HandleFunc("POST /software/import", s.page(s.appImport))
+	mux.HandleFunc("POST /software/remotes", s.page(s.remoteSave))
+	mux.HandleFunc("POST /software/remotes/{name}/{op}", s.page(s.remoteOp))
 	mux.HandleFunc("POST /software/apps/{id}/delete", s.page(s.appDelete))
 	mux.HandleFunc("POST /software/requests/{id}/{op}", s.page(s.requestDecide))
 	mux.HandleFunc("POST /software/settings", s.page(s.softwareSettingsSave))

@@ -47,16 +47,34 @@ have such an app count it as installed and managed right away; nothing is instal
 Take over what you want to keep before switching on the Flathub filter: apps outside the
 catalog get no updates once it is on.
 
+## Flatpak remotes
+
+**Software**, **Remotes** lists the remotes IT manages, Flathub from the start:
+
+* **allowed** remotes are added to the system installation of every device and kept enabled;
+  **blocked** ones are disabled, in the system and in users' installations.
+* **Only catalog apps**: with the store filter on (`restrict_flathub`), the remote gets a
+  filter that allows runtimes and the catalog's apps from that remote only.
+* **Found on devices, not managed** lists remotes devices have that IT does not manage
+  (Fedora Flatpaks, FlatPark, own repositories) with the device count: **Take over** makes
+  it a managed, allowed remote; **Block** disables it everywhere.
+* **Add remote** takes a `.flatpakrepo` file, a repository or an `oci+https://` URL.
+
+A catalog app installs its Flatpak from the remote chosen in its editor (Flathub by
+default); Flatpaks taken over from devices keep the remote they came from. The agent applies
+all of this every cycle, so changes users make to remotes do not last.
+
 ## Store policy
 
 The store policy is set per blueprint with the library item **Software store policy**
 (`com.limdm.softwarestore`):
 
 ```json
-{"restrict_flathub": true, "stores_read_only": true}
+{"restrict_flathub": true, "stores_read_only": true, "only_managed_remotes": true}
 ```
 
-Devices without such an item use the default under **Software**, **Settings**. Agents
+`only_managed_remotes` disables every Flatpak remote that is not allowed under **Remotes**,
+also in users' installations. Devices without such an item use the default under **Software**, **Settings**. Agents
 before 0.10.1 report the item as invalid but keep working; the server applies the policy
 either way.
 

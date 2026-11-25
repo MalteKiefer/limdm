@@ -20,8 +20,9 @@ import (
 
 // SoftwareSettings are the store wide switches (settings key "software").
 type SoftwareSettings struct {
-	RestrictFlathub bool `json:"restrict_flathub"` // Flathub offers only catalog apps
-	StoresReadOnly  bool `json:"stores_read_only"` // GNOME Software and KDE Discover cannot install
+	RestrictFlathub    bool `json:"restrict_flathub"`     // remotes marked catalog only offer only catalog apps
+	StoresReadOnly     bool `json:"stores_read_only"`     // GNOME Software and KDE Discover cannot install
+	OnlyManagedRemotes bool `json:"only_managed_remotes"` // every other Flatpak remote is disabled
 }
 
 func fp(id string) api.AppSource { return api.AppSource{Kind: "flatpak", Flatpak: id} }
@@ -126,7 +127,11 @@ func (s *Server) deviceCatalog(ctx context.Context, tx pgx.Tx, deviceID string, 
 		return nil, err
 	}
 	if policy != nil {
-		set = SoftwareSettings{RestrictFlathub: policy.RestrictFlathub, StoresReadOnly: policy.StoresReadOnly}
+		set = SoftwareSettings{RestrictFlathub: policy.RestrictFlathub, StoresReadOnly: policy.StoresReadOnly, OnlyManagedRemotes: policy.OnlyManagedRemotes}
+	}
+	remotes, err := s.catalogRemotes(ctx, tx)
+	if err != nil {
+		return nil, err
 	}
 	apps, err := s.catalogApps(ctx, tx, `WHERE enabled`)
 	if err != nil {
@@ -146,7 +151,8 @@ func (s *Server) deviceCatalog(ctx context.Context, tx pgx.Tx, deviceID string, 
 		reqs[app] = st
 	}
 	rows.Close()
-	c := &api.Catalog{Apps: []api.CatalogApp{}, RestrictFlathub: set.RestrictFlathub, StoresReadOnly: set.StoresReadOnly}
+	c := &api.Catalog{Apps: []api.CatalogApp{}, RestrictFlathub: set.RestrictFlathub, StoresReadOnly: set.StoresReadOnly,
+		Remotes: remotes, OnlyManagedRemotes: set.OnlyManagedRemotes}
 	for _, a := range apps {
 		if len(a.Scope) > 0 && !slices.ContainsFunc(chain, func(b blueprintRec) bool { return slices.Contains(a.Scope, b.ID) }) {
 			continue
@@ -253,4 +259,12 @@ func appSourcesText(src []api.AppSource) string {
 		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+func (s *Server) catalogRemotes(ctx context.Context, q querier) ([]api.CatalogRemote, error) {
+	rows, err := q.Query(ctx, `SELECT name, url, title, state, catalog_only FROM catalog_remotes ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowToStructByPos[api.CatalogRemote])
 }

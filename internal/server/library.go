@@ -66,6 +66,11 @@ var migrations = []struct {
 		return err
 	}},
 	{5, seedCatalog},
+	{6, func(ctx context.Context, tx pgx.Tx) error { // Flathub as the first managed remote
+		_, err := tx.Exec(ctx, `INSERT INTO catalog_remotes(name, url, title) VALUES ('flathub', 'https://dl.flathub.org/repo/flathub.flatpakrepo', 'Flathub')
+			ON CONFLICT (name) DO NOTHING`)
+		return err
+	}},
 }
 
 func columnExists(ctx context.Context, tx pgx.Tx, table, column string) (bool, error) {

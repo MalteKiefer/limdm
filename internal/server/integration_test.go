@@ -1365,4 +1365,39 @@ func TestAgentUpdates(t *testing.T) {
 	if fleet, _ := s.fleetFlatpaks(ctx); len(fleet) != 0 {
 		t.Fatalf("imported app still listed: %+v", fleet)
 	}
+
+	// remotes: Flathub managed from the start, take over a found one as blocked, only managed per policy
+	db.Exec(ctx, `UPDATE devices SET inventory='{"flatpak_remotes":[{"name":"flathub","url":"https://dl.flathub.org/repo/","installation":"system"},{"name":"flatpark","url":"https://dl.flatpark.org/","installation":"bob"}]}' WHERE id='d3'`)
+	post := func(path string, form url.Values) int {
+		t.Helper()
+		rq := httptest.NewRequest("POST", path, strings.NewReader(form.Encode()))
+		rq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rq.ParseForm()
+		rc := httptest.NewRecorder()
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /software/remotes", func(w http.ResponseWriter, r *http.Request) {
+			s.remoteSave(w, r, session{Email: "admin@firma.de", Role: "admin"})
+		})
+		mux.HandleFunc("POST /software/remotes/{name}/{op}", func(w http.ResponseWriter, r *http.Request) {
+			s.remoteOp(w, r, session{Email: "admin@firma.de", Role: "admin"})
+		})
+		mux.ServeHTTP(rc, rq)
+		return rc.Code
+	}
+	if code := post("/software/remotes", url.Values{"name": {"flatpark"}, "url": {"https://dl.flatpark.org/"}, "state": {"blocked"}}); code != http.StatusSeeOther {
+		t.Fatalf("take over: %d", code)
+	}
+	if code := post("/software/remotes/flatpark/allow", nil); code != http.StatusSeeOther {
+		t.Fatalf("allow: %d", code)
+	}
+	tx4, _ := db.Begin(ctx)
+	cat, _ = s.deviceCatalog(ctx, tx4, "d3", nil, &api.SoftwareStore{OnlyManagedRemotes: true})
+	tx4.Rollback(ctx)
+	names := map[string]string{}
+	for _, r := range cat.Remotes {
+		names[r.Name] = r.State
+	}
+	if names["flathub"] != "allowed" || names["flatpark"] != "allowed" || !cat.OnlyManagedRemotes {
+		t.Fatalf("catalog remotes: %+v only=%v", cat.Remotes, cat.OnlyManagedRemotes)
+	}
 }
