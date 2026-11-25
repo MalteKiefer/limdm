@@ -242,4 +242,16 @@ var deCatalog = map[string]string{
 	"admin@example.com": "admin@example.com", "example.com": "example.com", "https://accounts.google.com": "https://accounts.google.com",
 	"https://hooks.example.com/limdm":      "https://hooks.example.com/limdm",
 	"one per line: username email [admin]": "eine Zeile je Konto: Benutzername Mailadresse [admin]",
+
+	// device security
+	"overview": "Übersicht", "hardware": "Hardware", "software": "Software", "compliance": "Compliance",
+	"declarations": "Deklarationen", "commands": "Befehle",
+	"Recovery key": "Wiederherstellungsschlüssel", "Recovery keys": "Wiederherstellungsschlüssel", "Back to device": "Zurück zum Gerät",
+	"Enter this key at the disk unlock prompt instead of the passphrase. This view was recorded in the audit log.": "Gib diesen Schlüssel beim Entsperren der Festplatte statt der Passphrase ein. Diese Ansicht wurde im Audit Log festgehalten.",
+	"Escrowed": "Hinterlegt", "Last viewed": "Zuletzt angezeigt", "Show key": "Schlüssel anzeigen", "Volume UUID": "Volume UUID",
+	"LUKS, escrowed by the agent; every view is audited":                                                              "LUKS, vom Agent hinterlegt; jede Anzeige wird protokolliert",
+	"No recovery key escrowed. Declare disk encryption recovery; the user then runs pkexec limdm-agent recovery-key.": "Kein Wiederherstellungsschlüssel hinterlegt. Deklariere die Wiederherstellung der Festplattenverschlüsselung; der Benutzer führt dann pkexec limdm-agent recovery-key aus.",
+	"The device replaces this key at its next check in; afterwards it no longer works.":                               "Das Gerät ersetzt diesen Schlüssel beim nächsten Check in; danach ist er ungültig.",
+	"rotation pending": "Rotation ausstehend", "Boot loader password": "Bootloader Passwort",
+	"Disk encryption recovery": "Wiederherstellung Festplattenverschlüsselung", "polkit rules": "polkit Regeln", "sudo rules": "sudo Regeln",
 }

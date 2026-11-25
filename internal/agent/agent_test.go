@@ -267,3 +267,18 @@ func TestSyncManaged(t *testing.T) {
 		t.Fatal("second run must not change anything")
 	}
 }
+
+func TestPolkitAndSudoRendering(t *testing.T) {
+	js := polkitJS(api.PolkitRule{Name: "net", Actions: []string{"org.freedesktop.NetworkManager.*", "org.freedesktop.timedate1.set-timezone"},
+		Groups: []string{"netdev"}, Result: "auth_self_keep", LocalActiveOnly: true})
+	for _, want := range []string{`action.id.indexOf("org.freedesktop.NetworkManager.") == 0`, `action.id == "org.freedesktop.timedate1.set-timezone"`,
+		`subject.isInGroup("netdev")`, "subject.local && subject.active", "polkit.Result.AUTH_SELF_KEEP"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("polkit rule lacks %q:\n%s", want, js)
+		}
+	}
+	line := sudoLine(api.SudoRule{Principals: []string{"%dev", "alice"}, Commands: []string{"/usr/bin/apt-get update", "/usr/bin/systemctl restart nginx"}, NoPasswd: true})
+	if line != "%dev, alice ALL=(root) NOPASSWD: /usr/bin/apt-get update, /usr/bin/systemctl restart nginx\n" {
+		t.Fatalf("sudo line: %q", line)
+	}
+}

@@ -57,6 +57,8 @@ nfpms:
     contents:
       - src: packaging/limdm-agent.service
         dst: /usr/lib/systemd/system/limdm-agent.service
+      - src: packaging/com.limdm.recovery-key.policy
+        dst: /usr/share/polkit-1/actions/com.limdm.recovery-key.policy
       - dst: /etc/limdm
         type: dir
         file_info: {mode: 0o700}

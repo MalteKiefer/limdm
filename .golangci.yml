@@ -18,6 +18,7 @@ linters:
         - (io.Closer).Close
         - (*os.File).Close
         - os.Remove
+        - os.RemoveAll
         - (net/http.ResponseWriter).Write
         - (*encoding/json.Encoder).Encode
         - (*encoding/csv.Writer).Write

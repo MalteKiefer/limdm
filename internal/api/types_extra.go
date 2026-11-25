@@ -94,6 +94,11 @@ type ExtraPolicy struct {
 	Proxy         *Proxy            `json:"proxy,omitempty"`
 	Flatpak       *Flatpak          `json:"flatpak,omitempty"`
 	Scripts       []Script          `json:"scripts,omitempty"`
+
+	DiskEncryption *DiskEncryption `json:"disk_encryption,omitempty"`
+	Polkit         []PolkitRule    `json:"polkit,omitempty"`
+	Sudo           *Sudo           `json:"sudo,omitempty"`
+	Bootloader     *Bootloader     `json:"bootloader,omitempty"`
 }
 
 var extraExamples = map[string]string{
@@ -332,7 +337,7 @@ func (d Declaration) applyExtra(p *Policy) (bool, error) {
 		}
 		p.Extra.Scripts = v.Scripts
 	default:
-		return false, nil
+		return d.applySecurity(p)
 	}
 	return true, errors.Join(errs...)
 }
@@ -405,7 +410,7 @@ func mergeExtra(typ string, a, b json.RawMessage) (json.RawMessage, bool, error)
 			out, err = json.Marshal(Flatpak{Remotes: remotes, Install: without(union(x.Install, y.Install), rm), Remove: rm})
 		}
 	default:
-		return nil, false, nil
+		return mergeSecurity(typ, a, b)
 	}
 	return out, true, err
 }

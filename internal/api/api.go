@@ -535,7 +535,8 @@ type CheckinRequest struct {
 	Packages          []Package       `json:"packages,omitempty"`
 	PackagesHash      string          `json:"packages_hash"`
 	Results           []CommandResult `json:"results,omitempty"`
-	Metrics           *Metrics        `json:"metrics,omitempty"` // sent every check in, outside the status hash
+	Metrics           *Metrics        `json:"metrics,omitempty"`       // sent every check in, outside the status hash
+	RecoveryKeys      []RecoveryKey   `json:"recovery_keys,omitempty"` // new LUKS recovery keys to escrow
 	Events            []string        `json:"events,omitempty"`
 }
 
@@ -556,6 +557,9 @@ type CheckinResponse struct {
 	NeedPackages      bool          `json:"need_packages"`
 	AgentUpdate       *Release      `json:"agent_update,omitempty"`
 	ServerTime        time.Time     `json:"server_time"`
+	// RecoveryRotate carries escrowed keys the agent should replace (after
+	// they were viewed); the current key unlocks the slot for the new one.
+	RecoveryRotate []RecoveryKey `json:"recovery_rotate,omitempty"`
 }
 
 // ---- signed agent releases ----

@@ -56,6 +56,10 @@ and 2) and ISO/IEC 27001:2022 Annex A.
 | `com.limdm.ssh`, `com.limdm.banner` | hardening sshd options (allowlist), login banner |
 | `com.limdm.dns`, `com.limdm.ntp`, `com.limdm.proxy` | resolvers, time servers, system proxy |
 | `com.limdm.flatpak`, `com.limdm.scripts` | Flatpak apps, recurring scripts (only where scripts are allowed) |
+| `com.limdm.diskencryption` | `{"escrow": true, "rotate_after_view": true}`: LUKS recovery keys stored on the server |
+| `com.limdm.polkit` | polkit rules per action or namespace and group, e.g. let users manage networks or printers |
+| `com.limdm.sudo` | sudo rules (principals, run as, absolute commands, NOPASSWD) checked with `visudo` before install |
+| `com.limdm.bootloader` | GRUB superuser and password; the console stores only the PBKDF2 hash, default entries stay bootable |
 
 The console shows an example payload for every type.
 
@@ -222,6 +226,22 @@ systemctl enable --now limdm-agent
 ```
 
 Local report without changes: `limdm-agent check --level 2`.
+
+### Disk recovery keys
+
+With `com.limdm.diskencryption` and `escrow` the agent reports every LUKS volume without an
+escrowed key and reminds logged in desktop users once a day. Only the user knows a current
+passphrase, so the user runs
+
+```sh
+pkexec limdm-agent recovery-key
+```
+
+(authorized by a polkit action with the user's own password). The agent adds a generated
+recovery key in the systemd format, verifies it and sends it over mTLS. The server stores it
+sealed with AES-256-GCM; admins and helpdesk can reveal it on the device page, every view is
+audited. With `rotate_after_view` the device replaces a viewed key at its next check in and
+removes the old one only after the server confirmed the new key.
 
 ### Desktop login
 

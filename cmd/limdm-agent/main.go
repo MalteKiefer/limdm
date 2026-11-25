@@ -11,6 +11,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"golang.org/x/term"
+
 	"github.com/maltekiefer/limdm/internal/agent"
 )
 
@@ -18,6 +20,7 @@ const usage = `usage:
   limdm-agent enroll --server https://mdm.example.com:8444 --fingerprint SHA256 --token TOKEN [--allow-scripts]
   limdm-agent run                 run the agent (systemd service)
   limdm-agent check [--level 2]   print local compliance report, changes nothing
+  limdm-agent recovery-key [--all] create and escrow LUKS recovery keys (asks for the passphrase)
   limdm-agent pam-auth            PAM helper for desktop OIDC login (called by pam_exec)
   limdm-agent version`
 
@@ -66,6 +69,16 @@ func main() {
 		level := fs.Int("level", 0, "override compliance level (1 or 2)")
 		fs.Parse(os.Args[2:])
 		err = agent.Report(os.Stdout, *level)
+	case "recovery-key":
+		fs := flag.NewFlagSet("recovery-key", flag.ExitOnError)
+		all := fs.Bool("all", false, "also replace keys that are already escrowed")
+		fs.Parse(os.Args[2:])
+		err = agent.CreateRecoveryKeys(func(prompt string) (string, error) {
+			fmt.Fprint(os.Stderr, prompt)
+			b, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprintln(os.Stderr)
+			return string(b), err
+		}, *all)
 	default:
 		err = errors.New(usage)
 	}

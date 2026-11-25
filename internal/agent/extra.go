@@ -66,6 +66,10 @@ func (a *Agent) applyExtra() {
 	run(api.TypeProxy, a.applyProxy(x.Proxy))
 	run(api.TypeFlatpak, a.applyFlatpak(x.Flatpak))
 	run(api.TypeScripts, a.applyScripts(x.Scripts))
+	run(api.TypePolkit, applyPolkit(x.Polkit))
+	run(api.TypeSudo, applySudo(x.Sudo))
+	run(api.TypeBootloader, a.applyBootloader(x.Bootloader))
+	a.notifyEscrow()
 }
 
 func (a *Agent) applyRepositories(repos []api.Repository) error {

@@ -25,7 +25,7 @@
 </div>
 <nav class="tabs" aria-label="{{t "Device sections"}}">
   {{$tab := .Tab}}{{$failing := .Failing}}
-  {{range .Tabs}}<a href="/devices/{{$id}}?tab={{.}}" {{if eq $tab .}}class="on" aria-current="page"{{end}}>{{.}}{{if and (eq . "compliance") $failing}}<span class="count">{{$failing}}</span>{{end}}</a>{{end}}
+  {{range .Tabs}}<a href="/devices/{{$id}}?tab={{.}}" {{if eq $tab .}}class="on" aria-current="page"{{end}}>{{t .}}{{if and (eq . "compliance") $failing}}<span class="count">{{$failing}}</span>{{end}}</a>{{end}}
 </nav>
 
 {{if eq .Tab "overview"}}
@@ -110,6 +110,16 @@
       <td>{{if .Encrypted}}<span class="pill ok">{{t "LUKS"}}</span>{{else}}<span class="pill bad">{{t "none"}}</span>{{end}}</td>
       <td><meter min="0" max="{{.SizeGB}}" value="{{used .SizeGB .FreeGB}}" low="{{frac .SizeGB 80}}" high="{{frac .SizeGB 90}}" optimum="0"></meter> <span class="muted">{{used .SizeGB .FreeGB}} {{t "of"}} {{.SizeGB}} {{t "GB"}}</span></td>
       <td class="num">{{.FreeGB}} {{t "GB"}}</td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No volume data reported."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "Recovery keys"}}</h2><span class="muted">{{t "LUKS, escrowed by the agent; every view is audited"}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Device"}}</th><th>{{t "Volume UUID"}}</th><th>{{t "Escrowed"}}</th><th>{{t "Last viewed"}}</th><th></th></tr></thead>
+    <tbody>{{range .Recovery}}<tr><td class="mono">{{.Device}}</td><td class="mono">{{.UUID}}</td><td>{{fmtTime .Escrowed}}</td>
+      <td>{{if .ViewedAt}}{{fmtTime (derefTime .ViewedAt)}}{{if .ViewedBy}} · {{deref2 .ViewedBy}}{{end}}{{if .Rotate}} <span class="pill warn">{{t "rotation pending"}}</span>{{end}}{{else}}<span class="muted">{{t "never"}}</span>{{end}}</td>
+      <td>{{if ne $.Sess.Role "auditor"}}<form method="post" action="/devices/{{$id}}/recovery"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="uuid" value="{{.UUID}}"><button class="secondary small">{{t "Show key"}}</button></form>{{end}}</td></tr>
+    {{else}}<tr><td colspan="5" class="empty">{{t "No recovery key escrowed. Declare disk encryption recovery; the user then runs pkexec limdm-agent recovery-key."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 <section class="tablecard">

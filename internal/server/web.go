@@ -55,6 +55,7 @@ func parsePages(lang string) map[string]*template.Template {
 		"list":      func(v ...string) []string { return v },
 		"deref":     func(p *int64) int64 { return *p },
 		"derefTime": func(p *time.Time) time.Time { return *p },
+		"deref2":    func(p *string) string { return *p },
 		"typeLabel": func(t string) string {
 			if l, ok := typeLabels[t]; ok {
 				return T(l)
@@ -143,6 +144,8 @@ var typeLabels = map[string]string{
 	api.TypeSysctl: "Kernel parameters", api.TypeKernelModules: "Blocked kernel modules", api.TypeSSH: "SSH server options",
 	api.TypeBanner: "Login banner", api.TypeDNS: "DNS", api.TypeNTP: "Time servers", api.TypeProxy: "Proxy",
 	api.TypeFlatpak: "Flatpak apps", api.TypeScripts: "Recurring scripts",
+	api.TypeDiskEncryption: "Disk encryption recovery", api.TypePolkit: "polkit rules", api.TypeSudo: "sudo rules",
+	api.TypeBootloader: "Boot loader password",
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, name string, data map[string]any) {
@@ -166,6 +169,7 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /devices", s.page(s.devices))
 	mux.HandleFunc("GET /devices/{id}", s.page(s.device))
 	mux.HandleFunc("POST /devices/{id}/command", s.helpdeskPage(s.deviceCommand))
+	mux.HandleFunc("POST /devices/{id}/recovery", s.helpdeskPage(s.recoveryView))
 	mux.HandleFunc("GET /directory", s.page(s.adminOrAuditor(s.directoryPage)))
 	mux.HandleFunc("POST /directory/groups", s.page(s.groupAssign))
 	mux.HandleFunc("POST /directory/scim-token", s.page(s.scimToken))
@@ -435,6 +439,11 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		s.fail(w, err)
 		return
 	}
+	recovery, err := s.recoveryKeys(ctx, id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	// expected declarations, to show what the device has not confirmed yet
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -516,7 +525,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
 		"CommandTypes": api.CommandTypes,
 		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab,
-		"Resolved": res, "Tags": strings.Join(tags, ", "), "Primary": primary, "People": people, "Since": since, "Charts": charts,
+		"Resolved": res, "Tags": strings.Join(tags, ", "), "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery,
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "software", "compliance", "declarations", "commands"},
 	})
 }
