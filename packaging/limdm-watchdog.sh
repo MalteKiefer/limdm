@@ -21,7 +21,7 @@ if [ -f "$marker" ] && [ $(( $(date +%s) - $(stat -c %Y "$marker") )) -gt 900 ];
     elif [ -x "$saved" ]; then
         install -m 0755 "$saved" /usr/bin/limdm-agent.rollback && mv -f /usr/bin/limdm-agent.rollback /usr/bin/limdm-agent
         printf '{"from":"%s","to":"%s","ok":false,"rolled_back":true,"detail":"agent %s did not check in within 15 minutes"}\n' "$from" "$to" "$to" > "$state/update-result.json"
-        systemctl kill --signal=SIGTERM limdm-agent.service >/dev/null 2>&1 || systemctl start limdm-agent.service >/dev/null 2>&1 || true
+        systemctl kill --kill-who=main --signal=SIGTERM limdm-agent.service >/dev/null 2>&1 || systemctl start limdm-agent.service >/dev/null 2>&1 || true
     fi
     chmod 0600 "$state/update-result.json" 2>/dev/null || true
     rm -f "$marker"

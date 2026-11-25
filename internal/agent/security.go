@@ -519,7 +519,7 @@ func CreateRecoveryKeys(readPass func(prompt string) (string, error), all bool) 
 	}
 	if done > 0 {
 		fmt.Println("The agent sends the new keys to your IT department with its next check in. Your passphrase stays unchanged.")
-		if _, err := run(10*time.Second, "systemctl", "kill", "--signal=SIGUSR1", "limdm-agent"); err != nil {
+		if _, err := run(10*time.Second, "systemctl", "kill", "--kill-who=main", "--signal=SIGUSR1", "limdm-agent"); err != nil {
 			fmt.Println("(the agent is not running; the keys stay queued until it starts)")
 		}
 	}

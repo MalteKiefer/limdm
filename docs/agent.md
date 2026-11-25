@@ -150,7 +150,7 @@ well.
 | `limdm-agent check --level 2` | local compliance report, changes nothing |
 | `limdm-agent version` | installed version |
 | `sudo limdm-agent recovery-key` | create and escrow LUKS recovery keys from a terminal |
-| `systemctl kill -s USR1 limdm-agent` | check in now |
+| `systemctl kill --kill-who=main -s USR1 limdm-agent` | check in now |
 | `journalctl -u limdm-agent` | agent log |
 
 ## Files

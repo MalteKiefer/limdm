@@ -33,7 +33,7 @@ func TamperReport(msg string) error {
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
-	_, _ = run(10*time.Second, "systemctl", "kill", "--signal=SIGUSR1", agentUnit) // check in now, if running
+	_, _ = run(10*time.Second, "systemctl", "kill", "--kill-who=main", "--signal=SIGUSR1", agentUnit) // check in now, if running
 	return err
 }
 
