@@ -22,6 +22,9 @@ const (
 	TypePolkit         = "com.limdm.polkit"
 	TypeSudo           = "com.limdm.sudo"
 	TypeBootloader     = "com.limdm.bootloader"
+	// TypeSoftwareStore sets the store policy per blueprint; without it the
+	// console's default applies (Software, Settings).
+	TypeSoftwareStore = "com.limdm.softwarestore"
 )
 
 type DiskEncryption struct {
@@ -95,6 +98,7 @@ func init() {
 	Types[TypePolkit] = `{"rules": [{"name": "network", "actions": ["org.freedesktop.NetworkManager.*"], "groups": ["netdev"], "result": "yes", "local_active_only": true}, {"name": "printers", "actions": ["org.opensuse.cupspkhelper.mechanism.*"], "groups": [], "result": "auth_self_keep", "local_active_only": true}]}`
 	Types[TypeSudo] = `{"rules": [{"name": "developers", "principals": ["%developers"], "run_as": "", "commands": ["/usr/bin/apt-get update", "/usr/bin/systemctl restart nginx"], "nopasswd": false}], "timestamp_timeout": 5}`
 	Types[TypeBootloader] = `{"superuser": "bootadmin", "password": "replace with a new password, stored as PBKDF2 hash", "unrestricted": true}`
+	Types[TypeSoftwareStore] = `{"restrict_flathub": true, "stores_read_only": true}`
 	listTypes[TypePolkit] = true
 	listTypes[TypeSudo] = true
 }
@@ -225,6 +229,12 @@ func (d Declaration) applySecurity(p *Policy) (bool, error) {
 			bad("timestamp_timeout must be 0..60 minutes")
 		}
 		p.Extra.Sudo = &v
+	case TypeSoftwareStore:
+		var v SoftwareStore
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		p.Extra.SoftwareStore = &v
 	case TypeBootloader:
 		var v Bootloader
 		if err := strict(d.Payload, &v); err != nil {

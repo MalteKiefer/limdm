@@ -171,7 +171,7 @@ var typeLabels = map[string]string{
 	api.TypeBanner: "Login banner", api.TypeDNS: "DNS", api.TypeNTP: "Time servers", api.TypeProxy: "Proxy",
 	api.TypeFlatpak: "Flatpak apps", api.TypeScripts: "Recurring scripts",
 	api.TypeDiskEncryption: "Disk encryption recovery", api.TypePolkit: "polkit rules", api.TypeSudo: "sudo rules",
-	api.TypeBootloader: "Boot loader password",
+	api.TypeBootloader: "Boot loader password", api.TypeSoftwareStore: "Software store policy",
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, name string, data map[string]any) {
@@ -211,6 +211,7 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /software/apps/{id}", s.page(s.adminOrAuditor(s.appEdit)))
 	mux.HandleFunc("GET /software/icons/{id}", s.page(func(w http.ResponseWriter, r *http.Request, _ session) { s.catalogIcon(w, r) }))
 	mux.HandleFunc("POST /software/apps", s.page(s.appSave))
+	mux.HandleFunc("POST /software/import", s.page(s.appImport))
 	mux.HandleFunc("POST /software/apps/{id}/delete", s.page(s.appDelete))
 	mux.HandleFunc("POST /software/requests/{id}/{op}", s.page(s.requestDecide))
 	mux.HandleFunc("POST /software/settings", s.page(s.softwareSettingsSave))
@@ -613,7 +614,18 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		agentVersions, _ = pgx.CollectRows(rows, pgx.RowTo[string])
 		slices.SortFunc(agentVersions, func(a, b string) int { return api.CompareVersions(b, a) })
 	}
-	appNames := map[string]string{}
+	appNames, catalogFlatpaks := map[string]string{}, map[string]string{}
+	if tab == "software" && sub == "flatpak" {
+		if apps, err := s.catalogApps(ctx, s.db, ""); err == nil {
+			for _, a := range apps {
+				for _, src := range a.Sources {
+					if src.Kind == "flatpak" {
+						catalogFlatpaks[src.Flatpak] = a.ID
+					}
+				}
+			}
+		}
+	}
 	if tab == "software" && sub == "catalog" {
 		if apps, err := s.catalogApps(ctx, s.db, ""); err == nil {
 			for _, a := range apps {
@@ -621,7 +633,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 			}
 		}
 	}
-	s.render(w, r, sess, "device", map[string]any{"EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames,
+	s.render(w, r, sess, "device", map[string]any{"EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames, "CatalogFlatpaks": catalogFlatpaks,
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),

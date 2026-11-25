@@ -23,6 +23,17 @@
     <td>{{if .Scope}}{{len .Scope}} {{t "blueprints"}}{{else}}<span class="muted">{{t "all devices"}}</span>{{end}}</td>
   </tr>{{else}}<tr><td colspan="7" class="empty">{{t "The catalog is empty."}}</td></tr>{{end}}</tbody>
 </table></div></section>
+{{if and .Fleet (eq .Sess.Role "admin")}}
+<form class="tablecard" method="post" action="/software/import">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <div class="card-head"><h2>{{t "Installed on devices, not in the catalog"}}</h2><button class="small">{{t "Add selected to catalog"}}</button></div>
+  <p class="muted card-note">{{t "Flatpaks users or IT installed earlier. Added apps count as installed and managed on these devices; nothing is installed again. With the Flathub filter on, apps outside the catalog get no updates."}}</p>
+  <div class="scroll"><table>
+    <thead><tr><th></th><th>{{t "Application"}}</th><th>{{t "Flatpak ID"}}</th><th class="num">{{t "Devices"}}</th></tr></thead>
+    <tbody>{{range .Fleet}}<tr><td><input type="checkbox" name="flatpak" value="{{.ID}}" aria-label="{{.Name}}"></td><td>{{.Name}}</td><td class="mono">{{.ID}}</td><td class="num">{{.Devices}}</td></tr>{{end}}</tbody>
+  </table></div>
+</form>
+{{end}}
 {{else if eq .Tab "requests"}}
 <section class="tablecard"><div class="scroll"><table>
   <thead><tr><th>{{t "App"}}</th><th>{{t "Device"}}</th><th>{{t "User"}}</th><th>{{t "Note"}}</th><th>{{t "Requested"}}</th><th>{{t "State"}}</th>{{if eq $.Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
@@ -39,6 +50,7 @@
 <form class="card" method="post" action="/software/settings">
   <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="tab" value="settings">
   <h2>{{t "Store policy"}}</h2>
+  <p class="muted">{{t "Default for devices without a Software store policy item. Assign that item in a blueprint to decide per device group."}}</p>
   <label class="check"><input type="checkbox" name="restrict_flathub" {{if .Set.RestrictFlathub}}checked{{end}}> {{t "Flathub offers only catalog apps"}}</label>
   <p class="muted">{{t "A remote filter on every device limits Flathub, also for installations by users themselves, to the Flatpaks in the catalog. Runtimes stay available."}}</p>
   <label class="check"><input type="checkbox" name="stores_read_only" {{if .Set.StoresReadOnly}}checked{{end}}> {{t "GNOME Software and KDE Discover are read only"}}</label>

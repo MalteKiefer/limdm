@@ -119,10 +119,14 @@ func (s *Server) catalogApps(ctx context.Context, q querier, where string, args 
 
 // deviceCatalog is the catalog a device gets: enabled apps whose scope is
 // empty or contains one of its blueprints, with the device's requests.
-func (s *Server) deviceCatalog(ctx context.Context, tx pgx.Tx, deviceID string, chain []blueprintRec) (*api.Catalog, error) {
+// A store policy declaration of the device overrides the console default.
+func (s *Server) deviceCatalog(ctx context.Context, tx pgx.Tx, deviceID string, chain []blueprintRec, policy *api.SoftwareStore) (*api.Catalog, error) {
 	set, err := s.softwareSettings(ctx, tx)
 	if err != nil {
 		return nil, err
+	}
+	if policy != nil {
+		set = SoftwareSettings{RestrictFlathub: policy.RestrictFlathub, StoresReadOnly: policy.StoresReadOnly}
 	}
 	apps, err := s.catalogApps(ctx, tx, `WHERE enabled`)
 	if err != nil {

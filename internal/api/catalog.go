@@ -121,3 +121,9 @@ func (c Catalog) Flatpaks() []string {
 	}
 	return ids
 }
+
+// SoftwareStore is the store policy of a device (com.limdm.softwarestore).
+type SoftwareStore struct {
+	RestrictFlathub bool `json:"restrict_flathub"` // Flathub offers only catalog apps
+	StoresReadOnly  bool `json:"stores_read_only"` // GNOME Software and KDE Discover cannot install
+}

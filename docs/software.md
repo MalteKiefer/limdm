@@ -37,9 +37,28 @@ package. Firefox installed as `firefox` (rpm) or `firefox-esr` (deb) is shown as
 and never offered again as Flatpak. The device page (**Software**, **Catalog**) shows each
 app's state and how it is installed.
 
+## Taking over installed Flatpaks
+
+Flatpaks that users or IT installed before the catalog can be taken over: **Software**,
+**Catalog** lists Flatpaks installed on devices but not in the catalog, with the number of
+devices; **Add selected to catalog** creates entries (mode available, icon from Flathub).
+On a device page (**Software**, **Flatpak**) each app has **Add to catalog**. Devices that
+have such an app count it as installed and managed right away; nothing is installed again.
+Take over what you want to keep before switching on the Flathub filter: apps outside the
+catalog get no updates once it is on.
+
 ## Store policy
 
-**Software**, **Settings**:
+The store policy is set per blueprint with the library item **Software store policy**
+(`com.limdm.softwarestore`):
+
+```json
+{"restrict_flathub": true, "stores_read_only": true}
+```
+
+Devices without such an item use the default under **Software**, **Settings**. Agents
+before 0.10.1 report the item as invalid but keep working; the server applies the policy
+either way.
 
 * **Flathub offers only catalog apps.** A Flatpak remote filter (`deny *`, runtimes and the
   catalog's Flatpaks allowed) is set on the system's and every user's `flathub` remote, so

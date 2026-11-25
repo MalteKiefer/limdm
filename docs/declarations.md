@@ -248,6 +248,14 @@ reject the two keys as unknown, so add them only after the fleet runs 0.9.2.
 Typical uses: let users manage networks, printers, time zone or mount disks without admin
 rights.
 
+### `com.limdm.softwarestore`
+
+```json
+{"restrict_flathub": true, "stores_read_only": true}
+```
+
+Store policy of the software catalog per blueprint; see [software.md](software.md#store-policy).
+
 ### `com.limdm.bootloader`
 
 ```json
