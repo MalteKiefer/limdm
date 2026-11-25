@@ -446,3 +446,4 @@ form:has(select[name=type] option[value="com.limdm.certificates"]:checked) .cert
 td.icon-cell { width: 48px; padding-right: 0; }
 td.icon-cell img { display: block; border-radius: 6px; }
 #catalog-table td:last-child { white-space: nowrap; }
+.card-note { padding: 0 20px 12px; margin: 0; }

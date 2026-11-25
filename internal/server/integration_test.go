@@ -127,6 +127,11 @@ func TestIntegration(t *testing.T) {
 	if code, _ := ui("POST", "/tokens", url.Values{"uses": {"1"}, "days": {"1"}}, auditor); code != http.StatusForbidden {
 		t.Fatalf("auditor must be read only, got %d", code)
 	}
+	for _, path := range []string{"/software/import", "/software/apps", "/software/settings", "/software/requests/1/approve", "/software/apps/firefox/delete"} {
+		if code, _ := ui("POST", path, url.Values{"flatpak": {"org.example.App"}}, auditor); code != http.StatusForbidden {
+			t.Fatalf("auditor must not change the catalog: %s %d", path, code)
+		}
+	}
 	bad := url.Values{"uses": {"1"}, "days": {"1"}}
 	if code, _ := ui("POST", "/tokens", bad, adminSess); code != 200 {
 		t.Fatal("sanity")
@@ -1308,7 +1313,7 @@ func TestAgentUpdates(t *testing.T) {
 	db.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('software', '{"restrict_flathub":true}') ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`)
 	ctx2 := ctx
 	tx2, _ := db.Begin(ctx2)
-	cat, err := s.deviceCatalog(ctx2, tx2, "d3", []blueprintRec{{ID: 1}})
+	cat, err := s.deviceCatalog(ctx2, tx2, "d3", []blueprintRec{{ID: 1}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1326,7 +1331,7 @@ func TestAgentUpdates(t *testing.T) {
 		t.Fatalf("one request for the request mode app expected, got %d", n)
 	}
 	tx3, _ := db.Begin(ctx)
-	cat, _ = s.deviceCatalog(ctx, tx3, "d3", []blueprintRec{{ID: 999}})
+	cat, _ = s.deviceCatalog(ctx, tx3, "d3", []blueprintRec{{ID: 999}}, &api.SoftwareStore{StoresReadOnly: true})
 	tx3.Rollback(ctx)
 	var slack, zoom bool
 	for _, a := range cat.Apps {
@@ -1335,5 +1340,29 @@ func TestAgentUpdates(t *testing.T) {
 	}
 	if !slack || !zoom {
 		t.Fatalf("request state or scoped app missing: slack=%v zoom=%v", slack, zoom)
+	}
+	if cat.RestrictFlathub || !cat.StoresReadOnly {
+		t.Fatalf("the device's store policy must override the default: %+v", cat)
+	}
+
+	// import Flatpaks installed on devices into the catalog
+	db.Exec(ctx, `UPDATE devices SET inventory='{"flatpaks":[{"id":"com.github.wwmm.easyeffects","name":"Easy Effects","installation":"system"},{"id":"org.mozilla.firefox","name":"Firefox","installation":"system"}]}' WHERE id='d3'`)
+	fleet, err := s.fleetFlatpaks(ctx)
+	if err != nil || len(fleet) != 1 || fleet[0].ID != "com.github.wwmm.easyeffects" {
+		t.Fatalf("fleet flatpaks outside the catalog: %v %+v", err, fleet)
+	}
+	form := url.Values{"flatpak": {"com.github.wwmm.easyeffects", "org.unknown.App"}}
+	ireq := httptest.NewRequest("POST", "/software/import", strings.NewReader(form.Encode()))
+	ireq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	ireq.ParseForm()
+	rec = httptest.NewRecorder()
+	s.appImport(rec, ireq, session{Email: "admin@firma.de", Role: "admin"})
+	var imported string
+	db.QueryRow(ctx, `SELECT slug FROM catalog_apps WHERE sources @> '[{"flatpak":"com.github.wwmm.easyeffects"}]'`).Scan(&imported)
+	if rec.Code != http.StatusSeeOther || imported != "easy-effects" {
+		t.Fatalf("import: %d %q", rec.Code, imported)
+	}
+	if fleet, _ := s.fleetFlatpaks(ctx); len(fleet) != 0 {
+		t.Fatalf("imported app still listed: %+v", fleet)
 	}
 }

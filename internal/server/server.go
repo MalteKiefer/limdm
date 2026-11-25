@@ -629,7 +629,8 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	decls := res.Decls
-	catalog, err := s.deviceCatalog(ctx, tx, id, res.Chain)
+	pol, _ := api.Compose(decls)
+	catalog, err := s.deviceCatalog(ctx, tx, id, res.Chain, pol.Extra.SoftwareStore)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -639,7 +640,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.AppRequests) > 0 { // the device sees its new request states in this answer
-		if catalog, err = s.deviceCatalog(ctx, tx, id, res.Chain); err != nil {
+		if catalog, err = s.deviceCatalog(ctx, tx, id, res.Chain, pol.Extra.SoftwareStore); err != nil {
 			s.fail(w, err)
 			return
 		}
@@ -651,7 +652,6 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	if resp.DeclarationsToken != req.DeclarationsToken {
 		resp.Declarations = decls
 	}
-	pol, _ := api.Compose(decls)
 	if !pol.Privacy.NetworkInfo {
 		// the public address and its location are network data too
 		relocate = false

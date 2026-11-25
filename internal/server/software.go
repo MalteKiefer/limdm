@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -69,6 +70,10 @@ func (s *Server) renderSoftware(w http.ResponseWriter, r *http.Request, sess ses
 			apps[i].Installs = counts[apps[i].ID]
 		}
 		data["Apps"] = apps
+		if data["Fleet"], err = s.fleetFlatpaks(ctx); err != nil {
+			s.fail(w, err)
+			return
+		}
 	case "requests":
 		rows, err := s.db.Query(ctx, `SELECT q.id, q.device_id, d.hostname, q.app, a.name, q.username, q.note, q.status, q.decided_by, q.created_at, q.decided_at
 			FROM catalog_requests q JOIN devices d ON d.id=q.device_id JOIN catalog_apps a ON a.slug=q.app
@@ -273,4 +278,94 @@ func (s *Server) softwareSettingsSave(w http.ResponseWriter, r *http.Request, se
 	}
 	r.Form.Set("tab", "settings")
 	s.renderSoftware(w, r, sess, "Settings saved and active.", "")
+}
+
+// fleetFlatpak is a Flatpak app installed somewhere in the fleet.
+type fleetFlatpak struct {
+	ID, Name string
+	Devices  int
+}
+
+// fleetFlatpaks lists installed Flatpak apps that no catalog app covers yet.
+func (s *Server) fleetFlatpaks(ctx context.Context) ([]fleetFlatpak, error) {
+	rows, err := s.db.Query(ctx, `SELECT f->>'id', max(coalesce(nullif(f->>'name', ''), f->>'id')), count(DISTINCT d.id)
+		FROM devices d, jsonb_array_elements(coalesce(d.inventory->'flatpaks', '[]'::jsonb)) f
+		WHERE NOT d.retired AND f->>'id' IS NOT NULL
+		  AND NOT EXISTS (SELECT 1 FROM catalog_apps a, jsonb_array_elements(a.sources) src WHERE src->>'flatpak' = f->>'id')
+		GROUP BY 1 ORDER BY 3 DESC, 2`)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowToStructByPos[fleetFlatpak])
+}
+
+// slugFor turns an app name into a free catalog ID.
+func (s *Server) slugFor(ctx context.Context, tx pgx.Tx, name string) (string, error) {
+	base := strings.Trim(nonName.ReplaceAllString(strings.ToLower(name), "-"), "-._")
+	base = strings.ReplaceAll(strings.ReplaceAll(base, ".", "-"), "_", "-")
+	if len(base) > 40 {
+		base = strings.Trim(base[:40], "-")
+	}
+	if base == "" {
+		base = "app"
+	}
+	slug := base
+	for i := 2; ; i++ {
+		var taken bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM catalog_apps WHERE slug=$1)`, slug).Scan(&taken); err != nil {
+			return "", err
+		}
+		if !taken {
+			return slug, nil
+		}
+		slug = base + "-" + strconv.Itoa(i)
+	}
+}
+
+// appImport adds installed Flatpaks to the catalog (mode available); devices
+// that have them count them as installed and managed from then on.
+func (s *Server) appImport(w http.ResponseWriter, r *http.Request, sess session) {
+	ctx := r.Context()
+	fleet, err := s.fleetFlatpaks(ctx)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	names := map[string]string{}
+	for _, f := range fleet {
+		names[f.ID] = f.Name
+	}
+	var added []string
+	err = s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
+		for _, id := range r.Form["flatpak"] {
+			name, ok := names[id]
+			if !ok {
+				continue // unknown, or already in the catalog
+			}
+			app := api.CatalogApp{Name: truncate(name, 80), Mode: api.AppAvailable, Sources: []api.AppSource{{Kind: "flatpak", Flatpak: id}}}
+			slug, err := s.slugFor(ctx, tx, name)
+			if err != nil {
+				return "", "", "", "", err
+			}
+			app.ID = slug
+			if err := app.Validate(); err != nil {
+				continue
+			}
+			src, _ := json.Marshal(app.Sources)
+			if _, err := tx.Exec(ctx, `INSERT INTO catalog_apps(slug, name, mode, sources) VALUES ($1,$2,'available',$3)`, app.ID, app.Name, src); err != nil {
+				return "", "", "", "", err
+			}
+			added = append(added, id)
+		}
+		return sess.Email, "catalog.import", "catalog", strings.Join(added, " "), nil
+	})
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	back := "/software"
+	if d := r.FormValue("device"); d != "" {
+		back = "/devices/" + d + "?tab=software&sub=flatpak"
+	}
+	http.Redirect(w, r, back, http.StatusSeeOther)
 }
