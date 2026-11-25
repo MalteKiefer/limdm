@@ -433,8 +433,8 @@ func googleList[T any](ctx context.Context, c *http.Client, base, field string) 
 	return nil, errors.New("too many pages")
 }
 
-// activeUsers drops device users whose directory entry is inactive. Users
-// without a directory entry (local assignments) stay.
+// activeUsers drops device users whose directory entry is inactive or was
+// deleted. Users that never had a directory entry (local assignments) stay.
 func activeUsers(ctx context.Context, tx pgx.Tx, users []api.User) ([]api.User, error) {
 	if len(users) == 0 {
 		return users, nil
@@ -443,7 +443,8 @@ func activeUsers(ctx context.Context, tx pgx.Tx, users []api.User) ([]api.User, 
 	for i, u := range users {
 		emails[i] = strings.ToLower(u.Email)
 	}
-	rows, err := tx.Query(ctx, `SELECT lower(email) FROM dir_users WHERE NOT active AND lower(email) = ANY($1)`, emails)
+	rows, err := tx.Query(ctx, `SELECT lower(email) FROM dir_users WHERE NOT active AND lower(email) = ANY($1)
+		UNION SELECT email FROM dir_tombstones WHERE email = ANY($1)`, emails)
 	if err != nil {
 		return nil, err
 	}

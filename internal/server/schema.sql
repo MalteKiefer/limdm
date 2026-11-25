@@ -218,3 +218,27 @@ ALTER TABLE devices SET (fillfactor = 70);
 -- it, so a lost renewal response cannot lock the device out.
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS pending_serial TEXT;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS pending_not_after TIMESTAMPTZ;
+
+-- People deleted from the directory (SCIM DELETE) must lose their device
+-- accounts like deactivated ones: a tombstone remembers the email until the
+-- person is provisioned again. Triggers cover every write path.
+CREATE TABLE IF NOT EXISTS dir_tombstones (
+    email      TEXT PRIMARY KEY,
+    removed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE OR REPLACE FUNCTION dir_users_tombstone() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO dir_tombstones(email) VALUES (lower(OLD.email)) ON CONFLICT (email) DO UPDATE SET removed_at = now();
+        RETURN OLD;
+    END IF;
+    DELETE FROM dir_tombstones WHERE email = lower(NEW.email);
+    RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS dir_users_tombstone ON dir_users;
+CREATE TRIGGER dir_users_tombstone AFTER INSERT OR UPDATE OF email OR DELETE ON dir_users
+    FOR EACH ROW EXECUTE FUNCTION dir_users_tombstone();
+
+-- Console users seeded from LIMDM_ADMINS / LIMDM_AUDITORS are disabled at start
+-- once they are no longer listed; users edited in the console are not.
+ALTER TABLE console_users ADD COLUMN IF NOT EXISTS from_env BOOLEAN NOT NULL DEFAULT false;

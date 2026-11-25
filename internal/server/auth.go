@@ -197,8 +197,8 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) (session, bool)
 	if now.Sub(sess.Last) > idleTimeout || now.Sub(sess.IAT) > maxSession {
 		return sess, false
 	}
-	// Role is re-evaluated on every request: removing someone from LIMDM_ADMINS
-	// takes effect on restart, disabling a local admin immediately.
+	// Role is re-evaluated on every request: disabling a user in the console
+	// takes effect immediately, removing someone from LIMDM_ADMINS at restart.
 	switch {
 	case strings.HasPrefix(sess.Email, localPrefix):
 		if !s.settings().LocalLogin {

@@ -19,14 +19,33 @@ import (
 
 var roles = []string{"admin", "helpdesk", "auditor"}
 
-// seedConsoleUsers adds the bootstrap OIDC users from the environment once;
-// later changes in the UI win (disabled users are not re-enabled).
+// seedConsoleUsers adds the bootstrap OIDC users from the environment and
+// disables seeded users that were removed from it, so taking someone out of
+// LIMDM_ADMINS revokes their access at the next start. Changes made in the
+// console win: such users are no longer managed by the environment.
 func (s *Server) seedConsoleUsers(ctx context.Context) error {
+	listed := []string{}
 	for role, list := range map[string][]string{"admin": s.cfg.Admins, "auditor": s.cfg.Auditors} {
 		for _, email := range list {
-			if _, err := s.db.Exec(ctx, `INSERT INTO console_users(email, role) VALUES ($1,$2) ON CONFLICT (email) DO NOTHING`, email, role); err != nil {
+			listed = append(listed, email)
+			if _, err := s.db.Exec(ctx, `INSERT INTO console_users(email, role, from_env) VALUES ($1,$2,true)
+				ON CONFLICT (email) DO NOTHING`, email, role); err != nil {
 				return err
 			}
+		}
+	}
+	rows, err := s.db.Query(ctx, `UPDATE console_users SET disabled=true WHERE from_env AND NOT disabled AND email <> ALL($1) RETURNING email`, listed)
+	if err != nil {
+		return err
+	}
+	revoked, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	for _, email := range revoked {
+		s.log.Warn("console user removed from the environment, disabled", "email", email)
+		if err := s.auditAction(ctx, "system", "user.update", email, "disabled: no longer in LIMDM_ADMINS or LIMDM_AUDITORS", func(pgx.Tx) error { return nil }); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -153,7 +172,7 @@ func (s *Server) userUpdate(w http.ResponseWriter, r *http.Request, sess session
 		if name, ok := strings.CutPrefix(login, localPrefix); ok {
 			tag, err = tx.Exec(ctx, `UPDATE local_admins SET role=$2, disabled=$3 WHERE name=$1`, name, role, disable)
 		} else {
-			tag, err = tx.Exec(ctx, `UPDATE console_users SET role=$2, disabled=$3 WHERE email=$1`, login, role, disable)
+			tag, err = tx.Exec(ctx, `UPDATE console_users SET role=$2, disabled=$3, from_env=false WHERE email=$1`, login, role, disable)
 		}
 		if err == nil && tag.RowsAffected() == 0 {
 			err = errors.New("user not found")

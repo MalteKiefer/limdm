@@ -70,6 +70,18 @@ func TestIntegration(t *testing.T) {
 	if err := s.seedConsoleUsers(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// removing someone from LIMDM_AUDITORS revokes them at the next start
+	s.cfg.Auditors = nil
+	if err := s.seedConsoleUsers(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var auditorDisabled bool
+	db.QueryRow(ctx, `SELECT disabled FROM console_users WHERE email='audit@firma.de'`).Scan(&auditorDisabled)
+	if !auditorDisabled {
+		t.Fatal("auditor removed from the environment stays enabled")
+	}
+	db.Exec(ctx, `UPDATE console_users SET disabled=false WHERE email='audit@firma.de'`)
+	s.cfg.Auditors = []string{"audit@firma.de"}
 	// OIDC "configured" without network discovery: sessions of OIDC users stay valid
 	s.rt.Store(&runtimeState{set: Settings{LocalLogin: true, StaleHours: 24, OIDCIssuer: "https://idp.test", OIDCClientID: "x"}, auth: &oidcAuth{}})
 
@@ -956,6 +968,21 @@ func TestRecoveryEscrow(t *testing.T) {
 	tx.Rollback(ctx)
 	if err != nil || len(us) != 2 || us[0].Username != "here" {
 		t.Fatalf("active users: %+v %v", us, err)
+	}
+	// deleted from the directory (SCIM DELETE) counts like deactivated; provisioning again restores
+	db.Exec(ctx, `DELETE FROM dir_users WHERE email='here@example.com'`)
+	tx, _ = db.Begin(ctx)
+	us, _ = activeUsers(ctx, tx, []api.User{{Username: "here", Email: "here@example.com"}})
+	tx.Rollback(ctx)
+	if len(us) != 0 {
+		t.Fatalf("deleted directory user kept: %+v", us)
+	}
+	db.Exec(ctx, `INSERT INTO dir_users(source, user_name, email, active) VALUES ('scim','here','here@example.com',true)`)
+	tx, _ = db.Begin(ctx)
+	us, _ = activeUsers(ctx, tx, []api.User{{Username: "here", Email: "here@example.com"}})
+	tx.Rollback(ctx)
+	if len(us) != 1 {
+		t.Fatal("reprovisioned user still dropped")
 	}
 }
 
