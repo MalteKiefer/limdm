@@ -25,7 +25,7 @@ import (
 // show it. Without a tray host the helper still runs its reminders.
 
 // statusIcon draws the LiMDM logo (shield with prompt on a teal tile, see
-// packaging/icons/limdm.svg) with a status dot: green (compliant), amber
+// packaging/artwork/limdm.svg) with a status dot: green (compliant), amber
 // (checks failing), red (no contact or locked). Drawn in code: the tray
 // needs pixels and the binary has no SVG renderer.
 func statusIcon(c color.RGBA) []byte {

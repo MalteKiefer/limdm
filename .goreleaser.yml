@@ -107,11 +107,11 @@ nfpms:
         dst: /usr/lib/limdm/limdm-desktop-ui
         file_info:
           mode: 0o755
-      - src: packaging/icons/limdm.svg
+      - src: packaging/artwork/limdm.svg
         dst: /usr/share/icons/hicolor/scalable/apps/limdm.svg
         file_info:
           mode: 0o644
-      - src: packaging/icons/limdm-symbolic.svg
+      - src: packaging/artwork/limdm-symbolic.svg
         dst: /usr/share/icons/hicolor/symbolic/apps/limdm-symbolic.svg
         file_info:
           mode: 0o644
