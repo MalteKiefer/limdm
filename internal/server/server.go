@@ -16,12 +16,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -209,6 +211,13 @@ func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
 	}
 	pc.MinConns = 2
 	pc.MaxConnIdleTime = 5 * time.Minute
+	// a hanging query or a transaction left open must not hold connections
+	// until the pool runs dry; parameters in the URL still win
+	for k, v := range map[string]string{"statement_timeout": "30s", "idle_in_transaction_session_timeout": "60s", "lock_timeout": "10s"} {
+		if _, set := pc.ConnConfig.RuntimeParams[k]; !set {
+			pc.ConnConfig.RuntimeParams[k] = v
+		}
+	}
 	return pc, requireDBTLS(pc)
 }
 
@@ -238,6 +247,10 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("command key: %w", err)
 	}
+	itemKey = cmdKey
+	if err := signExistingItems(ctx, db, cfg.CADir); err != nil {
+		return nil, fmt.Errorf("signing library items: %w", err)
+	}
 	s := &Server{cfg: cfg, db: db, ca: ca, cmdKey: cmdKey, log: log, geoSem: make(chan struct{}, 1)}
 	if err := s.seedConsoleUsers(ctx); err != nil {
 		return nil, err
@@ -252,10 +265,42 @@ func (s *Server) Close() { s.db.Close() }
 
 // Background runs periodic jobs until ctx ends.
 func (s *Server) Background(ctx context.Context) {
-	go s.googleSyncLoop(ctx)
-	go s.historyLoop(ctx)
-	go s.releaseLoop(ctx)
-	go s.iconLoop(ctx)
+	for name, loop := range map[string]func(context.Context){"google sync": s.googleSyncLoop, "history": s.historyLoop,
+		"releases": s.releaseLoop, "catalog icons": s.iconLoop} {
+		go s.background(ctx, name, loop)
+	}
+}
+
+// background runs a loop for the life of the server: a panic is logged and
+// the loop restarts after a minute instead of taking the server down. With
+// several server instances only the one holding the loop's advisory lock
+// runs it, so syncs and downloads do not happen twice.
+func (s *Server) background(ctx context.Context, name string, loop func(context.Context)) {
+	key := int64(crc32.ChecksumIEEE([]byte("limdm-loop:" + name)))
+	for ctx.Err() == nil {
+		func() {
+			defer func() {
+				if p := recover(); p != nil {
+					s.log.Error("background loop panicked", "loop", name, "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
+				}
+			}()
+			conn, err := s.db.Acquire(ctx)
+			if err != nil {
+				return
+			}
+			defer conn.Release()
+			var leader bool
+			if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&leader); err != nil || !leader {
+				return // another instance runs it
+			}
+			defer func() { _, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, key) }()
+			loop(ctx)
+		}()
+		select {
+		case <-ctx.Done():
+		case <-time.After(time.Minute):
+		}
+	}
 }
 
 // AdminHandler serves the web UI.
@@ -297,8 +342,8 @@ func (s *Server) AgentHandler() http.Handler {
 	mux.HandleFunc("POST /api/v1/poll", s.deviceAuth(s.poll, false))
 	mux.HandleFunc("GET /api/v1/agent-packages/{version}/{file}", s.deviceAuth(s.agentPackage, false))
 	mux.HandleFunc("GET /api/v1/catalog/icons/{id}", s.deviceAuth(s.catalogIcon, false))
-	mux.HandleFunc("GET /api/v1/catalog/search", s.deviceAuth(s.flathubSearchJSON, false))
-	mux.HandleFunc("GET /api/v1/catalog/flathub-icon", s.deviceAuth(s.flathubIcon, false))
+	mux.HandleFunc("GET /api/v1/catalog/search", s.deviceAuth(s.deviceLimit(30, s.flathubSearchJSON), false))
+	mux.HandleFunc("GET /api/v1/catalog/flathub-icon", s.deviceAuth(s.deviceLimit(300, s.flathubIcon), false))
 	return securityHeaders(mux)
 }
 
@@ -348,9 +393,24 @@ func sha(s string) []byte {
 	return h[:]
 }
 
+// deviceLimit allows a device n requests per ten minutes to an endpoint that
+// makes the server call out (Flathub), so one device cannot exhaust it.
+func (s *Server) deviceLimit(n int, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, _ := r.Context().Value(deviceKey).(string)
+		if !s.limit.allow("dev:"+r.URL.Path+":"+id, n, 10*time.Minute) {
+			problem(w, http.StatusTooManyRequests, "too many requests")
+			return
+		}
+		next(w, r)
+	}
+}
+
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Warn("writing a JSON response failed", "err", err) // the client went away
+	}
 }
 
 // ---- agent API ----
@@ -387,7 +447,7 @@ func (s *Server) deviceAuth(next http.HandlerFunc, allowExpired bool) http.Handl
 	return func(w http.ResponseWriter, r *http.Request) {
 		leaf, err := s.verifyDevice(r, allowExpired)
 		if err != nil {
-			http.Error(w, "valid client certificate required", http.StatusUnauthorized)
+			problem(w, http.StatusUnauthorized, "valid client certificate required")
 			return
 		}
 		id, serial := leaf.Subject.CommonName, leaf.SerialNumber.Text(16)
@@ -403,12 +463,12 @@ func (s *Server) deviceAuth(next http.HandlerFunc, allowExpired bool) http.Handl
 					pending_serial=NULL, pending_not_after=NULL WHERE id=$1 AND pending_serial=$2`, id, serial)
 				return err
 			}); err != nil {
-				s.fail(w, err)
+				s.failAPI(w, err)
 				return
 			}
 		default:
 			s.log.Warn("rejected device certificate", "device", id, "serial", serial)
-			http.Error(w, "certificate revoked", http.StatusForbidden)
+			problem(w, http.StatusForbidden, "certificate revoked")
 			return
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), deviceKey, id)))
@@ -416,15 +476,20 @@ func (s *Server) deviceAuth(next http.HandlerFunc, allowExpired bool) http.Handl
 }
 
 func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
+	// unauthenticated: limit attempts per address before touching the database
+	if !s.limit.allow("enroll:"+clientIP(r), 20, 5*time.Minute) {
+		problem(w, http.StatusTooManyRequests, "too many enrollment attempts, try again later")
+		return
+	}
 	var req api.EnrollRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		problem(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	ctx := r.Context()
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	defer tx.Rollback(ctx)
@@ -433,26 +498,47 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		WHERE token_hash=$1 AND uses_left > 0 AND expires_at > now() RETURNING blueprint_id`, sha(req.Token)).Scan(&blueprintID)
 	if err != nil {
 		s.log.Warn("enroll rejected", "remote", clientIP(r))
-		http.Error(w, "invalid or expired token", http.StatusForbidden)
+		problem(w, http.StatusForbidden, "invalid or expired token")
 		return
 	}
 	id := hex.EncodeToString(sha(randToken(32))[:16])
 	cert, serial, notAfter, err := s.ca.signCSR(req.CSR, id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		problem(w, http.StatusBadRequest, "invalid certificate signing request")
 		return
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, machine_id, blueprint_id) VALUES ($1,$2,$3,$4,$5,$6)`,
 		id, serial, notAfter, truncate(req.Hostname, 255), truncate(req.MachineID, 64), blueprintID); err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	if err := audit(ctx, tx, "device:"+id, "device.enroll", id, req.Hostname+" cert "+serial); err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
+	// the same machine ID enrolled again (reinstall): reported, not acted on.
+	// The ID is readable by every user and cannot prove anything, so retiring
+	// the older record stays an admin decision in the console.
+	if mid := strings.TrimSpace(req.MachineID); mid != "" {
+		rows, err := tx.Query(ctx, `SELECT id FROM devices WHERE machine_id=$1 AND id<>$2 AND NOT retired`, truncate(mid, 64), id)
+		if err != nil {
+			s.failAPI(w, err)
+			return
+		}
+		old, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			s.failAPI(w, err)
+			return
+		}
+		for _, o := range old {
+			if err := audit(ctx, tx, "device:"+id, "device.duplicate", o, "enrolled again as "+id+" with the same machine ID; retire the older record if it is a reinstall"); err != nil {
+				s.failAPI(w, err)
+				return
+			}
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	writeJSON(w, api.EnrollResponse{DeviceID: id, Cert: cert})
@@ -462,12 +548,12 @@ func (s *Server) renew(w http.ResponseWriter, r *http.Request) {
 	id := r.Context().Value(deviceKey).(string)
 	var req api.RenewRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		problem(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	cert, serial, notAfter, err := s.ca.signCSR(req.CSR, id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		problem(w, http.StatusBadRequest, "invalid certificate signing request")
 		return
 	}
 	err = s.auditAction(r.Context(), "device:"+id, "device.cert_renew", id, serial, func(tx pgx.Tx) error {
@@ -476,7 +562,7 @@ func (s *Server) renew(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	if err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	writeJSON(w, api.EnrollResponse{DeviceID: id, Cert: cert})
@@ -502,7 +588,7 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 	var at *time.Time
 	if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM commands WHERE device_id=$1 AND status='pending'),
 		agent_version, update_state, update_version, update_at FROM devices WHERE id=$1`, id).Scan(&commands, &running, &state, &version, &at); err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	pending := commands
@@ -514,7 +600,7 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 			WHERE d.id=$1 AND d.last_seen IS NOT NULL AND (
 				EXISTS (SELECT 1 FROM dir_users du WHERE lower(du.email)=lower(u->>'email') AND NOT du.active AND du.updated_at > d.last_seen)
 				OR EXISTS (SELECT 1 FROM dir_tombstones t WHERE t.email=lower(u->>'email') AND t.removed_at > d.last_seen)))`, id).Scan(&pending); err != nil {
-			s.fail(w, err)
+			s.failAPI(w, err)
 			return
 		}
 	}
@@ -523,7 +609,7 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 		// at once, unless it was just handed out and is being installed
 		rel, clearTarget, err := s.dueUpdate(ctx, s.db, id, running)
 		if err != nil {
-			s.fail(w, err)
+			s.failAPI(w, err)
 			return
 		}
 		installing := rel != nil && state == "offered" && version == rel.Version && at != nil && time.Since(*at) < 20*time.Minute
@@ -537,16 +623,22 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	id := r.Context().Value(deviceKey).(string)
 	var req api.CheckinRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<20)).Decode(&req); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		problem(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	ctx := r.Context()
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	defer tx.Rollback(ctx)
+	// one check in per device at a time: a retry or a poll triggered check in
+	// running in parallel would otherwise overwrite this one's results
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM devices WHERE id=$1 FOR UPDATE`, id); err != nil {
+		s.failAPI(w, err)
+		return
+	}
 
 	var users []byte
 	var statusHash, pkgHash string
@@ -556,7 +648,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		RETURNING users, status_hash, packages_hash, $3 <> '' AND geo->>'ip' IS DISTINCT FROM $3 AND (geo_at IS NULL OR geo_at < now() - interval '1 hour')`,
 		id, truncate(req.AgentVersion, 32), ip).Scan(&users, &statusHash, &pkgHash, &relocate)
 	if err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	if st := req.Status; st != nil {
@@ -565,23 +657,23 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		decl, _ := json.Marshal(st.Declarations)
 		if _, err := tx.Exec(ctx, `UPDATE devices SET hostname=$2, inventory=$3, checks=$4, decl_status=$5, failing=$6, status_hash=$7 WHERE id=$1`,
 			id, truncate(st.Inventory.Hostname, 255), string(inv), string(checks), string(decl), countFailing(st.Checks), req.StatusHash); err != nil {
-			s.fail(w, err)
+			s.failAPI(w, err)
 			return
 		}
 		statusHash = req.StatusHash
 	}
 	if err := recordMetrics(ctx, tx, id, req.Metrics); err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	if err := s.escrowKeys(ctx, tx, id, req.RecoveryKeys); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		problem(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	if req.Packages != nil {
 		pk, _ := json.Marshal(req.Packages)
 		if _, err := tx.Exec(ctx, `UPDATE devices SET packages=$2, packages_hash=$3 WHERE id=$1`, id, string(pk), req.PackagesHash); err != nil {
-			s.fail(w, err)
+			s.failAPI(w, err)
 			return
 		}
 		pkgHash = req.PackagesHash
@@ -594,76 +686,41 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(ctx, `UPDATE commands SET status=$3, output=$4, updated_at=now(),
 			payload=CASE WHEN type IN ('user_create','user_password') THEN '' ELSE payload END WHERE id=$1 AND device_id=$2 AND status='sent'`,
 			res.ID, id, status, truncate(res.Output, 64<<10)); err != nil {
-			s.fail(w, err)
+			s.failAPI(w, err)
 			return
 		}
 		if err := audit(ctx, tx, "device:"+id, "command.result", strconv.FormatInt(res.ID, 10), status); err != nil {
-			s.fail(w, err)
+			s.failAPI(w, err)
 			return
 		}
 	}
-	var tamper []string
-	var evAt []time.Time
-	var evText []string
-	for i, ev := range req.Events {
-		if i >= 500 {
-			break
-		}
-		if _, msg, ok := strings.Cut(ev, " tamper: "); ok { // security relevant: chained audit log
-			tamper = append(tamper, msg)
-			if err := audit(ctx, tx, "device:"+id, "agent.tamper", id, truncate(ev, 2000)); err != nil {
-				s.fail(w, err)
-				return
-			}
-			continue
-		}
-		at, msg := time.Now().UTC(), ev
-		if ts, rest, ok := strings.Cut(ev, " "); ok {
-			if t, err := time.Parse(time.RFC3339, ts); err == nil {
-				at, msg = t, rest
-			}
-		}
-		evAt, evText = append(evAt, at), append(evText, truncate(msg, 2000))
-	}
-	if len(evText) > 0 {
-		if _, err := tx.Exec(ctx, `INSERT INTO device_events(device_id, at, detail) SELECT $1, a, d FROM unnest($2::timestamptz[], $3::text[]) AS e(a, d)`,
-			id, evAt, evText); err != nil {
-			s.fail(w, err)
-			return
-		}
-	}
-	var tamperEvent *webhookEvent
-	if len(tamper) > 0 {
-		var host string
-		if err := tx.QueryRow(ctx, `UPDATE devices SET tampered_at=now() WHERE id=$1 RETURNING hostname`, id).Scan(&host); err != nil {
-			s.fail(w, err)
-			return
-		}
-		tamperEvent = &webhookEvent{Type: "device.tamper", DeviceID: id, Hostname: host, Detail: strings.Join(tamper, "; "),
-			Console: s.cfg.PublicURL + "/devices/" + id}
+	tamperEvent, err := s.storeEvents(ctx, tx, id, req.Events)
+	if err != nil {
+		s.failAPI(w, err)
+		return
 	}
 
 	resp := api.CheckinResponse{ServerTime: time.Now().UTC(), CommandKey: hex.EncodeToString(s.cmdKey.Public().(ed25519.PublicKey)),
 		NeedStatus: statusHash != req.StatusHash, NeedPackages: pkgHash != req.PackagesHash}
 	res, err := resolveDevice(ctx, tx, id)
 	if err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	decls := res.Decls
 	pol, _ := api.Compose(decls)
 	catalog, err := s.deviceCatalog(ctx, tx, id, res.Chain, pol.Extra.SoftwareStore)
 	if err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	if err := recordAppRequests(ctx, tx, id, req.AppRequests, catalog); err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	if len(req.AppRequests) > 0 { // the device sees its new request states in this answer
 		if catalog, err = s.deviceCatalog(ctx, tx, id, res.Chain, pol.Extra.SoftwareStore); err != nil {
-			s.fail(w, err)
+			s.failAPI(w, err)
 			return
 		}
 	}
@@ -678,68 +735,46 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		// the public address and its location are network data too
 		relocate = false
 		if err := forgetPublicAddress(ctx, tx, id); err != nil {
-			s.fail(w, err)
+			s.failAPI(w, err)
 			return
 		}
 	}
 	event, err := s.enforceCompliance(ctx, tx, id, pol.Compliance, time.Now().UTC())
 	if err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	if err := json.Unmarshal(users, &resp.Users); err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	// people deactivated in the directory (SCIM, Google) lose their device accounts:
 	// the agent locks accounts that are no longer listed
 	if resp.Users, err = activeUsers(ctx, tx, resp.Users); err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	if b := s.branding(); b.Hash != req.BrandingHash {
 		resp.Branding = &b
 	}
 	if err := s.recordUpdateResult(ctx, tx, id, req.UpdateResult); err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	if resp.AgentUpdate, err = s.offerUpdate(ctx, tx, id, req.AgentVersion); err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	if resp.RecoveryRotate, err = s.rotations(ctx, tx, id); err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
-	// Commands are delivered until a result arrives (the agent ignores IDs it
-	// already ran), so a lost response cannot drop them. After 7 days they expire.
-	if _, err := tx.Exec(ctx, `UPDATE commands SET status='expired', updated_at=now(),
-		payload=CASE WHEN type IN ('user_create','user_password') THEN '' ELSE payload END
-		WHERE device_id=$1 AND status IN ('pending','sent') AND created_at < now() - interval '7 days'`, id); err != nil {
-		s.fail(w, err)
-		return
-	}
-	rows, err := tx.Query(ctx, `UPDATE commands SET status='sent', updated_at=now() WHERE device_id=$1 AND status IN ('pending','sent')
-		RETURNING id, type, payload, created_at, signature`, id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	resp.Commands, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (api.Command, error) {
-		var c api.Command
-		return c, row.Scan(&c.ID, &c.Type, &c.Payload, &c.CreatedAt, &c.Signature)
-	})
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if err := s.attachRecoveryKeys(ctx, tx, id, resp.Commands); err != nil {
-		s.fail(w, err)
+	if resp.Commands, err = s.deliverCommands(ctx, tx, id); err != nil {
+		s.failAPI(w, err)
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
-		s.fail(w, err)
+		s.failAPI(w, err)
 		return
 	}
 	if relocate {
@@ -797,6 +832,21 @@ func (s *Server) auditAction(ctx context.Context, actor, action, target, detail 
 	return tx.Commit(ctx)
 }
 
+// problem answers the agent API with RFC 9457 problem details, so clients
+// can tell errors apart by status and type instead of parsing text.
+func problem(w http.ResponseWriter, status int, detail string) {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"type": "about:blank", "title": http.StatusText(status), "status": status, "detail": detail})
+}
+
+// failAPI logs an internal error and answers with a generic problem.
+func (s *Server) failAPI(w http.ResponseWriter, err error) {
+	s.log.Error("agent request failed", "err", err)
+	problem(w, http.StatusInternalServerError, "internal error")
+}
+
 func (s *Server) fail(w http.ResponseWriter, err error) {
 	s.log.Error("request failed", "err", err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
@@ -831,4 +881,69 @@ func (s *Server) consoleFilter(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// storeEvents saves the device's event lines; tamper reports also go to the
+// chained audit log and come back as a webhook event.
+func (s *Server) storeEvents(ctx context.Context, tx pgx.Tx, id string, events []string) (*webhookEvent, error) {
+	var tamper, evText []string
+	var evAt []time.Time
+	for i, ev := range events {
+		if i >= 500 {
+			break
+		}
+		if _, msg, ok := strings.Cut(ev, " tamper: "); ok { // security relevant: chained audit log
+			tamper = append(tamper, msg)
+			if err := audit(ctx, tx, "device:"+id, "agent.tamper", id, truncate(ev, 2000)); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		at, msg := time.Now().UTC(), ev
+		if ts, rest, ok := strings.Cut(ev, " "); ok {
+			if t, err := time.Parse(time.RFC3339, ts); err == nil {
+				at, msg = t, rest
+			}
+		}
+		evAt, evText = append(evAt, at), append(evText, truncate(msg, 2000))
+	}
+	if len(evText) > 0 {
+		if _, err := tx.Exec(ctx, `INSERT INTO device_events(device_id, at, detail) SELECT $1, a, d FROM unnest($2::timestamptz[], $3::text[]) AS e(a, d)`,
+			id, evAt, evText); err != nil {
+			return nil, err
+		}
+	}
+	if len(tamper) == 0 {
+		return nil, nil
+	}
+	var host string
+	if err := tx.QueryRow(ctx, `UPDATE devices SET tampered_at=now() WHERE id=$1 RETURNING hostname`, id).Scan(&host); err != nil {
+		return nil, err
+	}
+	return &webhookEvent{Type: "device.tamper", DeviceID: id, Hostname: host, Detail: strings.Join(tamper, "; "),
+		Console: s.cfg.PublicURL + "/devices/" + id}, nil
+}
+
+// deliverCommands hands out pending commands. They are delivered until a
+// result arrives (the agent ignores IDs it already ran), so a lost response
+// cannot drop them; after 7 days they expire and secrets in them are cleared.
+func (s *Server) deliverCommands(ctx context.Context, tx pgx.Tx, id string) ([]api.Command, error) {
+	if _, err := tx.Exec(ctx, `UPDATE commands SET status='expired', updated_at=now(),
+		payload=CASE WHEN type IN ('user_create','user_password') THEN '' ELSE payload END
+		WHERE device_id=$1 AND status IN ('pending','sent') AND created_at < now() - interval '7 days'`, id); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `UPDATE commands SET status='sent', updated_at=now() WHERE device_id=$1 AND status IN ('pending','sent')
+		RETURNING id, type, payload, created_at, signature`, id)
+	if err != nil {
+		return nil, err
+	}
+	cmds, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (api.Command, error) {
+		var c api.Command
+		return c, row.Scan(&c.ID, &c.Type, &c.Payload, &c.CreatedAt, &c.Signature)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cmds, s.attachRecoveryKeys(ctx, tx, id, cmds)
 }

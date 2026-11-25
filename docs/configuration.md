@@ -98,7 +98,7 @@ Password checks in the profile count towards the same lockout as the sign in (5 
 
 **Directory** connects people and groups:
 
-* **SCIM 2.0** at `<LIMDM_PUBLIC_URL>/scim/v2` with a bearer token created on the page
+* **SCIM 2.0** at `<LIMDM_PUBLIC_URL>/scim/v2` (filters: `attribute eq "value"` only, others are answered with 400 `invalidFilter`; no ETags) with a bearer token created on the page
   (Okta, Microsoft Entra ID, authentik, JumpCloud).
 * **Google Workspace:** a service account with domain wide delegation for the scopes
   `admin.directory.user.readonly`, `admin.directory.group.readonly` and

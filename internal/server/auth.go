@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	sessionCookie = "limdm_session"
+	sessionCookie = "__Host-limdm_session" // RFC 6265bis: Secure, Path=/, no Domain, so no subdomain can set or override it
 	flowCookie    = "limdm_oidc"
 	idleTimeout   = 30 * time.Minute
 	maxSession    = 8 * time.Hour

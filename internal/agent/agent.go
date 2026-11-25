@@ -823,7 +823,7 @@ func (a *Agent) post(ctx context.Context, path string, in, out any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s: %s", path, resp.Status)
+		return apiError(path, resp)
 	}
 	return json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(out)
 }
@@ -1068,7 +1068,7 @@ func (a *Agent) getBytes(path string, limit int64, out *[]byte) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s: %s", path, resp.Status)
+		return apiError(path, resp)
 	}
 	*out, err = io.ReadAll(io.LimitReader(resp.Body, limit))
 	return err
@@ -1100,4 +1100,16 @@ func (a *Agent) verifyCommand(c api.Command) error {
 		return err
 	}
 	return api.VerifyCommand(ed25519.PublicKey(pub), a.cfg.DeviceID, c)
+}
+
+// apiError reads the server's RFC 9457 problem details, if any.
+func apiError(path string, resp *http.Response) error {
+	var p struct {
+		Detail string `json:"detail"`
+	}
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/problem+json") &&
+		json.NewDecoder(io.LimitReader(resp.Body, 8<<10)).Decode(&p) == nil && p.Detail != "" {
+		return fmt.Errorf("%s: %s: %s", path, resp.Status, p.Detail)
+	}
+	return fmt.Errorf("%s: %s", path, resp.Status)
 }
