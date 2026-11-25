@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // SCIM 2.0 (RFC 7643/7644) provisioning endpoint for users and groups.
@@ -32,9 +34,7 @@ func (s *Server) scimRoutes(mux *http.ServeMux) {
 	h := func(f http.HandlerFunc) http.HandlerFunc { return s.scimAuth(f) }
 	mux.HandleFunc("GET /scim/v2/ServiceProviderConfig", h(s.scimConfig))
 	mux.HandleFunc("GET /scim/v2/ResourceTypes", h(s.scimResourceTypes))
-	mux.HandleFunc("GET /scim/v2/Schemas", h(func(w http.ResponseWriter, r *http.Request) {
-		scimJSON(w, http.StatusOK, map[string]any{"schemas": []string{scimList}, "totalResults": 0, "Resources": []any{}})
-	}))
+	mux.HandleFunc("GET /scim/v2/Schemas", h(s.scimSchemas))
 	mux.HandleFunc("GET /scim/v2/Users", h(s.scimListUsers))
 	mux.HandleFunc("POST /scim/v2/Users", h(s.scimCreateUser))
 	mux.HandleFunc("GET /scim/v2/Users/{id}", h(s.scimGetUser))
@@ -55,13 +55,57 @@ func scimJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
+// scimErr writes an RFC 7644 3.12 error; scimType follows Table 9.
 func scimErr(w http.ResponseWriter, status int, detail string) {
-	scimJSON(w, status, map[string]any{"schemas": []string{scimError}, "status": strconv.Itoa(status), "detail": detail})
+	body := map[string]any{"schemas": []string{scimError}, "status": strconv.Itoa(status), "detail": detail}
+	if t := scimType(status, detail); t != "" {
+		body["scimType"] = t
+	}
+	scimJSON(w, status, body)
+}
+
+func scimType(status int, detail string) string {
+	d := strings.ToLower(detail)
+	switch {
+	case status == http.StatusConflict:
+		return "uniqueness"
+	case status != http.StatusBadRequest:
+		return ""
+	case strings.Contains(d, "filter"):
+		return "invalidFilter"
+	case strings.Contains(d, "json"), strings.Contains(d, "operation"), strings.Contains(d, "schema"):
+		return "invalidSyntax"
+	case strings.Contains(d, "no target"):
+		return "noTarget"
+	case strings.Contains(d, "path"):
+		return "invalidPath"
+	}
+	return "invalidValue"
+}
+
+// isUnique reports a unique constraint violation (SQLSTATE 23505).
+func isUnique(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "23505"
+}
+
+// scimID parses a resource id; ids are numeric, anything else is not found.
+func scimID(s string) int64 {
+	id, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || id <= 0 {
+		return 0
+	}
+	return id
 }
 
 // scimAuth checks the bearer token against the stored hash.
 func (s *Server) scimAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// refuse before evaluating the token while the client is over the limit
+		if s.limit.over("scim:"+clientIP(r), 20, 5*time.Minute) {
+			scimErr(w, http.StatusTooManyRequests, "too many failed attempts")
+			return
+		}
 		tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		var raw []byte
 		var stored struct {
@@ -72,10 +116,8 @@ func (s *Server) scimAuth(next http.HandlerFunc) http.HandlerFunc {
 			err = json.Unmarshal(raw, &stored)
 		}
 		if !ok || err != nil || stored.Hash == "" || subtle.ConstantTimeCompare([]byte(fmt.Sprintf("%x", sha(tok))), []byte(stored.Hash)) != 1 {
-			if !s.limit.allow("scim:"+clientIP(r), 20, 5*time.Minute) {
-				scimErr(w, http.StatusTooManyRequests, "too many failed attempts")
-				return
-			}
+			s.limit.allow("scim:"+clientIP(r), 20, 5*time.Minute) // counts the failure
+			w.Header().Set("WWW-Authenticate", `Bearer realm="limdm-scim", error="invalid_token"`)
 			scimErr(w, http.StatusUnauthorized, "invalid token")
 			return
 		}
@@ -86,22 +128,51 @@ func (s *Server) scimAuth(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) scimConfig(w http.ResponseWriter, r *http.Request) {
 	scimJSON(w, http.StatusOK, map[string]any{
-		"schemas":               []string{"urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"},
-		"patch":                 map[string]bool{"supported": true},
-		"bulk":                  map[string]any{"supported": false, "maxOperations": 0, "maxPayloadSize": 0},
-		"filter":                map[string]any{"supported": true, "maxResults": 200},
-		"changePassword":        map[string]bool{"supported": false},
-		"sort":                  map[string]bool{"supported": false},
-		"etag":                  map[string]bool{"supported": false},
-		"authenticationSchemes": []map[string]any{{"type": "oauthbearertoken", "name": "Bearer token", "description": "Token from the LiMDM directory page"}},
+		"schemas":        []string{"urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"},
+		"patch":          map[string]bool{"supported": true},
+		"bulk":           map[string]any{"supported": false, "maxOperations": 0, "maxPayloadSize": 0},
+		"filter":         map[string]any{"supported": true, "maxResults": 200},
+		"changePassword": map[string]bool{"supported": false},
+		"sort":           map[string]bool{"supported": false},
+		"etag":           map[string]bool{"supported": false},
+		"authenticationSchemes": []map[string]any{{"type": "oauthbearertoken", "name": "Bearer token", "description": "Token from the LiMDM directory page",
+			"specUri": "https://www.rfc-editor.org/info/rfc6750", "primary": true}},
+		"meta": map[string]string{"resourceType": "ServiceProviderConfig", "location": s.scimBase() + "/ServiceProviderConfig"},
 	})
 }
 
 func (s *Server) scimResourceTypes(w http.ResponseWriter, r *http.Request) {
-	scimJSON(w, http.StatusOK, map[string]any{"schemas": []string{scimList}, "totalResults": 2, "Resources": []map[string]any{
-		{"id": "User", "name": "User", "endpoint": "/Users", "schema": scimUserSchema, "schemaExtensions": []map[string]any{{"schema": scimEnterprise, "required": false}}},
-		{"id": "Group", "name": "Group", "endpoint": "/Groups", "schema": scimGroupSchema},
+	const rt = "urn:ietf:params:scim:schemas:core:2.0:ResourceType"
+	meta := func(id string) map[string]string {
+		return map[string]string{"resourceType": "ResourceType", "location": s.scimBase() + "/ResourceTypes/" + id}
+	}
+	scimJSON(w, http.StatusOK, map[string]any{"schemas": []string{scimList}, "totalResults": 2, "itemsPerPage": 2, "startIndex": 1, "Resources": []map[string]any{
+		{"schemas": []string{rt}, "id": "User", "name": "User", "endpoint": "/Users", "schema": scimUserSchema,
+			"schemaExtensions": []map[string]any{{"schema": scimEnterprise, "required": false}}, "meta": meta("User")},
+		{"schemas": []string{rt}, "id": "Group", "name": "Group", "endpoint": "/Groups", "schema": scimGroupSchema, "meta": meta("Group")},
 	}})
+}
+
+// scimSchemas describes the attributes LiMDM stores (RFC 7643 7).
+func (s *Server) scimSchemas(w http.ResponseWriter, r *http.Request) {
+	attr := func(name, typ string, required, multi bool, uniqueness string) map[string]any {
+		return map[string]any{"name": name, "type": typ, "multiValued": multi, "required": required, "caseExact": false,
+			"mutability": "readWrite", "returned": "default", "uniqueness": uniqueness}
+	}
+	schema := func(id, name string, attrs ...map[string]any) map[string]any {
+		return map[string]any{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:Schema"}, "id": id, "name": name, "attributes": attrs,
+			"meta": map[string]string{"resourceType": "Schema", "location": s.scimBase() + "/Schemas/" + id}}
+	}
+	res := []map[string]any{
+		schema(scimUserSchema, "User", attr("userName", "string", true, false, "server"), attr("displayName", "string", false, false, "none"),
+			attr("name", "complex", false, false, "none"), attr("emails", "complex", true, true, "none"),
+			attr("active", "boolean", false, false, "none"), attr("title", "string", false, false, "none"),
+			attr("externalId", "string", false, false, "none"), attr("groups", "complex", false, true, "none")),
+		schema(scimGroupSchema, "Group", attr("displayName", "string", true, false, "none"), attr("members", "complex", false, true, "none"),
+			attr("externalId", "string", false, false, "none")),
+		schema(scimEnterprise, "EnterpriseUser", attr("department", "string", false, false, "none")),
+	}
+	scimJSON(w, http.StatusOK, map[string]any{"schemas": []string{scimList}, "totalResults": len(res), "itemsPerPage": len(res), "startIndex": 1, "Resources": res})
 }
 
 // ---- users ----
@@ -172,20 +243,24 @@ func toSCIMUser(base string, u dirUser) scimUser {
 		UserName: u.UserName, DisplayName: u.DisplayName, Name: &scimName{GivenName: given, FamilyName: family, Formatted: u.DisplayName},
 		Emails: []scimEmail{{Value: u.Email, Type: "work", Primary: true}}, Active: &active, Title: u.Title,
 		Enterprise: &scimEntExt{Department: u.Department},
-		Meta:       map[string]any{"resourceType": "User", "location": base + "/Users/" + strconv.FormatInt(u.ID, 10)}}
-	for _, g := range u.Groups {
-		out.Groups = append(out.Groups, map[string]any{"display": g})
+		Meta: map[string]any{"resourceType": "User", "location": base + "/Users/" + strconv.FormatInt(u.ID, 10),
+			"lastModified": u.Updated.UTC().Format(time.RFC3339), "version": fmt.Sprintf(`W/"%d"`, u.Updated.UnixMicro())}}
+	for i, g := range u.Groups { // RFC 7643 4.1.2: value, $ref, display
+		gid := strconv.FormatInt(u.GroupIDs[i], 10)
+		out.Groups = append(out.Groups, map[string]any{"value": gid, "$ref": base + "/Groups/" + gid, "display": g})
 	}
 	return out
 }
 
 const dirUserCols = `u.id, u.external_id, u.source, u.user_name, u.email, u.display_name, u.department, u.title, u.active,
-	coalesce((SELECT array_agg(g.name ORDER BY g.name) FROM dir_members m JOIN dir_groups g ON g.id=m.group_id WHERE m.user_id=u.id), '{}')`
+	coalesce((SELECT array_agg(g.name ORDER BY g.name) FROM dir_members m JOIN dir_groups g ON g.id=m.group_id WHERE m.user_id=u.id), '{}'),
+	coalesce((SELECT array_agg(g.id ORDER BY g.name) FROM dir_members m JOIN dir_groups g ON g.id=m.group_id WHERE m.user_id=u.id), '{}'),
+	u.updated_at`
 
 func (s *Server) scimBase() string { return s.cfg.PublicURL + "/scim/v2" }
 
 func (s *Server) loadDirUser(ctx context.Context, id string) (dirUser, error) {
-	rows, err := s.db.Query(ctx, `SELECT `+dirUserCols+` FROM dir_users u WHERE u.id::text=$1 AND u.source='scim'`, id)
+	rows, err := s.db.Query(ctx, `SELECT `+dirUserCols+` FROM dir_users u WHERE u.id=$1 AND u.source='scim'`, scimID(id))
 	if err != nil {
 		return dirUser{}, err
 	}
@@ -193,14 +268,21 @@ func (s *Server) loadDirUser(ctx context.Context, id string) (dirUser, error) {
 }
 
 // filterRe accepts the equality filters identity providers send.
-var filterRe = regexp.MustCompile(`(?i)^\s*(userName|externalId|displayName|emails\.value|emails\[type eq "work"\]\.value)\s+eq\s+"((?:[^"\\]|\\.)*)"\s*$`)
+var filterRe = regexp.MustCompile(`(?i)^\s*(id|userName|externalId|displayName|emails\.value|emails\[type eq "work"\]\.value)\s+eq\s+"((?:[^"\\]|\\.)*)"\s*$`)
 
-func parseFilter(f string) (attr, value string, err error) {
+// filterable lists the filter attributes per resource (RFC 7644 3.4.2.2:
+// anything else is 400 invalidFilter, never "everything").
+var filterable = map[string][]string{
+	"User":  {"id", "username", "externalid", "displayname", "emails.value", `emails[type eq "work"].value`},
+	"Group": {"id", "displayname", "externalid"},
+}
+
+func parseFilter(resource, f string) (attr, value string, err error) {
 	if strings.TrimSpace(f) == "" {
 		return "", "", nil
 	}
 	m := filterRe.FindStringSubmatch(f)
-	if m == nil {
+	if m == nil || !slices.Contains(filterable[resource], strings.ToLower(m[1])) {
 		return "", "", errors.New("unsupported filter")
 	}
 	return strings.ToLower(m[1]), strings.ReplaceAll(m[2], `\"`, `"`), nil
@@ -216,21 +298,23 @@ func paging(r *http.Request) (start, count int) {
 }
 
 func (s *Server) scimListUsers(w http.ResponseWriter, r *http.Request) {
-	attr, val, err := parseFilter(r.URL.Query().Get("filter"))
+	attr, val, err := parseFilter("User", r.URL.Query().Get("filter"))
 	if err != nil {
 		scimErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	cond, args := "u.source='scim'", []any{}
 	switch attr {
+	case "id":
+		cond, args = cond+" AND u.id=$1", append(args, scimID(val))
 	case "username":
 		cond, args = cond+" AND lower(u.user_name)=lower($1)", append(args, val)
 	case "externalid":
 		cond, args = cond+" AND u.external_id=$1", append(args, val)
 	case "emails.value", `emails[type eq "work"].value`:
 		cond, args = cond+" AND u.email=lower($1)", append(args, val)
-	case "displayname":
-		cond, args = cond+" AND u.display_name=$1", append(args, val)
+	case "displayname": // caseExact=false (RFC 7643 4.1.1)
+		cond, args = cond+" AND lower(u.display_name)=lower($1)", append(args, val)
 	}
 	start, count := paging(r)
 	var total int
@@ -273,13 +357,13 @@ func (s *Server) writeUser(ctx context.Context, id string, u scimUser) (string, 
 	if id == "" {
 		err = s.db.QueryRow(ctx, `INSERT INTO dir_users(external_id, source, user_name, email, display_name, department, title, active)
 			VALUES ($1,'scim',$2,$3,$4,$5,$6,$7) RETURNING id`, u.ExternalID, u.UserName, email, u.display(), dept, u.Title, active).Scan(&newID)
-		if err != nil && strings.Contains(err.Error(), "duplicate key") {
+		if isUnique(err) {
 			return "", http.StatusConflict, errors.New("user exists")
 		}
 	} else {
 		action = "directory.scim_user_replace"
 		err = s.db.QueryRow(ctx, `UPDATE dir_users SET external_id=$2, user_name=$3, email=$4, display_name=$5, department=$6, title=$7, active=$8, updated_at=now()
-			WHERE id::text=$1 AND source='scim' RETURNING id`, id, u.ExternalID, u.UserName, email, u.display(), dept, u.Title, active).Scan(&newID)
+			WHERE id=$1 AND source='scim' RETURNING id`, scimID(id), u.ExternalID, u.UserName, email, u.display(), dept, u.Title, active).Scan(&newID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", http.StatusNotFound, errors.New("user not found")
 		}
@@ -319,7 +403,11 @@ func (s *Server) respondUser(w http.ResponseWriter, ctx context.Context, id stri
 		scimErr(w, http.StatusNotFound, "user not found")
 		return
 	}
-	scimJSON(w, status, toSCIMUser(s.scimBase(), u))
+	su := toSCIMUser(s.scimBase(), u)
+	if status == http.StatusCreated { // RFC 7644 3.3
+		w.Header().Set("Location", su.Meta["location"].(string))
+	}
+	scimJSON(w, status, su)
 }
 
 func (s *Server) scimGetUser(w http.ResponseWriter, r *http.Request) {
@@ -371,6 +459,9 @@ func scimString(raw json.RawMessage) string {
 func applyUserPatch(u *scimUser, op patchOp) error {
 	remove := strings.EqualFold(op.Op, "remove")
 	path := strings.ToLower(op.Path)
+	if path == "" && remove {
+		return errors.New("remove needs a path (no target)")
+	}
 	if path == "" { // value carries attributes
 		var attrs map[string]json.RawMessage
 		if err := json.Unmarshal(op.Value, &attrs); err != nil {
@@ -422,19 +513,40 @@ func applyUserPatch(u *scimUser, op patchOp) error {
 		var es []scimEmail
 		if !remove {
 			if err := json.Unmarshal(op.Value, &es); err != nil {
-				return err
+				return errors.New("emails must be a list (invalid JSON)")
 			}
+		}
+		if strings.EqualFold(op.Op, "add") { // RFC 7644 3.5.2.1: add appends to multi valued attributes
+			es = append(u.Emails, es...)
 		}
 		u.Emails = es
 	case strings.ToLower(scimEnterprise) + ":department", "department":
 		u.Enterprise.Department = str()
 	case strings.ToLower(scimEnterprise):
 		var ext scimEntExt
-		if err := json.Unmarshal(op.Value, &ext); err == nil {
-			u.Enterprise.Department = ext.Department
+		if err := json.Unmarshal(op.Value, &ext); err != nil {
+			return errors.New("invalid JSON value for the enterprise extension")
+		}
+		u.Enterprise.Department = ext.Department
+	default:
+		// attributes of the User schema LiMDM does not store are accepted and
+		// dropped (identity providers send them routinely); anything else is
+		// not a valid path for this resource
+		if !ignoredUserAttr(path) {
+			return fmt.Errorf("unsupported path %q", op.Path)
 		}
 	}
-	return nil // unknown attributes are ignored, as RFC 7644 allows for unsupported ones
+	return nil
+}
+
+// ignoredUserAttr: valid RFC 7643 User and enterprise attributes LiMDM does not keep.
+func ignoredUserAttr(path string) bool {
+	path = strings.TrimPrefix(path, strings.ToLower(scimEnterprise)+":")
+	attr, _, _ := strings.Cut(path, "[")
+	attr, _, _ = strings.Cut(attr, ".")
+	return slices.Contains([]string{"nickname", "profileurl", "usertype", "preferredlanguage", "locale", "timezone", "password",
+		"phonenumbers", "addresses", "ims", "photos", "roles", "entitlements", "x509certificates", "name",
+		"employeenumber", "costcenter", "organization", "division", "manager"}, attr)
 }
 
 func (s *Server) scimPatchUser(w http.ResponseWriter, r *http.Request) {
@@ -444,15 +556,13 @@ func (s *Server) scimPatchUser(w http.ResponseWriter, r *http.Request) {
 		scimErr(w, http.StatusNotFound, "user not found")
 		return
 	}
-	var body struct {
-		Operations []patchOp `json:"Operations"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		scimErr(w, http.StatusBadRequest, "invalid JSON")
+	ops, err := decodePatch(r)
+	if err != nil {
+		scimErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	u := toSCIMUser(s.scimBase(), cur)
-	for _, op := range body.Operations {
+	for _, op := range ops {
 		if err := applyUserPatch(&u, op); err != nil {
 			scimErr(w, http.StatusBadRequest, err.Error())
 			return
@@ -467,7 +577,7 @@ func (s *Server) scimPatchUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) scimDeleteUser(w http.ResponseWriter, r *http.Request) {
-	tag, err := s.db.Exec(r.Context(), `DELETE FROM dir_users WHERE id::text=$1 AND source='scim'`, r.PathValue("id"))
+	tag, err := s.db.Exec(r.Context(), `DELETE FROM dir_users WHERE id=$1 AND source='scim'`, scimID(r.PathValue("id")))
 	if err != nil || tag.RowsAffected() == 0 {
 		scimErr(w, http.StatusNotFound, "user not found")
 		return
@@ -490,7 +600,7 @@ type scimGroup struct {
 func (s *Server) loadGroup(ctx context.Context, id string) (scimGroup, error) {
 	var g scimGroup
 	var gid int64
-	err := s.db.QueryRow(ctx, `SELECT id, external_id, name FROM dir_groups WHERE id::text=$1 AND source='scim'`, id).Scan(&gid, &g.ExternalID, &g.DisplayName)
+	err := s.db.QueryRow(ctx, `SELECT id, external_id, name FROM dir_groups WHERE id=$1 AND source='scim'`, scimID(id)).Scan(&gid, &g.ExternalID, &g.DisplayName)
 	if err != nil {
 		return g, err
 	}
@@ -512,15 +622,17 @@ func (s *Server) loadGroup(ctx context.Context, id string) (scimGroup, error) {
 }
 
 func (s *Server) scimListGroups(w http.ResponseWriter, r *http.Request) {
-	attr, val, err := parseFilter(r.URL.Query().Get("filter"))
+	attr, val, err := parseFilter("Group", r.URL.Query().Get("filter"))
 	if err != nil {
 		scimErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	cond, args := "source='scim'", []any{}
 	switch attr {
+	case "id":
+		cond, args = cond+" AND id=$1", append(args, scimID(val))
 	case "displayname":
-		cond, args = cond+" AND name=$1", append(args, val)
+		cond, args = cond+" AND lower(name)=lower($1)", append(args, val)
 	case "externalid":
 		cond, args = cond+" AND external_id=$1", append(args, val)
 	}
@@ -572,11 +684,11 @@ func (s *Server) writeGroup(ctx context.Context, id string, g scimGroup, members
 			ext = randToken(12)
 		}
 		err = tx.QueryRow(ctx, `INSERT INTO dir_groups(external_id, source, name) VALUES ($1,'scim',$2) RETURNING id`, ext, g.DisplayName).Scan(&gid)
-		if err != nil && strings.Contains(err.Error(), "duplicate key") {
+		if isUnique(err) {
 			return "", http.StatusConflict, errors.New("group exists")
 		}
 	} else {
-		err = tx.QueryRow(ctx, `UPDATE dir_groups SET name=$2, updated_at=now() WHERE id::text=$1 AND source='scim' RETURNING id`, id, g.DisplayName).Scan(&gid)
+		err = tx.QueryRow(ctx, `UPDATE dir_groups SET name=$2, updated_at=now() WHERE id=$1 AND source='scim' RETURNING id`, scimID(id), g.DisplayName).Scan(&gid)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", http.StatusNotFound, errors.New("group not found")
 		}
@@ -588,8 +700,19 @@ func (s *Server) writeGroup(ctx context.Context, id string, g scimGroup, members
 		if _, err := tx.Exec(ctx, `DELETE FROM dir_members WHERE group_id=$1`, gid); err != nil {
 			return "", http.StatusInternalServerError, err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO dir_members(group_id, user_id) SELECT $1, id FROM dir_users WHERE id::text = ANY($2) ON CONFLICT DO NOTHING`, gid, members); err != nil {
+		ids := make([]int64, 0, len(members))
+		for _, m := range members {
+			if id := scimID(m); id > 0 {
+				ids = append(ids, id)
+			}
+		}
+		tag, err := tx.Exec(ctx, `INSERT INTO dir_members(group_id, user_id) SELECT $1, id FROM dir_users WHERE id = ANY($2) AND source='scim'
+			ON CONFLICT DO NOTHING`, gid, ids)
+		if err != nil {
 			return "", http.StatusInternalServerError, err
+		}
+		if int(tag.RowsAffected()) != len(slices.Compact(slices.Sorted(slices.Values(ids)))) || len(ids) != len(members) {
+			return "", http.StatusBadRequest, errors.New("members must reference existing SCIM users")
 		}
 	}
 	if err := audit(ctx, tx, "scim", "directory.scim_group_write", strconv.FormatInt(gid, 10), fmt.Sprintf("%s members=%d", g.DisplayName, len(members))); err != nil {
@@ -628,6 +751,9 @@ func (s *Server) respondGroup(w http.ResponseWriter, ctx context.Context, id str
 		scimErr(w, http.StatusNotFound, "group not found")
 		return
 	}
+	if status == http.StatusCreated {
+		w.Header().Set("Location", s.scimBase()+"/Groups/"+g.ID)
+	}
 	scimJSON(w, status, g)
 }
 
@@ -658,53 +784,16 @@ func (s *Server) scimPatchGroup(w http.ResponseWriter, r *http.Request) {
 		scimErr(w, http.StatusNotFound, "group not found")
 		return
 	}
-	var body struct {
-		Operations []patchOp `json:"Operations"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		scimErr(w, http.StatusBadRequest, "invalid JSON")
+	ops, err := decodePatch(r)
+	if err != nil {
+		scimErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	members := memberIDs(g.Members)
-	for _, op := range body.Operations {
-		kind, path := strings.ToLower(op.Op), strings.ToLower(op.Path)
-		var vals []map[string]string
-		_ = json.Unmarshal(op.Value, &vals)
-		switch {
-		case path == "displayname" || (path == "" && kind != "remove"):
-			if path == "" {
-				var attrs struct {
-					DisplayName string              `json:"displayName"`
-					Members     []map[string]string `json:"members"`
-				}
-				if json.Unmarshal(op.Value, &attrs) == nil {
-					if attrs.DisplayName != "" {
-						g.DisplayName = attrs.DisplayName
-					}
-					if attrs.Members != nil {
-						members = memberIDs(attrs.Members)
-					}
-				}
-			} else {
-				g.DisplayName = scimString(op.Value)
-			}
-		case path == "members" && kind == "add":
-			for _, id := range memberIDs(vals) {
-				if !containsStr(members, id) {
-					members = append(members, id)
-				}
-			}
-		case path == "members" && kind == "replace":
-			members = memberIDs(vals)
-		case path == "members" && kind == "remove":
-			if len(vals) == 0 {
-				members = []string{}
-			}
-			for _, id := range memberIDs(vals) {
-				members = removeStr(members, id)
-			}
-		case memberFilterRe.MatchString(op.Path) && kind == "remove":
-			members = removeStr(members, memberFilterRe.FindStringSubmatch(op.Path)[1])
+	for _, op := range ops {
+		if err := applyGroupPatch(&g, &members, op); err != nil {
+			scimErr(w, http.StatusBadRequest, err.Error())
+			return
 		}
 	}
 	id, code, err := s.writeGroup(ctx, r.PathValue("id"), g, members)
@@ -715,27 +804,97 @@ func (s *Server) scimPatchGroup(w http.ResponseWriter, r *http.Request) {
 	s.respondGroup(w, ctx, id, http.StatusOK)
 }
 
-func containsStr(list []string, v string) bool {
-	for _, x := range list {
-		if x == v {
-			return true
+// decodePatch reads a PatchOp body (RFC 7644 3.5.2) and checks schema and ops.
+func decodePatch(r *http.Request) ([]patchOp, error) {
+	var body struct {
+		Schemas    []string  `json:"schemas"`
+		Operations []patchOp `json:"Operations"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		return nil, errors.New("invalid JSON")
+	}
+	if !slices.Contains(body.Schemas, scimPatch) {
+		return nil, errors.New("PatchOp schema required")
+	}
+	if len(body.Operations) == 0 {
+		return nil, errors.New("no operation given")
+	}
+	for i, op := range body.Operations {
+		body.Operations[i].Op = strings.ToLower(op.Op)
+		if !slices.Contains([]string{"add", "remove", "replace"}, body.Operations[i].Op) {
+			return nil, fmt.Errorf("invalid operation %q", op.Op)
 		}
 	}
-	return false
+	return body.Operations, nil
 }
 
-func removeStr(list []string, v string) []string {
-	out := list[:0]
-	for _, x := range list {
-		if x != v {
-			out = append(out, x)
+// applyGroupPatch applies one operation on displayName or members.
+func applyGroupPatch(g *scimGroup, members *[]string, op patchOp) error {
+	path := strings.ToLower(op.Path)
+	var vals []map[string]string
+	if len(op.Value) > 0 && path == "members" {
+		if err := json.Unmarshal(op.Value, &vals); err != nil {
+			return errors.New("members value must be a list (invalid JSON)")
 		}
 	}
-	return out
+	switch {
+	case path == "" && op.Op == "remove":
+		return errors.New("remove needs a path (no target)")
+	case path == "":
+		var attrs struct {
+			DisplayName string              `json:"displayName"`
+			Members     []map[string]string `json:"members"`
+		}
+		if err := json.Unmarshal(op.Value, &attrs); err != nil {
+			return errors.New("invalid JSON value")
+		}
+		if attrs.DisplayName != "" {
+			g.DisplayName = attrs.DisplayName
+		}
+		if attrs.Members != nil {
+			if op.Op == "add" {
+				for _, id := range memberIDs(attrs.Members) {
+					if !slices.Contains(*members, id) {
+						*members = append(*members, id)
+					}
+				}
+			} else {
+				*members = memberIDs(attrs.Members)
+			}
+		}
+	case path == "displayname":
+		if op.Op == "remove" {
+			return errors.New("displayName is required and cannot be removed (no target)")
+		}
+		g.DisplayName = scimString(op.Value)
+	case path == "externalid":
+		g.ExternalID = scimString(op.Value)
+	case path == "members" && op.Op == "add":
+		for _, id := range memberIDs(vals) {
+			if !slices.Contains(*members, id) {
+				*members = append(*members, id)
+			}
+		}
+	case path == "members" && op.Op == "replace":
+		*members = memberIDs(vals)
+	case path == "members" && op.Op == "remove":
+		if len(vals) == 0 {
+			*members = []string{}
+		}
+		for _, id := range memberIDs(vals) {
+			*members = slices.DeleteFunc(*members, func(m string) bool { return m == id })
+		}
+	case memberFilterRe.MatchString(op.Path) && op.Op == "remove":
+		id := memberFilterRe.FindStringSubmatch(op.Path)[1]
+		*members = slices.DeleteFunc(*members, func(m string) bool { return m == id })
+	default:
+		return fmt.Errorf("unsupported path %q", op.Path)
+	}
+	return nil
 }
 
 func (s *Server) scimDeleteGroup(w http.ResponseWriter, r *http.Request) {
-	tag, err := s.db.Exec(r.Context(), `DELETE FROM dir_groups WHERE id::text=$1 AND source='scim'`, r.PathValue("id"))
+	tag, err := s.db.Exec(r.Context(), `DELETE FROM dir_groups WHERE id=$1 AND source='scim'`, scimID(r.PathValue("id")))
 	if err != nil || tag.RowsAffected() == 0 {
 		scimErr(w, http.StatusNotFound, "group not found")
 		return

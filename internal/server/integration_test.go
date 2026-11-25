@@ -400,7 +400,7 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("directory facts: %+v", facts)
 	}
 	// Entra deactivates with a string boolean; the device loses the group blueprint
-	if code := scim("PATCH", "/Users/"+created.ID, scimTok, map[string]any{"Operations": []map[string]any{{"op": "Replace", "path": "active", "value": "False"}}}, nil); code != 200 {
+	if code := scim("PATCH", "/Users/"+created.ID, scimTok, map[string]any{"schemas": []string{scimPatch}, "Operations": []map[string]any{{"op": "Replace", "path": "active", "value": "False"}}}, nil); code != 200 {
 		t.Fatalf("SCIM deactivate: %d", code)
 	}
 	tx1, _ := db.Begin(ctx)

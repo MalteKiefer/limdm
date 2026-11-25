@@ -132,6 +132,19 @@ type limiter struct {
 	hits map[string][]time.Time
 }
 
+// over reports whether key reached max hits within window, without counting.
+func (l *limiter) over(key string, max int, window time.Duration) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, t := range l.hits[key] {
+		if time.Since(t) < window {
+			n++
+		}
+	}
+	return n >= max
+}
+
 func (l *limiter) allow(key string, max int, window time.Duration) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()

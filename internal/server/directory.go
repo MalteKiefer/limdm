@@ -36,6 +36,8 @@ type dirUser struct {
 	Title       string
 	Active      bool
 	Groups      []string
+	GroupIDs    []int64
+	Updated     time.Time
 }
 
 type dirGroup struct {
@@ -83,9 +85,7 @@ func (s *Server) directoryPage(w http.ResponseWriter, r *http.Request, sess sess
 func (s *Server) renderDirectory(w http.ResponseWriter, r *http.Request, sess session, token, msg, errMsg string) {
 	ctx := r.Context()
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-	rows, err := s.db.Query(ctx, `SELECT u.id, u.external_id, u.source, u.user_name, u.email, u.display_name, u.department, u.title, u.active,
-		coalesce((SELECT array_agg(g.name ORDER BY g.name) FROM dir_members m JOIN dir_groups g ON g.id=m.group_id WHERE m.user_id=u.id), '{}')
-		FROM dir_users u WHERE $1 = '' OR lower(u.email || ' ' || u.display_name || ' ' || u.department) LIKE '%' || $1 || '%'
+	rows, err := s.db.Query(ctx, `SELECT `+dirUserCols+` FROM dir_users u WHERE $1 = '' OR lower(u.email || ' ' || u.display_name || ' ' || u.department) LIKE '%' || $1 || '%'
 		ORDER BY u.active DESC, u.display_name, u.email LIMIT 500`, q)
 	if err != nil {
 		s.fail(w, err)
