@@ -103,13 +103,14 @@ func (a *Agent) applyUsers() error {
 	if _, err := writeIfChanged(usersFile, string(b), 0o600); err != nil {
 		errs = append(errs, err)
 	}
-	lb, _ := json.Marshal(a.pol.Login) //nolint:gosec // client secret goes to a root only 0600 file for pam-auth
+	lb, _ := json.Marshal(pamPolicy{Login: a.pol.Login, OfflineLockHours: a.pol.OfflineLockHours})
 	if _, err := writeIfChanged(loginFile, string(lb), 0o600); err != nil {
 		errs = append(errs, err)
 	}
 	if err := a.installPAM(); err != nil {
 		errs = append(errs, err)
 	}
+	a.syncPasswordLocks()
 	return errors.Join(errs...)
 }
 
@@ -129,14 +130,14 @@ func pamInstalled() bool { return exists(pamMarker) }
 func pamActive() bool {
 	for _, f := range []string{"/etc/pam.d/common-auth", "/etc/pam.d/system-auth"} {
 		if s := readFile(f); strings.Contains(s, "pam_exec.so") && strings.Contains(s, " pam-auth") {
-			return true
+			return strings.Contains(s, "expose_authtok") // older installs lack it and are replaced
 		}
 	}
 	return false
 }
 
 func pamLine(exe string) string {
-	return "pam_exec.so quiet stdout " + exe + " pam-auth"
+	return "pam_exec.so quiet stdout expose_authtok " + exe + " pam-auth"
 }
 
 func (a *Agent) installPAM() error {
@@ -222,10 +223,12 @@ func authselectInstall(exe string) error {
 // insertPAMLine puts line before the first auth module that actually
 // authenticates (after pam_env, pam_faildelay and faillock preauth).
 func insertPAMLine(content, line string) (string, error) {
-	if strings.Contains(content, "pam-auth") && strings.Contains(content, "pam_exec.so") {
+	if strings.Contains(content, line) {
 		return content, nil
 	}
-	lines := strings.Split(content, "\n")
+	lines := slices.DeleteFunc(strings.Split(content, "\n"), func(l string) bool { // drop an older version of our line
+		return strings.Contains(l, "pam_exec.so") && strings.Contains(l, " pam-auth")
+	})
 	for i, l := range lines {
 		f := strings.Fields(l)
 		if len(f) < 3 || f[0] != "auth" {
@@ -239,24 +242,48 @@ func insertPAMLine(content, line string) (string, error) {
 	return "", errors.New("no auth module found")
 }
 
-// PAMAuth is the pam_exec entry point. Exit code 0 grants access.
+// PAMAuth is the pam_exec entry point. Exit code 0 grants access; 1 hands
+// over to pam_unix, which only accepts a local password the agent left unlocked.
 func PAMAuth() int {
 	if os.Getenv("PAM_TYPE") != "auth" {
 		return 1
 	}
+	pw := readAuthtok()
 	username := os.Getenv("PAM_USER")
 	email, ok := readUsers()[username]
 	if !ok {
 		return 1 // not centrally managed, fall through to local password
 	}
-	var cfg api.Login
-	b, err := os.ReadFile(loginFile)
-	if err != nil || json.Unmarshal(b, &cfg) != nil || !cfg.Enabled {
+	cfg, ok := readPAMPolicy()
+	if !ok {
 		return 1
+	}
+	now := time.Now()
+	if s := readFile(nologinFile); s != "" {
+		fmt.Print(s)
+		return 1
+	}
+	if lastContactOverdue(cfg, now) {
+		fmt.Print(offlineText)
+		return 1
+	}
+	if !ssoDue(cfg, username, now) && !passwordLocked(username) {
+		return 1 // confirmed recently: pam_unix checks the local password
+	}
+	if cfg.LocalPassword {
+		if err := checkLocalPassword(username, pw); err != nil {
+			fmt.Printf("SSO confirmation required. Enter the password you want to use on this device, then confirm on your phone: %v\n", err)
+			return 1
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	err = deviceLogin(ctx, cfg, email)
+	err := deviceLogin(ctx, cfg.Login, email)
+	if err == nil && cfg.LocalPassword {
+		if err = setLocalPassword(username, pw); err == nil {
+			err = recordSSO(username, now)
+		}
+	}
 	recordAuthEvent(username, email, err)
 	if err != nil {
 		fmt.Println("Login failed:", err)

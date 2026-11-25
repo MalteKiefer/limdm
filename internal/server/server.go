@@ -542,6 +542,12 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// people deactivated in the directory (SCIM, Google) lose their device accounts:
+	// the agent locks accounts that are no longer listed
+	if resp.Users, err = activeUsers(ctx, tx, resp.Users); err != nil {
+		s.fail(w, err)
+		return
+	}
 	if b := s.branding(); b.Hash != req.BrandingHash {
 		resp.Branding = &b
 	}

@@ -9,11 +9,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/maltekiefer/limdm/internal/api"
 	"golang.org/x/oauth2/jwt"
 )
 
@@ -428,4 +431,27 @@ func googleList[T any](ctx context.Context, c *http.Client, base, field string) 
 		}
 	}
 	return nil, errors.New("too many pages")
+}
+
+// activeUsers drops device users whose directory entry is inactive. Users
+// without a directory entry (local assignments) stay.
+func activeUsers(ctx context.Context, tx pgx.Tx, users []api.User) ([]api.User, error) {
+	if len(users) == 0 {
+		return users, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT lower(email) FROM dir_users WHERE NOT active`)
+	if err != nil {
+		return nil, err
+	}
+	inactive, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, err
+	}
+	out := users[:0:0]
+	for _, u := range users {
+		if !slices.Contains(inactive, strings.ToLower(u.Email)) {
+			out = append(out, u)
+		}
+	}
+	return out, nil
 }

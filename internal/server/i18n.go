@@ -285,4 +285,7 @@ var deCatalog = map[string]string{
 	"Single device": "Einzelnes Gerät", "Mass deployment": "Massenrollout",
 	"Distribute this file with Ansible, Puppet or a golden image as /etc/limdm/enroll.conf (mode 0600), then install the limdm-agent package or run the script without LIMDM_TOKEN. The agent enrolls on installation and deletes the file. Use a token with enough uses.": "Verteile diese Datei per Ansible, Puppet oder Golden Image als /etc/limdm/enroll.conf (Modus 0600) und installiere dann das Paket limdm-agent oder führe das Skript ohne LIMDM_TOKEN aus. Der Agent registriert sich bei der Installation und löscht die Datei. Nutze ein Token mit ausreichend Verwendungen.",
 	"Other systems: use the tar.gz release and": "Andere Systeme: nutze das tar.gz Release und",
+	// local password after SSO
+	"SSO": "SSO", "confirmed": "bestätigt", "never confirmed": "nie bestätigt", "local password locked": "lokales Passwort gesperrt",
+	"local account": "lokales Konto",
 }

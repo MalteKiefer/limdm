@@ -145,9 +145,10 @@
   <section class="tablecard">
     <div class="card-head"><h2>{{t "Accounts"}}</h2><span class="muted">{{len .Inv.Accounts}} {{t "login accounts"}}</span></div>
     <div class="scroll"><table>
-      <thead><tr><th>{{t "Account"}}</th><th class="num">{{t "UID"}}</th><th>{{t "Shell"}}</th><th>{{t "Rights"}}</th></tr></thead>
+      <thead><tr><th>{{t "Account"}}</th><th class="num">{{t "UID"}}</th><th>{{t "Shell"}}</th><th>{{t "Rights"}}</th><th>{{t "SSO"}}</th></tr></thead>
       <tbody>{{range .Inv.Accounts}}<tr><td class="mono">{{.Name}}</td><td class="num">{{.UID}}</td><td class="mono muted">{{.Shell}}</td>
-        <td>{{if .Admin}}<span class="pill warn">{{t "admin"}}</span>{{else}}<span class="pill">{{t "user"}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="4" class="empty">{{t "No account data reported."}}</td></tr>{{end}}</tbody>
+        <td>{{if .Admin}}<span class="pill warn">{{t "admin"}}</span>{{else}}<span class="pill">{{t "user"}}</span>{{end}}</td>
+        <td>{{if .SSO}}{{if .LastSSO}}{{t "confirmed"}} {{ago .LastSSO}}{{else}}<span class="muted">{{t "never confirmed"}}</span>{{end}}{{if .PwdLocked}} <span class="pill warn">{{t "local password locked"}}</span>{{end}}{{else}}<span class="muted">{{t "local account"}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="5" class="empty">{{t "No account data reported."}}</td></tr>{{end}}</tbody>
     </table></div>
     <div class="empty">{{t "Logged in now:"}} {{range .Inv.Users}}<span class="tag">{{.}}</span>{{else}}{{t "not collected (privacy)"}}{{end}}</div>
   </section>

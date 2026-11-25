@@ -74,6 +74,8 @@ type State struct {
 	EscrowNotified time.Time            `json:"escrow_notified"`
 	Company        string               `json:"company,omitempty"`
 	BrandingHash   string               `json:"branding_hash,omitempty"`
+	LastContact    time.Time            `json:"last_contact"`
+	OfflineLocked  bool                 `json:"offline_locked,omitempty"`
 }
 
 type Agent struct {
@@ -348,6 +350,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.kick = make(chan struct{}, 1)
 	a.desktop = &desktopServer{a: a, queued: map[string]bool{}, failures: map[uint32][]time.Time{}}
 	go a.serveDesktop(ctx)
+	a.enforceOffline(false) // before anything else: the device may have been off for a long time
 	for {
 		a.cycle(ctx)
 		wait := time.Duration(a.pol.CheckinSeconds) * time.Second
@@ -439,8 +442,10 @@ func (a *Agent) cycle(ctx context.Context) {
 	var resp api.CheckinResponse
 	if err := a.post(ctx, "/api/v1/checkin", req, &resp); err != nil {
 		a.log.Error("checkin failed, enforcing stored declarations", "err", err)
+		a.enforceOffline(false)
 		return
 	}
+	a.enforceOffline(true)
 	a.state.Results, a.state.Events = nil, nil
 	if len(sentKeys) > 0 {
 		a.escrowConfirmed(sentKeys)

@@ -335,3 +335,23 @@ func TestEnrollConfigErrors(t *testing.T) {
 		t.Fatal("garbage accepted")
 	}
 }
+
+func TestLocalPasswordRules(t *testing.T) {
+	p := pamPolicy{Login: api.Login{Enabled: true, LocalPassword: true, ReverifyHours: 24}}
+	if !ssoDue(p, "nobody-ever-confirmed", time.Now()) {
+		t.Fatal("unconfirmed user must need SSO")
+	}
+	if !ssoDue(pamPolicy{Login: api.Login{Enabled: true}}, "x", time.Now()) {
+		t.Fatal("pure SSO mode must always need SSO")
+	}
+	for pw, ok := range map[string]bool{"short": false, "correct horse battery": true, "anna-is-my-name-ok": false, "line\nbreak-password": false} {
+		if (checkLocalPassword("anna", pw) == nil) != ok {
+			t.Errorf("password %q: want ok=%v", pw, ok)
+		}
+	}
+	old := "auth\trequired\tpam_env.so\nauth [success=end default=ignore] pam_exec.so quiet stdout /usr/bin/limdm-agent pam-auth\nauth\tsufficient\tpam_unix.so\n"
+	got, err := insertPAMLine(old, "auth sufficient "+pamLine("/usr/bin/limdm-agent"))
+	if err != nil || strings.Count(got, "pam-auth") != 1 || !strings.Contains(got, "expose_authtok") {
+		t.Fatalf("PAM line not replaced: %v\n%s", err, got)
+	}
+}

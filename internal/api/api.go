@@ -58,7 +58,7 @@ var Types = map[string]string{
 	TypeFirewall:   `{"enforce": true, "allow": ["22/tcp"]}`,
 	TypeOSVersion:  `{"min": {"ubuntu": "22.04", "debian": "12", "fedora": "41"}}`,
 	TypeScreenLock: `{"idle_seconds": 300}`,
-	TypeLogin:      `{"issuer": "https://accounts.google.com", "client_id": "", "client_secret": "", "allowed_domain": ""}`,
+	TypeLogin:      `{"issuer": "https://accounts.google.com", "client_id": "", "client_secret": "", "allowed_domain": "", "local_password": true, "reverify_hours": 168}`,
 	TypePrivacy:    `{"network_info": false, "logged_in_users": false}`,
 }
 
@@ -66,6 +66,7 @@ var Types = map[string]string{
 // A zero section means "not managed".
 type Policy struct {
 	CheckinSeconds    int               `json:"checkin_seconds"`
+	OfflineLockHours  int               `json:"offline_lock_hours"` // lock the device when the server was unreachable this long, 0 = off
 	Compliance        Compliance        `json:"compliance"`
 	Updates           Updates           `json:"updates"`
 	Packages          Packages          `json:"packages"`
@@ -80,7 +81,8 @@ type Policy struct {
 }
 
 type agentPayload struct {
-	CheckinSeconds int `json:"checkin_seconds"`
+	CheckinSeconds   int `json:"checkin_seconds"`
+	OfflineLockHours int `json:"offline_lock_hours,omitempty"`
 }
 
 type Compliance struct {
@@ -142,6 +144,11 @@ type Login struct {
 	ClientID      string `json:"client_id"`
 	ClientSecret  string `json:"client_secret"`
 	AllowedDomain string `json:"allowed_domain"` // Google "hd" claim, or email domain
+	// LocalPassword: after an SSO confirmation the password typed at that login
+	// becomes the local password, used offline and on the lock screen until
+	// ReverifyHours have passed; then SSO is required again.
+	LocalPassword bool `json:"local_password,omitempty"`
+	ReverifyHours int  `json:"reverify_hours,omitempty"`
 }
 
 // Privacy controls which personal data leaves the device. Default: none of it.
@@ -190,7 +197,10 @@ func (d Declaration) apply(p *Policy) error {
 		if v.CheckinSeconds < 30 || v.CheckinSeconds > 86400 {
 			bad("checkin_seconds must be 30..86400")
 		}
-		p.CheckinSeconds = v.CheckinSeconds
+		if v.OfflineLockHours < 0 || v.OfflineLockHours > 8760 {
+			bad("offline_lock_hours must be 0 (off) up to 8760")
+		}
+		p.CheckinSeconds, p.OfflineLockHours = v.CheckinSeconds, v.OfflineLockHours
 	case TypeCompliance:
 		if err := strict(d.Payload, &p.Compliance); err != nil {
 			return err
@@ -290,6 +300,9 @@ func (d Declaration) apply(p *Policy) error {
 		p.Login.Enabled = true
 		if !strings.HasPrefix(p.Login.Issuer, "https://") || p.Login.ClientID == "" {
 			bad("login needs https issuer and client_id")
+		}
+		if p.Login.LocalPassword && (p.Login.ReverifyHours < 1 || p.Login.ReverifyHours > 2160) {
+			bad("local_password needs reverify_hours 1..2160")
 		}
 	case TypePrivacy:
 		if err := strict(d.Payload, &p.Privacy); err != nil {
@@ -445,6 +458,10 @@ type Account struct {
 	UID   int    `json:"uid"`
 	Shell string `json:"shell,omitempty"`
 	Admin bool   `json:"admin"` // uid 0 or member of sudo, wheel or admin
+	// SSO: centrally managed account; LastSSO is its last SSO confirmation.
+	SSO       bool       `json:"sso,omitempty"`
+	LastSSO   *time.Time `json:"last_sso,omitempty"`
+	PwdLocked bool       `json:"pwd_locked,omitempty"` // local password refused until the next SSO confirmation
 }
 
 // Repo is one package source. Signed reports signed-by (apt) or gpgcheck=1 (dnf).

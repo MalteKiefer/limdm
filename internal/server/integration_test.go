@@ -927,6 +927,14 @@ func TestRecoveryEscrow(t *testing.T) {
 	if _, err := s.sourceTemplate(ctx, "d1", "/etc/apt/sources.list.d/limdm-osquery.sources", "disable"); err == nil {
 		t.Fatal("managed source offered")
 	}
+	// directory deactivation removes device accounts
+	db.Exec(ctx, `INSERT INTO dir_users(source, user_name, email, active) VALUES ('scim','gone','Gone@Example.com',false),('scim','here','here@example.com',true)`)
+	tx, _ = db.Begin(ctx)
+	us, err := activeUsers(ctx, tx, []api.User{{Username: "gone", Email: "gone@example.com"}, {Username: "here", Email: "here@example.com"}, {Username: "local", Email: "local@example.com"}})
+	tx.Rollback(ctx)
+	if err != nil || len(us) != 2 || us[0].Username != "here" {
+		t.Fatalf("active users: %+v %v", us, err)
+	}
 }
 
 func TestRecoveryCodeLogin(t *testing.T) {

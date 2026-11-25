@@ -399,6 +399,7 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 	}
 	inv.Disks, inv.Volumes = nativeDisks(), nativeVolumes()
 	inv.Accounts = accounts(readPasswdGroup())
+	annotateSSO(inv.Accounts)
 	inv.Repos = h.repos()
 	inv.Desktop, inv.DisplayManager = desktop()
 	// interfaces and MACs are hardware inventory; addresses only with consent
@@ -429,4 +430,17 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 	}
 	enrichFromOsquery(&inv, priv)
 	return inv
+}
+
+// commandWithStdin runs a command with input on stdin (secrets never go into argv).
+func commandWithStdin(in string) func(name string, args ...string) (string, error) {
+	return func(name string, args ...string) (string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, name, args...)
+		cmd.Env = append(os.Environ(), "LC_ALL=C")
+		cmd.Stdin = strings.NewReader(in)
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
 }
