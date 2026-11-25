@@ -223,10 +223,15 @@ rights.
 ### `com.limdm.diskencryption`
 
 ```json
-{"escrow": true, "rotate_after_view": true}
+{"escrow": true, "rotate_after_view": true, "require_all": true, "exclude": ["/boot"]}
 ```
 
 LUKS recovery key escrow. See [disk-encryption.md](disk-encryption.md).
+
+Without `require_all` the check `disk.encryption` only looks at `/`. With it, every local
+volume must be on LUKS except the mount points in `exclude`; an entry covers everything below
+it (`/boot` also covers `/boot/efi`). The device page marks excluded volumes. The library
+item "Disk encryption on all volumes, /boot excluded" is a ready made start.
 
 ### `com.limdm.login`
 

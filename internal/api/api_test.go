@@ -112,3 +112,23 @@ func TestPrivacyDefault(t *testing.T) {
 		t.Fatalf("declaration switches only network_info off: %+v", p.Privacy)
 	}
 }
+
+func TestDiskEncryptionExclude(t *testing.T) {
+	d := &DiskEncryption{Exclude: []string{"/boot"}}
+	for m, want := range map[string]bool{"/boot": true, "/boot/efi": true, "/bootx": false, "/": false, "/home": false} {
+		if d.Excluded(m) != want {
+			t.Errorf("%s: %v", m, !want)
+		}
+	}
+	for payload, ok := range map[string]bool{
+		`{"escrow":true,"rotate_after_view":false,"require_all":true,"exclude":["/boot"]}`: true,
+		`{"escrow":true,"rotate_after_view":false,"exclude":["/"]}`:                        false,
+		`{"escrow":true,"rotate_after_view":false,"exclude":["boot"]}`:                     false,
+		`{"escrow":true,"rotate_after_view":false,"exclude":["/boot/../etc"]}`:             false,
+	} {
+		_, st := Compose([]Declaration{{Identifier: "d", Type: TypeDiskEncryption, Payload: []byte(payload)}})
+		if st[0].Valid != ok {
+			t.Errorf("%s: valid=%v", payload, st[0].Valid)
+		}
+	}
+}

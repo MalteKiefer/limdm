@@ -1,30 +1,39 @@
 {{define "title"}}{{t "Directory · LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head"><div><h1>{{t "Directory"}}</h1><div class="meta"><span>{{len .Users}} {{t "people"}}</span><span>{{len .Groups}} {{t "groups"}}</span><span>{{t "from SCIM or Google Workspace"}}</span></div></div></div>
+<nav class="tabs" aria-label="{{t "Directory"}}">
+  <a href="/directory?tab=people" {{if eq .Tab "people"}}class="on" aria-current="page"{{end}}>{{t "People"}}</a>
+  <a href="/directory?tab=groups" {{if eq .Tab "groups"}}class="on" aria-current="page"{{end}}>{{t "Groups"}}</a>
+  {{if eq .Sess.Role "admin"}}<a href="/directory?tab=settings" {{if eq .Tab "settings"}}class="on" aria-current="page"{{end}}>{{t "Settings"}}</a>{{end}}
+</nav>
 {{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
 {{if .Msg}}<div class="notice ok" role="status">{{t .Msg}}</div>{{end}}
 {{if .Token}}<div class="notice ok" role="status"><strong>{{t "SCIM token"}}</strong> (shown only once):<pre>{{.Token}}</pre></div>{{end}}
-<section class="tablecard" id="groups">
-  <div class="card-head"><h2>{{t "Groups"}}</h2><span class="muted">{{t "devices without an explicit blueprint get the blueprint of their primary user's group; lower priority wins"}}</span></div>
-  <div class="scroll"><table>
-    <thead><tr><th>{{t "Group"}}</th><th>{{t "Source"}}</th><th class="num">{{t "Members"}}</th><th>{{t "Blueprint"}}</th></tr></thead>
-    <tbody>{{$s := .}}{{range .Groups}}<tr><td>{{.Name}}</td><td>{{.Source}}</td><td class="num">{{.Members}}</td>
-      <td>{{if eq $s.Sess.Role "admin"}}<form class="inline-form" method="post" action="/directory/groups"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="group_id" value="{{.ID}}">
-        <select name="blueprint_id" aria-label="{{t "Blueprint"}}"><option value="0">{{t "none"}}</option>{{$cur := .Blueprint}}{{range $s.Blueprints}}<option value="{{.ID}}" {{if and $cur (eq (deref $cur) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select>
-        <input name="priority" type="number" min="0" max="10000" value="{{if .Priority}}{{.Priority}}{{else}}100{{end}}" class="small" aria-label="{{t "Priority"}}">
-        <button class="secondary small">{{t "Save"}}</button></form>{{end}}</td></tr>{{else}}<tr><td colspan="4" class="empty">{{t "No groups yet. Connect an identity provider below."}}</td></tr>{{end}}</tbody>
-  </table></div>
-</section>
+{{if eq .Tab "people"}}
 <section class="tablecard">
   <div class="card-head"><h2>{{t "People"}}</h2></div>
-  <form class="filters" method="get" action="/directory"><input type="search" name="q" value="{{.Q}}" placeholder="{{t "Search name, email, department"}}" aria-label="{{t "Search people"}}"><button class="secondary">{{t "Search"}}</button></form>
+  <form class="filters" method="get" action="/directory"><input type="hidden" name="tab" value="people"><input type="search" name="q" value="{{.Q}}" placeholder="{{t "Search name, email, department"}}" aria-label="{{t "Search people"}}"><button class="secondary">{{t "Search"}}</button></form>
   <div class="scroll"><table>
     <thead><tr><th>{{t "Name"}}</th><th>{{t "Email"}}</th><th>{{t "Department"}}</th><th>{{t "Groups"}}</th><th>{{t "Source"}}</th><th>{{t "State"}}</th></tr></thead>
     <tbody>{{range .Users}}<tr><td>{{.DisplayName}}<span class="sub">{{.Title}}</span></td><td class="mono">{{.Email}}</td><td>{{.Department}}</td>
       <td>{{range .Groups}}<span class="tag">{{.}}</span>{{end}}</td><td>{{.Source}}</td><td>{{if .Active}}<span class="pill ok">{{t "active"}}</span>{{else}}<span class="pill">{{t "inactive"}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No people yet."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
-{{if eq .Sess.Role "admin"}}
+{{end}}
+{{if eq .Tab "groups"}}
+<section class="tablecard" id="groups">
+  <div class="card-head"><h2>{{t "Groups"}}</h2><span class="muted">{{t "devices without an explicit blueprint get the blueprint of their primary user's group; lower priority wins"}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Group"}}</th><th>{{t "Source"}}</th><th class="num">{{t "Members"}}</th><th>{{t "Blueprint"}}</th></tr></thead>
+    <tbody>{{$s := .}}{{range .Groups}}<tr><td>{{.Name}}</td><td>{{.Source}}</td><td class="num">{{.Members}}</td>
+      <td>{{if eq $s.Sess.Role "admin"}}<form class="inline-form" method="post" action="/directory/groups"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="group_id" value="{{.ID}}"><input type="hidden" name="tab" value="groups">
+        <select name="blueprint_id" aria-label="{{t "Blueprint"}}"><option value="0">{{t "none"}}</option>{{$cur := .Blueprint}}{{range $s.Blueprints}}<option value="{{.ID}}" {{if and $cur (eq (deref $cur) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select>
+        <input name="priority" type="number" min="0" max="10000" value="{{if .Priority}}{{.Priority}}{{else}}100{{end}}" class="small" aria-label="{{t "Priority"}}">
+        <button class="secondary small">{{t "Save"}}</button></form>{{end}}</td></tr>{{else}}<tr><td colspan="4" class="empty">{{t "No groups yet. Connect an identity provider below."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+{{end}}
+{{if eq .Tab "settings"}}
 <div class="grid two">
   <section class="card">
     <h2>{{t "SCIM 2.0"}}</h2>

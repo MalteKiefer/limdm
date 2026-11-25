@@ -371,5 +371,6 @@ func DefaultLibrary() []LibraryItem {
 		li("Supported OS versions", TypeOSVersion, `{"min":{"ubuntu":"22.04","debian":"12","fedora":"41"}}`),
 		li("Screen lock after 5 minutes", TypeScreenLock, `{"idle_seconds":300}`),
 		li("Privacy: no network or session data", TypePrivacy, `{"network_info":false,"logged_in_users":false}`),
+		li("Disk encryption on all volumes, /boot excluded", TypeDiskEncryption, `{"escrow":true,"rotate_after_view":true,"require_all":true,"exclude":["/boot"]}`),
 	}
 }

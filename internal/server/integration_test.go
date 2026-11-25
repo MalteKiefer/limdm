@@ -115,6 +115,14 @@ func TestIntegration(t *testing.T) {
 	if code != 200 || token == "" || !strings.Contains(body, ca.Fingerprint()) {
 		t.Fatalf("token page: %d", code)
 	}
+	_, body2 := ui("POST", "/tokens", url.Values{"note": {"revoke-me"}, "uses": {"1"}, "days": {"1"}, "blueprint_id": {"0"}}, adminSess)
+	revID := hex.EncodeToString(sha(regexp.MustCompile(`lmt_[A-Za-z0-9_-]+`).FindString(body2)))
+	if code, _ := ui("POST", "/tokens/"+revID+"/revoke", url.Values{}, adminSess); code != http.StatusSeeOther && code != 200 {
+		t.Fatalf("revoke: %d", code)
+	}
+	if code, _ := ui("POST", "/tokens/"+revID+"/revoke", url.Values{}, adminSess); code != http.StatusNotFound {
+		t.Fatalf("revoked token still present: %d", code)
+	}
 	auditor := session{Email: "audit@firma.de", Role: "auditor", IAT: time.Now(), Last: time.Now()}
 	if code, _ := ui("POST", "/tokens", url.Values{"uses": {"1"}, "days": {"1"}}, auditor); code != http.StatusForbidden {
 		t.Fatalf("auditor must be read only, got %d", code)

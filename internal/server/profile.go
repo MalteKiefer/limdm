@@ -126,7 +126,14 @@ func (s *Server) renderProfile(w http.ResponseWriter, r *http.Request, sess sess
 		tab = "language"
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	s.render(w, r, sess, "profile", map[string]any{"P": v, "Msg": msg, "Error": errMsg, "Tab": tab, "Tabs": tabs})
+	type dateChoice struct{ Key, Sample string }
+	now := time.Now()
+	var formats []dateChoice
+	for _, k := range []string{"iso", "de", "uk", "us"} {
+		formats = append(formats, dateChoice{k, now.Format(dateFormats[k])})
+	}
+	s.render(w, r, sess, "profile", map[string]any{"P": v, "Msg": msg, "Error": errMsg, "Tab": tab, "Tabs": tabs,
+		"DateFormats": formats, "DateFmt": requestDateFormat(r)})
 }
 
 func (s *Server) localName(w http.ResponseWriter, r *http.Request, sess session) (string, bool) {
