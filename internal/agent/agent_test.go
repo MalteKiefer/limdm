@@ -698,3 +698,19 @@ func TestParsePeople(t *testing.T) {
 		t.Fatalf("people: %v", got)
 	}
 }
+
+func TestConsoleSession(t *testing.T) {
+	for props, want := range map[string]bool{
+		"Type=tty\nRemote=no\nClass=user\nUser=1000":            true,
+		"Type=unspecified\nRemote=yes\nClass=user\nUser=1001":   true,
+		"Type=wayland\nRemote=no\nClass=user\nUser=1000":        false,
+		"Type=x11\nRemote=no\nClass=user\nUser=1000":            false,
+		"Type=tty\nRemote=yes\nClass=user\nUser=0":              false,
+		"Type=wayland\nRemote=no\nClass=greeter\nUser=42":       false,
+		"Type=unspecified\nRemote=no\nClass=manager\nUser=1000": false,
+	} {
+		if got := consoleSession(props); got != want {
+			t.Errorf("%q: %v", props, got)
+		}
+	}
+}

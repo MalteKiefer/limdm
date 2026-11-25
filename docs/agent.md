@@ -241,7 +241,10 @@ focus.
   locked, so neither a login screen nor the screen locker accepts them. The agent remembers
   which accounts it locked; **Unlock device** releases exactly those (SSO rules may keep
   managed users locked).
-* Running sessions are locked: GNOME, KDE Plasma, Xfce, Cinnamon and MATE through logind,
+* Terminal and SSH sessions of people end (they cannot be locked); root's stay. While the
+  device is locked, the agent ends such sessions again every minute.
+* Graphical sessions are locked, not ended, like on Windows and macOS (unsaved work stays):
+  GNOME, KDE Plasma, Xfce, Cinnamon and MATE through logind,
   compositors and window managers without a logind aware locker (labwc, sway, Hyprland,
   river, niri, Wayfire, i3 and others) get swaylock or i3lock started directly, again every
   minute while the device stays locked.

@@ -16,7 +16,10 @@ import (
 //   - The local passwords of all people's accounts are locked, so neither a
 //     new login nor the screen locker accepts them. The accounts LiMDM
 //     locked are remembered; unlock only releases those.
-//   - Running sessions are locked: desktop environments through logind
+//   - Terminal and SSH sessions of people cannot be locked, so they end;
+//     root's stay, like /etc/nologin lets root in.
+//   - Running graphical sessions are locked, not ended (like Windows and
+//     macOS, unsaved work stays): desktop environments through logind
 //     (loginctl lock-sessions); compositors and window managers without a
 //     logind aware locker (labwc, sway, Hyprland, i3 …) get swaylock or
 //     i3lock started directly, again every minute while the device stays
@@ -55,8 +58,51 @@ func (a *Agent) lockDevice() (string, error) {
 		return "", err
 	}
 	locked, err := lockPasswords()
+	ended := endConsoleSessions()
 	n := a.lockSessions()
-	return "logins blocked, local passwords of " + strings.Join(locked, ", ") + " locked, " + strconv.Itoa(n) + " sessions locked", err
+	return "logins blocked, local passwords of " + strings.Join(locked, ", ") + " locked, " + strconv.Itoa(n) +
+		" sessions locked, terminal and SSH sessions ended: " + strings.Join(ended, ", "), err
+}
+
+// consoleSession: a logind session of a person that is not graphical
+// (Type tty or unspecified, or Remote=yes as with SSH). props is the
+// output of loginctl show-session -p Type -p Remote -p Class -p User.
+func consoleSession(props string) bool {
+	kv := map[string]string{}
+	for _, l := range strings.Split(props, "\n") {
+		if k, v, ok := strings.Cut(strings.TrimSpace(l), "="); ok {
+			kv[k] = v
+		}
+	}
+	uid, err := strconv.Atoi(kv["User"])
+	if err != nil || uid < 1000 || kv["Class"] != "user" {
+		return false // root, system users, greeters and user managers stay
+	}
+	return kv["Remote"] == "yes" || kv["Type"] == "tty" || kv["Type"] == "unspecified"
+}
+
+// endConsoleSessions ends terminal and SSH sessions of people; they have
+// no screen locker.
+func endConsoleSessions() []string {
+	out, err := sh("loginctl", "list-sessions", "--no-legend")
+	if err != nil {
+		return nil
+	}
+	var ended []string
+	for _, l := range strings.Split(out, "\n") {
+		f := strings.Fields(l)
+		if len(f) < 3 {
+			continue
+		}
+		props, err := sh("loginctl", "show-session", f[0], "-p", "Type", "-p", "Remote", "-p", "Class", "-p", "User")
+		if err != nil || !consoleSession(props) {
+			continue
+		}
+		if _, err := sh("loginctl", "terminate-session", f[0]); err == nil {
+			ended = append(ended, f[2]+" (session "+f[0]+")")
+		}
+	}
+	return ended
 }
 
 func (a *Agent) unlockDevice() (string, error) {
@@ -147,6 +193,9 @@ func (a *Agent) lockSessions() int {
 // every minute, so ending the locker does not help.
 func (a *Agent) enforceDeviceLock() {
 	if readFile(nologinFile) == nologinText {
+		if ended := endConsoleSessions(); len(ended) > 0 {
+			a.event("device locked: ended %s", strings.Join(ended, ", "))
+		}
 		a.lockSessions()
 	}
 }
