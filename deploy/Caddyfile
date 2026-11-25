@@ -1,7 +1,31 @@
 # Caddy in front of the admin UI on a host install (limdm-server package).
 # The server listens on 127.0.0.1:8080 without TLS; Caddy obtains the
 # certificate. The agent API (8444, mTLS) is exposed directly, not proxied.
+# The server sets HSTS, CSP and the other security headers itself.
 mdm.example.com {
 	encode zstd gzip
+
+	header -Server
+	request_body {
+		max_size 2MB
+	}
+
+	# JSON access log for fail2ban and CrowdSec (crowdsecurity/caddy)
+	log {
+		output file /var/log/caddy/limdm-access.log {
+			roll_size 50MiB
+			roll_keep 10
+		}
+		format json
+	}
+
+	# Optional: console only from your networks. Devices still fetch the
+	# install script and the identity provider still reaches SCIM.
+	# @outside {
+	# 	not remote_ip 198.51.100.0/24 10.8.0.0/16
+	# 	not path /install.sh /scim/*
+	# }
+	# respond @outside 403
+
 	reverse_proxy 127.0.0.1:8080
 }

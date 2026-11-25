@@ -1,0 +1,36 @@
+# /etc/crowdsec/scenarios/limdm-bf.yaml
+type: leaky
+name: limdm/limdm-bf
+description: "Brute force against the LiMDM console or enrollment"
+filter: "evt.Meta.log_type == 'limdm_auth_failed'"
+groupby: evt.Meta.source_ip
+capacity: 5
+leakspeed: 2m
+blackhole: 5m
+labels:
+  service: limdm
+  confidence: 3
+  spoofable: 0
+  classification:
+    - attack.T1110
+  label: "LiMDM brute force"
+  behavior: "http:bruteforce"
+  remediation: true
+---
+type: leaky
+name: limdm/limdm-tls-scan
+description: "Many failed TLS handshakes on the LiMDM agent port"
+filter: "evt.Meta.log_type == 'limdm_tls_failed'"
+groupby: evt.Meta.source_ip
+capacity: 30
+leakspeed: 20s
+blackhole: 10m
+labels:
+  service: limdm
+  confidence: 2
+  spoofable: 0
+  classification:
+    - attack.T1595
+  label: "LiMDM agent port scan"
+  behavior: "tcp:scan"
+  remediation: true

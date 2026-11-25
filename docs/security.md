@@ -60,6 +60,13 @@ page (Commands tab). They do not take part in the hash chain.
 * The desktop socket authorizes by peer credentials and active local session.
 * Secrets on the device (`device.pem`, login configuration, state) are root only, 0600.
 
+## Host hardening
+
+Firewall (ufw, firewalld, nftables), fail2ban and CrowdSec rules for failed sign ins and agent
+port scans, Caddy, PostgreSQL and a checklist: [installation.md](installation.md#hardening-the-host).
+Failed local and OIDC sign ins and rejected enrollments are logged with the client address
+(`local login failed`, `oidc login failed`, `enroll rejected`).
+
 ## Privacy
 
 * By default the agent reports everything, including IP addresses, DNS, routes and logged
