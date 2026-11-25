@@ -57,6 +57,11 @@ var migrations = []struct {
 }{
 	{2, migratePriorityBlueprints},
 	{3, seedDefaultBlueprint},
+	{4, func(ctx context.Context, tx pgx.Tx) error { // helpdesk role for local accounts
+		_, err := tx.Exec(ctx, `ALTER TABLE local_admins DROP CONSTRAINT IF EXISTS local_admins_role_check;
+			ALTER TABLE local_admins ADD CONSTRAINT local_admins_role_check CHECK (role IN ('admin', 'helpdesk', 'auditor'))`)
+		return err
+	}},
 }
 
 func columnExists(ctx context.Context, tx pgx.Tx, table, column string) (bool, error) {

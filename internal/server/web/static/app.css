@@ -266,3 +266,6 @@ button.ghost.danger { color: var(--bad); }
 .bp-else .bp-list { margin-left: 46px; }
 .bp-json { margin-top: 14px; }
 .bp-json summary { cursor: pointer; color: var(--text-3); font-size: 13px; margin-bottom: 8px; }
+.inline-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0; }
+.inline-form select { width: auto; margin: 0; }
+.inline-form label.check { margin: 0; }

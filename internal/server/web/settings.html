@@ -1,0 +1,28 @@
+{{define "title"}}Settings · LiMDM{{end}}
+{{define "content"}}
+<div class="page-head"><div><h1>Settings</h1><div class="meta"><span>Database, listeners and keys stay in the server environment</span></div></div></div>
+{{if .Error}}<div class="notice error" role="alert">{{.Error}}</div>{{end}}
+{{if .Msg}}<div class="notice ok" role="status">{{.Msg}}</div>{{end}}
+<form method="post" action="/settings">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <div class="grid two">
+    <section class="card">
+      <h2>Single sign on (OIDC)</h2>
+      <p class="muted">Google Workspace: create an OAuth client of type Web application with redirect URI <code>{{.Redirect}}</code>.</p>
+      <label>Issuer<input name="oidc_issuer" value="{{.Set.OIDCIssuer}}" placeholder="https://accounts.google.com" spellcheck="false"></label>
+      <label>Client ID<input name="oidc_client_id" value="{{.Set.OIDCClientID}}" spellcheck="false"></label>
+      <label>Client secret <span class="hint">{{if .HasSecret}}stored encrypted; leave empty to keep{{else}}not set{{end}}</span><input name="oidc_client_secret" type="password" autocomplete="new-password"></label>
+      {{if .HasSecret}}<label class="check"><input type="checkbox" name="clear_secret"> remove the stored secret</label>{{end}}
+      <label>Allowed domain <span class="hint">Google hd claim or email domain, optional</span><input name="allowed_domain" value="{{.Set.AllowedDomain}}" placeholder="example.com"></label>
+    </section>
+    <section class="card">
+      <h2>Access and monitoring</h2>
+      <label class="check"><input type="checkbox" name="local_login" {{if .Set.LocalLogin}}checked{{end}}> allow local accounts (password + TOTP)</label>
+      <label>Device counts as stale after (hours)<input name="stale_hours" type="number" min="1" max="2160" value="{{.Set.StaleHours}}"></label>
+      <label>Compliance webhook <span class="hint">https URL receiving JSON when a device becomes non-compliant</span><input name="webhook_url" value="{{.Set.WebhookURL}}" placeholder="https://hooks.example.com/limdm" spellcheck="false"></label>
+      <dl class="kv"><dt>Public URL</dt><dd class="mono">{{.PublicURL}}</dd></dl>
+    </section>
+  </div>
+  {{if eq .Sess.Role "admin"}}<div class="form-foot"><span class="muted">OIDC changes are checked against the provider before they take effect.</span><button>Save settings</button></div>{{end}}
+</form>
+{{end}}

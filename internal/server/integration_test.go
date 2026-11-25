@@ -62,6 +62,12 @@ func TestIntegration(t *testing.T) {
 		SessionKey: bytes.Repeat([]byte{7}, 32), Admins: []string{"admin@firma.de"}, Auditors: []string{"audit@firma.de"}, LocalLogin: true,
 	}}
 
+	if err := s.seedConsoleUsers(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// OIDC "configured" without network discovery: sessions of OIDC users stay valid
+	s.rt.Store(&runtimeState{set: Settings{LocalLogin: true, StaleHours: 24, OIDCIssuer: "https://idp.test", OIDCClientID: "x"}, auth: &oidcAuth{}})
+
 	// ---- admin UI with a forged, validly signed session ----
 	admin := httptest.NewServer(s.AdminHandler())
 	defer admin.Close()
@@ -476,6 +482,64 @@ func TestIntegration(t *testing.T) {
 	if lockedFailures < maxFailures+2 {
 		t.Fatalf("failed local logins not audited: %d", lockedFailures)
 	}
+
+	// ---- roles: helpdesk may send commands but no scripts and no configuration ----
+	db.Exec(ctx, `INSERT INTO console_users(email, role) VALUES ('help@firma.de', 'helpdesk')`)
+	help := session{Email: "help@firma.de", Role: "helpdesk", IAT: time.Now(), Last: time.Now()}
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"reboot"}}, help); code != http.StatusSeeOther {
+		t.Fatalf("helpdesk command: %d", code)
+	}
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"script"}, "payload": {"id"}}, help); code != http.StatusForbidden {
+		t.Fatalf("helpdesk script must be refused: %d", code)
+	}
+	if code, _ := ui("POST", "/tokens", url.Values{"uses": {"1"}, "days": {"1"}}, help); code != http.StatusForbidden {
+		t.Fatalf("helpdesk configuration must be refused: %d", code)
+	}
+	if code, _ := ui("GET", "/settings", nil, help); code != http.StatusForbidden {
+		t.Fatal("settings must be hidden from helpdesk")
+	}
+
+	// ---- user management ----
+	if code, body := ui("POST", "/users", url.Values{"kind": {"oidc"}, "login": {"Neu@Firma.de"}, "role": {"auditor"}}, adminSess); code != 200 || !strings.Contains(body, "neu@firma.de") {
+		t.Fatalf("add oidc user: %d", code)
+	}
+	if code, body := ui("POST", "/users", url.Values{"kind": {"local"}, "login": {"ops"}, "role": {"helpdesk"}}, adminSess); code != 200 || !strings.Contains(body, "otpauth://totp/") {
+		t.Fatalf("add local user must show credentials once: %d", code)
+	}
+	if _, body := ui("POST", "/users/update", url.Values{"login": {"admin@firma.de"}, "role": {"auditor"}}, adminSess); !strings.Contains(body, "your own account") {
+		t.Fatal("self demotion must be refused")
+	}
+	other := session{Email: "neu@firma.de", Role: "admin", IAT: time.Now(), Last: time.Now()}
+	db.Exec(ctx, `UPDATE console_users SET role='admin' WHERE email='neu@firma.de'`)
+	db.Exec(ctx, `UPDATE local_admins SET disabled=true`)
+	if _, body := ui("POST", "/users/update", url.Values{"login": {"admin@firma.de"}, "role": {"admin"}, "disabled": {"on"}}, other); strings.Contains(body, "must remain") {
+		t.Fatal("disabling one of two admins must be allowed")
+	}
+	if code, _ := ui("GET", "/", nil, adminSess); code != http.StatusFound {
+		t.Fatalf("session of a disabled OIDC admin must end: %d", code)
+	}
+	if _, body := ui("POST", "/users/update", url.Values{"login": {"neu@firma.de"}, "role": {"auditor"}}, other); !strings.Contains(body, "your own account") {
+		t.Fatal("the last admin demoting themselves must be refused")
+	}
+	db.Exec(ctx, `UPDATE console_users SET disabled=false, role='admin' WHERE email='admin@firma.de'`)
+
+	// ---- settings ----
+	if _, body := ui("POST", "/settings", url.Values{"stale_hours": {"48"}}, adminSess); !strings.Contains(body, "can only be disabled") {
+		t.Fatal("disabling local login without OIDC must be refused")
+	}
+	if _, body := ui("POST", "/settings", url.Values{"stale_hours": {"48"}, "local_login": {"on"}, "webhook_url": {"http://plain"}}, adminSess); !strings.Contains(body, "must be https") {
+		t.Fatal("plain http webhook accepted")
+	}
+	if _, body := ui("POST", "/settings", url.Values{"stale_hours": {"48"}, "local_login": {"on"}}, adminSess); !strings.Contains(body, "Settings saved") {
+		t.Fatalf("settings save failed:\n%s", body)
+	}
+	if s.settings().StaleHours != 48 || s.oidc() != nil {
+		t.Fatalf("settings not active: %+v", s.settings())
+	}
+	if code, _ := ui("GET", "/", nil, adminSess); code != http.StatusFound {
+		t.Fatal("OIDC sessions must end once OIDC is removed")
+	}
+	s.rt.Store(&runtimeState{set: Settings{LocalLogin: true, StaleHours: 24, OIDCIssuer: "https://idp.test", OIDCClientID: "x"}, auth: &oidcAuth{}})
 
 	// audit log is append only and chained
 	if _, err := db.Exec(ctx, `UPDATE audit_log SET detail='x'`); err == nil {

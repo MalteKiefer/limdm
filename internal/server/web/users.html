@@ -1,0 +1,37 @@
+{{define "title"}}Users · LiMDM{{end}}
+{{define "content"}}
+<div class="page-head"><div><h1>Users</h1><div class="meta"><span>Console access: OIDC identities and local accounts</span></div></div></div>
+{{if .Error}}<div class="notice error" role="alert">{{.Error}}</div>{{end}}
+{{if .Creds}}<div class="notice ok" role="status"><strong>Credentials created.</strong> Shown only once; hand them over securely and add the TOTP secret to an authenticator app.<pre>{{.Creds}}</pre></div>{{end}}
+<div class="grid side-right">
+  <section class="tablecard">
+    <div class="card-head"><h2>Accounts</h2><span class="muted">admin: everything · helpdesk: devices and commands except scripts · auditor: read only</span></div>
+    <div class="scroll"><table>
+      <thead><tr><th>Login</th><th>Type</th><th>Role</th><th>Last sign in</th>{{if eq .Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
+      <tbody>{{$s := .}}{{range .Users}}{{$login := .Login}}{{if .Local}}{{$login = printf "local:%s" .Login}}{{end}}<tr>
+        <td class="mono">{{.Login}}{{if .Disabled}} <span class="pill">disabled</span>{{end}}</td>
+        <td>{{if .Local}}local (password + TOTP){{else}}OIDC{{end}}</td>
+        <td>{{if eq $s.Sess.Role "admin"}}
+          <form class="inline-form" method="post" action="/users/update"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="login" value="{{$login}}">
+            <select name="role" aria-label="Role">{{$r := .Role}}{{range $s.Roles}}<option {{if eq . $r}}selected{{end}}>{{.}}</option>{{end}}</select>
+            <label class="check"><input type="checkbox" name="disabled" {{if .Disabled}}checked{{end}}> disabled</label>
+            <button class="secondary small">Save</button></form>
+          {{else}}{{.Role}}{{end}}</td>
+        <td>{{ago .LastLogin}}</td>
+        {{if eq $s.Sess.Role "admin"}}<td>{{if .Local}}<form method="post" action="/users/reset"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="login" value="{{$login}}"><button class="secondary small">Reset credentials</button></form>{{end}}</td>{{end}}
+      </tr>{{end}}</tbody>
+    </table></div>
+  </section>
+  {{if eq .Sess.Role "admin"}}
+  <form class="card" method="post" action="/users">
+    <h2>Add user</h2>
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Type<select name="kind"><option value="oidc" {{if not .OIDC}}disabled{{end}}>OIDC (email)</option><option value="local" {{if not .OIDC}}selected{{end}}>Local account</option></select></label>
+    <label>Email or local name<input name="login" required autocomplete="off" spellcheck="false"></label>
+    <label>Role<select name="role">{{range .Roles}}<option>{{.}}</option>{{end}}</select></label>
+    <button>Add user</button>
+    <p class="muted">Local accounts get a generated password and TOTP secret.{{if not .LocalLogin}} Local login is currently disabled in the settings.{{end}}</p>
+  </form>
+  {{end}}
+</div>
+{{end}}

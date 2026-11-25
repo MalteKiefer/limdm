@@ -91,7 +91,23 @@ var pages = func() map[string]*template.Template {
 type handler func(w http.ResponseWriter, r *http.Request, sess session)
 
 // page enforces login, admin role for every state change, and CSRF.
-func (s *Server) page(h handler) http.HandlerFunc {
+func (s *Server) page(h handler) http.HandlerFunc { return s.pageFor(h, "admin") }
+
+// helpdeskPage additionally lets the helpdesk role post (device commands).
+func (s *Server) helpdeskPage(h handler) http.HandlerFunc { return s.pageFor(h, "helpdesk") }
+
+// adminOrAuditor hides administration pages from the helpdesk role.
+func (s *Server) adminOrAuditor(h handler) handler {
+	return func(w http.ResponseWriter, r *http.Request, sess session) {
+		if sess.Role == "helpdesk" {
+			http.Error(w, "not available for the helpdesk role", http.StatusForbidden)
+			return
+		}
+		h(w, r, sess)
+	}
+}
+
+func (s *Server) pageFor(h handler, postRole string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := s.session(w, r)
 		if !ok {
@@ -100,8 +116,8 @@ func (s *Server) page(h handler) http.HandlerFunc {
 		}
 		if r.Method == http.MethodPost {
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-			if sess.Role != "admin" {
-				http.Error(w, "read only role", http.StatusForbidden)
+			if sess.Role != "admin" && (postRole != "helpdesk" || sess.Role != "helpdesk") {
+				http.Error(w, "your role cannot change this", http.StatusForbidden)
 				return
 			}
 			if !s.csrfOK(r, sess) {
@@ -140,7 +156,13 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", s.page(s.overview))
 	mux.HandleFunc("GET /devices", s.page(s.devices))
 	mux.HandleFunc("GET /devices/{id}", s.page(s.device))
-	mux.HandleFunc("POST /devices/{id}/command", s.page(s.deviceCommand))
+	mux.HandleFunc("POST /devices/{id}/command", s.helpdeskPage(s.deviceCommand))
+	mux.HandleFunc("GET /users", s.page(s.adminOrAuditor(s.usersPage)))
+	mux.HandleFunc("POST /users", s.page(s.userAdd))
+	mux.HandleFunc("POST /users/update", s.page(s.userUpdate))
+	mux.HandleFunc("POST /users/reset", s.page(s.userReset))
+	mux.HandleFunc("GET /settings", s.page(s.adminOrAuditor(s.settingsPage)))
+	mux.HandleFunc("POST /settings", s.page(s.settingsSave))
 	mux.HandleFunc("POST /devices/{id}/assign", s.page(s.deviceAssign))
 	mux.HandleFunc("POST /devices/{id}/retire", s.page(s.deviceRetire))
 	mux.HandleFunc("GET /blueprints", s.page(s.blueprints))
@@ -177,7 +199,7 @@ func (s *Server) status(d *deviceRow) {
 		d.Status, d.Class = "retired", "na"
 	case d.LastSeen == nil || d.Checks == 0:
 		d.Status, d.Class = "pending", "warn"
-	case time.Since(*d.LastSeen) > s.cfg.StaleAfter:
+	case time.Since(*d.LastSeen) > s.staleAfter():
 		d.Status, d.Class = "stale", "warn"
 	case d.Failing > 0:
 		d.Status, d.Class = "non-compliant", "bad"
@@ -282,7 +304,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 	donut := donutChart([]donutPart{{"compliant", counts["compliant"], "ok"}, {"non-compliant", counts["non-compliant"], "bad"},
 		{"stale", counts["stale"], "warn"}, {"pending", counts["pending"], "na"}})
 	s.render(w, sess, "overview", map[string]any{"Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
-		"Recent": recent, "StaleHours": int(s.cfg.StaleAfter.Hours())})
+		"Recent": recent, "StaleHours": s.settings().StaleHours})
 }
 
 type donutPart struct {
@@ -468,6 +490,9 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 	}
 	if typ != "script" {
 		payload = ""
+	} else if sess.Role != "admin" {
+		http.Error(w, "scripts require the admin role", http.StatusForbidden)
+		return
 	}
 	err := s.auditAction(r.Context(), sess.Email, "command."+typ, id, truncate(payload, 2000), func(tx pgx.Tx) error {
 		_, err := tx.Exec(r.Context(), `INSERT INTO commands(device_id, type, payload, created_by) VALUES ($1,$2,$3,$4)`, id, typ, payload, sess.Email)
@@ -653,7 +678,7 @@ func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session
 	s.render(w, sess, "compliance", map[string]any{
 		"F": f, "Shown": len(checks), "All": len(fc.Checks),
 		"Checks": checks, "Controls": controls, "Total": fc.Total, "Compliant": fc.Compliant, "Stale": fc.Stale,
-		"NonCompliant": fc.Noncompl, "Pending": fc.Pending, "StaleHours": int(s.cfg.StaleAfter.Hours()),
+		"NonCompliant": fc.Noncompl, "Pending": fc.Pending, "StaleHours": s.settings().StaleHours,
 	})
 }
 
@@ -720,7 +745,7 @@ func (s *Server) fleetCompliance(ctx context.Context) (fleetStats, error) {
 		switch {
 		case seen == nil || len(raw) <= 2:
 			pending++
-		case time.Since(*seen) > s.cfg.StaleAfter:
+		case time.Since(*seen) > s.staleAfter():
 			stale++
 		case failing == 0:
 			compliant++

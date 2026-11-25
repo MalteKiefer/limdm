@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -72,5 +73,20 @@ func TestClientIP(t *testing.T) {
 	r.Header.Set("X-Forwarded-For", "1.2.3.4, 198.51.100.7")
 	if got := clientIP(r); got != "198.51.100.7" {
 		t.Fatalf("loopback proxy: got %s", got)
+	}
+}
+
+func TestSecretSealing(t *testing.T) {
+	s := &Server{cfg: Config{SessionKey: []byte("0123456789abcdef0123456789abcdef")}}
+	enc, err := s.seal32("client-secret")
+	if err != nil || enc == "" || strings.Contains(enc, "client-secret") {
+		t.Fatalf("seal: %q %v", enc, err)
+	}
+	if got, err := s.open32(enc); err != nil || got != "client-secret" {
+		t.Fatalf("open: %q %v", got, err)
+	}
+	other := &Server{cfg: Config{SessionKey: []byte("ffffffffffffffffffffffffffffffff")}}
+	if _, err := other.open32(enc); err == nil {
+		t.Fatal("secret opened with a different key")
 	}
 }

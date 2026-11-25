@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -184,11 +185,11 @@ func (s *Server) renderLogin(w http.ResponseWriter, msg string) {
 	// double submit token against login CSRF
 	http.SetCookie(w, &http.Cookie{Name: loginCookie, Value: tok, Path: "/login", HttpOnly: true, Secure: true,
 		SameSite: http.SameSiteStrictMode, MaxAge: 600})
-	s.render(w, session{}, "login", map[string]any{"OIDC": s.auth != nil, "Local": s.cfg.LocalLogin, "LoginCSRF": tok, "Error": msg})
+	s.render(w, session{}, "login", map[string]any{"OIDC": s.oidc() != nil, "Local": s.settings().LocalLogin, "LoginCSRF": tok, "Error": msg})
 }
 
 func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
-	if !s.cfg.LocalLogin {
+	if !s.settings().LocalLogin {
 		http.NotFound(w, r)
 		return
 	}
@@ -294,6 +295,48 @@ func (s *Server) localRole(ctx context.Context, name string) string {
 	return role
 }
 
+// localAdd creates a local account with generated credentials and returns them.
+func localAdd(ctx context.Context, tx pgx.Tx, name, role string) (string, error) {
+	pw, secret := randToken(24), newTOTPSecret()
+	tag, err := tx.Exec(ctx, `INSERT INTO local_admins(name, role, password_hash, totp_secret) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+		name, role, hashPassword(pw), secret)
+	if err == nil && tag.RowsAffected() == 0 {
+		err = errors.New("account exists already")
+	}
+	if err != nil {
+		return "", err
+	}
+	return credentials(name, role, pw, secret), nil
+}
+
+// localReset replaces password and TOTP secret and clears a lockout.
+func localReset(ctx context.Context, tx pgx.Tx, name string) (string, error) {
+	pw, secret := randToken(24), newTOTPSecret()
+	var role string
+	err := tx.QueryRow(ctx, `UPDATE local_admins SET password_hash=$2, totp_secret=$3, totp_last_step=0, failures=0, locked_until=NULL
+		WHERE name=$1 RETURNING role`, name, hashPassword(pw), secret).Scan(&role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = errors.New("account not found")
+	}
+	if err != nil {
+		return "", err
+	}
+	return credentials(name, role, pw, secret), nil
+}
+
+func credentials(name, role, pw, secret string) string {
+	return fmt.Sprintf("user:     %s\nrole:     %s\npassword: %s\nsecret:   %s\ntotp:     %s\n", name, role, pw, secret, totpURI(name, secret))
+}
+
+type rowsOne struct{ ok bool }
+
+func (r rowsOne) RowsAffected() int64 {
+	if r.ok {
+		return 1
+	}
+	return 0
+}
+
 // ---- CLI ----
 
 // LocalAdmin manages local admin accounts: add, reset, disable, enable, list.
@@ -314,8 +357,8 @@ func LocalAdmin(ctx context.Context, databaseURL, op, name, role string) (string
 	if op != "list" && !localNameRe.MatchString(name) {
 		return "", errors.New("name must match " + localNameRe.String())
 	}
-	if role != "admin" && role != "auditor" {
-		return "", errors.New("role must be admin or auditor")
+	if !slices.Contains(roles, role) {
+		return "", errors.New("role must be admin, helpdesk or auditor")
 	}
 	tx, err := db.Begin(ctx)
 	if err != nil {
@@ -325,17 +368,13 @@ func LocalAdmin(ctx context.Context, databaseURL, op, name, role string) (string
 	var out, detail string
 	var res interface{ RowsAffected() int64 }
 	switch op {
-	case "add", "reset":
-		pw, secret := randToken(24), newTOTPSecret()
-		if op == "add" {
-			res, err = tx.Exec(ctx, `INSERT INTO local_admins(name, role, password_hash, totp_secret) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
-				name, role, hashPassword(pw), secret)
-		} else {
-			res, err = tx.Exec(ctx, `UPDATE local_admins SET password_hash=$2, totp_secret=$3, totp_last_step=0, failures=0, locked_until=NULL WHERE name=$1`,
-				name, hashPassword(pw), secret)
-		}
+	case "add":
+		out, err = localAdd(ctx, tx, name, role)
 		detail = "role " + role
-		out = fmt.Sprintf("user:     %s\nrole:     %s\npassword: %s\ntotp:     %s\n", name, role, pw, totpURI(name, secret))
+		res = rowsOne{err == nil}
+	case "reset":
+		out, err = localReset(ctx, tx, name)
+		res = rowsOne{err == nil}
 	case "disable", "enable":
 		res, err = tx.Exec(ctx, `UPDATE local_admins SET disabled=$2 WHERE name=$1`, name, op == "disable")
 	case "list":

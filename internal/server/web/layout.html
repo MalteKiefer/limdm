@@ -22,6 +22,11 @@
       <a href="/tokens" {{if eq .Page "tokens"}}class="on" aria-current="page"{{end}}>Enrollment</a>
       <span class="group">Evidence</span>
       <a href="/audit" {{if eq .Page "audit"}}class="on" aria-current="page"{{end}}>Audit log</a>
+      {{if ne .Sess.Role "helpdesk"}}
+      <span class="group">Administration</span>
+      <a href="/users" {{if eq .Page "users"}}class="on" aria-current="page"{{end}}>Users</a>
+      <a href="/settings" {{if eq .Page "settings"}}class="on" aria-current="page"{{end}}>Settings</a>
+      {{end}}
     </nav>
     <form class="who" method="post" action="/logout">
       <input type="hidden" name="csrf" value="{{.CSRF}}">

@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -170,10 +171,10 @@ func requireDBTLS(pc *pgxpool.Config) error {
 type Server struct {
 	cfg   Config
 	db    *pgxpool.Pool
-	auth  *oidcAuth // nil when OIDC is not configured
 	ca    *deviceCA
 	log   *slog.Logger
 	limit limiter
+	rt    atomic.Pointer[runtimeState] // settings editable in the UI and the OIDC client built from them
 }
 
 func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
@@ -204,14 +205,16 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("device CA: %w", err)
 	}
-	var auth *oidcAuth
-	if cfg.OIDCIssuer != "" {
-		if auth, err = newOIDCAuth(ctx, cfg); err != nil {
-			return nil, fmt.Errorf("oidc: %w", err)
-		}
-	}
+
 	log.Info("device CA ready", "fingerprint", ca.Fingerprint())
-	return &Server{cfg: cfg, db: db, auth: auth, ca: ca, log: log}, nil
+	s := &Server{cfg: cfg, db: db, ca: ca, log: log}
+	if err := s.seedConsoleUsers(ctx); err != nil {
+		return nil, err
+	}
+	if err := s.loadSettings(ctx); err != nil {
+		return nil, fmt.Errorf("settings: %w", err)
+	}
+	return s, nil
 }
 
 func (s *Server) Close() { s.db.Close() }
