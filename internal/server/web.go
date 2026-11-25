@@ -44,10 +44,17 @@ var pages = func() map[string]*template.Template {
 				return fmt.Sprintf("%d d ago", int(d.Hours()/24))
 			}
 		},
-		"frac": func(v uint64, pct uint64) uint64 { return v * pct / 100 },
-		"inc":  func(n int) int { return n + 1 },
-		"dec":  func(n int) int { return n - 1 },
-		"list": func(v ...string) []string { return v },
+		"frac":  func(v uint64, pct uint64) uint64 { return v * pct / 100 },
+		"inc":   func(n int) int { return n + 1 },
+		"dec":   func(n int) int { return n - 1 },
+		"list":  func(v ...string) []string { return v },
+		"deref": func(p *int64) int64 { return *p },
+		"typeLabel": func(t string) string {
+			if l, ok := typeLabels[t]; ok {
+				return l
+			}
+			return t
+		},
 		"actionLabel": func(a string) string {
 			return map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot in 1 minute",
 				"shutdown": "Shut down in 1 minute", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script"}[a]
@@ -106,6 +113,13 @@ func (s *Server) page(h handler) http.HandlerFunc {
 	}
 }
 
+var typeLabels = map[string]string{
+	api.TypeAgent: "Agent", api.TypeCompliance: "Compliance", api.TypeUpdates: "Software updates",
+	api.TypePackages: "Packages", api.TypeServices: "Services", api.TypeFiles: "Files", api.TypeFirewall: "Firewall",
+	api.TypeOSVersion: "OS versions", api.TypeScreenLock: "Screen lock", api.TypeLogin: "Desktop login (OIDC)",
+	api.TypePrivacy: "Privacy",
+}
+
 func (s *Server) render(w http.ResponseWriter, sess session, name string, data map[string]any) {
 	if data == nil {
 		data = map[string]any{}
@@ -132,6 +146,11 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /blueprints", s.page(s.blueprints))
 	mux.HandleFunc("GET /blueprints/{id}", s.page(s.blueprintEdit))
 	mux.HandleFunc("POST /blueprints", s.page(s.blueprintSave))
+	mux.HandleFunc("POST /blueprints/{id}/delete", s.page(s.blueprintDelete))
+	mux.HandleFunc("GET /library", s.page(s.library))
+	mux.HandleFunc("GET /library/{id}", s.page(s.libraryEdit))
+	mux.HandleFunc("POST /library", s.page(s.librarySave))
+	mux.HandleFunc("POST /library/{id}/delete", s.page(s.libraryDelete))
 	mux.HandleFunc("GET /tokens", s.page(s.tokens))
 	mux.HandleFunc("POST /tokens", s.page(s.tokenCreate))
 	mux.HandleFunc("GET /compliance", s.page(s.compliance))
@@ -169,7 +188,7 @@ func (s *Server) status(d *deviceRow) {
 
 func (s *Server) listDevices(ctx context.Context) ([]deviceRow, error) {
 	rows, err := s.db.Query(ctx, `SELECT d.id, d.hostname, coalesce(d.inventory->>'os_name',''), d.agent_version,
-		coalesce((SELECT string_agg(b.name, ', ' ORDER BY b.priority) FROM device_blueprints db JOIN blueprints b ON b.id=db.blueprint_id WHERE db.device_id=d.id),''),
+		coalesce((SELECT b.name FROM blueprints b WHERE b.id=d.blueprint_id),'default') || coalesce(' · ' || nullif(array_to_string(d.tags, ', '), ''), ''),
 		coalesce(d.inventory->>'desktop',''), coalesce((d.inventory->>'memory_mb')::bigint, 0),
 		d.failing, jsonb_array_length(d.checks), d.last_seen, d.retired
 		FROM devices d ORDER BY d.retired, d.hostname`)
@@ -307,26 +326,6 @@ func firstNonEmpty(v ...string) string {
 	return ""
 }
 
-type blueprintRow struct {
-	ID       int64
-	Name     string
-	Priority int
-	Updated  time.Time
-	Devices  int
-	Assigned bool
-}
-
-func (s *Server) blueprintList(ctx context.Context, deviceID string) ([]blueprintRow, error) {
-	rows, err := s.db.Query(ctx, `SELECT b.id, b.name, b.priority, b.updated_at,
-		(SELECT count(*) FROM device_blueprints db JOIN devices d ON d.id=db.device_id WHERE db.blueprint_id=b.id AND NOT d.retired),
-		EXISTS(SELECT 1 FROM device_blueprints db WHERE db.blueprint_id=b.id AND db.device_id=$1)
-		FROM blueprints b ORDER BY b.priority, b.name`, deviceID)
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, pgx.RowToStructByPos[blueprintRow])
-}
-
 func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
 	id := r.PathValue("id")
@@ -380,7 +379,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		s.fail(w, err)
 		return
 	}
-	bps, err := s.blueprintList(ctx, id)
+	bps, err := s.allBlueprints(ctx, id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -392,8 +391,14 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	want, err := effectiveDeclarations(ctx, tx, id)
+	res, err := resolveDevice(ctx, tx, id)
 	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	want := res.Decls
+	var tags []string
+	if err := tx.QueryRow(ctx, `SELECT tags FROM devices WHERE id=$1`, id).Scan(&tags); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -450,6 +455,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
 		"CommandTypes": api.CommandTypes,
 		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab,
+		"Resolved": res, "Tags": strings.Join(tags, ", "),
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "software", "compliance", "declarations", "commands"},
 	})
 }
@@ -498,6 +504,22 @@ func parseUsers(text string) ([]api.User, error) {
 	return users, nil
 }
 
+// parseTags accepts a comma separated list of short labels.
+func parseTags(text string) ([]string, error) {
+	tags := []string{}
+	for _, t := range strings.Split(text, ",") {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t == "" || slices.Contains(tags, t) {
+			continue
+		}
+		if !identOK(t) || len(t) > 32 {
+			return nil, fmt.Errorf("invalid tag %q: up to 32 letters, digits, dot, dash, underscore", t)
+		}
+		tags = append(tags, t)
+	}
+	return tags, nil
+}
+
 func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess session) {
 	id := r.PathValue("id")
 	users, err := parseUsers(r.FormValue("users"))
@@ -505,24 +527,18 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	var bpIDs []int64
-	for _, v := range r.Form["blueprint"] {
-		n, err := strconv.ParseInt(v, 10, 64)
-		if err != nil {
-			http.Error(w, "invalid blueprint", http.StatusBadRequest)
-			return
-		}
-		bpIDs = append(bpIDs, n)
+	var bpID *int64
+	if v, err := strconv.ParseInt(r.FormValue("blueprint_id"), 10, 64); err == nil && v > 0 {
+		bpID = &v
+	}
+	tags, err := parseTags(r.FormValue("tags"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 	ub, _ := json.Marshal(users)
-	err = s.auditAction(r.Context(), sess.Email, "device.assign", id, fmt.Sprintf("blueprints=%v users=%s", bpIDs, ub), func(tx pgx.Tx) error {
-		if _, err := tx.Exec(r.Context(), `UPDATE devices SET users=$2 WHERE id=$1`, id, string(ub)); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(r.Context(), `DELETE FROM device_blueprints WHERE device_id=$1`, id); err != nil {
-			return err
-		}
-		_, err := tx.Exec(r.Context(), `INSERT INTO device_blueprints(device_id, blueprint_id) SELECT $1, unnest($2::bigint[])`, id, bpIDs)
+	err = s.auditAction(r.Context(), sess.Email, "device.assign", id, fmt.Sprintf("blueprint=%v tags=%v users=%s", r.FormValue("blueprint_id"), tags, ub), func(tx pgx.Tx) error {
+		_, err := tx.Exec(r.Context(), `UPDATE devices SET users=$2, blueprint_id=$3, tags=$4 WHERE id=$1`, id, string(ub), bpID, tags)
 		return err
 	})
 	if err != nil {
@@ -543,89 +559,6 @@ func (s *Server) deviceRetire(w http.ResponseWriter, r *http.Request, sess sessi
 		return
 	}
 	http.Redirect(w, r, "/devices/"+id, http.StatusSeeOther)
-}
-
-// ---- blueprints ----
-
-func (s *Server) blueprints(w http.ResponseWriter, r *http.Request, sess session) {
-	list, err := s.blueprintList(r.Context(), "")
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.render(w, sess, "blueprints", map[string]any{"Blueprints": list})
-}
-
-func (s *Server) blueprintEdit(w http.ResponseWriter, r *http.Request, sess session) {
-	var id int64
-	bp := api.Blueprint{Priority: 100, Declarations: []api.Declaration{}}
-	if v := r.PathValue("id"); v != "new" {
-		var raw []byte
-		var err error
-		id, err = strconv.ParseInt(v, 10, 64)
-		if err == nil {
-			err = s.db.QueryRow(r.Context(), `SELECT name, priority, declarations FROM blueprints WHERE id=$1`, id).Scan(&bp.Name, &bp.Priority, &raw)
-		}
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		if err := json.Unmarshal(raw, &bp.Declarations); err != nil {
-			s.fail(w, err)
-			return
-		}
-	}
-	pretty, _ := json.MarshalIndent(bp.Declarations, "", "  ")
-	s.renderBlueprint(w, sess, id, bp.Name, bp.Priority, string(pretty), "")
-}
-
-func (s *Server) renderBlueprint(w http.ResponseWriter, sess session, id int64, name string, prio int, doc, errMsg string) {
-	types := make([]string, 0, len(api.Types))
-	for t := range api.Types {
-		types = append(types, t)
-	}
-	sort.Strings(types)
-	var examples []map[string]string
-	for _, t := range types {
-		examples = append(examples, map[string]string{"Type": t, "Example": api.Types[t]})
-	}
-	s.render(w, sess, "blueprint", map[string]any{"ID": id, "Name": name, "Priority": prio, "Doc": doc, "Error": errMsg, "Types": examples})
-}
-
-func (s *Server) blueprintSave(w http.ResponseWriter, r *http.Request, sess session) {
-	id, _ := strconv.ParseInt(r.FormValue("id"), 10, 64)
-	prio, perr := strconv.Atoi(r.FormValue("priority"))
-	bp := api.Blueprint{Name: strings.TrimSpace(r.FormValue("name")), Priority: prio}
-	err := json.Unmarshal([]byte(r.FormValue("doc")), &bp.Declarations)
-	if err == nil && perr != nil {
-		err = errors.New("priority must be a number")
-	}
-	if err == nil {
-		err = bp.Validate()
-	}
-	if err != nil {
-		s.renderBlueprint(w, sess, id, bp.Name, prio, r.FormValue("doc"), err.Error())
-		return
-	}
-	doc, _ := json.Marshal(bp.Declarations)
-	err = s.auditAction(r.Context(), sess.Email, "blueprint.save", bp.Name, string(doc), func(tx pgx.Tx) error {
-		if id > 0 {
-			// The default blueprint applies to every device by name; it must keep it.
-			tag, err := tx.Exec(r.Context(), `UPDATE blueprints SET name=$2, priority=$3, declarations=$4, updated_at=now()
-				WHERE id=$1 AND (name <> 'default' OR $2 = 'default')`, id, bp.Name, bp.Priority, string(doc))
-			if err == nil && tag.RowsAffected() == 0 {
-				err = errors.New("blueprint not found, or default cannot be renamed")
-			}
-			return err
-		}
-		_, err := tx.Exec(r.Context(), `INSERT INTO blueprints(name, priority, declarations) VALUES ($1,$2,$3)`, bp.Name, bp.Priority, string(doc))
-		return err
-	})
-	if err != nil {
-		s.renderBlueprint(w, sess, id, bp.Name, prio, r.FormValue("doc"), err.Error())
-		return
-	}
-	http.Redirect(w, r, "/blueprints", http.StatusSeeOther)
 }
 
 // ---- enrollment tokens ----
@@ -651,7 +584,7 @@ func (s *Server) tokenPage(w http.ResponseWriter, r *http.Request, sess session,
 		s.fail(w, err)
 		return
 	}
-	bps, err := s.blueprintList(r.Context(), "")
+	bps, err := s.allBlueprints(r.Context(), "")
 	if err != nil {
 		s.fail(w, err)
 		return

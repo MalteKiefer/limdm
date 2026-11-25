@@ -1,12 +1,15 @@
 {{define "title"}}Blueprints · LiMDM{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>Blueprints</h1><div class="meta"><span>Sets of declarations that devices converge to on their own</span></div></div>
+  <div><h1>Blueprints</h1><div class="meta"><span>Assignment maps: which library items a device gets, under which conditions</span></div></div>
   {{if eq .Sess.Role "admin"}}<div class="actions"><a class="button" href="/blueprints/new">New blueprint</a></div>{{end}}
 </div>
-<div class="notice">When several blueprints of a device declare the same type, the lower priority number wins. <code>default</code> applies to every device.</div>
+<div class="notice">Every device has exactly one blueprint; devices without one use <code>default</code>. A blueprint can inherit from a parent, whose map is evaluated first.</div>
 <div class="tablecard"><div class="scroll"><table>
-  <thead><tr><th>Name</th><th class="num">Priority</th><th class="num">Devices</th><th>Updated</th></tr></thead>
-  <tbody>{{range .Blueprints}}<tr><td><a class="rowlink" href="/blueprints/{{.ID}}">{{.Name}}</a></td><td class="num">{{.Priority}}</td><td class="num">{{if eq .Name "default"}}all{{else}}{{.Devices}}{{end}}</td><td>{{fmtTime .Updated}}</td></tr>{{end}}</tbody>
+  <thead><tr><th>Blueprint</th><th>Inherits from</th><th class="num">Devices</th><th>Updated</th></tr></thead>
+  <tbody>{{$names := .Names}}{{range .Blueprints}}<tr>
+    <td><a class="rowlink" href="/blueprints/{{.ID}}">{{.Name}}</a>{{if .Desc}}<span class="sub">{{.Desc}}</span>{{end}}</td>
+    <td>{{if .Parent}}{{index $names (deref .Parent)}}{{else}}<span class="muted">none</span>{{end}}</td>
+    <td class="num">{{.Devices}}</td><td>{{fmtTime .Updated}}</td></tr>{{end}}</tbody>
 </table></div></div>
 {{end}}

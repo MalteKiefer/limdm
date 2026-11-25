@@ -33,14 +33,6 @@ type Declaration struct {
 	ServerToken string          `json:"server_token,omitempty"`
 }
 
-// Blueprint groups declarations. When several blueprints of a device declare
-// the same type, the one with the lowest priority number wins.
-type Blueprint struct {
-	Name         string        `json:"name"`
-	Priority     int           `json:"priority"`
-	Declarations []Declaration `json:"declarations"`
-}
-
 const (
 	TypeAgent      = "com.limdm.agent"
 	TypeCompliance = "com.limdm.compliance"
@@ -149,22 +141,6 @@ type Login struct {
 type Privacy struct {
 	NetworkInfo   bool `json:"network_info"`    // IP addresses
 	LoggedInUsers bool `json:"logged_in_users"` // usernames of active sessions
-}
-
-// DefaultBlueprint is a CIS Level 1 baseline applied to every device.
-func DefaultBlueprint() Blueprint {
-	d := func(id, typ, payload string) Declaration {
-		return Declaration{Identifier: id, Type: typ, Payload: json.RawMessage(payload)}
-	}
-	return Blueprint{Name: "default", Priority: 1000, Declarations: []Declaration{
-		d("agent", TypeAgent, `{"checkin_seconds":300}`),
-		d("compliance", TypeCompliance, `{"level":1,"remediate":true,"exclude":[]}`),
-		d("updates", TypeUpdates, `{"mode":"security","window":"02:00-05:00","reboot":false}`),
-		d("firewall", TypeFirewall, `{"enforce":true,"allow":["22/tcp"]}`),
-		d("osversion", TypeOSVersion, `{"min":{"ubuntu":"22.04","debian":"12","fedora":"41"}}`),
-		d("screenlock", TypeScreenLock, `{"idle_seconds":300}`),
-		d("privacy", TypePrivacy, `{"network_info":false,"logged_in_users":false}`),
-	}}
 }
 
 var (
@@ -306,28 +282,6 @@ func (d Declaration) apply(p *Policy) error {
 	return errors.Join(errs...)
 }
 
-// Validate checks a blueprint before it is stored.
-func (b Blueprint) Validate() error {
-	if !identRe.MatchString(b.Name) {
-		return fmt.Errorf("invalid blueprint name %q", b.Name)
-	}
-	var errs []error
-	ids, types := map[string]bool{}, map[string]bool{}
-	for _, d := range b.Declarations {
-		if ids[d.Identifier] {
-			errs = append(errs, fmt.Errorf("duplicate identifier %q", d.Identifier))
-		}
-		if types[d.Type] {
-			errs = append(errs, fmt.Errorf("type %s declared twice in one blueprint", d.Type))
-		}
-		ids[d.Identifier], types[d.Type] = true, true
-		if err := d.apply(&Policy{}); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", d.Identifier, err))
-		}
-	}
-	return errors.Join(errs...)
-}
-
 // Token is a stable hash of a declaration's content.
 func (d Declaration) Token() string {
 	var buf bytes.Buffer
@@ -336,23 +290,13 @@ func (d Declaration) Token() string {
 	return hex.EncodeToString(h[:8])
 }
 
-// Effective picks, per type, the declaration of the highest priority blueprint
-// (lowest number). Blueprints must be sorted by priority.
-func Effective(bps []Blueprint) []Declaration {
-	seen := map[string]bool{}
-	var out []Declaration
-	for _, b := range bps {
-		for _, d := range b.Declarations {
-			if seen[d.Type] {
-				continue
-			}
-			seen[d.Type] = true
-			d.ServerToken = d.Token()
-			out = append(out, d)
-		}
+// DefaultDeclarations is the baseline an agent enforces before its first sync.
+func DefaultDeclarations() []Declaration {
+	d, err := Merge(DefaultLibrary())
+	if err != nil {
+		panic(err) // static data, covered by tests
 	}
-	slices.SortFunc(out, func(a, b Declaration) int { return strings.Compare(a.Type, b.Type) })
-	return out
+	return d
 }
 
 // DeclarationsToken summarises a set of declarations for change detection.

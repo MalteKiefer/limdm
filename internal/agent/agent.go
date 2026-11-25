@@ -292,7 +292,7 @@ func New(log *slog.Logger) (*Agent, error) {
 		}
 	}
 	if a.state.DeclToken == "" { // never synced: start from the built in baseline
-		a.state.Declarations = api.Effective([]api.Blueprint{api.DefaultBlueprint()})
+		a.state.Declarations = api.DefaultDeclarations()
 	}
 	a.compose()
 	return a, nil
@@ -802,7 +802,7 @@ func Report(w io.Writer, level int) error {
 		}
 	}
 	if a.state.DeclToken == "" {
-		a.state.Declarations = api.Effective([]api.Blueprint{api.DefaultBlueprint()})
+		a.state.Declarations = api.DefaultDeclarations()
 	}
 	a.compose()
 	a.pol.Compliance.Remediate = false

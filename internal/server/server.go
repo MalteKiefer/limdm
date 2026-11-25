@@ -214,17 +214,6 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	return &Server{cfg: cfg, db: db, auth: auth, ca: ca, log: log}, nil
 }
 
-func migrate(ctx context.Context, db *pgxpool.Pool) error {
-	if _, err := db.Exec(ctx, schema); err != nil {
-		return fmt.Errorf("apply schema: %w", err)
-	}
-	def := api.DefaultBlueprint()
-	decl, _ := json.Marshal(def.Declarations)
-	_, err := db.Exec(ctx, `INSERT INTO blueprints(name, priority, declarations) VALUES ($1,$2,$3) ON CONFLICT (name) DO NOTHING`,
-		def.Name, def.Priority, string(decl))
-	return err
-}
-
 func (s *Server) Close() { s.db.Close() }
 
 // AdminHandler serves the web UI.
@@ -389,16 +378,10 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, machine_id) VALUES ($1,$2,$3,$4,$5)`,
-		id, serial, notAfter, truncate(req.Hostname, 255), truncate(req.MachineID, 64)); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, machine_id, blueprint_id) VALUES ($1,$2,$3,$4,$5,$6)`,
+		id, serial, notAfter, truncate(req.Hostname, 255), truncate(req.MachineID, 64), blueprintID); err != nil {
 		s.fail(w, err)
 		return
-	}
-	if blueprintID != nil {
-		if _, err := tx.Exec(ctx, `INSERT INTO device_blueprints(device_id, blueprint_id) VALUES ($1,$2)`, id, *blueprintID); err != nil {
-			s.fail(w, err)
-			return
-		}
 	}
 	if err := audit(ctx, tx, "device:"+id, "device.enroll", id, req.Hostname+" cert "+serial); err != nil {
 		s.fail(w, err)
@@ -442,28 +425,6 @@ func countFailing(checks []api.CheckResult) int {
 		}
 	}
 	return n
-}
-
-// effectiveDeclarations merges the default blueprint and all assigned ones.
-func effectiveDeclarations(ctx context.Context, q pgx.Tx, deviceID string) ([]api.Declaration, error) {
-	rows, err := q.Query(ctx, `SELECT name, priority, declarations FROM blueprints
-		WHERE name='default' OR id IN (SELECT blueprint_id FROM device_blueprints WHERE device_id=$1)
-		ORDER BY priority, id`, deviceID)
-	if err != nil {
-		return nil, err
-	}
-	bps, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (api.Blueprint, error) {
-		var b api.Blueprint
-		var raw []byte
-		if err := row.Scan(&b.Name, &b.Priority, &raw); err != nil {
-			return b, err
-		}
-		return b, json.Unmarshal(raw, &b.Declarations)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return api.Effective(bps), nil
 }
 
 func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {

@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -188,7 +189,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	status := &api.Status{
-		Inventory: api.Inventory{Hostname: "laptop1", OSName: "Debian GNU/Linux 12", Arch: "amd64", MemoryMB: 16384, Desktop: "GNOME 43",
+		Inventory: api.Inventory{Hostname: "laptop1", OSID: "debian", OSVersion: "12", OSName: "Debian GNU/Linux 12", Arch: "amd64", MemoryMB: 16384, Desktop: "GNOME 43",
 			Disks:   []api.Disk{{Name: "/dev/nvme0n1", Model: "Test SSD", SizeGB: 512, Type: "nvme"}},
 			Volumes: []api.Volume{{Device: "/dev/mapper/root", Mount: "/", FS: "ext4", SizeGB: 500, FreeGB: 40, Encrypted: true}}},
 		Checks: []api.CheckResult{
@@ -216,23 +217,54 @@ func TestIntegration(t *testing.T) {
 		t.Fatal("unknown status hash must request full status")
 	}
 
-	// blueprint with stricter compliance, assigned to the device
-	strict := `[{"identifier":"strict","type":"com.limdm.compliance","payload":{"level":2,"remediate":true,"exclude":[]}}]`
-	if code, body := ui("POST", "/blueprints", url.Values{"name": {"strict"}, "priority": {"10"}, "doc": {strict}}, adminSess); code != http.StatusSeeOther {
-		t.Fatalf("blueprint save: %d %s", code, body)
+	// library items and a blueprint with a condition, inheriting from default
+	itemID := func(name string) string {
+		var id string
+		db.QueryRow(ctx, `SELECT id::text FROM library_items WHERE name=$1`, name).Scan(&id)
+		return id
 	}
-	if code, body := ui("POST", "/blueprints", url.Values{"name": {"bad"}, "priority": {"10"}, "doc": {`[{"identifier":"p","type":"com.limdm.packages","payload":{"install":["--evil"]}}]`}}, adminSess); code != 200 || !strings.Contains(body, "invalid package") {
-		t.Fatal("invalid blueprint must be rejected")
+	saveItem := func(name, typ, payload string) (int, string) {
+		return ui("POST", "/library", url.Values{"name": {name}, "type": {typ}, "payload": {payload}}, adminSess)
+	}
+	if code, body := saveItem("CIS Level 2", api.TypeCompliance, `{"level":2,"remediate":true,"exclude":[]}`); code != http.StatusSeeOther {
+		t.Fatalf("library save: %d %s", code, body)
+	}
+	if code, _ := saveItem("Debian tools", api.TypePackages, `{"install":["htop"],"remove":[]}`); code != http.StatusSeeOther {
+		t.Fatal("library save packages")
+	}
+	if code, body := saveItem("evil", api.TypePackages, `{"install":["--evil"]}`); code != 200 || !strings.Contains(body, "invalid package") {
+		t.Fatal("invalid library item must be rejected")
 	}
 	var defID string
 	db.QueryRow(ctx, `SELECT id::text FROM blueprints WHERE name='default'`).Scan(&defID)
-	if code, body := ui("POST", "/blueprints", url.Values{"id": {defID}, "name": {"renamed"}, "priority": {"1000"}, "doc": {"[]"}}, adminSess); code != 200 || !strings.Contains(body, "cannot be renamed") {
+	tree := `[{"kind":"assign","items":[` + itemID("CIS Level 2") + `]},
+		{"kind":"if","branches":[{"match":"all","rules":[{"field":"os.id","op":"eq","value":"debian"},{"field":"tag","op":"has","value":"lab"}],
+		"nodes":[{"kind":"assign","items":[` + itemID("Debian tools") + `]}]}],"else":[]}]`
+	if code, body := ui("POST", "/blueprints", url.Values{"name": {"strict"}, "parent_id": {defID}, "tree": {tree}}, adminSess); code != http.StatusSeeOther {
+		t.Fatalf("blueprint save: %d %s", code, body)
+	}
+	if code, body := ui("POST", "/blueprints", url.Values{"name": {"bad"}, "tree": {`[{"kind":"assign","items":[99999]}]`}}, adminSess); code != 200 || !strings.Contains(body, "does not exist") {
+		t.Fatal("blueprint with unknown item must be rejected")
+	}
+	if code, body := ui("POST", "/blueprints", url.Values{"id": {defID}, "name": {"renamed"}, "tree": {"[]"}}, adminSess); code != 200 || !strings.Contains(body, "cannot be renamed") {
 		t.Fatalf("renaming default must be refused: %d", code)
 	}
 	var bpID string
 	db.QueryRow(ctx, `SELECT id::text FROM blueprints WHERE name='strict'`).Scan(&bpID)
-	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/assign", url.Values{"blueprint": {bpID}, "users": {"mm max@firma.de admin"}}, adminSess); code != http.StatusSeeOther {
+	ui("POST", "/blueprints", url.Values{"name": {"child"}, "parent_id": {bpID}, "tree": {"[]"}}, adminSess)
+	var childID string
+	db.QueryRow(ctx, `SELECT id::text FROM blueprints WHERE name='child'`).Scan(&childID)
+	if code, body := ui("POST", "/blueprints", url.Values{"id": {bpID}, "name": {"strict"}, "parent_id": {childID}, "tree": {tree}}, adminSess); code != 200 || !strings.Contains(body, "cycle") {
+		t.Fatal("inheritance cycle must be refused")
+	}
+	if code, _ := ui("POST", "/library/"+itemID("Debian tools")+"/delete", url.Values{}, adminSess); code != http.StatusConflict {
+		t.Fatal("deleting an item in use must be refused")
+	}
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/assign", url.Values{"blueprint_id": {bpID}, "tags": {"Lab, berlin"}, "users": {"mm max@firma.de admin"}}, adminSess); code != http.StatusSeeOther {
 		t.Fatalf("assign: %d", code)
+	}
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/assign", url.Values{"tags": {"no spaces allowed"}}, adminSess); code != http.StatusBadRequest {
+		t.Fatal("invalid tag accepted")
 	}
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"rm -rf"}}, adminSess); code != http.StatusBadRequest {
 		t.Fatalf("unknown command type accepted: %d", code)
@@ -246,11 +278,14 @@ func TestIntegration(t *testing.T) {
 	if cr.DeclarationsToken == firstToken || pol.Compliance.Level != 2 || len(cr.Users) != 1 || len(cr.Commands) != 1 {
 		t.Fatalf("after assignment: level=%d users=%v cmds=%v", pol.Compliance.Level, cr.Users, cr.Commands)
 	}
+	if !slices.Contains(pol.Packages.Install, "htop") || pol.Updates.Mode != "security" {
+		t.Fatalf("condition (debian + tag lab) or inherited default not applied: %+v", pol)
+	}
 	call(dev, "/api/v1/checkin", api.CheckinRequest{DeclarationsToken: cr.DeclarationsToken, StatusHash: "s1", PackagesHash: "p1",
 		Results: []api.CommandResult{{ID: cr.Commands[0].ID, OK: true, Output: "ok"}}, Events: []string{"remediated kernel.aslr"}}, nil)
 
 	// every admin page renders
-	pages := []string{"/", "/devices", "/devices?status=non-compliant&q=laptop", "/compliance", "/compliance?state=failing&level=1&framework=iso&sort=fail&q=luks", "/blueprints", "/blueprints/" + bpID, "/blueprints/new", "/tokens", "/audit"}
+	pages := []string{"/", "/devices", "/devices?status=non-compliant&q=laptop", "/compliance", "/compliance?state=failing&level=1&framework=iso&sort=fail&q=luks", "/blueprints", "/blueprints/" + bpID, "/blueprints/new", "/library", "/library/new?type=com.limdm.packages", "/library/" + itemID("Debian tools"), "/tokens", "/audit"}
 	for _, tab := range []string{"overview", "hardware", "software", "compliance", "declarations", "commands"} {
 		pages = append(pages, "/devices/"+er.DeviceID+"?tab="+tab+"&q=open&page=2")
 	}
@@ -451,5 +486,59 @@ func TestIntegration(t *testing.T) {
 	}
 	if broken, err := s.verifyAudit(ctx); err != nil || broken != 0 {
 		t.Fatalf("chain broken at %d: %v", broken, err)
+	}
+}
+
+// TestMigrationFromPriorityBlueprints converts the first data model.
+func TestMigrationFromPriorityBlueprints(t *testing.T) {
+	dsn := os.Getenv("LIMDM_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("LIMDM_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, schema); err != nil {
+		t.Fatal(err)
+	}
+	// turn the fresh schema back into the legacy shape
+	legacy := `ALTER TABLE blueprints DROP COLUMN tree, DROP COLUMN parent_id,
+		ADD COLUMN priority INT NOT NULL DEFAULT 100, ADD COLUMN declarations JSONB NOT NULL DEFAULT '[]';
+		CREATE TABLE device_blueprints (device_id TEXT REFERENCES devices(id), blueprint_id BIGINT REFERENCES blueprints(id));
+		INSERT INTO blueprints(name, priority, declarations) VALUES
+		  ('default', 1000, '[{"identifier":"compliance","type":"com.limdm.compliance","payload":{"level":1,"remediate":true}}]'),
+		  ('strict', 10, '[{"identifier":"strict","type":"com.limdm.compliance","payload":{"level":2,"remediate":true}}]'),
+		  ('loose', 50, '[]');
+		INSERT INTO devices(id, cert_serial, cert_not_after) VALUES ('dev1', 's', now());
+		INSERT INTO device_blueprints SELECT 'dev1', id FROM blueprints WHERE name IN ('strict', 'loose');`
+	if _, err := db.Exec(ctx, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	tx, _ := db.Begin(ctx)
+	res, err := resolveDevice(ctx, tx, "dev1")
+	tx.Rollback(ctx) // release table locks before the next migrate runs DDL
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, _ := api.Compose(res.Decls)
+	if len(res.Chain) != 2 || res.Chain[0].Name != "default" || res.Chain[1].Name != "strict" || pol.Compliance.Level != 2 {
+		t.Fatalf("migrated chain %v level %d", res.Chain, pol.Compliance.Level)
+	}
+	var legacyTable bool
+	db.QueryRow(ctx, `SELECT to_regclass('device_blueprints') IS NOT NULL`).Scan(&legacyTable)
+	if legacyTable {
+		t.Fatal("device_blueprints must be dropped")
+	}
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal("migrations must be idempotent: ", err)
 	}
 }

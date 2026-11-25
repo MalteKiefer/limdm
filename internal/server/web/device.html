@@ -56,14 +56,14 @@
     {{if eq .Sess.Role "admin"}}
     <form method="post" action="/devices/{{$id}}/assign">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <p class="muted">The default blueprint always applies.</p>
-      {{range .Blueprints}}{{if ne .Name "default"}}<label class="check"><input type="checkbox" name="blueprint" value="{{.ID}}" {{if .Assigned}}checked{{end}}> {{.Name}} <span class="muted">priority {{.Priority}}</span></label>{{end}}{{end}}
+      <label>Blueprint<select name="blueprint_id">{{range .Blueprints}}<option value="{{if eq .Name "default"}}0{{else}}{{.ID}}{{end}}" {{if .Assigned}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+      <label>Tags <span class="hint">comma separated, usable in blueprint conditions</span><input name="tags" value="{{.Tags}}" placeholder="finance, berlin"></label>
       <label>Desktop users <span class="hint">one per line: username email [admin]</span>
         <textarea name="users" rows="4" class="code" placeholder="jdoe jane.doe@example.com admin">{{.Users}}</textarea></label>
       <button>Save assignment</button>
     </form>
     {{else}}
-    <dl class="kv">{{range .Blueprints}}{{if .Assigned}}<dt>Blueprint</dt><dd>{{.Name}}</dd>{{end}}{{end}}</dl>
+    <dl class="kv">{{range .Blueprints}}{{if .Assigned}}<dt>Blueprint</dt><dd>{{.Name}}</dd>{{end}}{{end}}<dt>Tags</dt><dd>{{.Tags}}</dd></dl>
     {{end}}
   </section>
 </div>
@@ -177,6 +177,13 @@
 {{end}}
 
 {{if eq .Tab "declarations"}}
+<section class="card">
+  <div class="card-head"><h2>Resolved configuration</h2><span class="muted">{{range $i, $b := .Resolved.Chain}}{{if $i}} → {{end}}<a href="/blueprints/{{$b.ID}}">{{$b.Name}}</a>{{end}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>#</th><th>Library item</th><th>Type</th></tr></thead>
+    <tbody>{{range $i, $it := .Resolved.Items}}<tr><td class="num muted">{{inc $i}}</td><td><a href="/library/{{$it.ID}}">{{$it.Name}}</a></td><td>{{typeLabel $it.Type}}</td></tr>{{else}}<tr><td colspan="3" class="empty">No items match this device.</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
 <section class="tablecard"><div class="scroll"><table>
   <thead><tr><th>Status</th><th>Identifier</th><th>Type</th><th>Reasons</th></tr></thead>
   <tbody>{{range .Decl}}<tr><td><span class="pill {{.Class}}">{{.State}}</span></td><td class="mono">{{.Identifier}}</td><td class="mono">{{.Type}}</td><td class="muted">{{join .Reasons "; "}}</td></tr>{{else}}<tr><td colspan="4" class="empty">No declarations.</td></tr>{{end}}</tbody>
