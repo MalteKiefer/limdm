@@ -56,7 +56,7 @@ var Types = map[string]string{
 	TypeFiles:      `{"files": [{"path": "/etc/motd", "content": "...", "mode": "0644"}]}`,
 	TypeFirewall:   `{"enforce": true, "allow": ["22/tcp"]}`,
 	TypeOSVersion:  `{"min": {"ubuntu": "22.04", "debian": "12", "fedora": "41"}}`,
-	TypeScreenLock: `{"idle_seconds": 300, "hide_users": true, "allow_autologin": false}`,
+	TypeScreenLock: `{"idle_seconds": 300}`,
 	TypeLogin:      `{"issuer": "https://accounts.google.com", "client_id": "", "client_secret": "", "allowed_domain": "", "local_password": true, "reverify_hours": 168}`,
 	TypePrivacy:    `{"network_info": true, "logged_in_users": true}`,
 }
@@ -132,14 +132,19 @@ type osPayload struct {
 	Min map[string]string `json:"min"` // os-release ID -> minimum VERSION_ID
 }
 
+// screenLockPayload: the login screen keys are optional. A declaration
+// without them (every declaration written before they existed) leaves the
+// login manager alone; agents before 0.9.2 reject them as unknown keys.
 type screenLockPayload struct {
-	IdleSeconds    int  `json:"idle_seconds"`
-	HideUsers      bool `json:"hide_users,omitempty"`      // login screen asks for the user name instead of listing users
-	AllowAutologin bool `json:"allow_autologin,omitempty"` // automatic login is switched off unless this is set
+	IdleSeconds    int   `json:"idle_seconds"`
+	HideUsers      *bool `json:"hide_users,omitempty"`      // login screen asks for the user name instead of listing users
+	AllowAutologin *bool `json:"allow_autologin,omitempty"` // false switches automatic login off
 }
 
-// ScreenLock is the effective screen lock and login screen policy.
+// ScreenLock is the effective login screen policy. ManageLogin is set when
+// the declaration has one of the login screen keys.
 type ScreenLock struct {
+	ManageLogin    bool `json:"manage_login,omitempty"`
 	HideUsers      bool `json:"hide_users,omitempty"`
 	AllowAutologin bool `json:"allow_autologin,omitempty"`
 }
@@ -305,7 +310,8 @@ func (d Declaration) apply(p *Policy) error {
 			bad("idle_seconds must be 30..3600")
 		}
 		p.ScreenLockSeconds = v.IdleSeconds
-		p.ScreenLock = ScreenLock{HideUsers: v.HideUsers, AllowAutologin: v.AllowAutologin}
+		p.ScreenLock = ScreenLock{ManageLogin: v.HideUsers != nil || v.AllowAutologin != nil,
+			HideUsers: v.HideUsers != nil && *v.HideUsers, AllowAutologin: v.AllowAutologin == nil || *v.AllowAutologin}
 	case TypeLogin:
 		if err := strict(d.Payload, &p.Login); err != nil {
 			return err

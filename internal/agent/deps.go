@@ -44,6 +44,8 @@ var dependencies = []dependency{
 	{cmd: "swaylock", debian: "swaylock", fedora: "swaylock", desktop: true, with: waylandCompositors},
 	{cmd: "xss-lock", debian: "xss-lock", fedora: "xss-lock", desktop: true, with: x11WindowManagers},
 	{cmd: "i3lock", debian: "i3lock", fedora: "i3lock", desktop: true, with: x11WindowManagers},
+	{cmd: "xset", debian: "x11-xserver-utils", fedora: "xset", desktop: true, with: x11WindowManagers},
+	{cmd: "xfce4-screensaver", debian: "xfce4-screensaver", fedora: "xfce4-screensaver", desktop: true, with: []string{"xfce4-session"}},
 }
 
 var depsChecked time.Time
