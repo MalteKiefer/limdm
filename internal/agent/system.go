@@ -193,7 +193,7 @@ func (h *host) nativePackages() ([]api.Package, error) {
 	if h.family == "debian" {
 		out, err = run(time.Minute, "dpkg-query", "-W", "-f", "${db:Status-Abbrev}\t${Package}\t${Version}\t${Architecture}\n")
 	} else {
-		out, err = run(time.Minute, "rpm", "-qa", "--qf", "ii \t%{NAME}\t%{VERSION}-%{RELEASE}\t%{ARCH}\n")
+		out, err = run(time.Minute, "rpm", "-qa", "--qf", "ii \t%{NAME}\t%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}\t%|ARCH?{%{ARCH}}|\n")
 	}
 	if err != nil {
 		return nil, err
@@ -201,7 +201,7 @@ func (h *host) nativePackages() ([]api.Package, error) {
 	var pkgs []api.Package
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Split(line, "\t")
-		if len(f) == 4 && strings.HasPrefix(f[0], "ii") {
+		if len(f) == 4 && strings.HasPrefix(f[0], "ii") && f[1] != "gpg-pubkey" {
 			pkgs = append(pkgs, api.Package{Name: f[1], Version: f[2], Arch: f[3]})
 		}
 	}
@@ -418,15 +418,27 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 		Source:    "native",
 		MachineID: readTrim("/etc/machine-id"), OSID: h.ID, OSVersion: h.Version, OSName: h.Name,
 		Kernel: readTrim("/proc/sys/kernel/osrelease"), Arch: runtime.GOARCH,
-		Vendor: readTrim("/sys/class/dmi/id/sys_vendor"), Model: readTrim("/sys/class/dmi/id/product_name"),
-		Serial: readTrim("/sys/class/dmi/id/product_serial"),
+		Vendor: cleanDMI(readTrim("/sys/class/dmi/id/sys_vendor")), Model: cleanDMI(readTrim("/sys/class/dmi/id/product_name")),
+		Serial: cleanDMI(readTrim("/sys/class/dmi/id/product_serial")),
+	}
+	if inv.Model == "" { // ARM boards (Raspberry Pi …) describe themselves in the device tree
+		inv.Model = strings.TrimRight(readTrim("/proc/device-tree/model"), "\x00")
+	}
+	if inv.Serial == "" {
+		inv.Serial = strings.TrimRight(readTrim("/proc/device-tree/serial-number"), "\x00")
 	}
 	inv.Hostname, _ = os.Hostname()
 	sc := bufio.NewScanner(strings.NewReader(readFile("/proc/cpuinfo")))
-	for sc.Scan() {
-		if k, v, ok := strings.Cut(sc.Text(), ":"); ok && strings.TrimSpace(k) == "model name" {
-			inv.CPU = strings.TrimSpace(v)
-			break
+	for sc.Scan() { // x86 has "model name"; ARM kernels "Hardware", "Model" or "CPU part"
+		if k, v, ok := strings.Cut(sc.Text(), ":"); ok {
+			switch strings.TrimSpace(k) {
+			case "model name":
+				inv.CPU = strings.TrimSpace(v)
+			case "Hardware", "Model":
+				if inv.CPU == "" {
+					inv.CPU = strings.TrimSpace(v)
+				}
+			}
 		}
 	}
 	for _, line := range strings.Split(readFile("/proc/meminfo"), "\n") {

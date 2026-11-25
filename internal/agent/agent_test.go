@@ -799,3 +799,16 @@ func TestVerifyCommand(t *testing.T) {
 		t.Fatal("changed payload accepted")
 	}
 }
+
+func TestInventoryHelpers(t *testing.T) {
+	for in, want := range map[string]string{"To be filled by O.E.M.": "", "Default string": "", " LENOVO ": "LENOVO", "0123456789": "", "PF47M7M1": "PF47M7M1"} {
+		if got := cleanDMI(in); got != want {
+			t.Errorf("cleanDMI(%q) = %q", in, got)
+		}
+	}
+	for in, want := range map[string]string{"labwc:wlroots": "labwc", "X-Cinnamon": "Cinnamon", "Hyprland": "Hyprland", "XFCE": "Xfce", "Pantheon": "Pantheon"} {
+		if got := desktopName(in); got != want {
+			t.Errorf("desktopName(%q) = %q", in, got)
+		}
+	}
+}
