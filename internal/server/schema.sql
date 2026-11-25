@@ -1,12 +1,24 @@
--- ponytail: idempotent schema applied at startup; switch to versioned migrations at the first breaking change.
+-- Idempotent base schema applied at startup; data conversions live in migrations.go.
 
-CREATE TABLE IF NOT EXISTS blueprints (
-    id           BIGSERIAL PRIMARY KEY,
-    name         TEXT NOT NULL UNIQUE,
-    priority     INT NOT NULL DEFAULT 100,  -- lower wins when two blueprints declare the same type
-    declarations JSONB NOT NULL DEFAULT '[]',
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+-- Reusable configuration building blocks (one declaration type each).
+CREATE TABLE IF NOT EXISTS library_items (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE,
+    type        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    payload     JSONB NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Assignment maps: a tree of assign / if nodes, optionally inheriting from a parent.
+CREATE TABLE IF NOT EXISTS blueprints (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE blueprints ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+ALTER TABLE blueprints ADD COLUMN IF NOT EXISTS parent_id BIGINT REFERENCES blueprints(id) ON DELETE SET NULL;
+ALTER TABLE blueprints ADD COLUMN IF NOT EXISTS tree JSONB NOT NULL DEFAULT '[]';
 
 CREATE TABLE IF NOT EXISTS devices (
     id             TEXT PRIMARY KEY,
@@ -28,11 +40,71 @@ CREATE TABLE IF NOT EXISTS devices (
     retired        BOOLEAN NOT NULL DEFAULT false
 );
 
--- The blueprint named 'default' applies to every device implicitly.
-CREATE TABLE IF NOT EXISTS device_blueprints (
-    device_id    TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+-- One blueprint per device; NULL means the blueprint named 'default'.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS blueprint_id BIGINT REFERENCES blueprints(id) ON DELETE SET NULL;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
+
+-- Directory: people and groups from SCIM or Google Workspace.
+CREATE TABLE IF NOT EXISTS dir_users (
+    id           BIGSERIAL PRIMARY KEY,
+    external_id  TEXT NOT NULL DEFAULT '',
+    source       TEXT NOT NULL, -- scim | google
+    user_name    TEXT NOT NULL,
+    email        TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL DEFAULT '',
+    department   TEXT NOT NULL DEFAULT '',
+    title        TEXT NOT NULL DEFAULT '',
+    active       BOOLEAN NOT NULL DEFAULT true,
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS dir_groups (
+    id          BIGSERIAL PRIMARY KEY,
+    external_id TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (source, external_id)
+);
+CREATE TABLE IF NOT EXISTS dir_members (
+    group_id BIGINT NOT NULL REFERENCES dir_groups(id) ON DELETE CASCADE,
+    user_id  BIGINT NOT NULL REFERENCES dir_users(id) ON DELETE CASCADE,
+    PRIMARY KEY (group_id, user_id)
+);
+-- A device without an explicit blueprint gets the one of its primary user's group.
+CREATE TABLE IF NOT EXISTS blueprint_group_assignments (
+    group_id     BIGINT PRIMARY KEY REFERENCES dir_groups(id) ON DELETE CASCADE,
     blueprint_id BIGINT NOT NULL REFERENCES blueprints(id) ON DELETE CASCADE,
-    PRIMARY KEY (device_id, blueprint_id)
+    priority     INT NOT NULL DEFAULT 100
+);
+-- Compliance policy state: since when failing, end of grace, last webhook, policy lock.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS noncompliant_since TIMESTAMPTZ;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS grace_until TIMESTAMPTZ;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS notified_at TIMESTAMPTZ;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS auto_locked BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS primary_user_id BIGINT REFERENCES dir_users(id) ON DELETE SET NULL;
+
+-- History for charts: per device at most every 15 minutes, fleet once a day; 30 days kept.
+CREATE TABLE IF NOT EXISTS device_metrics (
+    device_id     TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    at            TIMESTAMPTZ NOT NULL,
+    mem_used_mb   BIGINT NOT NULL,
+    mem_total_mb  BIGINT NOT NULL,
+    root_used_pct REAL NOT NULL,
+    load1         REAL NOT NULL,
+    PRIMARY KEY (device_id, at)
+);
+CREATE TABLE IF NOT EXISTS fleet_history (
+    day           DATE PRIMARY KEY,
+    compliant     INT NOT NULL,
+    noncompliant  INT NOT NULL,
+    in_grace      INT NOT NULL,
+    stale         INT NOT NULL,
+    pending       INT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version    INT PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS enroll_tokens (
@@ -61,7 +133,7 @@ CREATE INDEX IF NOT EXISTS commands_device_status ON commands(device_id, status)
 -- and TOTP are both required; credentials are generated by `limdm-server local-admin`.
 CREATE TABLE IF NOT EXISTS local_admins (
     name           TEXT PRIMARY KEY,
-    role           TEXT NOT NULL CHECK (role IN ('admin', 'auditor')),
+    role           TEXT NOT NULL CHECK (role IN ('admin', 'helpdesk', 'auditor')),
     password_hash  TEXT NOT NULL,
     totp_secret    TEXT NOT NULL,
     totp_last_step BIGINT NOT NULL DEFAULT 0,
@@ -70,6 +142,22 @@ CREATE TABLE IF NOT EXISTS local_admins (
     disabled       BOOLEAN NOT NULL DEFAULT false,
     last_login     TIMESTAMPTZ,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- OIDC console users; the environment lists only seed this table.
+CREATE TABLE IF NOT EXISTS console_users (
+    email      TEXT PRIMARY KEY,
+    role       TEXT NOT NULL CHECK (role IN ('admin', 'helpdesk', 'auditor')),
+    disabled   BOOLEAN NOT NULL DEFAULT false,
+    last_login TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Settings edited in the UI (secrets sealed with a key derived from LIMDM_SESSION_KEY).
+CREATE TABLE IF NOT EXISTS settings (
+    key        TEXT PRIMARY KEY,
+    value      JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Append only, hash chained audit trail (ISO 27001 A.8.15, BSI OPS.1.1.5).

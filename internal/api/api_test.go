@@ -12,42 +12,25 @@ func decl(id, typ, payload string) Declaration {
 	return Declaration{Identifier: id, Type: typ, Payload: json.RawMessage(payload)}
 }
 
-func TestBlueprintValidate(t *testing.T) {
-	if err := DefaultBlueprint().Validate(); err != nil {
-		t.Fatalf("default blueprint invalid: %v", err)
-	}
-	bad := []Declaration{
-		decl("p", TypePackages, `{"install":["-o Dpkg::Pre-Invoke=evil"]}`), // option injection
-		decl("f", TypeFiles, `{"files":[{"path":"/etc/../root/x","content":""}]}`),
-		decl("u", TypeUpdates, `{"mode":"sometimes"}`),
-		decl("x", "com.limdm.unknown", `{}`),
-		decl("c", TypeCompliance, `{"level":1,"typo":true}`), // unknown field
-		decl("w", TypeFirewall, `{"enforce":true,"allow":["22/tcp; rm -rf /"]}`),
-	}
-	for _, d := range bad {
-		if err := (Blueprint{Name: "t", Declarations: []Declaration{d}}).Validate(); err == nil {
-			t.Errorf("%s accepted", d.Identifier)
+func TestItemValidate(t *testing.T) {
+	for _, it := range DefaultLibrary() {
+		if err := it.Validate(); err != nil {
+			t.Fatalf("default item %s invalid: %v", it.Name, err)
 		}
 	}
-}
-
-func TestEffectivePriority(t *testing.T) {
-	strict := Blueprint{Name: "strict", Priority: 10, Declarations: []Declaration{decl("c2", TypeCompliance, `{"level":2,"remediate":true}`)}}
-	eff := Effective([]Blueprint{strict, DefaultBlueprint()})
-	p, st := Compose(eff)
-	if p.Compliance.Level != 2 {
-		t.Fatalf("higher priority blueprint must win, got level %d", p.Compliance.Level)
+	bad := []LibraryItem{
+		{Name: "p", Type: TypePackages, Payload: json.RawMessage(`{"install":["-o Dpkg::Pre-Invoke=evil"]}`)}, // option injection
+		{Name: "f", Type: TypeFiles, Payload: json.RawMessage(`{"files":[{"path":"/etc/../root/x","content":""}]}`)},
+		{Name: "u", Type: TypeUpdates, Payload: json.RawMessage(`{"mode":"sometimes"}`)},
+		{Name: "x", Type: "com.limdm.unknown", Payload: json.RawMessage(`{}`)},
+		{Name: "c", Type: TypeCompliance, Payload: json.RawMessage(`{"level":1,"typo":true}`)}, // unknown field
+		{Name: "w", Type: TypeFirewall, Payload: json.RawMessage(`{"enforce":true,"allow":["22/tcp; rm -rf /"]}`)},
+		{Name: "", Type: TypeAgent, Payload: json.RawMessage(`{"checkin_seconds":300}`)},
 	}
-	if p.Updates.Mode != "security" || p.ScreenLockSeconds != 300 {
-		t.Fatal("default declarations of other types must still apply")
-	}
-	for _, s := range st {
-		if !s.Valid || s.ServerToken == "" {
-			t.Fatalf("status %+v", s)
+	for _, it := range bad {
+		if err := it.Validate(); err == nil {
+			t.Errorf("%q accepted", it.Name)
 		}
-	}
-	if DeclarationsToken(eff) == DeclarationsToken(Effective([]Blueprint{DefaultBlueprint()})) {
-		t.Fatal("token must change when declarations change")
 	}
 }
 
@@ -55,6 +38,18 @@ func TestComposeSkipsInvalid(t *testing.T) {
 	p, st := Compose([]Declaration{decl("u", TypeUpdates, `{"mode":"bad"}`), decl("s", TypeScreenLock, `{"idle_seconds":120}`)})
 	if p.Updates.Mode != "" || st[0].Valid || p.ScreenLockSeconds != 120 || !st[1].Valid {
 		t.Fatalf("got %+v %+v", p, st)
+	}
+}
+
+func TestDefaultDeclarations(t *testing.T) {
+	p, st := Compose(DefaultDeclarations())
+	if p.Compliance.Level != 1 || p.Updates.Mode != "security" || p.ScreenLockSeconds != 300 {
+		t.Fatalf("baseline: %+v", p)
+	}
+	for _, s := range st {
+		if !s.Valid {
+			t.Fatalf("invalid default declaration %+v", s)
+		}
 	}
 }
 

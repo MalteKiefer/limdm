@@ -1,0 +1,22 @@
+{{define "title"}}{{t "Library · LiMDM"}}{{end}}
+{{define "content"}}
+<div class="page-head">
+  <div><h1>{{t "Library"}}</h1><div class="meta"><span>{{t "Reusable configuration items, assigned to devices through blueprints"}}</span></div></div>
+  {{if eq .Sess.Role "admin"}}
+  <form class="actions" method="get" action="/library/new">
+    <select name="type" aria-label="{{t "Item type"}}">{{range .AllTypes}}<option value="{{.}}">{{typeLabel .}}</option>{{end}}</select>
+    <button>{{t "New item"}}</button>
+  </form>
+  {{end}}
+</div>
+{{range $t := .Types}}
+<section class="tablecard">
+  <div class="card-head"><h2>{{typeLabel $t}}</h2><span class="muted mono">{{$t}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Name"}}</th><th>{{t "Description"}}</th><th>{{t "Used by"}}</th></tr></thead>
+    <tbody>{{range index $.Groups $t}}<tr><td><a class="rowlink" href="/library/{{.ID}}">{{.Name}}</a></td><td class="muted">{{.Description}}</td>
+      <td>{{range .UsedBy}}<span class="tag">{{.}}</span>{{else}}<span class="muted">{{t "unused"}}</span>{{end}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+{{else}}<div class="empty card">{{t "The library is empty. Create the first item."}}</div>{{end}}
+{{end}}

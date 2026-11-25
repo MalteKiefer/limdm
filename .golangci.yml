@@ -42,6 +42,12 @@ linters:
           - gosec
           - noctx
           - errcheck
+      # German UI catalog: English spell checking and the credential
+      # heuristic ("Password", "Token" labels) do not apply.
+      - path: internal/server/i18n\.go
+        linters:
+          - misspell
+          - gosec
 
 formatters:
   enable:

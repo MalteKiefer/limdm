@@ -57,14 +57,15 @@ type Config struct {
 
 // State survives restarts. Declarations are kept so enforcement continues offline.
 type State struct {
-	Declarations  []api.Declaration   `json:"declarations"`
-	DeclToken     string              `json:"declarations_token"`
-	Users         []api.User          `json:"users"`
-	LastUpdateRun time.Time           `json:"last_update_run"`
-	RebootSince   time.Time           `json:"reboot_since"`
-	RebootPlanned time.Time           `json:"reboot_planned"` // when a post update reboot was scheduled
-	Results       []api.CommandResult `json:"results"`        // not yet reported
-	Events        []string            `json:"events"`
+	Declarations  []api.Declaration    `json:"declarations"`
+	DeclToken     string               `json:"declarations_token"`
+	Users         []api.User           `json:"users"`
+	LastUpdateRun time.Time            `json:"last_update_run"`
+	RebootSince   time.Time            `json:"reboot_since"`
+	RebootPlanned time.Time            `json:"reboot_planned"`        // when a post update reboot was scheduled
+	ScriptRuns    map[string]time.Time `json:"script_runs,omitempty"` // last run of recurring scripts
+	Results       []api.CommandResult  `json:"results"`               // not yet reported
+	Events        []string             `json:"events"`
 }
 
 type Agent struct {
@@ -292,7 +293,7 @@ func New(log *slog.Logger) (*Agent, error) {
 		}
 	}
 	if a.state.DeclToken == "" { // never synced: start from the built in baseline
-		a.state.Declarations = api.Effective([]api.Blueprint{api.DefaultBlueprint()})
+		a.state.Declarations = api.DefaultDeclarations()
 	}
 	a.compose()
 	return a, nil
@@ -395,7 +396,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	sum := sha256.Sum256(sb)
 	statusHash := hex.EncodeToString(sum[:])
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
-		StatusHash: statusHash, Results: a.state.Results, Events: a.state.Events}
+		StatusHash: statusHash, Results: a.state.Results, Events: a.state.Events, Metrics: metrics()}
 	if statusHash != a.sentStatusHash {
 		req.Status = &status
 	}
@@ -510,6 +511,7 @@ func (a *Agent) enforce() {
 	if err := a.applyUsers(); err != nil {
 		a.problem(api.TypeLogin, "users: %v", err)
 	}
+	a.applyExtra()
 	// osquery is mandatory as inventory source; retry hourly, not every cycle
 	if !hasOsquery() && time.Since(a.osqueryTried) > time.Hour {
 		a.osqueryTried = time.Now()
@@ -802,7 +804,7 @@ func Report(w io.Writer, level int) error {
 		}
 	}
 	if a.state.DeclToken == "" {
-		a.state.Declarations = api.Effective([]api.Blueprint{api.DefaultBlueprint()})
+		a.state.Declarations = api.DefaultDeclarations()
 	}
 	a.compose()
 	a.pol.Compliance.Remediate = false

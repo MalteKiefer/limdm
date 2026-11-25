@@ -1,27 +1,33 @@
-{{define "title"}}Blueprint {{.Name}} · LiMDM{{end}}
+{{define "title"}}{{if .BP.Name}}{{.BP.Name}}{{else}}{{t "New blueprint"}}{{end}} {{t "· LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><div class="eyebrow"><a href="/blueprints">Blueprints</a></div><h1>{{if .Name}}{{.Name}}{{else}}New blueprint{{end}}</h1></div>
+  <div><div class="eyebrow"><a href="/blueprints">{{t "Blueprints"}}</a></div><h1>{{if .BP.Name}}{{.BP.Name}}{{else}}{{t "New blueprint"}}{{end}}</h1></div>
 </div>
-{{if .Error}}<div class="notice error" role="alert">{{.Error}}</div>{{end}}
-<div class="grid side-right">
-  <form class="card" method="post" action="/blueprints">
-    <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+<form method="post" action="/blueprints" id="bp-form">
+  <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.BP.ID}}">
+  <section class="card">
     <div class="inline">
-      <label>Name<input name="name" value="{{.Name}}" required pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}" {{if eq .Name "default"}}readonly{{end}}></label>
-      <label class="narrow">Priority<input name="priority" type="number" value="{{.Priority}}"></label>
+      <label>{{t "Name"}}<input name="name" value="{{.BP.Name}}" required pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}" {{if eq .BP.Name "default"}}readonly{{end}}></label>
+      <label>{{t "Inherits from"}}<select name="parent_id" {{if eq .BP.Name "default"}}disabled{{end}}><option value="0">{{t "nothing"}}</option>
+        {{$pid := .ParentID}}{{$self := .BP.ID}}{{range .Blueprints}}{{if ne .ID $self}}<option value="{{.ID}}" {{if eq .ID $pid}}selected{{end}}>{{.Name}}</option>{{end}}{{end}}</select></label>
     </div>
-    <label>Declarations <span class="hint">JSON list of identifier, type, payload</span>
-      <textarea name="doc" rows="30" class="code" spellcheck="false">{{.Doc}}</textarea></label>
-    {{if eq .Sess.Role "admin"}}<div class="form-foot"><span class="muted">Validated strictly before saving. Devices pick up changes at their next check in.</span><button>Save blueprint</button></div>{{end}}
-  </form>
-  <section class="tablecard">
-    <div class="card-head"><h2>Declaration types</h2></div>
-    <div class="scroll"><table>
-      <thead><tr><th>Type and example payload</th></tr></thead>
-      <tbody>{{range .Types}}<tr><td><code>{{.Type}}</code><span class="sub mono">{{.Example}}</span></td></tr>{{end}}</tbody>
-    </table></div>
-    <div class="empty">Compliance level 1 is the CIS Level 1 baseline, level 2 adds controls for high protection needs. Excluded check IDs are reported as documented exceptions.</div>
+    <label>{{t "Description"}}<input name="description" value="{{.BP.Desc}}" maxlength="300"></label>
   </section>
-</div>
+  <section class="card">
+    <div class="card-head"><h2>{{t "Assignment map"}}</h2><span class="muted">{{t "evaluated top to bottom; in a condition the first matching branch wins"}}</span></div>
+    <div id="bp-editor" class="bp-editor" hidden></div>
+    <noscript><p class="muted">{{t "The visual editor needs JavaScript; edit the map as JSON below."}}</p></noscript>
+    <details class="bp-json"><summary>{{t "JSON"}}</summary>
+      <textarea name="tree" id="bp-tree" rows="18" class="code" spellcheck="false">{{.Tree}}</textarea></details>
+  </section>
+  {{if eq .Sess.Role "admin"}}<div class="form-foot"><span class="muted">{{t "Validated on save: items must exist, rules must use known fields."}}</span><button>{{t "Save blueprint"}}</button></div>{{end}}
+</form>
+{{if and .BP.ID (ne .BP.Name "default") (eq .Sess.Role "admin")}}
+<form class="card" method="post" action="/blueprints/{{.BP.ID}}/delete"><input type="hidden" name="csrf" value="{{.CSRF}}">
+  <h2>{{t "Delete blueprint"}}</h2><p class="muted">{{t "Devices assigned to it fall back to default."}}</p><button class="danger">{{t "Delete"}}</button></form>
+{{end}}
+<script type="application/json" id="bp-items">{{.ItemsJSON}}</script>
+<script type="application/json" id="bp-fields">{{.FieldsJSON}}</script>
+<script src="/static/blueprint-editor.js" defer></script>
 {{end}}

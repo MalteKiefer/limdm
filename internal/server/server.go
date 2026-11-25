@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -170,10 +171,11 @@ func requireDBTLS(pc *pgxpool.Config) error {
 type Server struct {
 	cfg   Config
 	db    *pgxpool.Pool
-	auth  *oidcAuth // nil when OIDC is not configured
 	ca    *deviceCA
 	log   *slog.Logger
 	limit limiter
+	rt    atomic.Pointer[runtimeState] // settings editable in the UI and the OIDC client built from them
+	hooks *http.Client                 // webhook client; nil uses http.DefaultClient (tests inject one)
 }
 
 func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
@@ -204,28 +206,25 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("device CA: %w", err)
 	}
-	var auth *oidcAuth
-	if cfg.OIDCIssuer != "" {
-		if auth, err = newOIDCAuth(ctx, cfg); err != nil {
-			return nil, fmt.Errorf("oidc: %w", err)
-		}
-	}
-	log.Info("device CA ready", "fingerprint", ca.Fingerprint())
-	return &Server{cfg: cfg, db: db, auth: auth, ca: ca, log: log}, nil
-}
 
-func migrate(ctx context.Context, db *pgxpool.Pool) error {
-	if _, err := db.Exec(ctx, schema); err != nil {
-		return fmt.Errorf("apply schema: %w", err)
+	log.Info("device CA ready", "fingerprint", ca.Fingerprint())
+	s := &Server{cfg: cfg, db: db, ca: ca, log: log}
+	if err := s.seedConsoleUsers(ctx); err != nil {
+		return nil, err
 	}
-	def := api.DefaultBlueprint()
-	decl, _ := json.Marshal(def.Declarations)
-	_, err := db.Exec(ctx, `INSERT INTO blueprints(name, priority, declarations) VALUES ($1,$2,$3) ON CONFLICT (name) DO NOTHING`,
-		def.Name, def.Priority, string(decl))
-	return err
+	if err := s.loadSettings(ctx); err != nil {
+		return nil, fmt.Errorf("settings: %w", err)
+	}
+	return s, nil
 }
 
 func (s *Server) Close() { s.db.Close() }
+
+// Background runs periodic jobs until ctx ends.
+func (s *Server) Background(ctx context.Context) {
+	go s.googleSyncLoop(ctx)
+	go s.historyLoop(ctx)
+}
 
 // AdminHandler serves the web UI.
 func (s *Server) AdminHandler() http.Handler {
@@ -237,7 +236,9 @@ func (s *Server) AdminHandler() http.Handler {
 		}
 		w.Write([]byte("ok"))
 	})
+	s.scimRoutes(mux)
 	mux.HandleFunc("GET /login", s.loginPage)
+	mux.HandleFunc("GET /lang/{lang}", s.setLang)
 	mux.HandleFunc("GET /login/oidc", s.login)
 	mux.HandleFunc("POST /login/local", s.localLogin)
 	mux.HandleFunc("GET /auth/callback", s.callback)
@@ -389,16 +390,10 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, machine_id) VALUES ($1,$2,$3,$4,$5)`,
-		id, serial, notAfter, truncate(req.Hostname, 255), truncate(req.MachineID, 64)); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, machine_id, blueprint_id) VALUES ($1,$2,$3,$4,$5,$6)`,
+		id, serial, notAfter, truncate(req.Hostname, 255), truncate(req.MachineID, 64), blueprintID); err != nil {
 		s.fail(w, err)
 		return
-	}
-	if blueprintID != nil {
-		if _, err := tx.Exec(ctx, `INSERT INTO device_blueprints(device_id, blueprint_id) VALUES ($1,$2)`, id, *blueprintID); err != nil {
-			s.fail(w, err)
-			return
-		}
 	}
 	if err := audit(ctx, tx, "device:"+id, "device.enroll", id, req.Hostname+" cert "+serial); err != nil {
 		s.fail(w, err)
@@ -444,28 +439,6 @@ func countFailing(checks []api.CheckResult) int {
 	return n
 }
 
-// effectiveDeclarations merges the default blueprint and all assigned ones.
-func effectiveDeclarations(ctx context.Context, q pgx.Tx, deviceID string) ([]api.Declaration, error) {
-	rows, err := q.Query(ctx, `SELECT name, priority, declarations FROM blueprints
-		WHERE name='default' OR id IN (SELECT blueprint_id FROM device_blueprints WHERE device_id=$1)
-		ORDER BY priority, id`, deviceID)
-	if err != nil {
-		return nil, err
-	}
-	bps, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (api.Blueprint, error) {
-		var b api.Blueprint
-		var raw []byte
-		if err := row.Scan(&b.Name, &b.Priority, &raw); err != nil {
-			return b, err
-		}
-		return b, json.Unmarshal(raw, &b.Declarations)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return api.Effective(bps), nil
-}
-
 func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	id := r.Context().Value(deviceKey).(string)
 	var req api.CheckinRequest
@@ -499,6 +472,10 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		statusHash = req.StatusHash
+	}
+	if err := recordMetrics(ctx, tx, id, req.Metrics); err != nil {
+		s.fail(w, err)
+		return
 	}
 	if req.Packages != nil {
 		pk, _ := json.Marshal(req.Packages)
@@ -544,6 +521,12 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	if resp.DeclarationsToken != req.DeclarationsToken {
 		resp.Declarations = decls
 	}
+	pol, _ := api.Compose(decls)
+	event, err := s.enforceCompliance(ctx, tx, id, pol.Compliance, time.Now().UTC())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	if err := json.Unmarshal(users, &resp.Users); err != nil {
 		s.fail(w, err)
 		return
@@ -565,6 +548,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	s.sendWebhook(event)
 	if rel, ok := s.releaseFor(req.Arch); ok && api.NewerVersion(rel.Version, req.AgentVersion) {
 		resp.AgentUpdate = &rel
 	}

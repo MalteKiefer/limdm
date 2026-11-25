@@ -211,6 +211,9 @@ func (a *Agent) evaluate() []api.CheckResult {
 				}
 			}
 		}
+		if r.Status == fail && slices.Contains(p.Advisory, c.ID) {
+			r.Status = "advisory" // reported, not counted against compliance
+		}
 		out = append(out, r)
 	}
 	return out

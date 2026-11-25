@@ -65,6 +65,7 @@ func serve(log *slog.Logger) error {
 		return err
 	}
 	defer srv.Close()
+	srv.Background(ctx)
 	agentTLS, err := srv.AgentTLSConfig()
 	if err != nil {
 		return err

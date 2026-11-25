@@ -27,36 +27,49 @@ var webFS embed.FS
 
 var staticFS, _ = fs.Sub(webFS, "web")
 
-var pages = func() map[string]*template.Template {
+var pages = map[string]map[string]*template.Template{"en": parsePages("en"), "de": parsePages("de")}
+
+func parsePages(lang string) map[string]*template.Template {
+	T := func(s string) string { return translate(lang, s) }
 	funcs := template.FuncMap{
+		"t":    T,
+		"lang": func() string { return lang },
 		"ago": func(t *time.Time) string {
 			if t == nil {
-				return "never"
+				return T("never")
 			}
 			switch d := time.Since(*t); {
 			case d < time.Minute:
-				return "just now"
+				return T("just now")
 			case d < time.Hour:
-				return fmt.Sprintf("%d min ago", int(d.Minutes()))
+				return fmt.Sprintf(T("%d min ago"), int(d.Minutes()))
 			case d < 48*time.Hour:
-				return fmt.Sprintf("%d h ago", int(d.Hours()))
+				return fmt.Sprintf(T("%d h ago"), int(d.Hours()))
 			default:
-				return fmt.Sprintf("%d d ago", int(d.Hours()/24))
+				return fmt.Sprintf(T("%d d ago"), int(d.Hours()/24))
 			}
 		},
-		"frac": func(v uint64, pct uint64) uint64 { return v * pct / 100 },
-		"inc":  func(n int) int { return n + 1 },
-		"dec":  func(n int) int { return n - 1 },
-		"list": func(v ...string) []string { return v },
+		"frac":      func(v uint64, pct uint64) uint64 { return v * pct / 100 },
+		"inc":       func(n int) int { return n + 1 },
+		"dec":       func(n int) int { return n - 1 },
+		"list":      func(v ...string) []string { return v },
+		"deref":     func(p *int64) int64 { return *p },
+		"derefTime": func(p *time.Time) time.Time { return *p },
+		"typeLabel": func(t string) string {
+			if l, ok := typeLabels[t]; ok {
+				return T(l)
+			}
+			return t
+		},
 		"actionLabel": func(a string) string {
-			return map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot in 1 minute",
-				"shutdown": "Shut down in 1 minute", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script"}[a]
+			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot in 1 minute",
+				"shutdown": "Shut down in 1 minute", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script"}[a])
 		},
 		"join":    strings.Join,
 		"fmtTime": func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") },
 		"gib": func(mb uint64) string {
 			if mb == 0 {
-				return "n/a"
+				return T("n/a")
 			}
 			return fmt.Sprintf("%.1f GiB", float64(mb)/1024)
 		},
@@ -79,12 +92,28 @@ var pages = func() map[string]*template.Template {
 		m[key] = template.Must(template.New("layout.html").Funcs(funcs).ParseFS(webFS, "web/layout.html", n))
 	}
 	return m
-}()
+}
 
 type handler func(w http.ResponseWriter, r *http.Request, sess session)
 
 // page enforces login, admin role for every state change, and CSRF.
-func (s *Server) page(h handler) http.HandlerFunc {
+func (s *Server) page(h handler) http.HandlerFunc { return s.pageFor(h, "admin") }
+
+// helpdeskPage additionally lets the helpdesk role post (device commands).
+func (s *Server) helpdeskPage(h handler) http.HandlerFunc { return s.pageFor(h, "helpdesk") }
+
+// adminOrAuditor hides administration pages from the helpdesk role.
+func (s *Server) adminOrAuditor(h handler) handler {
+	return func(w http.ResponseWriter, r *http.Request, sess session) {
+		if sess.Role == "helpdesk" {
+			http.Error(w, "not available for the helpdesk role", http.StatusForbidden)
+			return
+		}
+		h(w, r, sess)
+	}
+}
+
+func (s *Server) pageFor(h handler, postRole string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := s.session(w, r)
 		if !ok {
@@ -93,8 +122,8 @@ func (s *Server) page(h handler) http.HandlerFunc {
 		}
 		if r.Method == http.MethodPost {
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-			if sess.Role != "admin" {
-				http.Error(w, "read only role", http.StatusForbidden)
+			if sess.Role != "admin" && (postRole != "helpdesk" || sess.Role != "helpdesk") {
+				http.Error(w, "your role cannot change this", http.StatusForbidden)
 				return
 			}
 			if !s.csrfOK(r, sess) {
@@ -106,7 +135,17 @@ func (s *Server) page(h handler) http.HandlerFunc {
 	}
 }
 
-func (s *Server) render(w http.ResponseWriter, sess session, name string, data map[string]any) {
+var typeLabels = map[string]string{
+	api.TypeAgent: "Agent", api.TypeCompliance: "Compliance", api.TypeUpdates: "Software updates",
+	api.TypePackages: "Packages", api.TypeServices: "Services", api.TypeFiles: "Files", api.TypeFirewall: "Firewall",
+	api.TypeOSVersion: "OS versions", api.TypeScreenLock: "Screen lock", api.TypeLogin: "Desktop login (OIDC)",
+	api.TypePrivacy: "Privacy", api.TypeRepositories: "Package sources", api.TypeCertificates: "CA certificates",
+	api.TypeSysctl: "Kernel parameters", api.TypeKernelModules: "Blocked kernel modules", api.TypeSSH: "SSH server options",
+	api.TypeBanner: "Login banner", api.TypeDNS: "DNS", api.TypeNTP: "Time servers", api.TypeProxy: "Proxy",
+	api.TypeFlatpak: "Flatpak apps", api.TypeScripts: "Recurring scripts",
+}
+
+func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, name string, data map[string]any) {
 	if data == nil {
 		data = map[string]any{}
 	}
@@ -114,7 +153,7 @@ func (s *Server) render(w http.ResponseWriter, sess session, name string, data m
 	data["CSRF"] = s.csrfToken(sess)
 	data["Page"] = name
 	var buf bytes.Buffer
-	if err := pages[name].Execute(&buf, data); err != nil {
+	if err := pages[requestLang(r)][name].Execute(&buf, data); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -126,12 +165,28 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", s.page(s.overview))
 	mux.HandleFunc("GET /devices", s.page(s.devices))
 	mux.HandleFunc("GET /devices/{id}", s.page(s.device))
-	mux.HandleFunc("POST /devices/{id}/command", s.page(s.deviceCommand))
+	mux.HandleFunc("POST /devices/{id}/command", s.helpdeskPage(s.deviceCommand))
+	mux.HandleFunc("GET /directory", s.page(s.adminOrAuditor(s.directoryPage)))
+	mux.HandleFunc("POST /directory/groups", s.page(s.groupAssign))
+	mux.HandleFunc("POST /directory/scim-token", s.page(s.scimToken))
+	mux.HandleFunc("POST /directory/google", s.page(s.googleConfigure))
+	mux.HandleFunc("POST /directory/google/sync", s.page(s.googleSyncNow))
+	mux.HandleFunc("GET /users", s.page(s.adminOrAuditor(s.usersPage)))
+	mux.HandleFunc("POST /users", s.page(s.userAdd))
+	mux.HandleFunc("POST /users/update", s.page(s.userUpdate))
+	mux.HandleFunc("POST /users/reset", s.page(s.userReset))
+	mux.HandleFunc("GET /settings", s.page(s.adminOrAuditor(s.settingsPage)))
+	mux.HandleFunc("POST /settings", s.page(s.settingsSave))
 	mux.HandleFunc("POST /devices/{id}/assign", s.page(s.deviceAssign))
 	mux.HandleFunc("POST /devices/{id}/retire", s.page(s.deviceRetire))
 	mux.HandleFunc("GET /blueprints", s.page(s.blueprints))
 	mux.HandleFunc("GET /blueprints/{id}", s.page(s.blueprintEdit))
 	mux.HandleFunc("POST /blueprints", s.page(s.blueprintSave))
+	mux.HandleFunc("POST /blueprints/{id}/delete", s.page(s.blueprintDelete))
+	mux.HandleFunc("GET /library", s.page(s.library))
+	mux.HandleFunc("GET /library/{id}", s.page(s.libraryEdit))
+	mux.HandleFunc("POST /library", s.page(s.librarySave))
+	mux.HandleFunc("POST /library/{id}/delete", s.page(s.libraryDelete))
 	mux.HandleFunc("GET /tokens", s.page(s.tokens))
 	mux.HandleFunc("POST /tokens", s.page(s.tokenCreate))
 	mux.HandleFunc("GET /compliance", s.page(s.compliance))
@@ -145,6 +200,8 @@ type deviceRow struct {
 	ID, Hostname, OS, AgentVersion, Blueprints string
 	Desktop                                    string
 	MemoryMB                                   uint64
+	GraceUntil                                 *time.Time
+	AutoLocked                                 bool
 	Failing                                    int
 	Checks                                     int
 	LastSeen                                   *time.Time
@@ -158,8 +215,10 @@ func (s *Server) status(d *deviceRow) {
 		d.Status, d.Class = "retired", "na"
 	case d.LastSeen == nil || d.Checks == 0:
 		d.Status, d.Class = "pending", "warn"
-	case time.Since(*d.LastSeen) > s.cfg.StaleAfter:
+	case time.Since(*d.LastSeen) > s.staleAfter():
 		d.Status, d.Class = "stale", "warn"
+	case d.Failing > 0 && d.GraceUntil != nil && time.Now().Before(*d.GraceUntil):
+		d.Status, d.Class = "in grace", "warn"
 	case d.Failing > 0:
 		d.Status, d.Class = "non-compliant", "bad"
 	default:
@@ -169,16 +228,16 @@ func (s *Server) status(d *deviceRow) {
 
 func (s *Server) listDevices(ctx context.Context) ([]deviceRow, error) {
 	rows, err := s.db.Query(ctx, `SELECT d.id, d.hostname, coalesce(d.inventory->>'os_name',''), d.agent_version,
-		coalesce((SELECT string_agg(b.name, ', ' ORDER BY b.priority) FROM device_blueprints db JOIN blueprints b ON b.id=db.blueprint_id WHERE db.device_id=d.id),''),
+		coalesce((SELECT b.name FROM blueprints b WHERE b.id=d.blueprint_id),'default') || coalesce(' · ' || nullif(array_to_string(d.tags, ', '), ''), ''),
 		coalesce(d.inventory->>'desktop',''), coalesce((d.inventory->>'memory_mb')::bigint, 0),
-		d.failing, jsonb_array_length(d.checks), d.last_seen, d.retired
+		d.failing, jsonb_array_length(d.checks), d.last_seen, d.retired, d.grace_until, d.auto_locked
 		FROM devices d ORDER BY d.retired, d.hostname`)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (deviceRow, error) {
 		var d deviceRow
-		err := row.Scan(&d.ID, &d.Hostname, &d.OS, &d.AgentVersion, &d.Blueprints, &d.Desktop, &d.MemoryMB, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired)
+		err := row.Scan(&d.ID, &d.Hostname, &d.OS, &d.AgentVersion, &d.Blueprints, &d.Desktop, &d.MemoryMB, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &d.GraceUntil, &d.AutoLocked)
 		s.status(&d)
 		return d, err
 	})
@@ -203,8 +262,8 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 		}
 		shown = append(shown, d)
 	}
-	s.render(w, sess, "devices", map[string]any{"Devices": shown, "Total": len(list), "Counts": counts, "Q": q, "Status": status,
-		"Statuses": []string{"compliant", "non-compliant", "stale", "pending", "retired"}})
+	s.render(w, r, sess, "devices", map[string]any{"Devices": shown, "Total": len(list), "Counts": counts, "Q": q, "Status": status,
+		"Statuses": []string{"compliant", "in grace", "non-compliant", "stale", "pending", "retired"}})
 }
 
 // overview is the landing page: fleet state, OS mix, weakest controls, recent activity.
@@ -261,9 +320,14 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 		return
 	}
 	donut := donutChart([]donutPart{{"compliant", counts["compliant"], "ok"}, {"non-compliant", counts["non-compliant"], "bad"},
-		{"stale", counts["stale"], "warn"}, {"pending", counts["pending"], "na"}})
-	s.render(w, sess, "overview", map[string]any{"Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
-		"Recent": recent, "StaleHours": int(s.cfg.StaleAfter.Hours())})
+		{"in grace", counts["in grace"], "warn"}, {"stale", counts["stale"], "warn"}, {"pending", counts["pending"], "na"}})
+	trend, err := s.fleetChart(ctx)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.render(w, r, sess, "overview", map[string]any{"Trend": trend, "Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
+		"Recent": recent, "StaleHours": s.settings().StaleHours})
 }
 
 type donutPart struct {
@@ -307,35 +371,16 @@ func firstNonEmpty(v ...string) string {
 	return ""
 }
 
-type blueprintRow struct {
-	ID       int64
-	Name     string
-	Priority int
-	Updated  time.Time
-	Devices  int
-	Assigned bool
-}
-
-func (s *Server) blueprintList(ctx context.Context, deviceID string) ([]blueprintRow, error) {
-	rows, err := s.db.Query(ctx, `SELECT b.id, b.name, b.priority, b.updated_at,
-		(SELECT count(*) FROM device_blueprints db JOIN devices d ON d.id=db.device_id WHERE db.blueprint_id=b.id AND NOT d.retired),
-		EXISTS(SELECT 1 FROM device_blueprints db WHERE db.blueprint_id=b.id AND db.device_id=$1)
-		FROM blueprints b ORDER BY b.priority, b.name`, deviceID)
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, pgx.RowToStructByPos[blueprintRow])
-}
-
 func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
 	id := r.PathValue("id")
 	var d deviceRow
 	var inv, checks, decl, users, pkgs []byte
 	var enrolled, certExp time.Time
+	var since *time.Time
 	err := s.db.QueryRow(ctx, `SELECT id, hostname, agent_version, failing, jsonb_array_length(checks), last_seen, retired,
-		inventory, checks, decl_status, users, packages, enrolled_at, cert_not_after FROM devices WHERE id=$1`, id).
-		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &pkgs, &enrolled, &certExp)
+		inventory, checks, decl_status, users, packages, enrolled_at, cert_not_after, grace_until, auto_locked, noncompliant_since FROM devices WHERE id=$1`, id).
+		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &pkgs, &enrolled, &certExp, &d.GraceUntil, &d.AutoLocked, &since)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -380,7 +425,12 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		s.fail(w, err)
 		return
 	}
-	bps, err := s.blueprintList(ctx, id)
+	bps, err := s.allBlueprints(ctx, id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	charts, err := s.deviceCharts(ctx, id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -392,8 +442,24 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	want, err := effectiveDeclarations(ctx, tx, id)
+	res, err := resolveDevice(ctx, tx, id)
 	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	want := res.Decls
+	var tags, people []string
+	var primary string
+	if err := tx.QueryRow(ctx, `SELECT d.tags, coalesce(u.email,'') FROM devices d LEFT JOIN dir_users u ON u.id=d.primary_user_id WHERE d.id=$1`, id).Scan(&tags, &primary); err != nil {
+		s.fail(w, err)
+		return
+	}
+	rowsP, err := tx.Query(ctx, `SELECT email FROM dir_users WHERE active ORDER BY email LIMIT 2000`)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if people, err = pgx.CollectRows(rowsP, pgx.RowTo[string]); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -444,12 +510,13 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		}
 		declRows = append(declRows, row)
 	}
-	s.render(w, sess, "device", map[string]any{
+	s.render(w, r, sess, "device", map[string]any{
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
 		"CommandTypes": api.CommandTypes,
 		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab,
+		"Resolved": res, "Tags": strings.Join(tags, ", "), "Primary": primary, "People": people, "Since": since, "Charts": charts,
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "software", "compliance", "declarations", "commands"},
 	})
 }
@@ -462,6 +529,9 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 	}
 	if typ != "script" {
 		payload = ""
+	} else if sess.Role != "admin" {
+		http.Error(w, "scripts require the admin role", http.StatusForbidden)
+		return
 	}
 	err := s.auditAction(r.Context(), sess.Email, "command."+typ, id, truncate(payload, 2000), func(tx pgx.Tx) error {
 		_, err := tx.Exec(r.Context(), `INSERT INTO commands(device_id, type, payload, created_by) VALUES ($1,$2,$3,$4)`, id, typ, payload, sess.Email)
@@ -498,6 +568,22 @@ func parseUsers(text string) ([]api.User, error) {
 	return users, nil
 }
 
+// parseTags accepts a comma separated list of short labels.
+func parseTags(text string) ([]string, error) {
+	tags := []string{}
+	for _, t := range strings.Split(text, ",") {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t == "" || slices.Contains(tags, t) {
+			continue
+		}
+		if !identOK(t) || len(t) > 32 {
+			return nil, fmt.Errorf("invalid tag %q: up to 32 letters, digits, dot, dash, underscore", t)
+		}
+		tags = append(tags, t)
+	}
+	return tags, nil
+}
+
 func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess session) {
 	id := r.PathValue("id")
 	users, err := parseUsers(r.FormValue("users"))
@@ -505,24 +591,27 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	var bpIDs []int64
-	for _, v := range r.Form["blueprint"] {
-		n, err := strconv.ParseInt(v, 10, 64)
-		if err != nil {
-			http.Error(w, "invalid blueprint", http.StatusBadRequest)
+	var bpID *int64
+	if v, err := strconv.ParseInt(r.FormValue("blueprint_id"), 10, 64); err == nil && v > 0 {
+		bpID = &v
+	}
+	tags, err := parseTags(r.FormValue("tags"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var primary *int64
+	if email := strings.ToLower(strings.TrimSpace(r.FormValue("primary_user"))); email != "" {
+		var uid int64
+		if err := s.db.QueryRow(r.Context(), `SELECT id FROM dir_users WHERE email=$1`, email).Scan(&uid); err != nil {
+			http.Error(w, "primary user not found in the directory", http.StatusBadRequest)
 			return
 		}
-		bpIDs = append(bpIDs, n)
+		primary = &uid
 	}
 	ub, _ := json.Marshal(users)
-	err = s.auditAction(r.Context(), sess.Email, "device.assign", id, fmt.Sprintf("blueprints=%v users=%s", bpIDs, ub), func(tx pgx.Tx) error {
-		if _, err := tx.Exec(r.Context(), `UPDATE devices SET users=$2 WHERE id=$1`, id, string(ub)); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(r.Context(), `DELETE FROM device_blueprints WHERE device_id=$1`, id); err != nil {
-			return err
-		}
-		_, err := tx.Exec(r.Context(), `INSERT INTO device_blueprints(device_id, blueprint_id) SELECT $1, unnest($2::bigint[])`, id, bpIDs)
+	err = s.auditAction(r.Context(), sess.Email, "device.assign", id, fmt.Sprintf("blueprint=%v tags=%v users=%s", r.FormValue("blueprint_id"), tags, ub), func(tx pgx.Tx) error {
+		_, err := tx.Exec(r.Context(), `UPDATE devices SET users=$2, blueprint_id=$3, tags=$4, primary_user_id=$5 WHERE id=$1`, id, string(ub), bpID, tags, primary)
 		return err
 	})
 	if err != nil {
@@ -543,89 +632,6 @@ func (s *Server) deviceRetire(w http.ResponseWriter, r *http.Request, sess sessi
 		return
 	}
 	http.Redirect(w, r, "/devices/"+id, http.StatusSeeOther)
-}
-
-// ---- blueprints ----
-
-func (s *Server) blueprints(w http.ResponseWriter, r *http.Request, sess session) {
-	list, err := s.blueprintList(r.Context(), "")
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.render(w, sess, "blueprints", map[string]any{"Blueprints": list})
-}
-
-func (s *Server) blueprintEdit(w http.ResponseWriter, r *http.Request, sess session) {
-	var id int64
-	bp := api.Blueprint{Priority: 100, Declarations: []api.Declaration{}}
-	if v := r.PathValue("id"); v != "new" {
-		var raw []byte
-		var err error
-		id, err = strconv.ParseInt(v, 10, 64)
-		if err == nil {
-			err = s.db.QueryRow(r.Context(), `SELECT name, priority, declarations FROM blueprints WHERE id=$1`, id).Scan(&bp.Name, &bp.Priority, &raw)
-		}
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		if err := json.Unmarshal(raw, &bp.Declarations); err != nil {
-			s.fail(w, err)
-			return
-		}
-	}
-	pretty, _ := json.MarshalIndent(bp.Declarations, "", "  ")
-	s.renderBlueprint(w, sess, id, bp.Name, bp.Priority, string(pretty), "")
-}
-
-func (s *Server) renderBlueprint(w http.ResponseWriter, sess session, id int64, name string, prio int, doc, errMsg string) {
-	types := make([]string, 0, len(api.Types))
-	for t := range api.Types {
-		types = append(types, t)
-	}
-	sort.Strings(types)
-	var examples []map[string]string
-	for _, t := range types {
-		examples = append(examples, map[string]string{"Type": t, "Example": api.Types[t]})
-	}
-	s.render(w, sess, "blueprint", map[string]any{"ID": id, "Name": name, "Priority": prio, "Doc": doc, "Error": errMsg, "Types": examples})
-}
-
-func (s *Server) blueprintSave(w http.ResponseWriter, r *http.Request, sess session) {
-	id, _ := strconv.ParseInt(r.FormValue("id"), 10, 64)
-	prio, perr := strconv.Atoi(r.FormValue("priority"))
-	bp := api.Blueprint{Name: strings.TrimSpace(r.FormValue("name")), Priority: prio}
-	err := json.Unmarshal([]byte(r.FormValue("doc")), &bp.Declarations)
-	if err == nil && perr != nil {
-		err = errors.New("priority must be a number")
-	}
-	if err == nil {
-		err = bp.Validate()
-	}
-	if err != nil {
-		s.renderBlueprint(w, sess, id, bp.Name, prio, r.FormValue("doc"), err.Error())
-		return
-	}
-	doc, _ := json.Marshal(bp.Declarations)
-	err = s.auditAction(r.Context(), sess.Email, "blueprint.save", bp.Name, string(doc), func(tx pgx.Tx) error {
-		if id > 0 {
-			// The default blueprint applies to every device by name; it must keep it.
-			tag, err := tx.Exec(r.Context(), `UPDATE blueprints SET name=$2, priority=$3, declarations=$4, updated_at=now()
-				WHERE id=$1 AND (name <> 'default' OR $2 = 'default')`, id, bp.Name, bp.Priority, string(doc))
-			if err == nil && tag.RowsAffected() == 0 {
-				err = errors.New("blueprint not found, or default cannot be renamed")
-			}
-			return err
-		}
-		_, err := tx.Exec(r.Context(), `INSERT INTO blueprints(name, priority, declarations) VALUES ($1,$2,$3)`, bp.Name, bp.Priority, string(doc))
-		return err
-	})
-	if err != nil {
-		s.renderBlueprint(w, sess, id, bp.Name, prio, r.FormValue("doc"), err.Error())
-		return
-	}
-	http.Redirect(w, r, "/blueprints", http.StatusSeeOther)
 }
 
 // ---- enrollment tokens ----
@@ -651,12 +657,12 @@ func (s *Server) tokenPage(w http.ResponseWriter, r *http.Request, sess session,
 		s.fail(w, err)
 		return
 	}
-	bps, err := s.blueprintList(r.Context(), "")
+	bps, err := s.allBlueprints(r.Context(), "")
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	s.render(w, sess, "tokens", map[string]any{"Tokens": list, "Blueprints": bps, "Created": created,
+	s.render(w, r, sess, "tokens", map[string]any{"Tokens": list, "Blueprints": bps, "Created": created,
 		"AgentURL": s.cfg.AgentURL, "Fingerprint": s.ca.Fingerprint()})
 }
 
@@ -717,10 +723,10 @@ func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session
 	f := complianceFilter{Q: strings.ToLower(strings.TrimSpace(q.Get("q"))), State: q.Get("state"), Level: q.Get("level"),
 		Framework: q.Get("framework"), Sort: q.Get("sort")}
 	checks, controls := f.apply(fc.Checks, fc.Controls)
-	s.render(w, sess, "compliance", map[string]any{
+	s.render(w, r, sess, "compliance", map[string]any{
 		"F": f, "Shown": len(checks), "All": len(fc.Checks),
 		"Checks": checks, "Controls": controls, "Total": fc.Total, "Compliant": fc.Compliant, "Stale": fc.Stale,
-		"NonCompliant": fc.Noncompl, "Pending": fc.Pending, "StaleHours": int(s.cfg.StaleAfter.Hours()),
+		"NonCompliant": fc.Noncompl, "Pending": fc.Pending, "StaleHours": s.settings().StaleHours,
 	})
 }
 
@@ -787,7 +793,7 @@ func (s *Server) fleetCompliance(ctx context.Context) (fleetStats, error) {
 		switch {
 		case seen == nil || len(raw) <= 2:
 			pending++
-		case time.Since(*seen) > s.cfg.StaleAfter:
+		case time.Since(*seen) > s.staleAfter():
 			stale++
 		case failing == 0:
 			compliant++
@@ -877,7 +883,7 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session)
 		s.fail(w, err)
 		return
 	}
-	s.render(w, sess, "audit", map[string]any{"Entries": list, "BrokenAt": brokenAt})
+	s.render(w, r, sess, "audit", map[string]any{"Entries": list, "BrokenAt": brokenAt})
 }
 
 // verifyAudit recomputes the hash chain. Returns the first broken id or 0.

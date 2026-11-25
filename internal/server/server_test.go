@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -128,5 +129,16 @@ func TestAgentCertificateNames(t *testing.T) {
 	leaf, _ := x509.ParseCertificate(tc.Certificates[0].Certificate[0])
 	if leaf.VerifyHostname("mdm.example.com") != nil || leaf.VerifyHostname("192.0.2.10") != nil {
 		t.Fatalf("names: %v %v", leaf.DNSNames, leaf.IPAddresses)
+	}
+}
+
+func TestLineChartEscapes(t *testing.T) {
+	now := time.Now()
+	out := string(lineChart(`<script>`, "%", 100, now.Add(-time.Hour), now, []series{{`"><x`, "ok", []point{{now.Add(-time.Hour), 10}, {now, 250}}}}))
+	if strings.Contains(out, "<script>") || strings.Contains(out, `"><x`) {
+		t.Fatalf("unescaped label: %s", out)
+	}
+	if !strings.Contains(out, ">250%<") { // axis grows to the max value
+		t.Fatalf("axis not scaled: %s", out)
 	}
 }

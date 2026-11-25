@@ -248,3 +248,22 @@ func TestRepoParsers(t *testing.T) {
 		t.Fatalf("yum: %+v", r)
 	}
 }
+
+func TestSyncManaged(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(dir+"/limdm-old.sources", []byte("x"), 0o644)
+	os.WriteFile(dir+"/limdm-osquery.sources", []byte("keep"), 0o644)
+	os.WriteFile(dir+"/debian.sources", []byte("foreign"), 0o644)
+	changed, err := syncManaged(dir, "limdm-", ".sources", map[string]string{"limdm-new.sources": "y"}, "limdm-osquery.sources")
+	if err != nil || !changed {
+		t.Fatal(changed, err)
+	}
+	for f, want := range map[string]bool{"limdm-old.sources": false, "limdm-new.sources": true, "limdm-osquery.sources": true, "debian.sources": true} {
+		if exists(dir+"/"+f) != want {
+			t.Errorf("%s exists=%v", f, !want)
+		}
+	}
+	if changed, _ := syncManaged(dir, "limdm-", ".sources", map[string]string{"limdm-new.sources": "y"}, "limdm-osquery.sources"); changed {
+		t.Fatal("second run must not change anything")
+	}
+}

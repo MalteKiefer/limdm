@@ -33,14 +33,6 @@ type Declaration struct {
 	ServerToken string          `json:"server_token,omitempty"`
 }
 
-// Blueprint groups declarations. When several blueprints of a device declare
-// the same type, the one with the lowest priority number wins.
-type Blueprint struct {
-	Name         string        `json:"name"`
-	Priority     int           `json:"priority"`
-	Declarations []Declaration `json:"declarations"`
-}
-
 const (
 	TypeAgent      = "com.limdm.agent"
 	TypeCompliance = "com.limdm.compliance"
@@ -58,7 +50,7 @@ const (
 // Types lists every declaration type with a short description for the UI.
 var Types = map[string]string{
 	TypeAgent:      `{"checkin_seconds": 300}`,
-	TypeCompliance: `{"level": 1, "remediate": true, "exclude": []}`,
+	TypeCompliance: `{"level": 1, "remediate": true, "exclude": [], "advisory": ["boot.secureboot"], "grace_hours": 72, "notify": true, "lock_after_hours": 0, "unlock_when_compliant": true}`,
 	TypeUpdates:    `{"mode": "security", "window": "02:00-05:00", "reboot": false}`,
 	TypePackages:   `{"install": [], "remove": []}`,
 	TypeServices:   `{"enable": [], "disable": []}`,
@@ -84,6 +76,7 @@ type Policy struct {
 	ScreenLockSeconds int               `json:"screen_lock_seconds"`
 	Login             Login             `json:"login"`
 	Privacy           Privacy           `json:"privacy"`
+	Extra             ExtraPolicy       `json:"extra"`
 }
 
 type agentPayload struct {
@@ -91,9 +84,15 @@ type agentPayload struct {
 }
 
 type Compliance struct {
-	Level     int      `json:"level"`     // 1 = CIS Level 1 baseline, 2 = Level 2 strict
-	Remediate bool     `json:"remediate"` // agent fixes failing checks that have an automatic fix
-	Exclude   []string `json:"exclude"`   // check IDs accepted as risk (documented exception)
+	Level     int      `json:"level"`              // 1 = CIS Level 1 baseline, 2 = Level 2 strict
+	Remediate bool     `json:"remediate"`          // agent fixes failing checks that have an automatic fix
+	Exclude   []string `json:"exclude"`            // check IDs accepted as risk (documented exception)
+	Advisory  []string `json:"advisory,omitempty"` // reported, but not counted against compliance
+	// Evaluated by the server:
+	GraceHours          int  `json:"grace_hours,omitempty"`      // time to fix before the device counts as non-compliant
+	Notify              bool `json:"notify,omitempty"`           // call the compliance webhook when the grace period ends
+	LockAfterHours      int  `json:"lock_after_hours,omitempty"` // lock the device after this long non-compliant (0 = never)
+	UnlockWhenCompliant bool `json:"unlock_when_compliant,omitempty"`
 }
 
 type Updates struct {
@@ -151,22 +150,6 @@ type Privacy struct {
 	LoggedInUsers bool `json:"logged_in_users"` // usernames of active sessions
 }
 
-// DefaultBlueprint is a CIS Level 1 baseline applied to every device.
-func DefaultBlueprint() Blueprint {
-	d := func(id, typ, payload string) Declaration {
-		return Declaration{Identifier: id, Type: typ, Payload: json.RawMessage(payload)}
-	}
-	return Blueprint{Name: "default", Priority: 1000, Declarations: []Declaration{
-		d("agent", TypeAgent, `{"checkin_seconds":300}`),
-		d("compliance", TypeCompliance, `{"level":1,"remediate":true,"exclude":[]}`),
-		d("updates", TypeUpdates, `{"mode":"security","window":"02:00-05:00","reboot":false}`),
-		d("firewall", TypeFirewall, `{"enforce":true,"allow":["22/tcp"]}`),
-		d("osversion", TypeOSVersion, `{"min":{"ubuntu":"22.04","debian":"12","fedora":"41"}}`),
-		d("screenlock", TypeScreenLock, `{"idle_seconds":300}`),
-		d("privacy", TypePrivacy, `{"network_info":false,"logged_in_users":false}`),
-	}}
-}
-
 var (
 	pkgRe     = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9+._:-]{0,127}$`)
 	unitRe    = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9@._:-]{0,127}$`)
@@ -212,8 +195,20 @@ func (d Declaration) apply(p *Policy) error {
 		if err := strict(d.Payload, &p.Compliance); err != nil {
 			return err
 		}
-		if p.Compliance.Level != 1 && p.Compliance.Level != 2 {
+		c := p.Compliance
+		if c.Level != 1 && c.Level != 2 {
 			bad("level must be 1 or 2")
+		}
+		if c.GraceHours < 0 || c.GraceHours > 2160 || c.LockAfterHours < 0 || c.LockAfterHours > 2160 {
+			bad("grace_hours and lock_after_hours must be 0..2160")
+		}
+		if c.LockAfterHours > 0 && c.LockAfterHours < c.GraceHours {
+			bad("lock_after_hours must not be shorter than grace_hours")
+		}
+		for _, id := range append(slices.Clone(c.Exclude), c.Advisory...) {
+			if !identRe.MatchString(id) {
+				bad("invalid check ID %q", id)
+			}
 		}
 	case TypeUpdates:
 		if err := strict(d.Payload, &p.Updates); err != nil {
@@ -301,29 +296,10 @@ func (d Declaration) apply(p *Policy) error {
 			return err
 		}
 	default:
+		if ok, err := d.applyExtra(p); ok {
+			return err
+		}
 		return fmt.Errorf("unknown declaration type %q", d.Type)
-	}
-	return errors.Join(errs...)
-}
-
-// Validate checks a blueprint before it is stored.
-func (b Blueprint) Validate() error {
-	if !identRe.MatchString(b.Name) {
-		return fmt.Errorf("invalid blueprint name %q", b.Name)
-	}
-	var errs []error
-	ids, types := map[string]bool{}, map[string]bool{}
-	for _, d := range b.Declarations {
-		if ids[d.Identifier] {
-			errs = append(errs, fmt.Errorf("duplicate identifier %q", d.Identifier))
-		}
-		if types[d.Type] {
-			errs = append(errs, fmt.Errorf("type %s declared twice in one blueprint", d.Type))
-		}
-		ids[d.Identifier], types[d.Type] = true, true
-		if err := d.apply(&Policy{}); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", d.Identifier, err))
-		}
 	}
 	return errors.Join(errs...)
 }
@@ -336,23 +312,13 @@ func (d Declaration) Token() string {
 	return hex.EncodeToString(h[:8])
 }
 
-// Effective picks, per type, the declaration of the highest priority blueprint
-// (lowest number). Blueprints must be sorted by priority.
-func Effective(bps []Blueprint) []Declaration {
-	seen := map[string]bool{}
-	var out []Declaration
-	for _, b := range bps {
-		for _, d := range b.Declarations {
-			if seen[d.Type] {
-				continue
-			}
-			seen[d.Type] = true
-			d.ServerToken = d.Token()
-			out = append(out, d)
-		}
+// DefaultDeclarations is the baseline an agent enforces before its first sync.
+func DefaultDeclarations() []Declaration {
+	d, err := Merge(DefaultLibrary())
+	if err != nil {
+		panic(err) // static data, covered by tests
 	}
-	slices.SortFunc(out, func(a, b Declaration) int { return strings.Compare(a.Type, b.Type) })
-	return out
+	return d
 }
 
 // DeclarationsToken summarises a set of declarations for change detection.
@@ -569,7 +535,16 @@ type CheckinRequest struct {
 	Packages          []Package       `json:"packages,omitempty"`
 	PackagesHash      string          `json:"packages_hash"`
 	Results           []CommandResult `json:"results,omitempty"`
+	Metrics           *Metrics        `json:"metrics,omitempty"` // sent every check in, outside the status hash
 	Events            []string        `json:"events,omitempty"`
+}
+
+// Metrics are point in time measurements for history charts.
+type Metrics struct {
+	MemUsedMB   uint64  `json:"mem_used_mb"`
+	MemTotalMB  uint64  `json:"mem_total_mb"`
+	RootUsedPct float64 `json:"root_used_pct"`
+	Load1       float64 `json:"load1"`
 }
 
 type CheckinResponse struct {

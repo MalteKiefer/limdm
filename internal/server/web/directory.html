@@ -1,0 +1,48 @@
+{{define "title"}}{{t "Directory · LiMDM"}}{{end}}
+{{define "content"}}
+<div class="page-head"><div><h1>{{t "Directory"}}</h1><div class="meta"><span>{{len .Users}} {{t "people"}}</span><span>{{len .Groups}} {{t "groups"}}</span><span>{{t "from SCIM or Google Workspace"}}</span></div></div></div>
+{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+{{if .Msg}}<div class="notice ok" role="status">{{t .Msg}}</div>{{end}}
+{{if .Token}}<div class="notice ok" role="status"><strong>{{t "SCIM token"}}</strong> (shown only once):<pre>{{.Token}}</pre></div>{{end}}
+<section class="tablecard" id="groups">
+  <div class="card-head"><h2>{{t "Groups"}}</h2><span class="muted">{{t "devices without an explicit blueprint get the blueprint of their primary user's group; lower priority wins"}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Group"}}</th><th>{{t "Source"}}</th><th class="num">{{t "Members"}}</th><th>{{t "Blueprint"}}</th></tr></thead>
+    <tbody>{{$s := .}}{{range .Groups}}<tr><td>{{.Name}}</td><td>{{.Source}}</td><td class="num">{{.Members}}</td>
+      <td>{{if eq $s.Sess.Role "admin"}}<form class="inline-form" method="post" action="/directory/groups"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="group_id" value="{{.ID}}">
+        <select name="blueprint_id" aria-label="{{t "Blueprint"}}"><option value="0">{{t "none"}}</option>{{$cur := .Blueprint}}{{range $s.Blueprints}}<option value="{{.ID}}" {{if and $cur (eq (deref $cur) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select>
+        <input name="priority" type="number" min="0" max="10000" value="{{if .Priority}}{{.Priority}}{{else}}100{{end}}" class="small" aria-label="{{t "Priority"}}">
+        <button class="secondary small">{{t "Save"}}</button></form>{{end}}</td></tr>{{else}}<tr><td colspan="4" class="empty">{{t "No groups yet. Connect an identity provider below."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "People"}}</h2></div>
+  <form class="filters" method="get" action="/directory"><input type="search" name="q" value="{{.Q}}" placeholder="{{t "Search name, email, department"}}" aria-label="{{t "Search people"}}"><button class="secondary">{{t "Search"}}</button></form>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Name"}}</th><th>{{t "Email"}}</th><th>{{t "Department"}}</th><th>{{t "Groups"}}</th><th>{{t "Source"}}</th><th>{{t "State"}}</th></tr></thead>
+    <tbody>{{range .Users}}<tr><td>{{.DisplayName}}<span class="sub">{{.Title}}</span></td><td class="mono">{{.Email}}</td><td>{{.Department}}</td>
+      <td>{{range .Groups}}<span class="tag">{{.}}</span>{{end}}</td><td>{{.Source}}</td><td>{{if .Active}}<span class="pill ok">{{t "active"}}</span>{{else}}<span class="pill">{{t "inactive"}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No people yet."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+{{if eq .Sess.Role "admin"}}
+<div class="grid two">
+  <section class="card">
+    <h2>{{t "SCIM 2.0"}}</h2>
+    <p class="muted">{{t "For Okta, Microsoft Entra ID, authentik and JumpCloud. Configure the app with this base URL and a bearer token."}}</p>
+    <dl class="kv"><dt>{{t "Base URL"}}</dt><dd class="mono">{{.SCIMURL}}</dd><dt>{{t "Token"}}</dt><dd>{{if .SCIMSet}}{{t "set (stored as hash)"}}{{else}}{{t "not set"}}{{end}}</dd></dl>
+    <form method="post" action="/directory/scim-token"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary">{{if .SCIMSet}}{{t "Rotate token"}}{{else}}{{t "Create token"}}{{end}}</button></form>
+  </section>
+  <form class="card" method="post" action="/directory/google">
+    <h2>{{t "Google Workspace"}}</h2>
+    <p class="muted">Google cannot push SCIM to custom apps, so LiMDM reads the directory: create a service account with domain wide delegation for the read only scopes
+      <code>admin.directory.user.readonly</code>, <code>admin.directory.group.readonly</code> and <code>admin.directory.group.member.readonly</code>.</p>
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>{{t "Admin to impersonate"}}<input name="admin_email" value="{{.Google.AdminEmail}}" placeholder="{{t "admin@example.com"}}"></label>
+    <label>{{t "Service account key"}} <span class="hint">{{if .GoogleConfigured}}{{t "stored encrypted; paste a new JSON key to replace"}}{{else}}{{t "paste the JSON key file"}}{{end}}</span>
+      <textarea name="service_account" rows="4" class="code" spellcheck="false" autocomplete="off"></textarea></label>
+    <div class="form-foot"><span class="muted">{{if not .Google.LastSync.IsZero}}{{t "Last sync"}} {{fmtTime .Google.LastSync}}: {{.Google.LastResult}}{{else}}{{t "Syncs hourly once configured."}}{{end}}</span><button>{{t "Save and sync"}}</button></div>
+  </form>
+</div>
+{{if .GoogleConfigured}}<form method="post" action="/directory/google/sync"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary">{{t "Sync Google now"}}</button></form>{{end}}
+{{end}}
+{{end}}

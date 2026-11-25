@@ -10,11 +10,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/oauth2"
 )
 
@@ -30,16 +30,16 @@ type oidcAuth struct {
 	oauth    oauth2.Config
 }
 
-func newOIDCAuth(ctx context.Context, cfg Config) (*oidcAuth, error) {
-	p, err := oidc.NewProvider(ctx, cfg.OIDCIssuer)
+func newOIDCAuthFrom(ctx context.Context, issuer, clientID, secret, publicURL string) (*oidcAuth, error) {
+	p, err := oidc.NewProvider(ctx, issuer)
 	if err != nil {
 		return nil, err
 	}
 	return &oidcAuth{
-		verifier: p.Verifier(&oidc.Config{ClientID: cfg.OIDCClientID}),
+		verifier: p.Verifier(&oidc.Config{ClientID: clientID}),
 		oauth: oauth2.Config{
-			ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCSecret, Endpoint: p.Endpoint(),
-			RedirectURL: cfg.PublicURL + "/auth/callback", Scopes: []string{oidc.ScopeOpenID, "email", "profile"},
+			ClientID: clientID, ClientSecret: secret, Endpoint: p.Endpoint(),
+			RedirectURL: publicURL + "/auth/callback", Scopes: []string{oidc.ScopeOpenID, "email", "profile"},
 		},
 	}, nil
 }
@@ -89,21 +89,23 @@ func (s *Server) setCookie(w http.ResponseWriter, name, val string, maxAge time.
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
-	if s.auth == nil {
+	auth := s.oidc()
+	if auth == nil {
 		http.NotFound(w, r)
 		return
 	}
 	f := flow{State: randToken(24), Nonce: randToken(24), Verifier: oauth2.GenerateVerifier(), Exp: time.Now().Add(10 * time.Minute)}
 	s.setCookie(w, flowCookie, s.seal(f), 10*time.Minute)
 	opts := []oauth2.AuthCodeOption{oauth2.S256ChallengeOption(f.Verifier), oidc.Nonce(f.Nonce)}
-	if s.cfg.AllowedDomain != "" {
-		opts = append(opts, oauth2.SetAuthURLParam("hd", s.cfg.AllowedDomain)) // Google account chooser hint, enforced below
+	if d := s.settings().AllowedDomain; d != "" {
+		opts = append(opts, oauth2.SetAuthURLParam("hd", d)) // Google account chooser hint, enforced below
 	}
-	http.Redirect(w, r, s.auth.oauth.AuthCodeURL(f.State, opts...), http.StatusFound)
+	http.Redirect(w, r, auth.oauth.AuthCodeURL(f.State, opts...), http.StatusFound)
 }
 
 func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
-	if s.auth == nil {
+	auth := s.oidc()
+	if auth == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -116,13 +118,13 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setCookie(w, flowCookie, "", -1)
-	tok, err := s.auth.oauth.Exchange(ctx, r.URL.Query().Get("code"), oauth2.VerifierOption(f.Verifier))
+	tok, err := auth.oauth.Exchange(ctx, r.URL.Query().Get("code"), oauth2.VerifierOption(f.Verifier))
 	if err != nil {
 		http.Error(w, "login failed", http.StatusUnauthorized)
 		return
 	}
 	raw, _ := tok.Extra("id_token").(string)
-	idt, err := s.auth.verifier.Verify(ctx, raw)
+	idt, err := auth.verifier.Verify(ctx, raw)
 	if err != nil || idt.Nonce != f.Nonce {
 		http.Error(w, "login failed", http.StatusUnauthorized)
 		return
@@ -137,7 +139,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email := strings.ToLower(claims.Email)
-	role := s.roleFor(email, claims.EmailVerified, claims.HD)
+	role := s.roleFor(ctx, email, claims.EmailVerified, claims.HD)
 	if role == "" {
 		if err := s.auditAction(ctx, email, "login.denied", "", "not an admin or auditor", nil); err != nil {
 			s.log.Error("audit login.denied", "err", err)
@@ -146,7 +148,10 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	if err := s.auditAction(ctx, email, "login", "", role, nil); err != nil {
+	if err := s.auditAction(ctx, email, "login", "", role, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE console_users SET last_login=now() WHERE email=$1`, email)
+		return err
+	}); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -154,20 +159,14 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-func (s *Server) roleFor(email string, verified bool, hd string) string {
+func (s *Server) roleFor(ctx context.Context, email string, verified bool, hd string) string {
 	if !verified || email == "" {
 		return ""
 	}
-	if d := s.cfg.AllowedDomain; d != "" && !strings.EqualFold(hd, d) && !strings.HasSuffix(email, "@"+d) {
+	if d := s.settings().AllowedDomain; d != "" && !strings.EqualFold(hd, d) && !strings.HasSuffix(email, "@"+d) {
 		return ""
 	}
-	switch {
-	case slices.Contains(s.cfg.Admins, email):
-		return "admin"
-	case slices.Contains(s.cfg.Auditors, email):
-		return "auditor"
-	}
-	return ""
+	return s.oidcRole(ctx, email)
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
@@ -196,18 +195,19 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) (session, bool)
 	// takes effect on restart, disabling a local admin immediately.
 	switch {
 	case strings.HasPrefix(sess.Email, localPrefix):
-		if !s.cfg.LocalLogin {
+		if !s.settings().LocalLogin {
 			return sess, false
 		}
 		if sess.Role = s.localRole(r.Context(), strings.TrimPrefix(sess.Email, localPrefix)); sess.Role == "" {
 			return sess, false
 		}
-	case slices.Contains(s.cfg.Admins, sess.Email):
-		sess.Role = "admin"
-	case slices.Contains(s.cfg.Auditors, sess.Email):
-		sess.Role = "auditor"
 	default:
-		return sess, false
+		if s.oidc() == nil {
+			return sess, false
+		}
+		if sess.Role = s.oidcRole(r.Context(), sess.Email); sess.Role == "" {
+			return sess, false
+		}
 	}
 	sess.Last = now
 	s.setCookie(w, sessionCookie, s.seal(sess), maxSession-now.Sub(sess.IAT))

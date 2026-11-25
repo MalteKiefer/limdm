@@ -5,10 +5,13 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"io"
@@ -18,10 +21,12 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/maltekiefer/limdm/internal/api"
@@ -60,6 +65,12 @@ func TestIntegration(t *testing.T) {
 		PublicURL: "https://mdm.test", AgentURL: "https://127.0.0.1:8444", StaleAfter: 24 * time.Hour,
 		SessionKey: bytes.Repeat([]byte{7}, 32), Admins: []string{"admin@firma.de"}, Auditors: []string{"audit@firma.de"}, LocalLogin: true,
 	}}
+
+	if err := s.seedConsoleUsers(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// OIDC "configured" without network discovery: sessions of OIDC users stay valid
+	s.rt.Store(&runtimeState{set: Settings{LocalLogin: true, StaleHours: 24, OIDCIssuer: "https://idp.test", OIDCClientID: "x"}, auth: &oidcAuth{}})
 
 	// ---- admin UI with a forged, validly signed session ----
 	admin := httptest.NewServer(s.AdminHandler())
@@ -188,7 +199,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	status := &api.Status{
-		Inventory: api.Inventory{Hostname: "laptop1", OSName: "Debian GNU/Linux 12", Arch: "amd64", MemoryMB: 16384, Desktop: "GNOME 43",
+		Inventory: api.Inventory{Hostname: "laptop1", OSID: "debian", OSVersion: "12", OSName: "Debian GNU/Linux 12", Arch: "amd64", MemoryMB: 16384, Desktop: "GNOME 43",
 			Disks:   []api.Disk{{Name: "/dev/nvme0n1", Model: "Test SSD", SizeGB: 512, Type: "nvme"}},
 			Volumes: []api.Volume{{Device: "/dev/mapper/root", Mount: "/", FS: "ext4", SizeGB: 500, FreeGB: 40, Encrypted: true}}},
 		Checks: []api.CheckResult{
@@ -216,23 +227,54 @@ func TestIntegration(t *testing.T) {
 		t.Fatal("unknown status hash must request full status")
 	}
 
-	// blueprint with stricter compliance, assigned to the device
-	strict := `[{"identifier":"strict","type":"com.limdm.compliance","payload":{"level":2,"remediate":true,"exclude":[]}}]`
-	if code, body := ui("POST", "/blueprints", url.Values{"name": {"strict"}, "priority": {"10"}, "doc": {strict}}, adminSess); code != http.StatusSeeOther {
-		t.Fatalf("blueprint save: %d %s", code, body)
+	// library items and a blueprint with a condition, inheriting from default
+	itemID := func(name string) string {
+		var id string
+		db.QueryRow(ctx, `SELECT id::text FROM library_items WHERE name=$1`, name).Scan(&id)
+		return id
 	}
-	if code, body := ui("POST", "/blueprints", url.Values{"name": {"bad"}, "priority": {"10"}, "doc": {`[{"identifier":"p","type":"com.limdm.packages","payload":{"install":["--evil"]}}]`}}, adminSess); code != 200 || !strings.Contains(body, "invalid package") {
-		t.Fatal("invalid blueprint must be rejected")
+	saveItem := func(name, typ, payload string) (int, string) {
+		return ui("POST", "/library", url.Values{"name": {name}, "type": {typ}, "payload": {payload}}, adminSess)
+	}
+	if code, body := saveItem("CIS Level 2", api.TypeCompliance, `{"level":2,"remediate":true,"exclude":[]}`); code != http.StatusSeeOther {
+		t.Fatalf("library save: %d %s", code, body)
+	}
+	if code, _ := saveItem("Debian tools", api.TypePackages, `{"install":["htop"],"remove":[]}`); code != http.StatusSeeOther {
+		t.Fatal("library save packages")
+	}
+	if code, body := saveItem("evil", api.TypePackages, `{"install":["--evil"]}`); code != 200 || !strings.Contains(body, "invalid package") {
+		t.Fatal("invalid library item must be rejected")
 	}
 	var defID string
 	db.QueryRow(ctx, `SELECT id::text FROM blueprints WHERE name='default'`).Scan(&defID)
-	if code, body := ui("POST", "/blueprints", url.Values{"id": {defID}, "name": {"renamed"}, "priority": {"1000"}, "doc": {"[]"}}, adminSess); code != 200 || !strings.Contains(body, "cannot be renamed") {
+	tree := `[{"kind":"assign","items":[` + itemID("CIS Level 2") + `]},
+		{"kind":"if","branches":[{"match":"all","rules":[{"field":"os.id","op":"eq","value":"debian"},{"field":"tag","op":"has","value":"lab"}],
+		"nodes":[{"kind":"assign","items":[` + itemID("Debian tools") + `]}]}],"else":[]}]`
+	if code, body := ui("POST", "/blueprints", url.Values{"name": {"strict"}, "parent_id": {defID}, "tree": {tree}}, adminSess); code != http.StatusSeeOther {
+		t.Fatalf("blueprint save: %d %s", code, body)
+	}
+	if code, body := ui("POST", "/blueprints", url.Values{"name": {"bad"}, "tree": {`[{"kind":"assign","items":[99999]}]`}}, adminSess); code != 200 || !strings.Contains(body, "does not exist") {
+		t.Fatal("blueprint with unknown item must be rejected")
+	}
+	if code, body := ui("POST", "/blueprints", url.Values{"id": {defID}, "name": {"renamed"}, "tree": {"[]"}}, adminSess); code != 200 || !strings.Contains(body, "cannot be renamed") {
 		t.Fatalf("renaming default must be refused: %d", code)
 	}
 	var bpID string
 	db.QueryRow(ctx, `SELECT id::text FROM blueprints WHERE name='strict'`).Scan(&bpID)
-	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/assign", url.Values{"blueprint": {bpID}, "users": {"mm max@firma.de admin"}}, adminSess); code != http.StatusSeeOther {
+	ui("POST", "/blueprints", url.Values{"name": {"child"}, "parent_id": {bpID}, "tree": {"[]"}}, adminSess)
+	var childID string
+	db.QueryRow(ctx, `SELECT id::text FROM blueprints WHERE name='child'`).Scan(&childID)
+	if code, body := ui("POST", "/blueprints", url.Values{"id": {bpID}, "name": {"strict"}, "parent_id": {childID}, "tree": {tree}}, adminSess); code != 200 || !strings.Contains(body, "cycle") {
+		t.Fatal("inheritance cycle must be refused")
+	}
+	if code, _ := ui("POST", "/library/"+itemID("Debian tools")+"/delete", url.Values{}, adminSess); code != http.StatusConflict {
+		t.Fatal("deleting an item in use must be refused")
+	}
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/assign", url.Values{"blueprint_id": {bpID}, "tags": {"Lab, berlin"}, "users": {"mm max@firma.de admin"}}, adminSess); code != http.StatusSeeOther {
 		t.Fatalf("assign: %d", code)
+	}
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/assign", url.Values{"tags": {"no spaces allowed"}}, adminSess); code != http.StatusBadRequest {
+		t.Fatal("invalid tag accepted")
 	}
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"rm -rf"}}, adminSess); code != http.StatusBadRequest {
 		t.Fatalf("unknown command type accepted: %d", code)
@@ -246,11 +288,14 @@ func TestIntegration(t *testing.T) {
 	if cr.DeclarationsToken == firstToken || pol.Compliance.Level != 2 || len(cr.Users) != 1 || len(cr.Commands) != 1 {
 		t.Fatalf("after assignment: level=%d users=%v cmds=%v", pol.Compliance.Level, cr.Users, cr.Commands)
 	}
+	if !slices.Contains(pol.Packages.Install, "htop") || pol.Updates.Mode != "security" {
+		t.Fatalf("condition (debian + tag lab) or inherited default not applied: %+v", pol)
+	}
 	call(dev, "/api/v1/checkin", api.CheckinRequest{DeclarationsToken: cr.DeclarationsToken, StatusHash: "s1", PackagesHash: "p1",
 		Results: []api.CommandResult{{ID: cr.Commands[0].ID, OK: true, Output: "ok"}}, Events: []string{"remediated kernel.aslr"}}, nil)
 
 	// every admin page renders
-	pages := []string{"/", "/devices", "/devices?status=non-compliant&q=laptop", "/compliance", "/compliance?state=failing&level=1&framework=iso&sort=fail&q=luks", "/blueprints", "/blueprints/" + bpID, "/blueprints/new", "/tokens", "/audit"}
+	pages := []string{"/", "/devices", "/devices?status=non-compliant&q=laptop", "/compliance", "/compliance?state=failing&level=1&framework=iso&sort=fail&q=luks", "/blueprints", "/blueprints/" + bpID, "/blueprints/new", "/library", "/library/new?type=com.limdm.packages", "/library/" + itemID("Debian tools"), "/tokens", "/audit"}
 	for _, tab := range []string{"overview", "hardware", "software", "compliance", "declarations", "commands"} {
 		pages = append(pages, "/devices/"+er.DeviceID+"?tab="+tab+"&q=open&page=2")
 	}
@@ -268,6 +313,90 @@ func TestIntegration(t *testing.T) {
 	}
 	if _, body := ui("GET", "/devices/"+er.DeviceID+"?tab=declarations", nil, auditor); !strings.Contains(body, "com.limdm.compliance") {
 		t.Fatal("device page must list declarations")
+	}
+
+	// ---- directory: SCIM provisioning and group based blueprint assignment ----
+	_, body = ui("POST", "/directory/scim-token", url.Values{}, adminSess)
+	scimTok := regexp.MustCompile(`lms_[A-Za-z0-9_-]+`).FindString(body)
+	if scimTok == "" {
+		t.Fatal("no SCIM token shown")
+	}
+	scim := func(method, path, tok string, in any, out any) int {
+		t.Helper()
+		var rd io.Reader
+		if in != nil {
+			b, _ := json.Marshal(in)
+			rd = bytes.NewReader(b)
+		}
+		req, _ := http.NewRequest(method, admin.URL+"/scim/v2"+path, rd)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		req.Header.Set("Content-Type", "application/scim+json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if out != nil {
+			json.NewDecoder(resp.Body).Decode(out)
+		}
+		return resp.StatusCode
+	}
+	if code := scim("GET", "/Users", "wrong", nil, nil); code != http.StatusUnauthorized {
+		t.Fatalf("SCIM without valid token: %d", code)
+	}
+	var created struct{ ID string }
+	if code := scim("POST", "/Users", scimTok, map[string]any{"schemas": []string{scimUserSchema}, "userName": "max@firma.de", "externalId": "ext-1",
+		"name": map[string]string{"givenName": "Max", "familyName": "Muster"}, "emails": []map[string]any{{"value": "Max@Firma.de", "primary": true}},
+		scimEnterprise: map[string]string{"department": "Finance"}}, &created); code != http.StatusCreated || created.ID == "" {
+		t.Fatalf("SCIM create user: %d", code)
+	}
+	if code := scim("POST", "/Users", scimTok, map[string]any{"userName": "max@firma.de", "emails": []map[string]any{{"value": "max@firma.de"}}}, nil); code != http.StatusConflict {
+		t.Fatalf("duplicate SCIM user: %d", code)
+	}
+	var list struct{ TotalResults int }
+	scim("GET", `/Users?filter=userName+eq+%22max@firma.de%22`, scimTok, nil, &list)
+	if list.TotalResults != 1 {
+		t.Fatalf("SCIM filter: %d", list.TotalResults)
+	}
+	var grp struct{ ID string }
+	if code := scim("POST", "/Groups", scimTok, map[string]any{"displayName": "finance-laptops", "members": []map[string]string{}}, &grp); code != http.StatusCreated {
+		t.Fatalf("SCIM create group: %d", code)
+	}
+	if code := scim("PATCH", "/Groups/"+grp.ID, scimTok, map[string]any{"schemas": []string{scimPatch}, "Operations": []map[string]any{
+		{"op": "Add", "path": "members", "value": []map[string]string{{"value": created.ID}}}}}, nil); code != 200 {
+		t.Fatalf("SCIM add member: %d", code)
+	}
+	var gid string
+	db.QueryRow(ctx, `SELECT id::text FROM dir_groups WHERE name='finance-laptops'`).Scan(&gid)
+	ui("POST", "/directory/groups", url.Values{"group_id": {gid}, "blueprint_id": {childID}, "priority": {"5"}}, adminSess)
+	// clear the explicit blueprint, set the primary user: the group's blueprint must win over default
+	if code, body := ui("POST", "/devices/"+er.DeviceID+"/assign", url.Values{"blueprint_id": {"0"}, "primary_user": {"max@firma.de"}, "tags": {"lab"}}, adminSess); code != http.StatusSeeOther {
+		t.Fatalf("assign primary user: %d %s", code, body)
+	}
+	tx0, _ := db.Begin(ctx)
+	resGroup, err := resolveDevice(ctx, tx0, er.DeviceID)
+	tx0.Rollback(ctx)
+	if err != nil || resGroup.Chain[len(resGroup.Chain)-1].Name != "child" {
+		t.Fatalf("group assignment not applied: %v %+v", err, resGroup.Chain)
+	}
+	txf, _ := db.Begin(ctx)
+	facts, _, _ := deviceFacts(ctx, txf, er.DeviceID)
+	txf.Rollback(ctx) // an open transaction would block later schema DDL
+	if len(facts.Groups) != 1 || facts.Department != "Finance" {
+		t.Fatalf("directory facts: %+v", facts)
+	}
+	// Entra deactivates with a string boolean; the device loses the group blueprint
+	if code := scim("PATCH", "/Users/"+created.ID, scimTok, map[string]any{"Operations": []map[string]any{{"op": "Replace", "path": "active", "value": "False"}}}, nil); code != 200 {
+		t.Fatalf("SCIM deactivate: %d", code)
+	}
+	tx1, _ := db.Begin(ctx)
+	resGroup, _ = resolveDevice(ctx, tx1, er.DeviceID)
+	tx1.Rollback(ctx)
+	if resGroup.Chain[len(resGroup.Chain)-1].Name != "default" {
+		t.Fatalf("inactive user must not bring a group blueprint: %+v", resGroup.Chain)
+	}
+	if code, _ := ui("GET", "/directory", nil, auditor); code != 200 {
+		t.Fatal("directory page")
 	}
 
 	// certificate renewal revokes the old certificate
@@ -442,6 +571,64 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("failed local logins not audited: %d", lockedFailures)
 	}
 
+	// ---- roles: helpdesk may send commands but no scripts and no configuration ----
+	db.Exec(ctx, `INSERT INTO console_users(email, role) VALUES ('help@firma.de', 'helpdesk')`)
+	help := session{Email: "help@firma.de", Role: "helpdesk", IAT: time.Now(), Last: time.Now()}
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"reboot"}}, help); code != http.StatusSeeOther {
+		t.Fatalf("helpdesk command: %d", code)
+	}
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"script"}, "payload": {"id"}}, help); code != http.StatusForbidden {
+		t.Fatalf("helpdesk script must be refused: %d", code)
+	}
+	if code, _ := ui("POST", "/tokens", url.Values{"uses": {"1"}, "days": {"1"}}, help); code != http.StatusForbidden {
+		t.Fatalf("helpdesk configuration must be refused: %d", code)
+	}
+	if code, _ := ui("GET", "/settings", nil, help); code != http.StatusForbidden {
+		t.Fatal("settings must be hidden from helpdesk")
+	}
+
+	// ---- user management ----
+	if code, body := ui("POST", "/users", url.Values{"kind": {"oidc"}, "login": {"Neu@Firma.de"}, "role": {"auditor"}}, adminSess); code != 200 || !strings.Contains(body, "neu@firma.de") {
+		t.Fatalf("add oidc user: %d", code)
+	}
+	if code, body := ui("POST", "/users", url.Values{"kind": {"local"}, "login": {"ops"}, "role": {"helpdesk"}}, adminSess); code != 200 || !strings.Contains(body, "otpauth://totp/") {
+		t.Fatalf("add local user must show credentials once: %d", code)
+	}
+	if _, body := ui("POST", "/users/update", url.Values{"login": {"admin@firma.de"}, "role": {"auditor"}}, adminSess); !strings.Contains(body, "your own account") {
+		t.Fatal("self demotion must be refused")
+	}
+	other := session{Email: "neu@firma.de", Role: "admin", IAT: time.Now(), Last: time.Now()}
+	db.Exec(ctx, `UPDATE console_users SET role='admin' WHERE email='neu@firma.de'`)
+	db.Exec(ctx, `UPDATE local_admins SET disabled=true`)
+	if _, body := ui("POST", "/users/update", url.Values{"login": {"admin@firma.de"}, "role": {"admin"}, "disabled": {"on"}}, other); strings.Contains(body, "must remain") {
+		t.Fatal("disabling one of two admins must be allowed")
+	}
+	if code, _ := ui("GET", "/", nil, adminSess); code != http.StatusFound {
+		t.Fatalf("session of a disabled OIDC admin must end: %d", code)
+	}
+	if _, body := ui("POST", "/users/update", url.Values{"login": {"neu@firma.de"}, "role": {"auditor"}}, other); !strings.Contains(body, "your own account") {
+		t.Fatal("the last admin demoting themselves must be refused")
+	}
+	db.Exec(ctx, `UPDATE console_users SET disabled=false, role='admin' WHERE email='admin@firma.de'`)
+
+	// ---- settings ----
+	if _, body := ui("POST", "/settings", url.Values{"stale_hours": {"48"}}, adminSess); !strings.Contains(body, "can only be disabled") {
+		t.Fatal("disabling local login without OIDC must be refused")
+	}
+	if _, body := ui("POST", "/settings", url.Values{"stale_hours": {"48"}, "local_login": {"on"}, "webhook_url": {"http://plain"}}, adminSess); !strings.Contains(body, "must be https") {
+		t.Fatal("plain http webhook accepted")
+	}
+	if _, body := ui("POST", "/settings", url.Values{"stale_hours": {"48"}, "local_login": {"on"}}, adminSess); !strings.Contains(body, "Settings saved") {
+		t.Fatalf("settings save failed:\n%s", body)
+	}
+	if s.settings().StaleHours != 48 || s.oidc() != nil {
+		t.Fatalf("settings not active: %+v", s.settings())
+	}
+	if code, _ := ui("GET", "/", nil, adminSess); code != http.StatusFound {
+		t.Fatal("OIDC sessions must end once OIDC is removed")
+	}
+	s.rt.Store(&runtimeState{set: Settings{LocalLogin: true, StaleHours: 24, OIDCIssuer: "https://idp.test", OIDCClientID: "x"}, auth: &oidcAuth{}})
+
 	// audit log is append only and chained
 	if _, err := db.Exec(ctx, `UPDATE audit_log SET detail='x'`); err == nil {
 		t.Fatal("audit_log update must fail")
@@ -451,5 +638,208 @@ func TestIntegration(t *testing.T) {
 	}
 	if broken, err := s.verifyAudit(ctx); err != nil || broken != 0 {
 		t.Fatalf("chain broken at %d: %v", broken, err)
+	}
+}
+
+// TestMigrationFromPriorityBlueprints converts the first data model.
+func TestMigrationFromPriorityBlueprints(t *testing.T) {
+	dsn := os.Getenv("LIMDM_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("LIMDM_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, schema); err != nil {
+		t.Fatal(err)
+	}
+	// turn the fresh schema back into the legacy shape
+	legacy := `ALTER TABLE blueprints DROP COLUMN tree, DROP COLUMN parent_id,
+		ADD COLUMN priority INT NOT NULL DEFAULT 100, ADD COLUMN declarations JSONB NOT NULL DEFAULT '[]';
+		CREATE TABLE device_blueprints (device_id TEXT REFERENCES devices(id), blueprint_id BIGINT REFERENCES blueprints(id));
+		INSERT INTO blueprints(name, priority, declarations) VALUES
+		  ('default', 1000, '[{"identifier":"compliance","type":"com.limdm.compliance","payload":{"level":1,"remediate":true}}]'),
+		  ('strict', 10, '[{"identifier":"strict","type":"com.limdm.compliance","payload":{"level":2,"remediate":true}}]'),
+		  ('loose', 50, '[]');
+		INSERT INTO devices(id, cert_serial, cert_not_after) VALUES ('dev1', 's', now());
+		INSERT INTO device_blueprints SELECT 'dev1', id FROM blueprints WHERE name IN ('strict', 'loose');`
+	if _, err := db.Exec(ctx, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	tx, _ := db.Begin(ctx)
+	res, err := resolveDevice(ctx, tx, "dev1")
+	tx.Rollback(ctx) // release table locks before the next migrate runs DDL
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, _ := api.Compose(res.Decls)
+	if len(res.Chain) != 2 || res.Chain[0].Name != "default" || res.Chain[1].Name != "strict" || pol.Compliance.Level != 2 {
+		t.Fatalf("migrated chain %v level %d", res.Chain, pol.Compliance.Level)
+	}
+	var legacyTable bool
+	db.QueryRow(ctx, `SELECT to_regclass('device_blueprints') IS NOT NULL`).Scan(&legacyTable)
+	if legacyTable {
+		t.Fatal("device_blueprints must be dropped")
+	}
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal("migrations must be idempotent: ", err)
+	}
+}
+
+// TestCompliancePolicy walks a device through grace, notification, lock and unlock.
+func TestCompliancePolicy(t *testing.T) {
+	dsn := os.Getenv("LIMDM_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("LIMDM_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	db.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, failing) VALUES ('d1', 's', now(), 'pc1', 2)`)
+	s := &Server{db: db, log: slog.New(slog.NewTextHandler(io.Discard, nil)), cfg: Config{PublicURL: "https://mdm.test", SessionKey: bytes.Repeat([]byte{1}, 32)}}
+	pol := api.Compliance{Level: 1, GraceHours: 1, Notify: true, LockAfterHours: 2, UnlockWhenCompliant: true}
+	t0 := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+	step := func(at time.Time) *webhookEvent {
+		t.Helper()
+		tx, _ := db.Begin(ctx)
+		ev, err := s.enforceCompliance(ctx, tx, "d1", pol, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx.Commit(ctx)
+		return ev
+	}
+	commands := func() []string {
+		rows, _ := db.Query(ctx, `SELECT type FROM commands WHERE device_id='d1' ORDER BY id`)
+		out, _ := pgx.CollectRows(rows, pgx.RowTo[string])
+		return out
+	}
+	if ev := step(t0); ev != nil {
+		t.Fatal("no webhook inside the grace period")
+	}
+	if ev := step(t0.Add(30 * time.Minute)); ev != nil {
+		t.Fatal("still in grace")
+	}
+	ev := step(t0.Add(61 * time.Minute))
+	if ev == nil || ev.Failing != 2 || !ev.Since.Equal(t0) {
+		t.Fatalf("webhook after grace: %+v", ev)
+	}
+	if step(t0.Add(70*time.Minute)) != nil {
+		t.Fatal("webhook must be sent once per episode")
+	}
+	if len(commands()) != 0 {
+		t.Fatal("no lock before lock_after_hours")
+	}
+	step(t0.Add(2 * time.Hour))
+	step(t0.Add(3 * time.Hour))
+	if got := commands(); !slices.Equal(got, []string{"lock"}) {
+		t.Fatalf("lock queued once: %v", got)
+	}
+	db.Exec(ctx, `UPDATE devices SET failing=0 WHERE id='d1'`)
+	step(t0.Add(4 * time.Hour))
+	var since *time.Time
+	var locked bool
+	db.QueryRow(ctx, `SELECT noncompliant_since, auto_locked FROM devices WHERE id='d1'`).Scan(&since, &locked)
+	if got := commands(); !slices.Equal(got, []string{"lock", "unlock"}) || since != nil || locked {
+		t.Fatalf("after recovery: cmds=%v since=%v locked=%v", got, since, locked)
+	}
+	var audited int
+	db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE actor='policy'`).Scan(&audited)
+	if audited != 3 {
+		t.Fatalf("notify, lock and unlock must be audited, got %d", audited)
+	}
+}
+
+func TestWebhookSignature(t *testing.T) {
+	got := make(chan *http.Request, 1)
+	bodies := make(chan []byte, 1)
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got <- r
+		bodies <- b
+	}))
+	defer ts.Close()
+	s := &Server{cfg: Config{SessionKey: bytes.Repeat([]byte{2}, 32)}, hooks: ts.Client(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s.rt.Store(&runtimeState{set: Settings{WebhookURL: ts.URL}})
+	s.sendWebhook(&webhookEvent{Type: "device.noncompliant", DeviceID: "d1"})
+	select {
+	case r := <-got:
+		body := <-bodies
+		mac := hmac.New(sha256.New, s.webhookKey())
+		mac.Write(body)
+		if r.Header.Get("X-LiMDM-Signature") != "sha256="+hex.EncodeToString(mac.Sum(nil)) {
+			t.Fatal("signature does not verify")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("webhook not delivered")
+	}
+}
+
+func TestHistory(t *testing.T) {
+	dsn := os.Getenv("LIMDM_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("LIMDM_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	db.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname) VALUES ('d1', 's', now(), 'pc1')`)
+	rec := func(m *api.Metrics) {
+		t.Helper()
+		tx, _ := db.Begin(ctx)
+		if err := recordMetrics(ctx, tx, "d1", m); err != nil {
+			t.Fatal(err)
+		}
+		tx.Commit(ctx)
+	}
+	rec(&api.Metrics{MemUsedMB: 900, MemTotalMB: 100}) // implausible, ignored
+	rec(&api.Metrics{MemUsedMB: 1000, MemTotalMB: 4000, RootUsedPct: 40, Load1: 0.5})
+	rec(&api.Metrics{MemUsedMB: 2000, MemTotalMB: 4000, RootUsedPct: 41, Load1: 0.7}) // within 15 min, dropped
+	var n int
+	db.QueryRow(ctx, `SELECT count(*) FROM device_metrics`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("want 1 sample, got %d", n)
+	}
+	db.Exec(ctx, `UPDATE device_metrics SET at = at - interval '1 hour'`)
+	rec(&api.Metrics{MemUsedMB: 2000, MemTotalMB: 4000, RootUsedPct: 41, Load1: 0.7})
+	s := &Server{db: db, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	charts, err := s.deviceCharts(ctx, "d1")
+	if err != nil || len(charts) != 3 || !strings.Contains(string(charts[0]), "<polyline") {
+		t.Fatalf("device charts: %v %d", err, len(charts))
+	}
+	if err := s.snapshotFleet(ctx); err != nil {
+		t.Fatal(err)
+	}
+	db.Exec(ctx, `INSERT INTO fleet_history VALUES (current_date - 1, 3, 1, 0, 0, 0)`)
+	chart, err := s.fleetChart(ctx)
+	if err != nil || !strings.Contains(string(chart), `class="line bad"`) {
+		t.Fatalf("fleet chart: %v", err)
 	}
 }

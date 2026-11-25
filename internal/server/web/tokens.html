@@ -1,9 +1,9 @@
-{{define "title"}}Enrollment · LiMDM{{end}}
+{{define "title"}}{{t "Enrollment · LiMDM"}}{{end}}
 {{define "content"}}
-<div class="page-head"><div><h1>Enrollment</h1><div class="meta"><span>One time tokens bind new devices to the device CA</span></div></div></div>
+<div class="page-head"><div><h1>{{t "Enrollment"}}</h1><div class="meta"><span>{{t "One time tokens bind new devices to the device CA"}}</span></div></div></div>
 {{if .Created}}
 <div class="notice ok" role="status">
-  <strong>Token created.</strong> It is shown only once.
+  <strong>{{t "Token created."}}</strong> It is shown only once.
   <pre>{{.Created}}</pre>
   <p class="muted">On the device, as root, after installing the agent with <code>install-agent.sh</code>:</p>
   <pre>limdm-agent enroll --server {{.AgentURL}} --fingerprint {{.Fingerprint}} --token {{.Created}}</pre>
@@ -11,30 +11,30 @@
 {{end}}
 <div class="grid side-right">
   <section class="tablecard">
-    <div class="card-head"><h2>Active tokens</h2></div>
+    <div class="card-head"><h2>{{t "Active tokens"}}</h2></div>
     <div class="scroll"><table>
-      <thead><tr><th>Note</th><th>Blueprint</th><th class="num">Uses left</th><th>Expires</th><th>Created by</th></tr></thead>
-      <tbody>{{range .Tokens}}<tr><td>{{.Note}}</td><td>{{.Blueprint}}</td><td class="num">{{.Uses}}</td><td>{{fmtTime .Expires}}</td><td>{{.By}}</td></tr>{{else}}<tr><td colspan="5" class="empty">No active tokens.</td></tr>{{end}}</tbody>
+      <thead><tr><th>{{t "Note"}}</th><th>{{t "Blueprint"}}</th><th class="num">{{t "Uses left"}}</th><th>{{t "Expires"}}</th><th>{{t "Created by"}}</th></tr></thead>
+      <tbody>{{range .Tokens}}<tr><td>{{.Note}}</td><td>{{.Blueprint}}</td><td class="num">{{.Uses}}</td><td>{{fmtTime .Expires}}</td><td>{{.By}}</td></tr>{{else}}<tr><td colspan="5" class="empty">{{t "No active tokens."}}</td></tr>{{end}}</tbody>
     </table></div>
   </section>
   <div>
     <section class="card">
-      <h2>Agent endpoint</h2>
-      <dl class="kv"><dt>URL</dt><dd class="mono">{{.AgentURL}}</dd><dt>Transport</dt><dd>mTLS, TLS 1.3 only</dd></dl>
-      <p class="muted">Device CA fingerprint (SHA-256), pinned by the agent at enrollment:</p>
+      <h2>{{t "Agent endpoint"}}</h2>
+      <dl class="kv"><dt>{{t "URL"}}</dt><dd class="mono">{{.AgentURL}}</dd><dt>{{t "Transport"}}</dt><dd>{{t "mTLS, TLS 1.3 only"}}</dd></dl>
+      <p class="muted">{{t "Device CA fingerprint (SHA-256), pinned by the agent at enrollment:"}}</p>
       <div class="fp">{{.Fingerprint}}</div>
     </section>
     {{if eq .Sess.Role "admin"}}
     <form class="card" method="post" action="/tokens">
-      <h2>New token</h2>
+      <h2>{{t "New token"}}</h2>
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <label>Note<input name="note" maxlength="200" placeholder="e.g. laptops batch 12"></label>
-      <label>Blueprint<select name="blueprint_id"><option value="0">default only</option>{{range .Blueprints}}{{if ne .Name "default"}}<option value="{{.ID}}">{{.Name}}</option>{{end}}{{end}}</select></label>
+      <label>{{t "Note"}}<input name="note" maxlength="200" placeholder="{{t "e.g. laptops batch 12"}}"></label>
+      <label>{{t "Blueprint"}}<select name="blueprint_id"><option value="0">{{t "default only"}}</option>{{range .Blueprints}}{{if ne .Name "default"}}<option value="{{.ID}}">{{.Name}}</option>{{end}}{{end}}</select></label>
       <div class="inline">
-        <label>Uses<input name="uses" type="number" value="1" min="1" max="10000"></label>
-        <label>Valid for days<input name="days" type="number" value="7" min="1" max="90"></label>
+        <label>{{t "Uses"}}<input name="uses" type="number" value="1" min="1" max="10000"></label>
+        <label>{{t "Valid for days"}}<input name="days" type="number" value="7" min="1" max="90"></label>
       </div>
-      <button>Create token</button>
+      <button>{{t "Create token"}}</button>
     </form>
     {{end}}
   </div>

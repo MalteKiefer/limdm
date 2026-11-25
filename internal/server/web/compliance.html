@@ -1,37 +1,37 @@
-{{define "title"}}Compliance · LiMDM{{end}}
+{{define "title"}}{{t "Compliance · LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>Compliance</h1><div class="meta"><span>{{.Total}} active devices</span><span>BSI IT-Grundschutz · CIS · ISO/IEC 27001:2022</span></div></div>
-  <div class="actions"><a class="button secondary" href="/export/inventory.csv">Inventory CSV</a><a class="button secondary" href="/export/audit.csv">Audit CSV</a><a class="button" href="/export/compliance.csv">Evidence CSV</a></div>
+  <div><h1>{{t "Compliance"}}</h1><div class="meta"><span>{{.Total}} {{t "active devices"}}</span><span>{{t "BSI IT-Grundschutz · CIS · ISO/IEC 27001:2022"}}</span></div></div>
+  <div class="actions"><a class="button secondary" href="/export/inventory.csv">{{t "Inventory CSV"}}</a><a class="button secondary" href="/export/audit.csv">{{t "Audit CSV"}}</a><a class="button" href="/export/compliance.csv">{{t "Evidence CSV"}}</a></div>
 </div>
 <div class="stats">
-  <div class="stat"><div class="label"><span class="dot ok"></span>Compliant</div><div class="value">{{.Compliant}}</div></div>
-  <div class="stat"><div class="label"><span class="dot bad"></span>Non-compliant</div><div class="value">{{.NonCompliant}}</div></div>
-  <div class="stat"><div class="label"><span class="dot warn"></span>Stale</div><div class="value">{{.Stale}}</div><div class="hint">silent for {{.StaleHours}} h</div></div>
-  <div class="stat"><div class="label"><span class="dot na"></span>Pending</div><div class="value">{{.Pending}}</div><div class="hint">no report yet</div></div>
+  <div class="stat"><div class="label"><span class="dot ok"></span>{{t "Compliant"}}</div><div class="value">{{.Compliant}}</div></div>
+  <div class="stat"><div class="label"><span class="dot bad"></span>{{t "Non-compliant"}}</div><div class="value">{{.NonCompliant}}</div></div>
+  <div class="stat"><div class="label"><span class="dot warn"></span>{{t "Stale"}}</div><div class="value">{{.Stale}}</div><div class="hint">{{t "silent for"}} {{.StaleHours}} {{t "h"}}</div></div>
+  <div class="stat"><div class="label"><span class="dot na"></span>{{t "Pending"}}</div><div class="value">{{.Pending}}</div><div class="hint">{{t "no report yet"}}</div></div>
 </div>
 <form class="filters" method="get" action="/compliance">
-  <input type="search" name="q" value="{{.F.Q}}" placeholder="Search checks" aria-label="Search checks">
-  <select name="state" aria-label="State"><option value="">All states</option><option value="failing" {{if eq .F.State "failing"}}selected{{end}}>Failing</option><option value="passing" {{if eq .F.State "passing"}}selected{{end}}>Passing</option></select>
-  <select name="level" aria-label="Level"><option value="">All levels</option><option value="1" {{if eq .F.Level "1"}}selected{{end}}>Level 1</option><option value="2" {{if eq .F.Level "2"}}selected{{end}}>Level 2</option></select>
-  <select name="framework" aria-label="Framework"><option value="">All frameworks</option><option value="bsi" {{if eq .F.Framework "bsi"}}selected{{end}}>BSI IT-Grundschutz</option><option value="cis" {{if eq .F.Framework "cis"}}selected{{end}}>CIS Benchmark</option><option value="iso" {{if eq .F.Framework "iso"}}selected{{end}}>ISO/IEC 27001</option></select>
-  <select name="sort" aria-label="Sort"><option value="">Sort by ID</option><option value="fail" {{if eq .F.Sort "fail"}}selected{{end}}>Most failing</option><option value="title" {{if eq .F.Sort "title"}}selected{{end}}>Title</option><option value="level" {{if eq .F.Sort "level"}}selected{{end}}>Level</option></select>
-  <button class="secondary">Apply</button>
-  {{if or .F.Q .F.State .F.Level .F.Framework .F.Sort}}<a href="/compliance">Reset</a>{{end}}
+  <input type="search" name="q" value="{{.F.Q}}" placeholder="{{t "Search checks"}}" aria-label="{{t "Search checks"}}">
+  <select name="state" aria-label="{{t "State"}}"><option value="">{{t "All states"}}</option><option value="failing" {{if eq .F.State "failing"}}selected{{end}}>{{t "Failing"}}</option><option value="passing" {{if eq .F.State "passing"}}selected{{end}}>{{t "Passing"}}</option></select>
+  <select name="level" aria-label="{{t "Level"}}"><option value="">{{t "All levels"}}</option><option value="1" {{if eq .F.Level "1"}}selected{{end}}>{{t "Level 1"}}</option><option value="2" {{if eq .F.Level "2"}}selected{{end}}>{{t "Level 2"}}</option></select>
+  <select name="framework" aria-label="{{t "Framework"}}"><option value="">{{t "All frameworks"}}</option><option value="bsi" {{if eq .F.Framework "bsi"}}selected{{end}}>{{t "BSI IT-Grundschutz"}}</option><option value="cis" {{if eq .F.Framework "cis"}}selected{{end}}>{{t "CIS Benchmark"}}</option><option value="iso" {{if eq .F.Framework "iso"}}selected{{end}}>{{t "ISO/IEC 27001"}}</option></select>
+  <select name="sort" aria-label="{{t "Sort"}}"><option value="">{{t "Sort by ID"}}</option><option value="fail" {{if eq .F.Sort "fail"}}selected{{end}}>{{t "Most failing"}}</option><option value="title" {{if eq .F.Sort "title"}}selected{{end}}>{{t "Title"}}</option><option value="level" {{if eq .F.Sort "level"}}selected{{end}}>{{t "Level"}}</option></select>
+  <button class="secondary">{{t "Apply"}}</button>
+  {{if or .F.Q .F.State .F.Level .F.Framework .F.Sort}}<a href="/compliance">{{t "Reset"}}</a>{{end}}
 </form>
 <section class="tablecard">
-  <div class="card-head"><h2>Checks</h2><span class="muted">{{.Shown}} of {{.All}}</span></div>
+  <div class="card-head"><h2>{{t "Checks"}}</h2><span class="muted">{{.Shown}} {{t "of"}} {{.All}}</span></div>
   <div class="scroll"><table>
-    <thead><tr><th>Check</th><th>Level</th><th class="num">Pass</th><th class="num">Fail</th><th class="num">Exception</th><th class="num">n/a</th><th>Failing devices</th></tr></thead>
-    <tbody>{{range .Checks}}<tr><td>{{.Title}}<span class="sub mono">{{.ID}}</span></td><td>L{{.Level}}</td><td class="num">{{.Pass}}</td>
+    <thead><tr><th>{{t "Check"}}</th><th>{{t "Level"}}</th><th class="num">{{t "Pass"}}</th><th class="num">{{t "Fail"}}</th><th class="num">{{t "Exception"}}</th><th class="num">{{t "n/a"}}</th><th>{{t "Failing devices"}}</th></tr></thead>
+    <tbody>{{range .Checks}}<tr><td>{{.Title}}<span class="sub mono">{{.ID}}</span></td><td>{{t "L"}}{{.Level}}</td><td class="num">{{.Pass}}</td>
       <td class="num">{{if .Fail}}<span class="pill fail">{{.Fail}}</span>{{else}}<span class="muted">0</span>{{end}}</td><td class="num">{{.Excepted}}</td><td class="num">{{.NA}}</td>
-      <td class="muted">{{join .FailingHosts ", "}}</td></tr>{{else}}<tr><td colspan="7" class="empty">No reports yet.</td></tr>{{end}}</tbody>
+      <td class="muted">{{join .FailingHosts ", "}}</td></tr>{{else}}<tr><td colspan="7" class="empty">{{t "No reports yet."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 <section class="tablecard">
-  <div class="card-head"><h2>Coverage by framework</h2><span class="muted">pass and fail summed over devices</span></div>
+  <div class="card-head"><h2>{{t "Coverage by framework"}}</h2><span class="muted">{{t "pass and fail summed over devices"}}</span></div>
   <div class="scroll"><table>
-    <thead><tr><th>Framework</th><th>Control</th><th>Checks</th><th class="num">Pass</th><th class="num">Fail</th></tr></thead>
+    <thead><tr><th>{{t "Framework"}}</th><th>{{t "Control"}}</th><th>{{t "Checks"}}</th><th class="num">{{t "Pass"}}</th><th class="num">{{t "Fail"}}</th></tr></thead>
     <tbody>{{range .Controls}}<tr><td>{{.Framework}}</td><td>{{.Control}}</td><td>{{range .Checks}}<span class="tag">{{.}}</span>{{end}}</td><td class="num">{{.Pass}}</td><td class="num">{{if .Fail}}<span class="pill fail">{{.Fail}}</span>{{else}}<span class="muted">0</span>{{end}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
