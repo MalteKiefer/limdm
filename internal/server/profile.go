@@ -10,6 +10,7 @@ import (
 	"html/template"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,16 +26,23 @@ import (
 
 const recoveryCount = 10
 
-var recoveryCodeRe = regexp.MustCompile(`^[a-z2-7]{4}-[a-z2-7]{4}-[a-z2-7]{4}$`)
+// Recovery codes carry 120 bits (24 base32 characters), above the 112 bits
+// NIST SP 800-63B 5.1.2.2 requires for lookup secrets stored as plain hashes.
+// Codes from v0.6.0 (12 characters) are still accepted until they are replaced.
+var recoveryCodeRe = regexp.MustCompile(`^[a-z2-7]{4}(-[a-z2-7]{4}){5}$|^[a-z2-7]{4}(-[a-z2-7]{4}){2}$`)
 
 // selfPage lets every role post to its own profile.
 func (s *Server) selfPage(h handler) http.HandlerFunc { return s.pageFor(h, "self") }
 
 func newRecoveryCode() string {
-	b := make([]byte, 8)
+	b := make([]byte, 15) // 120 bits, exactly 24 base32 characters
 	rand.Read(b)
-	s := strings.ToLower(b32.EncodeToString(b))[:12]
-	return s[:4] + "-" + s[4:8] + "-" + s[8:]
+	s := strings.ToLower(b32.EncodeToString(b))
+	parts := make([]string, 0, 6)
+	for i := 0; i < len(s); i += 4 {
+		parts = append(parts, s[i:i+4])
+	}
+	return strings.Join(parts, "-")
 }
 
 func hashCode(c string) string {
@@ -72,6 +80,7 @@ func qrSVG(text string) template.HTML {
 }
 
 type profileView struct {
+	Tab            string
 	Local          bool
 	Name           string
 	RecoveryLeft   int
@@ -105,8 +114,19 @@ func (s *Server) renderProfile(w http.ResponseWriter, r *http.Request, sess sess
 			v.PendingQR = qrSVG(v.PendingURI)
 		}
 	}
+	tabs := []string{"language"}
+	if local {
+		tabs = append(tabs, "password", "authenticator", "recovery")
+	}
+	tab := v.Tab
+	if tab == "" {
+		tab = r.URL.Query().Get("tab")
+	}
+	if !slices.Contains(tabs, tab) {
+		tab = "language"
+	}
 	w.Header().Set("Cache-Control", "no-store")
-	s.render(w, r, sess, "profile", map[string]any{"P": v, "Msg": msg, "Error": errMsg})
+	s.render(w, r, sess, "profile", map[string]any{"P": v, "Msg": msg, "Error": errMsg, "Tab": tab, "Tabs": tabs})
 }
 
 func (s *Server) localName(w http.ResponseWriter, r *http.Request, sess session) (string, bool) {
@@ -157,11 +177,11 @@ func (s *Server) profilePassword(w http.ResponseWriter, r *http.Request, sess se
 	}
 	pw, again := r.FormValue("new"), r.FormValue("repeat")
 	if len(pw) < 12 || len(pw) > 256 {
-		s.renderProfile(w, r, sess, profileView{}, "", "The new password needs 12 to 256 characters.")
+		s.renderProfile(w, r, sess, profileView{Tab: "password"}, "", "The new password needs 12 to 256 characters.")
 		return
 	}
 	if pw != again {
-		s.renderProfile(w, r, sess, profileView{}, "", "The new passwords do not match.")
+		s.renderProfile(w, r, sess, profileView{Tab: "password"}, "", "The new passwords do not match.")
 		return
 	}
 	ctx := r.Context()
@@ -169,14 +189,15 @@ func (s *Server) profilePassword(w http.ResponseWriter, r *http.Request, sess se
 		if err := s.checkCurrent(ctx, tx, name, r.FormValue("current")); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `UPDATE local_admins SET password_hash=$2 WHERE name=$1`, name, hashPassword(pw))
+		_, err := tx.Exec(ctx, `UPDATE local_admins SET password_hash=$2, session_gen=session_gen+1 WHERE name=$1`, name, hashPassword(pw))
 		return err
 	})
 	if err != nil {
-		s.renderProfile(w, r, sess, profileView{}, "", s.profileErr(ctx, sess, name, r, err))
+		s.renderProfile(w, r, sess, profileView{Tab: "password"}, "", s.profileErr(ctx, sess, name, r, err))
 		return
 	}
-	s.renderProfile(w, r, sess, profileView{}, "Password changed.", "")
+	s.renewSession(w, r, sess) // other sessions of this account end
+	s.renderProfile(w, r, sess, profileView{Tab: "password"}, "Password changed.", "")
 }
 
 // profileErr records a failed password check outside the rolled back transaction.
@@ -212,10 +233,10 @@ func (s *Server) profileTOTP(w http.ResponseWriter, r *http.Request, sess sessio
 			return err
 		})
 		if err != nil {
-			s.renderProfile(w, r, sess, profileView{}, "", s.profileErr(ctx, sess, name, r, err))
+			s.renderProfile(w, r, sess, profileView{Tab: "authenticator"}, "", s.profileErr(ctx, sess, name, r, err))
 			return
 		}
-		s.renderProfile(w, r, sess, profileView{PendingSecret: secret}, "", "")
+		s.renderProfile(w, r, sess, profileView{Tab: "authenticator", PendingSecret: secret}, "", "")
 	case "confirm":
 		err := s.auditAction(ctx, sess.Email, "profile.totp", sess.Email, "TOTP secret replaced", func(tx pgx.Tx) error {
 			var pending *string
@@ -229,20 +250,22 @@ func (s *Server) profileTOTP(w http.ResponseWriter, r *http.Request, sess sessio
 			if !ok {
 				return errors.New("the code does not match the new secret")
 			}
-			_, err := tx.Exec(ctx, `UPDATE local_admins SET totp_secret=totp_pending, totp_pending=NULL, totp_last_step=$2 WHERE name=$1`, name, step)
+			_, err := tx.Exec(ctx, `UPDATE local_admins SET totp_secret=totp_pending, totp_pending=NULL, totp_last_step=$2,
+				session_gen=session_gen+1 WHERE name=$1`, name, step)
 			return err
 		})
 		if err != nil {
-			s.renderProfile(w, r, sess, profileView{}, "", err.Error())
+			s.renderProfile(w, r, sess, profileView{Tab: "authenticator"}, "", err.Error())
 			return
 		}
-		s.renderProfile(w, r, sess, profileView{}, "Authenticator app replaced.", "")
+		s.renewSession(w, r, sess)
+		s.renderProfile(w, r, sess, profileView{Tab: "authenticator"}, "Authenticator app replaced.", "")
 	case "cancel":
 		if _, err := s.db.Exec(ctx, `UPDATE local_admins SET totp_pending=NULL WHERE name=$1`, name); err != nil {
 			s.fail(w, err)
 			return
 		}
-		s.renderProfile(w, r, sess, profileView{}, "", "")
+		s.renderProfile(w, r, sess, profileView{Tab: "authenticator"}, "", "")
 	default:
 		http.Error(w, "bad request", http.StatusBadRequest)
 	}
@@ -274,8 +297,8 @@ func (s *Server) profileRecovery(w http.ResponseWriter, r *http.Request, sess se
 		return nil
 	})
 	if err != nil {
-		s.renderProfile(w, r, sess, profileView{}, "", s.profileErr(ctx, sess, name, r, err))
+		s.renderProfile(w, r, sess, profileView{Tab: "recovery"}, "", s.profileErr(ctx, sess, name, r, err))
 		return
 	}
-	s.renderProfile(w, r, sess, profileView{NewCodes: codes}, "", "")
+	s.renderProfile(w, r, sess, profileView{Tab: "recovery", NewCodes: codes}, "", "")
 }

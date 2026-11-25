@@ -89,27 +89,41 @@ func (a *Agent) applyUsers() error {
 			}
 		}
 	}
+	// removed users: locked and forgotten; a failed lock is retried next cycle
+	if a.state.RemovePending == nil {
+		a.state.RemovePending = map[string]bool{}
+	}
 	for name := range prev {
 		if _, keep := cur[name]; !keep {
-			_, _ = sh("gpasswd", "-d", name, group) // fails when not a member, that is fine
-			if _, err := sh("usermod", "-L", "-e", "1", name); err != nil {
-				errs = append(errs, err)
-			} else {
-				a.event("locked removed user %s", name)
-			}
+			a.state.RemovePending[name] = true
 		}
+	}
+	for name := range a.state.RemovePending {
+		if _, back := cur[name]; back {
+			delete(a.state.RemovePending, name)
+			continue
+		}
+		_, _ = sh("gpasswd", "-d", name, group) // fails when not a member, that is fine
+		if _, err := sh("usermod", "-L", "-e", "1", name); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		forgetSSO(name) // coming back later must not skip the SSO confirmation
+		delete(a.state.RemovePending, name)
+		a.event("locked removed user %s", name)
 	}
 	b, _ := json.Marshal(cur)
 	if _, err := writeIfChanged(usersFile, string(b), 0o600); err != nil {
 		errs = append(errs, err)
 	}
-	lb, _ := json.Marshal(a.pol.Login) //nolint:gosec // client secret goes to a root only 0600 file for pam-auth
+	lb, _ := json.Marshal(pamPolicy{Login: a.pol.Login, OfflineLockHours: a.pol.OfflineLockHours})
 	if _, err := writeIfChanged(loginFile, string(lb), 0o600); err != nil {
 		errs = append(errs, err)
 	}
 	if err := a.installPAM(); err != nil {
 		errs = append(errs, err)
 	}
+	a.syncPasswordLocks()
 	return errors.Join(errs...)
 }
 
@@ -129,14 +143,14 @@ func pamInstalled() bool { return exists(pamMarker) }
 func pamActive() bool {
 	for _, f := range []string{"/etc/pam.d/common-auth", "/etc/pam.d/system-auth"} {
 		if s := readFile(f); strings.Contains(s, "pam_exec.so") && strings.Contains(s, " pam-auth") {
-			return true
+			return strings.Contains(s, "expose_authtok") // older installs lack it and are replaced
 		}
 	}
 	return false
 }
 
 func pamLine(exe string) string {
-	return "pam_exec.so quiet stdout " + exe + " pam-auth"
+	return "pam_exec.so quiet stdout expose_authtok " + exe + " pam-auth"
 }
 
 func (a *Agent) installPAM() error {
@@ -148,9 +162,13 @@ func (a *Agent) installPAM() error {
 		return err
 	}
 	if a.host.family == "debian" {
-		cfg := fmt.Sprintf("Name: LiMDM OIDC login\nDefault: yes\nPriority: 300\nAuth-Type: Primary\nAuth:\n\t[success=end default=ignore]\t%s\n", pamLine(exe))
-		if _, err := writeIfChanged(pamDebian, cfg, 0o644); err != nil {
-			return err
+		// the profile ships with the package (/usr/share is package owned);
+		// only older installs without it get it written here
+		if !exists(pamDebian) {
+			cfg := fmt.Sprintf("Name: LiMDM OIDC login\nDefault: no\nPriority: 300\nAuth-Type: Primary\nAuth:\n\t[success=end default=ignore]\t%s\n", pamLine(exe))
+			if _, err := writeIfChanged(pamDebian, cfg, 0o644); err != nil {
+				return err
+			}
 		}
 		if _, err := sh("pam-auth-update", "--package", "--enable", "limdm"); err != nil {
 			return err
@@ -170,7 +188,6 @@ func (a *Agent) removePAM() error {
 		if _, err := sh("pam-auth-update", "--package", "--remove", "limdm"); err != nil {
 			return err
 		}
-		os.Remove(pamDebian)
 	} else {
 		prev := strings.Fields(readTrim(authPrev))
 		if len(prev) == 0 {
@@ -222,10 +239,12 @@ func authselectInstall(exe string) error {
 // insertPAMLine puts line before the first auth module that actually
 // authenticates (after pam_env, pam_faildelay and faillock preauth).
 func insertPAMLine(content, line string) (string, error) {
-	if strings.Contains(content, "pam-auth") && strings.Contains(content, "pam_exec.so") {
+	if strings.Contains(content, line) {
 		return content, nil
 	}
-	lines := strings.Split(content, "\n")
+	lines := slices.DeleteFunc(strings.Split(content, "\n"), func(l string) bool { // drop an older version of our line
+		return strings.Contains(l, "pam_exec.so") && strings.Contains(l, " pam-auth")
+	})
 	for i, l := range lines {
 		f := strings.Fields(l)
 		if len(f) < 3 || f[0] != "auth" {
@@ -239,24 +258,51 @@ func insertPAMLine(content, line string) (string, error) {
 	return "", errors.New("no auth module found")
 }
 
-// PAMAuth is the pam_exec entry point. Exit code 0 grants access.
+// PAMAuth is the pam_exec entry point. Exit code 0 grants access; 1 hands
+// over to pam_unix, which only accepts a local password the agent left unlocked.
 func PAMAuth() int {
 	if os.Getenv("PAM_TYPE") != "auth" {
 		return 1
+	}
+	pw := readAuthtok()
+	if !localService(os.Getenv("PAM_SERVICE"), os.Getenv("PAM_RHOST")) {
+		return 1 // remote or unknown service: never start a device flow, pam_unix decides
 	}
 	username := os.Getenv("PAM_USER")
 	email, ok := readUsers()[username]
 	if !ok {
 		return 1 // not centrally managed, fall through to local password
 	}
-	var cfg api.Login
-	b, err := os.ReadFile(loginFile)
-	if err != nil || json.Unmarshal(b, &cfg) != nil || !cfg.Enabled {
+	cfg, ok := readPAMPolicy()
+	if !ok {
 		return 1
+	}
+	now := time.Now()
+	if s := readFile(nologinFile); s != "" {
+		fmt.Print(s)
+		return 1
+	}
+	if lastContactOverdue(cfg, now) {
+		fmt.Print(offlineText)
+		return 1
+	}
+	if !ssoDue(cfg, username, now) && !passwordLocked(username) {
+		return 1 // confirmed recently: pam_unix checks the local password
+	}
+	if cfg.LocalPassword {
+		if err := checkLocalPassword(username, pw); err != nil {
+			fmt.Printf("SSO confirmation required. Enter the password you want to use on this device, then confirm on your phone: %v\n", err)
+			return 1
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	err = deviceLogin(ctx, cfg, email)
+	err := deviceLogin(ctx, cfg.Login, email)
+	if err == nil && cfg.LocalPassword {
+		if err = setLocalPassword(username, pw); err == nil {
+			err = recordSSO(username, now)
+		}
+	}
 	recordAuthEvent(username, email, err)
 	if err != nil {
 		fmt.Println("Login failed:", err)
@@ -284,7 +330,8 @@ func deviceLogin(ctx context.Context, cfg api.Login, email string) error {
 	if uri == "" {
 		uri = da.VerificationURI
 	}
-	fmt.Printf("Sign in as %s:\nOpen %s and enter the code %s\n", email, uri, da.UserCode)
+	// the mapped email is not shown: the user is not authenticated yet
+	fmt.Printf("Confirm the sign in with your company account:\nOpen %s and enter the code %s\n", uri, da.UserCode)
 	tok, err := oc.DeviceAccessToken(ctx, da)
 	if err != nil {
 		return errors.New("not confirmed")
@@ -302,17 +349,17 @@ func deviceLogin(ctx context.Context, cfg api.Login, email string) error {
 	if err := idt.Claims(&c); err != nil {
 		return err
 	}
-	return checkIdentity(c.Email, c.EmailVerified, c.HD, email, cfg.AllowedDomain)
+	return checkIdentity(cfg.Issuer, c.Email, c.EmailVerified, c.HD, email, cfg.AllowedDomain)
 }
 
-func checkIdentity(gotEmail string, verified bool, hd, wantEmail, domain string) error {
+func checkIdentity(issuer, gotEmail string, verified bool, hd, wantEmail, domain string) error {
 	if !verified {
 		return errors.New("email not verified")
 	}
 	if !strings.EqualFold(gotEmail, wantEmail) {
 		return errors.New("account does not match this user")
 	}
-	if domain != "" && !strings.EqualFold(hd, domain) && !strings.HasSuffix(strings.ToLower(gotEmail), "@"+strings.ToLower(domain)) {
+	if !api.DomainAllowed(issuer, gotEmail, hd, domain) {
 		return errors.New("account is not in the allowed domain")
 	}
 	return nil
@@ -330,4 +377,22 @@ func recordAuthEvent(username, email string, err error) {
 		fmt.Fprintln(f, msg)
 		f.Close()
 	}
+}
+
+// pamServices run the SSO device flow: display managers, screen lockers, the
+// text console and privilege prompts at the device. sshd and other remote
+// services are excluded, so an unauthenticated network client can neither
+// start a device flow (code phishing, a root process waiting on the IdP) nor
+// learn which accounts are managed.
+var pamServices = map[string]bool{
+	"login": true, "gdm-password": true, "gdm-fingerprint": false, "lightdm": true, "sddm": true, "lxdm": true, "slim": true,
+	"kde": true, "gnome-screensaver": true, "xscreensaver": true, "cinnamon-screensaver": true, "mate-screensaver": true,
+	"xfce4-screensaver": true, "sudo": true, "sudo-i": true, "su": true, "su-l": true, "polkit-1": true,
+}
+
+func localService(service, rhost string) bool {
+	if rhost != "" && rhost != "localhost" && rhost != "127.0.0.1" && rhost != "::1" {
+		return false
+	}
+	return pamServices[service]
 }

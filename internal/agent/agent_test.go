@@ -10,6 +10,9 @@ import (
 	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/pem"
+	"errors"
+	"io"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
@@ -17,7 +20,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -82,19 +89,26 @@ func TestSSHValue(t *testing.T) {
 }
 
 func TestCheckIdentity(t *testing.T) {
-	if checkIdentity("A@Firma.de", true, "firma.de", "a@firma.de", "firma.de") != nil {
+	if checkIdentity("https://idp.example", "A@Firma.de", true, "firma.de", "a@firma.de", "firma.de") != nil {
 		t.Fatal("valid identity rejected")
 	}
 	for _, c := range [][]string{
 		{"b@firma.de", "firma.de"},  // other user
 		{"a@firma.de.evil", "evil"}, // wrong domain
 	} {
-		if checkIdentity(c[0], true, c[1], "a@firma.de", "firma.de") == nil {
+		if checkIdentity("https://idp.example", c[0], true, c[1], "a@firma.de", "firma.de") == nil {
 			t.Errorf("%v accepted", c)
 		}
 	}
-	if checkIdentity("a@firma.de", false, "firma.de", "a@firma.de", "firma.de") == nil {
+	if checkIdentity("https://idp.example", "a@firma.de", false, "firma.de", "a@firma.de", "firma.de") == nil {
 		t.Fatal("unverified email accepted")
+	}
+	// Google: a consumer account with a verified company address has no hd claim
+	if checkIdentity("https://accounts.google.com", "a@firma.de", true, "", "a@firma.de", "firma.de") == nil {
+		t.Fatal("Google account without hd accepted")
+	}
+	if checkIdentity("https://accounts.google.com", "a@firma.de", true, "firma.de", "a@firma.de", "firma.de") != nil {
+		t.Fatal("Workspace account rejected")
 	}
 }
 
@@ -224,11 +238,23 @@ func TestDesktopVersionParsing(t *testing.T) {
 }
 
 func TestAccounts(t *testing.T) {
-	passwd := "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1::/:/usr/sbin/nologin\nadmin:x:5001:5001::/home/admin:/usr/bin/fish\nanna:x:1001:1001::/home/anna:/bin/bash\nsvc:x:1002:1002::/:/usr/sbin/nologin\n"
-	group := "sudo:x:27:admin\nwheel:x:10:\nusers:x:100:anna\n"
-	got := accounts(passwd, group)
-	if len(got) != 3 || got[0].Name != "root" || !got[0].Admin || !got[1].Admin || got[2].Name != "anna" || got[2].Admin {
-		t.Fatalf("accounts: %+v", got)
+	local := "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1::/:/usr/sbin/nologin\nadmin:x:5001:5001::/home/admin:/usr/bin/fish\nanna:x:1001:1001:Anna A,,,:/home/anna:/bin/bash\n"
+	nss := local + "jdoe:*:70001:70001:John Doe:/home/jdoe:/bin/bash\nsystemd-dyn:x:61234:61234::/:/usr/sbin/nologin\n"
+	localGroup := "sudo:x:27:admin\nwheel:x:10:\nusers:x:100:anna\n"
+	nssGroup := localGroup + "engineers:*:70100:jdoe,anna\n"
+	users, groups := parseAccounts(nss, nssGroup, local, localGroup)
+	byName := map[string]api.Account{}
+	for _, u := range users {
+		byName[u.Name] = u
+	}
+	if len(users) != 6 || !byName["root"].Admin || !byName["admin"].Admin || byName["anna"].Admin || byName["anna"].Gecos != "Anna A" {
+		t.Fatalf("users: %+v", users)
+	}
+	if byName["jdoe"].Source != "nss" || byName["anna"].Source != "local" || !byName["daemon"].System || !byName["systemd-dyn"].System || byName["jdoe"].System {
+		t.Fatalf("sources: %+v", users)
+	}
+	if len(groups) != 4 || groups[3].Name != "engineers" || groups[3].Source != "nss" || len(groups[3].Members) != 2 {
+		t.Fatalf("groups: %+v", groups)
 	}
 }
 
@@ -286,7 +312,7 @@ func TestPolkitAndSudoRendering(t *testing.T) {
 
 func TestDesktopServer(t *testing.T) {
 	a := &Agent{kick: make(chan struct{}, 1)}
-	d := &desktopServer{a: a, queued: map[string]bool{"u2": true}, failures: map[uint32][]time.Time{}}
+	d := &desktopServer{a: a, queued: map[string]bool{"u2": true}, inflight: map[string]bool{}, failures: map[uint32][]time.Time{}}
 	d.info.Store(&desktopInfo{Company: "ACME", Need: []luksVolume{{"/dev/sda3", "u1"}, {"/dev/sdb1", "u2"}}})
 	st := d.serve(1000, DesktopRequest{Op: "status"})
 	if st.Company != "ACME" || len(st.Need) != 1 || st.Need[0].UUID != "u1" {
@@ -333,5 +359,96 @@ func TestEnrollConfigErrors(t *testing.T) {
 	os.WriteFile(f, []byte("garbage\n"), 0o600)
 	if err := EnrollFromConfig(f); err == nil {
 		t.Fatal("garbage accepted")
+	}
+}
+
+func TestLocalPasswordRules(t *testing.T) {
+	p := pamPolicy{Login: api.Login{Enabled: true, LocalPassword: true, ReverifyHours: 24}}
+	if !ssoDue(p, "nobody-ever-confirmed", time.Now()) {
+		t.Fatal("unconfirmed user must need SSO")
+	}
+	if !ssoDue(pamPolicy{Login: api.Login{Enabled: true}}, "x", time.Now()) {
+		t.Fatal("pure SSO mode must always need SSO")
+	}
+	for pw, ok := range map[string]bool{"short": false, "correct horse battery": true, "anna-is-my-name-ok": false, "line\nbreak-password": false} {
+		if (checkLocalPassword("anna", pw) == nil) != ok {
+			t.Errorf("password %q: want ok=%v", pw, ok)
+		}
+	}
+	old := "auth\trequired\tpam_env.so\nauth [success=end default=ignore] pam_exec.so quiet stdout /usr/bin/limdm-agent pam-auth\nauth\tsufficient\tpam_unix.so\n"
+	got, err := insertPAMLine(old, "auth sufficient "+pamLine("/usr/bin/limdm-agent"))
+	if err != nil || strings.Count(got, "pam-auth") != 1 || !strings.Contains(got, "expose_authtok") {
+		t.Fatalf("PAM line not replaced: %v\n%s", err, got)
+	}
+}
+
+func TestCommandsRunOnce(t *testing.T) {
+	a := &Agent{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	a.state.DoneCommands = map[int64]time.Time{7: time.Now()}
+	a.runCommands([]api.Command{{ID: 7, Type: "sync"}})
+	if len(a.state.Results) != 1 || a.state.Results[0].ID != 7 {
+		t.Fatalf("redelivered command must be answered, not rerun: %+v", a.state.Results)
+	}
+	a.runCommands([]api.Command{{ID: 7, Type: "sync"}})
+	if len(a.state.Results) != 1 {
+		t.Fatalf("pending result duplicated: %+v", a.state.Results)
+	}
+}
+
+func TestPAMServiceFilter(t *testing.T) {
+	for _, c := range []struct {
+		service, rhost string
+		want           bool
+	}{{"gdm-password", "", true}, {"login", "", true}, {"sudo", "", true}, {"sshd", "", false},
+		{"login", "203.0.113.7", false}, {"sshd", "203.0.113.7", false}, {"cron", "", false}, {"", "", false}} {
+		if localService(c.service, c.rhost) != c.want {
+			t.Errorf("%s from %q: want %v", c.service, c.rhost, c.want)
+		}
+	}
+}
+
+func TestDesktopRateLimitParallel(t *testing.T) {
+	var calls atomic.Int32
+	addKeyFn = func(string, string, string) error {
+		calls.Add(1)
+		time.Sleep(20 * time.Millisecond)
+		return errors.New("wrong")
+	}
+	defer func() { addKeyFn = luksAddKey }()
+	a := &Agent{kick: make(chan struct{}, 1)}
+	d := &desktopServer{a: a, queued: map[string]bool{}, inflight: map[string]bool{}, failures: map[uint32][]time.Time{}}
+	vols := make([]luksVolume, 10)
+	for i := range vols {
+		vols[i] = luksVolume{"/dev/x" + strconv.Itoa(i), "u" + strconv.Itoa(i)}
+	}
+	d.info.Store(&desktopInfo{Need: vols})
+	var wg sync.WaitGroup
+	for i := range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.serve(1000, DesktopRequest{Op: "escrow", UUID: "u" + strconv.Itoa(i), Passphrase: "x"})
+		}()
+	}
+	wg.Wait()
+	if n := calls.Load(); n > 5 {
+		t.Fatalf("%d passphrase attempts ran in parallel, limit is 5", n)
+	}
+}
+
+func TestParseSlots(t *testing.T) {
+	luks2 := "LUKS header information\nVersion:       \t2\n\nKeyslots:\n  0: luks2\n\tKey:        512 bits\n  3: luks2\n\tKey:        512 bits\nTokens:\n  0: systemd-tpm2\n"
+	if got, err := parseSlots(luks2); err != nil || !slices.Equal(got, []int{0, 3}) {
+		t.Fatalf("luks2: %v %v", got, err)
+	}
+	luks1 := "Version:       \t1\nKey Slot 0: ENABLED\nKey Slot 1: DISABLED\nKey Slot 2: ENABLED\n"
+	if got, err := parseSlots(luks1); err != nil || !slices.Equal(got, []int{0, 2}) {
+		t.Fatalf("luks1: %v %v", got, err)
+	}
+	if _, err := parseSlots("garbage"); err == nil {
+		t.Fatal("unparsable dump accepted")
+	}
+	if m := unlocked.FindStringSubmatch("Key slot 3 unlocked.\nCommand successful."); m == nil || m[1] != "3" {
+		t.Fatal("unlocked slot not parsed")
 	}
 }

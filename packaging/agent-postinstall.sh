@@ -1,7 +1,11 @@
 #!/bin/sh
+# deb: configure (install and upgrade); rpm: $1 = 1 install, 2 upgrade.
+set -e
 systemctl daemon-reload >/dev/null 2>&1 || true
+systemctl enable --now limdm-watchdog.timer >/dev/null 2>&1 || true
 if [ -f /etc/limdm/device.pem ]; then
-    systemctl try-restart limdm-agent.service >/dev/null 2>&1 || true
+    # RefuseManualStop blocks "restart"; Restart=always brings up the new binary
+    systemctl kill --signal=SIGTERM limdm-agent.service >/dev/null 2>&1 || true
 elif [ -f /etc/limdm/enroll.conf ]; then
     # mass deployment: the config was placed before the package was installed
     if limdm-agent enroll --config /etc/limdm/enroll.conf; then

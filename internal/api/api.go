@@ -58,7 +58,7 @@ var Types = map[string]string{
 	TypeFirewall:   `{"enforce": true, "allow": ["22/tcp"]}`,
 	TypeOSVersion:  `{"min": {"ubuntu": "22.04", "debian": "12", "fedora": "41"}}`,
 	TypeScreenLock: `{"idle_seconds": 300}`,
-	TypeLogin:      `{"issuer": "https://accounts.google.com", "client_id": "", "client_secret": "", "allowed_domain": ""}`,
+	TypeLogin:      `{"issuer": "https://accounts.google.com", "client_id": "", "client_secret": "", "allowed_domain": "", "local_password": true, "reverify_hours": 168}`,
 	TypePrivacy:    `{"network_info": false, "logged_in_users": false}`,
 }
 
@@ -66,6 +66,7 @@ var Types = map[string]string{
 // A zero section means "not managed".
 type Policy struct {
 	CheckinSeconds    int               `json:"checkin_seconds"`
+	OfflineLockHours  int               `json:"offline_lock_hours"` // lock the device when the server was unreachable this long, 0 = off
 	Compliance        Compliance        `json:"compliance"`
 	Updates           Updates           `json:"updates"`
 	Packages          Packages          `json:"packages"`
@@ -80,7 +81,8 @@ type Policy struct {
 }
 
 type agentPayload struct {
-	CheckinSeconds int `json:"checkin_seconds"`
+	CheckinSeconds   int `json:"checkin_seconds"`
+	OfflineLockHours int `json:"offline_lock_hours,omitempty"`
 }
 
 type Compliance struct {
@@ -142,6 +144,11 @@ type Login struct {
 	ClientID      string `json:"client_id"`
 	ClientSecret  string `json:"client_secret"`
 	AllowedDomain string `json:"allowed_domain"` // Google "hd" claim, or email domain
+	// LocalPassword: after an SSO confirmation the password typed at that login
+	// becomes the local password, used offline and on the lock screen until
+	// ReverifyHours have passed; then SSO is required again.
+	LocalPassword bool `json:"local_password,omitempty"`
+	ReverifyHours int  `json:"reverify_hours,omitempty"`
 }
 
 // Privacy controls which personal data leaves the device. Default: none of it.
@@ -190,7 +197,10 @@ func (d Declaration) apply(p *Policy) error {
 		if v.CheckinSeconds < 30 || v.CheckinSeconds > 86400 {
 			bad("checkin_seconds must be 30..86400")
 		}
-		p.CheckinSeconds = v.CheckinSeconds
+		if v.OfflineLockHours < 0 || v.OfflineLockHours > 8760 {
+			bad("offline_lock_hours must be 0 (off) up to 8760")
+		}
+		p.CheckinSeconds, p.OfflineLockHours = v.CheckinSeconds, v.OfflineLockHours
 	case TypeCompliance:
 		if err := strict(d.Payload, &p.Compliance); err != nil {
 			return err
@@ -252,6 +262,9 @@ func (d Declaration) apply(p *Policy) error {
 			if _, err := f.FileMode(); err != nil {
 				bad("file %s: %v", f.Path, err)
 			}
+			if userWritable(f.Path) {
+				bad("file %s: directories writable by users cannot be managed (symlink attacks)", f.Path)
+			}
 		}
 		p.Files = v.Files
 	case TypeFirewall:
@@ -290,6 +303,9 @@ func (d Declaration) apply(p *Policy) error {
 		p.Login.Enabled = true
 		if !strings.HasPrefix(p.Login.Issuer, "https://") || p.Login.ClientID == "" {
 			bad("login needs https issuer and client_id")
+		}
+		if p.Login.LocalPassword && (p.Login.ReverifyHours < 1 || p.Login.ReverifyHours > 2160) {
+			bad("local_password needs reverify_hours 1..2160")
 		}
 	case TypePrivacy:
 		if err := strict(d.Payload, &p.Privacy); err != nil {
@@ -363,8 +379,8 @@ func (f File) FileMode() (uint32, error) {
 		return 0o644, nil
 	}
 	m, err := strconv.ParseUint(f.Mode, 8, 32)
-	if err != nil || m > 0o7777 {
-		return 0, fmt.Errorf("invalid mode %q", f.Mode)
+	if err != nil || m > 0o777 {
+		return 0, fmt.Errorf("invalid mode %q (0000..0777, no setuid, setgid or sticky bits)", f.Mode)
 	}
 	return uint32(m), nil
 }
@@ -429,22 +445,35 @@ type Inventory struct {
 	BIOSVersion string `json:"bios_version,omitempty"`
 	BootTime    int64  `json:"boot_time"`
 	// Desktop environment and display manager, empty on servers.
-	Desktop        string    `json:"desktop,omitempty"`
-	DisplayManager string    `json:"display_manager,omitempty"`
-	Disks          []Disk    `json:"disks,omitempty"`
-	Volumes        []Volume  `json:"volumes,omitempty"`
-	Accounts       []Account `json:"accounts,omitempty"`        // local login accounts and admin rights
-	Repos          []Repo    `json:"repos,omitempty"`           // configured package sources
-	Interfaces     []NIC     `json:"interfaces,omitempty"`      // only with privacy.network_info
-	IPs            []string  `json:"ips,omitempty"`             // only with privacy.network_info
-	Users          []string  `json:"logged_in_users,omitempty"` // only with privacy.logged_in_users
+	Desktop        string      `json:"desktop,omitempty"`
+	DisplayManager string      `json:"display_manager,omitempty"`
+	Disks          []Disk      `json:"disks,omitempty"`
+	Volumes        []Volume    `json:"volumes,omitempty"`
+	Accounts       []Account   `json:"accounts,omitempty"`   // local login accounts and admin rights
+	Repos          []Repo      `json:"repos,omitempty"`      // configured package sources
+	Interfaces     []NIC       `json:"interfaces,omitempty"` // addresses only with privacy.network_info
+	DNS            []DNSConfig `json:"dns,omitempty"`        // only with privacy.network_info
+	Routes         []Route     `json:"routes,omitempty"`     // only with privacy.network_info
+	VPNs           []VPN       `json:"vpns,omitempty"`
+	Groups         []Group     `json:"groups,omitempty"`
+	IPs            []string    `json:"ips,omitempty"`             // only with privacy.network_info
+	Users          []string    `json:"logged_in_users,omitempty"` // only with privacy.logged_in_users
 }
 
 type Account struct {
-	Name  string `json:"name"`
-	UID   int    `json:"uid"`
-	Shell string `json:"shell,omitempty"`
-	Admin bool   `json:"admin"` // uid 0 or member of sudo, wheel or admin
+	Name   string `json:"name"`
+	UID    int    `json:"uid"`
+	GID    int    `json:"gid,omitempty"`
+	Home   string `json:"home,omitempty"`
+	Gecos  string `json:"gecos,omitempty"`
+	Source string `json:"source,omitempty"` // local (/etc/passwd) or nss (sssd, LDAP, systemd-homed, DynamicUser, winbind)
+	System bool   `json:"system,omitempty"` // service account: uid below 1000 or no login shell
+	Shell  string `json:"shell,omitempty"`
+	Admin  bool   `json:"admin"` // uid 0 or member of sudo, wheel or admin
+	// SSO: centrally managed account; LastSSO is its last SSO confirmation.
+	SSO       bool       `json:"sso,omitempty"`
+	LastSSO   *time.Time `json:"last_sso,omitempty"`
+	PwdLocked bool       `json:"pwd_locked,omitempty"` // local password refused until the next SSO confirmation
 }
 
 // Repo is one package source. Signed reports signed-by (apt) or gpgcheck=1 (dnf).
@@ -477,9 +506,45 @@ type Volume struct {
 }
 
 type NIC struct {
-	Name string   `json:"name"`
-	MAC  string   `json:"mac,omitempty"`
-	IPs  []string `json:"ips,omitempty"`
+	Name  string   `json:"name"`
+	MAC   string   `json:"mac,omitempty"`
+	IPs   []string `json:"ips,omitempty"`
+	Kind  string   `json:"kind,omitempty"`  // ethernet, wifi, wireguard, tun, bridge, vlan, virtual
+	State string   `json:"state,omitempty"` // up, down, unknown
+	MTU   int      `json:"mtu,omitempty"`
+	VPN   string   `json:"vpn,omitempty"` // provider when the interface belongs to a VPN client
+}
+
+// DNSConfig is one resolver scope: "global" or a link name.
+type DNSConfig struct {
+	Scope   string   `json:"scope"`
+	Servers []string `json:"servers,omitempty"`
+	Domains []string `json:"domains,omitempty"`
+}
+
+type Route struct {
+	Dst     string `json:"dst"` // "default" for the default route
+	Gateway string `json:"gateway,omitempty"`
+	Dev     string `json:"dev,omitempty"`
+	Proto   string `json:"proto,omitempty"`
+	Metric  int    `json:"metric,omitempty"`
+	Family  string `json:"family"` // inet, inet6
+}
+
+// VPN is an installed or running VPN client.
+type VPN struct {
+	Name      string `json:"name"` // WireGuard, OpenVPN, Tailscale, NetBird, Mullvad, ...
+	Service   string `json:"service,omitempty"`
+	Active    bool   `json:"active"`
+	Interface string `json:"interface,omitempty"`
+}
+
+type Group struct {
+	Name    string   `json:"name"`
+	GID     int      `json:"gid"`
+	Members []string `json:"members,omitempty"`
+	Source  string   `json:"source"` // local (/etc/group) or nss (sssd, LDAP, systemd, winbind, ...)
+	System  bool     `json:"system,omitempty"`
 }
 
 type Package struct {
@@ -520,7 +585,15 @@ type Command struct {
 }
 
 // CommandTypes are the one off actions an admin can send.
-var CommandTypes = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "script"}
+var CommandTypes = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "script", "lost", "found", "wipe", "allow_uninstall"}
+
+// LostMode is the payload of the "lost" command. The server adds the escrowed
+// recovery keys only when it delivers the command; they are never stored in
+// the command itself.
+type LostMode struct {
+	Message string        `json:"message"`
+	Keys    []RecoveryKey `json:"keys,omitempty"`
+}
 
 type CommandResult struct {
 	ID     int64  `json:"id"`
@@ -628,4 +701,14 @@ func CompareVersions(a, b string) int {
 		}
 	}
 	return 0
+}
+
+// userWritable reports paths below directories regular users can write to.
+func userWritable(p string) bool {
+	for _, d := range []string{"/home/", "/tmp/", "/var/tmp/", "/run/user/", "/dev/shm/", "/var/mail/", "/var/spool/"} {
+		if strings.HasPrefix(p, d) {
+			return true
+		}
+	}
+	return false
 }

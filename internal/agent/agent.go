@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	mrand "math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -28,7 +29,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -74,6 +77,10 @@ type State struct {
 	EscrowNotified time.Time            `json:"escrow_notified"`
 	Company        string               `json:"company,omitempty"`
 	BrandingHash   string               `json:"branding_hash,omitempty"`
+	LastContact    time.Time            `json:"last_contact"`
+	DoneCommands   map[int64]time.Time  `json:"done_commands,omitempty"`  // executed command IDs: the server redelivers until it has the result
+	RemovePending  map[string]bool      `json:"remove_pending,omitempty"` // removed users whose account lock still has to succeed
+	OfflineLocked  bool                 `json:"offline_locked,omitempty"`
 }
 
 type Agent struct {
@@ -85,6 +92,7 @@ type Agent struct {
 
 	pol        api.Policy
 	desktop    *desktopServer
+	evMu       sync.Mutex // guards state.Events: the desktop socket logs from its own goroutines
 	kick       chan struct{}
 	declStatus []api.DeclarationStatus
 	users      []api.User
@@ -327,16 +335,40 @@ func (a *Agent) problem(typ, format string, args ...any) {
 func (a *Agent) event(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	a.log.Info(msg)
+	a.addEvent(time.Now().UTC().Format(time.RFC3339) + " " + msg)
+}
+
+// addEvent queues one line for the next check in (bounded while offline).
+func (a *Agent) addEvent(line string) {
+	a.evMu.Lock()
+	defer a.evMu.Unlock()
 	if len(a.state.Events) < 500 {
-		a.state.Events = append(a.state.Events, time.Now().UTC().Format(time.RFC3339)+" "+msg)
+		a.state.Events = append(a.state.Events, line)
 	}
 }
 
+// pendingEvents copies the queued events.
+func (a *Agent) pendingEvents() []string {
+	a.evMu.Lock()
+	defer a.evMu.Unlock()
+	return slices.Clone(a.state.Events)
+}
+
 func (a *Agent) saveState() {
-	b, _ := json.Marshal(a.state)
-	if _, err := writeIfChanged(stateFile, string(b), 0o600); err != nil {
+	if err := a.saveStateErr(); err != nil {
 		a.log.Error("save state", "err", err)
 	}
+}
+
+func (a *Agent) saveStateErr() error {
+	a.evMu.Lock()
+	b, err := json.Marshal(a.state)
+	a.evMu.Unlock()
+	if err != nil {
+		return err
+	}
+	_, err = writeIfChanged(stateFile, string(b), 0o600)
+	return err
 }
 
 // Run loops until ctx ends.
@@ -346,16 +378,20 @@ func (a *Agent) Run(ctx context.Context) error {
 	signal.Notify(wake, syscall.SIGUSR1) // "recovery-key" asks for an immediate check in
 	defer signal.Stop(wake)
 	a.kick = make(chan struct{}, 1)
-	a.desktop = &desktopServer{a: a, queued: map[string]bool{}, failures: map[uint32][]time.Time{}}
+	a.desktop = &desktopServer{a: a, queued: map[string]bool{}, inflight: map[string]bool{}, failures: map[uint32][]time.Time{}}
 	go a.serveDesktop(ctx)
+	a.enforceOffline(false) // before anything else: the device may have been off for a long time
 	for {
 		a.cycle(ctx)
 		wait := time.Duration(a.pol.CheckinSeconds) * time.Second
 		if wait <= 0 {
 			wait = 5 * time.Minute
 		}
+		// jitter spreads the fleet: after a blueprint change every device would
+		// otherwise check in at the same moment
+		wait += time.Duration(mrand.Int64N(int64(wait/10) + 1)) //nolint:gosec // scheduling jitter, not a secret
 		if a.syncNow {
-			a.syncNow, wait = false, 5*time.Second
+			a.syncNow, wait = false, 5*time.Second+time.Duration(mrand.Int64N(int64(55*time.Second))) //nolint:gosec // scheduling jitter
 		}
 		select {
 		case <-ctx.Done():
@@ -409,6 +445,8 @@ func (a *Agent) cycle(ctx context.Context) {
 	defer a.publishDesktop()
 	a.renewIdentity(ctx)
 	a.takeEscrowRequests()
+	a.collectTamper()
+	a.guardWatchdog()
 	checks := a.converge()
 	a.collectAuthEvents()
 
@@ -417,7 +455,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	sum := sha256.Sum256(sb)
 	statusHash := hex.EncodeToString(sum[:])
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
-		StatusHash: statusHash, Results: a.state.Results, Events: a.state.Events, Metrics: metrics(), BrandingHash: a.state.BrandingHash}
+		StatusHash: statusHash, Results: a.state.Results, Events: a.pendingEvents(), Metrics: metrics(), BrandingHash: a.state.BrandingHash}
 	// an invalid key would make the server reject every check in
 	a.state.PendingKeys = slices.DeleteFunc(a.state.PendingKeys, func(k pendingKey) bool { return !k.Valid() })
 	sentKeys := slices.Clone(a.state.PendingKeys)
@@ -439,9 +477,15 @@ func (a *Agent) cycle(ctx context.Context) {
 	var resp api.CheckinResponse
 	if err := a.post(ctx, "/api/v1/checkin", req, &resp); err != nil {
 		a.log.Error("checkin failed, enforcing stored declarations", "err", err)
+		a.enforceOffline(false)
 		return
 	}
-	a.state.Results, a.state.Events = nil, nil
+	a.enforceOffline(true)
+	// drop only what was sent: entries added meanwhile (unlock events, desktop) stay
+	a.state.Results = a.state.Results[len(req.Results):]
+	a.evMu.Lock()
+	a.state.Events = a.state.Events[len(req.Events):]
+	a.evMu.Unlock()
 	if len(sentKeys) > 0 {
 		a.escrowConfirmed(sentKeys)
 	}
@@ -472,10 +516,7 @@ func (a *Agent) cycle(ctx context.Context) {
 		a.syncNow = true
 	}
 	a.compose()
-	for _, c := range resp.Commands {
-		a.state.Results = append(a.state.Results, a.execute(c))
-		a.syncNow = true
-	}
+	a.runCommands(resp.Commands)
 	if rel := resp.AgentUpdate; rel != nil && UpdatePubKey != "" && rel.Version != a.failedUpdate {
 		if err := a.selfUpdate(ctx, *rel); err != nil {
 			a.failedUpdate = rel.Version
@@ -615,14 +656,22 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 	case "update":
 		out, err = a.host.upgrade(false)
 		a.state.LastUpdateRun = time.Now()
-	case "reboot":
-		out, err = sh("shutdown", "-r", "+1", "LiMDM: reboot requested by administrator in 1 minute")
-	case "shutdown":
-		out, err = sh("shutdown", "-h", "+1", "LiMDM: shutdown requested by administrator in 1 minute")
+	case "reboot", "shutdown":
+		out, err = powerAction(c.Type, c.Payload)
 	case "lock":
 		out, err = lockDevice()
+		a.syncPasswordLocks()
 	case "unlock":
 		out, err = unlockDevice()
+		a.syncPasswordLocks()
+	case "lost":
+		out, err = a.lostMode(c.Payload)
+	case "found":
+		out, err = a.foundMode()
+	case "wipe":
+		out, err = a.wipe()
+	case "allow_uninstall":
+		out, err = allowUninstall()
 	case "script":
 		if !a.cfg.AllowScripts {
 			err = errors.New("remote scripts are disabled on this device (allow_scripts)")
@@ -695,8 +744,8 @@ func (a *Agent) collectAuthEvents() {
 		return
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-		if line != "" && len(a.state.Events) < 500 {
-			a.state.Events = append(a.state.Events, line)
+		if line != "" {
+			a.addEvent(line)
 		}
 	}
 	if err := os.Remove(sending); err != nil {
@@ -888,4 +937,51 @@ func EnrollFromConfig(path string) error {
 		return err
 	}
 	return os.Remove(path)
+}
+
+// powerAction reboots or shuts down after payload minutes (0 = now, empty = 1 for
+// commands queued by older servers).
+func powerAction(typ, payload string) (string, error) {
+	m := 1
+	if payload != "" {
+		var err error
+		if m, err = strconv.Atoi(payload); err != nil || m < 0 || m > 1440 {
+			return "", errors.New("delay must be 0..1440 minutes")
+		}
+	}
+	flag, word := "-r", "reboot"
+	if typ == "shutdown" {
+		flag, word = "-h", "shutdown"
+	}
+	when, text := "now", "LiMDM: "+word+" requested by administrator now"
+	if m > 0 {
+		when, text = "+"+strconv.Itoa(m), fmt.Sprintf("LiMDM: %s requested by administrator in %d minutes", word, m)
+	}
+	return sh("shutdown", flag, when, text)
+}
+
+// runCommands executes each command once. The server repeats commands until it
+// received their result, so IDs already executed are skipped.
+func (a *Agent) runCommands(cmds []api.Command) {
+	if a.state.DoneCommands == nil {
+		a.state.DoneCommands = map[int64]time.Time{}
+	}
+	for id, at := range a.state.DoneCommands {
+		if time.Since(at) > 30*24*time.Hour {
+			delete(a.state.DoneCommands, id)
+		}
+	}
+	for _, c := range cmds {
+		if _, done := a.state.DoneCommands[c.ID]; done {
+			// ran before, but its result never arrived (for example a reboot "now")
+			if !slices.ContainsFunc(a.state.Results, func(r api.CommandResult) bool { return r.ID == c.ID }) {
+				a.state.Results = append(a.state.Results, api.CommandResult{ID: c.ID, OK: true, Output: "executed; the device restarted before the result was sent"})
+			}
+			continue
+		}
+		a.state.DoneCommands[c.ID] = time.Now() // before running: a reboot must not repeat after restart
+		a.saveState()
+		a.state.Results = append(a.state.Results, a.execute(c))
+		a.syncNow = true
+	}
 }

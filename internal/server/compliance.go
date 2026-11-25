@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -26,8 +27,9 @@ type webhookEvent struct {
 	Type     string    `json:"type"` // device.noncompliant
 	DeviceID string    `json:"device_id"`
 	Hostname string    `json:"hostname"`
-	Failing  int       `json:"failing_checks"`
-	Since    time.Time `json:"noncompliant_since"`
+	Failing  int       `json:"failing_checks,omitempty"`
+	Since    time.Time `json:"noncompliant_since,omitzero"`
+	Detail   string    `json:"detail,omitempty"` // device.tamper: what was found
 	Console  string    `json:"console_url"`
 }
 
@@ -42,6 +44,16 @@ func (s *Server) enforceCompliance(ctx context.Context, tx pgx.Tx, deviceID stri
 		Scan(&failing, &since, &notified, &locked, &host)
 	if err != nil {
 		return nil, err
+	}
+	if locked && c.LockAfterHours == 0 {
+		// the lock action was removed from the policy: lift the automatic lock
+		if err := queuePolicyCommand(ctx, tx, deviceID, "unlock", false); err != nil {
+			return nil, err
+		}
+		if err := audit(ctx, tx, "policy", "compliance.unlock", deviceID, "lock action no longer declared"); err != nil {
+			return nil, err
+		}
+		locked = false
 	}
 	if failing == 0 {
 		if since == nil && !locked {
@@ -115,8 +127,15 @@ func (s *Server) sendWebhook(ev *webhookEvent) {
 	if ev == nil || target == "" {
 		return
 	}
-	body, _ := json.Marshal(ev)
+	body, err := json.Marshal(ev)
+	if err != nil {
+		s.log.Error("webhook", "err", err)
+		return
+	}
+	// the timestamp is signed with the body, so receivers can reject replays
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
 	mac := hmac.New(sha256.New, s.webhookKey())
+	mac.Write([]byte(ts + "."))
 	mac.Write(body)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -127,10 +146,11 @@ func (s *Server) sendWebhook(ev *webhookEvent) {
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-LiMDM-Timestamp", ts)
 		req.Header.Set("X-LiMDM-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 		client := s.hooks
 		if client == nil {
-			client = http.DefaultClient
+			client = webhookClient
 		}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -142,4 +162,11 @@ func (s *Server) sendWebhook(ev *webhookEvent) {
 			s.log.Error("webhook", "status", resp.Status)
 		}
 	}()
+}
+
+// webhookClient does not follow redirects: a redirect could point the server
+// at internal addresses (blind SSRF).
+var webhookClient = &http.Client{
+	Timeout:       10 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }

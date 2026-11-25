@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Console users: OIDC identities (by email) and local accounts (password +
@@ -19,14 +20,33 @@ import (
 
 var roles = []string{"admin", "helpdesk", "auditor"}
 
-// seedConsoleUsers adds the bootstrap OIDC users from the environment once;
-// later changes in the UI win (disabled users are not re-enabled).
+// seedConsoleUsers adds the bootstrap OIDC users from the environment and
+// disables seeded users that were removed from it, so taking someone out of
+// LIMDM_ADMINS revokes their access at the next start. Changes made in the
+// console win: such users are no longer managed by the environment.
 func (s *Server) seedConsoleUsers(ctx context.Context) error {
+	listed := []string{}
 	for role, list := range map[string][]string{"admin": s.cfg.Admins, "auditor": s.cfg.Auditors} {
 		for _, email := range list {
-			if _, err := s.db.Exec(ctx, `INSERT INTO console_users(email, role) VALUES ($1,$2) ON CONFLICT (email) DO NOTHING`, email, role); err != nil {
+			listed = append(listed, email)
+			if _, err := s.db.Exec(ctx, `INSERT INTO console_users(email, role, from_env) VALUES ($1,$2,true)
+				ON CONFLICT (email) DO NOTHING`, email, role); err != nil {
 				return err
 			}
+		}
+	}
+	rows, err := s.db.Query(ctx, `UPDATE console_users SET disabled=true WHERE from_env AND NOT disabled AND email <> ALL($1) RETURNING email`, listed)
+	if err != nil {
+		return err
+	}
+	revoked, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	for _, email := range revoked {
+		s.log.Warn("console user removed from the environment, disabled", "email", email)
+		if err := s.auditAction(ctx, "system", "user.update", email, "disabled: no longer in LIMDM_ADMINS or LIMDM_AUDITORS", func(pgx.Tx) error { return nil }); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -34,11 +54,47 @@ func (s *Server) seedConsoleUsers(ctx context.Context) error {
 
 // oidcRole returns the role of an enabled OIDC console user, or "".
 func (s *Server) oidcRole(ctx context.Context, email string) string {
-	var role string
-	if err := s.db.QueryRow(ctx, `SELECT role FROM console_users WHERE email=$1 AND NOT disabled`, email).Scan(&role); err != nil {
-		return ""
-	}
+	role, _ := s.account(ctx, email)
 	return role
+}
+
+// account returns role and session generation of an enabled console account
+// (OIDC email or local:<name>); role is "" when it is unknown or disabled.
+func (s *Server) account(ctx context.Context, login string) (string, int64) {
+	var role string
+	var gen int64
+	q := `SELECT role, session_gen FROM console_users WHERE email=$1 AND NOT disabled`
+	key := login
+	if name, ok := strings.CutPrefix(login, localPrefix); ok {
+		q, key = `SELECT role, session_gen FROM local_admins WHERE name=$1 AND NOT disabled`, name
+	}
+	if err := s.db.QueryRow(ctx, q, key).Scan(&role, &gen); err != nil {
+		return "", 0
+	}
+	return role, gen
+}
+
+type execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// revokeSessions ends every session of an account.
+func (s *Server) revokeSessions(ctx context.Context, db execer, login string) error {
+	if name, ok := strings.CutPrefix(login, localPrefix); ok {
+		_, err := db.Exec(ctx, `UPDATE local_admins SET session_gen=session_gen+1 WHERE name=$1`, name)
+		return err
+	}
+	_, err := db.Exec(ctx, `UPDATE console_users SET session_gen=session_gen+1 WHERE email=$1`, login)
+	return err
+}
+
+// renewSession reissues the current session under the account's new
+// generation after the user changed their own credentials.
+func (s *Server) renewSession(w http.ResponseWriter, r *http.Request, sess session) {
+	if role, gen := s.account(r.Context(), sess.Email); role != "" {
+		sess.Gen = gen
+		s.setCookie(w, sessionCookie, s.seal(sess), maxSession-time.Since(sess.IAT))
+	}
 }
 
 type consoleUser struct {
@@ -151,9 +207,9 @@ func (s *Server) userUpdate(w http.ResponseWriter, r *http.Request, sess session
 		var tag interface{ RowsAffected() int64 }
 		var err error
 		if name, ok := strings.CutPrefix(login, localPrefix); ok {
-			tag, err = tx.Exec(ctx, `UPDATE local_admins SET role=$2, disabled=$3 WHERE name=$1`, name, role, disable)
+			tag, err = tx.Exec(ctx, `UPDATE local_admins SET role=$2, disabled=$3, session_gen=session_gen+1 WHERE name=$1`, name, role, disable)
 		} else {
-			tag, err = tx.Exec(ctx, `UPDATE console_users SET role=$2, disabled=$3 WHERE email=$1`, login, role, disable)
+			tag, err = tx.Exec(ctx, `UPDATE console_users SET role=$2, disabled=$3, from_env=false, session_gen=session_gen+1 WHERE email=$1`, login, role, disable)
 		}
 		if err == nil && tag.RowsAffected() == 0 {
 			err = errors.New("user not found")

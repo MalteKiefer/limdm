@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/maltekiefer/limdm/internal/api"
@@ -76,9 +77,10 @@ func sudoLine(r api.SudoRule) string {
 }
 
 // applySudo writes one sudoers drop in per rule (prefix 70-limdm-, the
-// compliance defaults live in 60-limdm). Each file is checked with visudo
-// before it is installed; if the whole configuration fails afterwards, the
-// managed files are removed again so sudo keeps working.
+// compliance defaults live in 60-limdm). Every new content is checked with
+// visudo first; a rejected rule keeps its previous file. If the complete
+// configuration fails afterwards although it was valid before, the managed
+// files are restored to their previous state, so sudo keeps working.
 func applySudo(s *api.Sudo) error {
 	desired := map[string]string{}
 	if s != nil {
@@ -93,36 +95,54 @@ func applySudo(s *api.Sudo) error {
 	if len(desired) == 0 && len(existing) == 0 {
 		return nil
 	}
+	_, baseErr := sh("visudo", "-c", "-q")
+	previous := map[string]string{} // name -> content before this run ("" = did not exist)
+	for _, f := range existing {
+		previous[filepath.Base(f)] = readFile(f)
+	}
 	tmp, err := os.MkdirTemp("/run", "limdm-sudo-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(tmp)
 	var errs []error
+	keep := map[string]bool{}
 	for name, content := range desired {
 		f := filepath.Join(tmp, name)
 		if err := os.WriteFile(f, []byte(content), 0o440); err != nil { //nolint:gosec // sudoers mode
 			return err
 		}
 		if out, err := sh("visudo", "-c", "-q", "-f", f); err != nil {
-			errs = append(errs, fmt.Errorf("sudo rule %s rejected by visudo: %s", name, lastLines(out, 2)))
-			delete(desired, name)
+			errs = append(errs, fmt.Errorf("sudo rule %s rejected by visudo, previous version kept: %s", name, lastLines(out, 2)))
+			keep[name] = true
 			continue
 		}
 		if _, err := writeIfChanged(filepath.Join(sudoersDir, name), content, 0o440); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	for _, f := range existing {
-		if _, ok := desired[filepath.Base(f)]; !ok {
-			errs = append(errs, os.Remove(f))
+	for name := range previous {
+		if _, ok := desired[name]; !ok && !keep[name] {
+			errs = append(errs, os.Remove(filepath.Join(sudoersDir, name)))
 		}
+	}
+	if baseErr != nil {
+		return errors.Join(append(errs, fmt.Errorf("sudo configuration was already invalid before LiMDM changed it: %w", baseErr))...)
 	}
 	if out, err := sh("visudo", "-c", "-q"); err != nil {
 		for name := range desired {
-			os.Remove(filepath.Join(sudoersDir, name))
+			if old, ok := previous[name]; ok {
+				_, _ = writeIfChanged(filepath.Join(sudoersDir, name), old, 0o440)
+			} else {
+				os.Remove(filepath.Join(sudoersDir, name))
+			}
 		}
-		errs = append(errs, fmt.Errorf("sudo configuration invalid, managed rules removed: %s", lastLines(out, 2)))
+		for name, old := range previous {
+			if _, ok := desired[name]; !ok {
+				_, _ = writeIfChanged(filepath.Join(sudoersDir, name), old, 0o440)
+			}
+		}
+		errs = append(errs, fmt.Errorf("sudo configuration invalid after the change, previous state restored: %s", lastLines(out, 2)))
 	}
 	return errors.Join(errs...)
 }
@@ -273,18 +293,56 @@ func luksRemoveKey(dev, key string) error {
 
 // takeEscrowRequests moves keys created by "limdm-agent recovery-key" into state.
 func (a *Agent) takeEscrowRequests() {
-	escrowMu.Lock()
-	defer escrowMu.Unlock()
-	b, err := os.ReadFile(escrowRequest)
-	if err != nil {
-		return
-	}
-	var ks []pendingKey
-	if json.Unmarshal(b, &ks) == nil {
+	err := withEscrowRequests(func(ks []pendingKey) ([]pendingKey, error) {
+		if len(ks) == 0 {
+			return nil, nil
+		}
 		a.state.PendingKeys = append(a.state.PendingKeys, ks...)
+		if err := a.saveStateErr(); err != nil {
+			a.state.PendingKeys = a.state.PendingKeys[:len(a.state.PendingKeys)-len(ks)]
+			return ks, err // keep the file: the keys exist only there
+		}
+		return nil, nil
+	})
+	if err != nil {
+		a.event("escrow requests: %v", err)
 	}
-	a.saveState()
-	os.Remove(escrowRequest)
+}
+
+// withEscrowRequests gives exclusive access to the escrow request file, which
+// the agent, the desktop socket and the recovery-key command share. fn returns
+// the remaining entries; the file is replaced atomically or removed.
+func withEscrowRequests(fn func([]pendingKey) ([]pendingKey, error)) error {
+	lock, err := os.OpenFile(escrowRequest+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }() // closing the file releases it too
+	var ks []pendingKey
+	if b, err := os.ReadFile(escrowRequest); err == nil {
+		if err := json.Unmarshal(b, &ks); err != nil {
+			return fmt.Errorf("%s is corrupt, left in place: %w", escrowRequest, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	rest, ferr := fn(ks)
+	if len(rest) == 0 {
+		if err := os.Remove(escrowRequest); err != nil && !os.IsNotExist(err) {
+			return errors.Join(ferr, err)
+		}
+		return ferr
+	}
+	b, err := json.Marshal(rest)
+	if err != nil {
+		return errors.Join(ferr, err)
+	}
+	_, err = writeIfChanged(escrowRequest, string(b), 0o600)
+	return errors.Join(ferr, err)
 }
 
 // rotateRecovery replaces keys the server marked as viewed. The old key stays
@@ -425,10 +483,8 @@ func CreateRecoveryKeys(readPass func(prompt string) (string, error), all bool) 
 		}
 	}
 	var req []pendingKey
-	if b, err := os.ReadFile(escrowRequest); err == nil {
-		if err := json.Unmarshal(b, &req); err != nil {
-			return fmt.Errorf("pending escrow request: %w", err)
-		}
+	if err := withEscrowRequests(func(ks []pendingKey) ([]pendingKey, error) { req = ks; return ks, nil }); err != nil {
+		return err
 	}
 	vols := luksVolumes()
 	if len(vols) == 0 {
@@ -448,9 +504,7 @@ func CreateRecoveryKeys(readPass func(prompt string) (string, error), all bool) 
 		if err := luksAddKey(v.Path, pw, k); err != nil {
 			return err
 		}
-		req = append(req, pendingKey{RecoveryKey: api.RecoveryKey{UUID: v.UUID, Device: v.Path, Key: k}})
-		b, _ := json.Marshal(req)
-		if err := os.WriteFile(escrowRequest, b, 0o600); err != nil {
+		if err := queueEscrow(pendingKey{RecoveryKey: api.RecoveryKey{UUID: v.UUID, Device: v.Path, Key: k}}); err != nil {
 			return err
 		}
 		done++

@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -181,6 +182,14 @@ type Server struct {
 	limit limiter
 	rt    atomic.Pointer[runtimeState] // settings editable in the UI and the OIDC client built from them
 	hooks *http.Client                 // webhook client; nil uses http.DefaultClient (tests inject one)
+
+	saveMu sync.Mutex // serializes settings saves
+	fleet  atomic.Pointer[fleetCache]
+	// first broken audit entry found by the last full verification, 0 = intact
+	auditBroken atomic.Int64
+	relMu       sync.Mutex // release manifest, reloaded when its modification time changes
+	relMod      time.Time
+	rels        []api.Release
 }
 
 func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
@@ -188,6 +197,13 @@ func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	// explicit limits instead of the pgx default of max(4, CPUs); a pool_max_conns
+	// parameter in the URL still wins
+	if !strings.Contains(databaseURL, "pool_max_conns") {
+		pc.MaxConns = 32
+	}
+	pc.MinConns = 2
+	pc.MaxConnIdleTime = 5 * time.Minute
 	return pc, requireDBTLS(pc)
 }
 
@@ -358,12 +374,25 @@ func (s *Server) deviceAuth(next http.HandlerFunc, allowExpired bool) http.Handl
 			http.Error(w, "valid client certificate required", http.StatusUnauthorized)
 			return
 		}
-		id := leaf.Subject.CommonName
+		id, serial := leaf.Subject.CommonName, leaf.SerialNumber.Text(16)
 		var current string
-		err = s.db.QueryRow(r.Context(), `SELECT cert_serial FROM devices WHERE id=$1 AND NOT retired`, id).Scan(&current)
-		if err != nil || current != leaf.SerialNumber.Text(16) {
-			s.log.Warn("rejected device certificate", "device", id, "serial", leaf.SerialNumber.Text(16))
-			http.Error(w, "certificate revoked", http.StatusUnauthorized)
+		var pending *string
+		err = s.db.QueryRow(r.Context(), `SELECT cert_serial, pending_serial FROM devices WHERE id=$1 AND NOT retired`, id).Scan(&current, &pending)
+		switch {
+		case err == nil && serial == current:
+		case err == nil && pending != nil && serial == *pending:
+			// first use of a renewed certificate: it replaces (and revokes) the previous one
+			if err := s.auditAction(r.Context(), "device:"+id, "device.cert_activate", id, serial, func(tx pgx.Tx) error {
+				_, err := tx.Exec(r.Context(), `UPDATE devices SET cert_serial=pending_serial, cert_not_after=pending_not_after,
+					pending_serial=NULL, pending_not_after=NULL WHERE id=$1 AND pending_serial=$2`, id, serial)
+				return err
+			}); err != nil {
+				s.fail(w, err)
+				return
+			}
+		default:
+			s.log.Warn("rejected device certificate", "device", id, "serial", serial)
+			http.Error(w, "certificate revoked", http.StatusForbidden)
 			return
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), deviceKey, id)))
@@ -426,7 +455,8 @@ func (s *Server) renew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err = s.auditAction(r.Context(), "device:"+id, "device.cert_renew", id, serial, func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `UPDATE devices SET cert_serial=$2, cert_not_after=$3 WHERE id=$1`, id, serial, notAfter)
+		// the current certificate stays valid until the new one is used once
+		_, err := tx.Exec(r.Context(), `UPDATE devices SET pending_serial=$2, pending_not_after=$3 WHERE id=$1`, id, serial, notAfter)
 		return err
 	})
 	if err != nil {
@@ -511,14 +541,45 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var tamper []string
+	var evAt []time.Time
+	var evText []string
 	for i, ev := range req.Events {
 		if i >= 500 {
 			break
 		}
-		if err := audit(ctx, tx, "device:"+id, "agent.event", id, truncate(ev, 2000)); err != nil {
+		if _, msg, ok := strings.Cut(ev, " tamper: "); ok { // security relevant: chained audit log
+			tamper = append(tamper, msg)
+			if err := audit(ctx, tx, "device:"+id, "agent.tamper", id, truncate(ev, 2000)); err != nil {
+				s.fail(w, err)
+				return
+			}
+			continue
+		}
+		at, msg := time.Now().UTC(), ev
+		if ts, rest, ok := strings.Cut(ev, " "); ok {
+			if t, err := time.Parse(time.RFC3339, ts); err == nil {
+				at, msg = t, rest
+			}
+		}
+		evAt, evText = append(evAt, at), append(evText, truncate(msg, 2000))
+	}
+	if len(evText) > 0 {
+		if _, err := tx.Exec(ctx, `INSERT INTO device_events(device_id, at, detail) SELECT $1, a, d FROM unnest($2::timestamptz[], $3::text[]) AS e(a, d)`,
+			id, evAt, evText); err != nil {
 			s.fail(w, err)
 			return
 		}
+	}
+	var tamperEvent *webhookEvent
+	if len(tamper) > 0 {
+		var host string
+		if err := tx.QueryRow(ctx, `UPDATE devices SET tampered_at=now() WHERE id=$1 RETURNING hostname`, id).Scan(&host); err != nil {
+			s.fail(w, err)
+			return
+		}
+		tamperEvent = &webhookEvent{Type: "device.tamper", DeviceID: id, Hostname: host, Detail: strings.Join(tamper, "; "),
+			Console: s.cfg.PublicURL + "/devices/" + id}
 	}
 
 	resp := api.CheckinResponse{ServerTime: time.Now().UTC(),
@@ -542,6 +603,12 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// people deactivated in the directory (SCIM, Google) lose their device accounts:
+	// the agent locks accounts that are no longer listed
+	if resp.Users, err = activeUsers(ctx, tx, resp.Users); err != nil {
+		s.fail(w, err)
+		return
+	}
 	if b := s.branding(); b.Hash != req.BrandingHash {
 		resp.Branding = &b
 	}
@@ -549,7 +616,15 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	rows, err := tx.Query(ctx, `UPDATE commands SET status='sent', updated_at=now() WHERE device_id=$1 AND status='pending' RETURNING id, type, payload`, id)
+	// Commands are delivered until a result arrives (the agent ignores IDs it
+	// already ran), so a lost response cannot drop them. After 7 days they expire.
+	if _, err := tx.Exec(ctx, `UPDATE commands SET status='expired', updated_at=now()
+		WHERE device_id=$1 AND status IN ('pending','sent') AND created_at < now() - interval '7 days'`, id); err != nil {
+		s.fail(w, err)
+		return
+	}
+	rows, err := tx.Query(ctx, `UPDATE commands SET status='sent', updated_at=now() WHERE device_id=$1 AND status IN ('pending','sent')
+		RETURNING id, type, payload`, id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -562,11 +637,16 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	if err := s.attachRecoveryKeys(ctx, tx, id, resp.Commands); err != nil {
+		s.fail(w, err)
+		return
+	}
 	if err := tx.Commit(ctx); err != nil {
 		s.fail(w, err)
 		return
 	}
 	s.sendWebhook(event)
+	s.sendWebhook(tamperEvent)
 	if rel, ok := s.releaseFor(req.Arch); ok && api.NewerVersion(rel.Version, req.AgentVersion) {
 		resp.AgentUpdate = &rel
 	}
@@ -580,14 +660,20 @@ func (s *Server) releaseFor(arch string) (api.Release, bool) {
 	if s.cfg.ReleaseDir == "" {
 		return api.Release{}, false
 	}
-	b, err := os.ReadFile(filepath.Join(s.cfg.ReleaseDir, "manifest.json"))
+	path := filepath.Join(s.cfg.ReleaseDir, "manifest.json")
+	st, err := os.Stat(path)
 	if err != nil {
 		return api.Release{}, false
 	}
-	var rels []api.Release
-	if json.Unmarshal(b, &rels) != nil {
-		return api.Release{}, false
+	s.relMu.Lock()
+	if !st.ModTime().Equal(s.relMod) {
+		var rels []api.Release
+		if b, err := os.ReadFile(path); err == nil && json.Unmarshal(b, &rels) == nil {
+			s.rels, s.relMod = rels, st.ModTime()
+		}
 	}
+	rels := s.rels
+	s.relMu.Unlock()
 	for _, r := range rels {
 		if r.Arch == arch {
 			return r, true

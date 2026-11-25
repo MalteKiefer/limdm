@@ -27,6 +27,30 @@ type host struct {
 
 	aptUpdated time.Time
 	pending    pendingCache
+	pkgs       pkgCache
+}
+
+// pkgCache keeps the package list until the package database changes.
+type pkgCache struct {
+	stamp string // modification times of the package database
+	list  []api.Package
+	hash  string
+	names map[string]bool
+}
+
+// pkgDBStamp changes whenever packages are installed, removed or upgraded.
+func (h *host) pkgDBStamp() string {
+	paths := []string{"/var/lib/dpkg/status"}
+	if h.family != "debian" {
+		paths = []string{"/var/lib/rpm/rpmdb.sqlite", "/var/lib/rpm/Packages", "/usr/lib/sysimage/rpm/rpmdb.sqlite"}
+	}
+	var b strings.Builder
+	for _, p := range paths {
+		if st, err := os.Stat(p); err == nil {
+			fmt.Fprintf(&b, "%s:%d:%d;", p, st.ModTime().UnixNano(), st.Size())
+		}
+	}
+	return b.String()
 }
 
 type pendingCache struct {
@@ -142,6 +166,10 @@ func writeIfChanged(path, content string, mode os.FileMode) (bool, error) {
 // ---- package management ----
 
 func (h *host) installedPackages() ([]api.Package, string, error) {
+	stamp := h.pkgDBStamp()
+	if stamp != "" && stamp == h.pkgs.stamp {
+		return h.pkgs.list, h.pkgs.hash, nil
+	}
 	pkgs, err := h.osqueryPackages()
 	if err != nil || len(pkgs) == 0 {
 		if pkgs, err = h.nativePackages(); err != nil {
@@ -150,10 +178,13 @@ func (h *host) installedPackages() ([]api.Package, string, error) {
 	}
 	sort.Slice(pkgs, func(i, j int) bool { return pkgs[i].Name < pkgs[j].Name })
 	sum := sha256.New()
+	names := make(map[string]bool, len(pkgs))
 	for _, p := range pkgs {
 		fmt.Fprintf(sum, "%s=%s=%s\n", p.Name, p.Version, p.Arch)
+		names[p.Name] = true
 	}
-	return pkgs, hex.EncodeToString(sum.Sum(nil)), nil
+	h.pkgs = pkgCache{stamp: stamp, list: pkgs, hash: hex.EncodeToString(sum.Sum(nil)), names: names}
+	return pkgs, h.pkgs.hash, nil
 }
 
 func (h *host) nativePackages() ([]api.Package, error) {
@@ -178,6 +209,10 @@ func (h *host) nativePackages() ([]api.Package, error) {
 }
 
 func (h *host) isInstalled(name string) bool {
+	// answered from the cached list while the package database is unchanged
+	if stamp := h.pkgDBStamp(); stamp != "" && stamp == h.pkgs.stamp {
+		return h.pkgs.names[name]
+	}
 	if h.family == "debian" {
 		out, err := run(30*time.Second, "dpkg-query", "-W", "-f", "${db:Status-Abbrev}", name)
 		return err == nil && strings.HasPrefix(out, "ii")
@@ -398,26 +433,11 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 		}
 	}
 	inv.Disks, inv.Volumes = nativeDisks(), nativeVolumes()
-	inv.Accounts = accounts(readPasswdGroup())
+	inv.Accounts, inv.Groups = nssAccounts()
+	annotateSSO(inv.Accounts)
 	inv.Repos = h.repos()
 	inv.Desktop, inv.DisplayManager = desktop()
-	// interfaces and MACs are hardware inventory; addresses only with consent
-	if addrs, err := net.Interfaces(); err == nil {
-		for _, ifc := range addrs {
-			if ifc.Flags&net.FlagLoopback != 0 {
-				continue
-			}
-			n := api.NIC{Name: ifc.Name, MAC: ifc.HardwareAddr.String()}
-			if as, err := ifc.Addrs(); err == nil && priv.NetworkInfo {
-				for _, a := range as {
-					if ipn, ok := a.(*net.IPNet); ok && !ipn.IP.IsLinkLocalUnicast() {
-						n.IPs = append(n.IPs, ipn.IP.String())
-					}
-				}
-			}
-			inv.Interfaces = append(inv.Interfaces, n)
-		}
-	}
+	inv.Interfaces, inv.DNS, inv.Routes, inv.VPNs = network(priv)
 	if out, err := run(30*time.Second, "who"); err == nil && priv.LoggedInUsers {
 		seen := map[string]bool{}
 		for _, line := range strings.Split(out, "\n") {
@@ -427,6 +447,19 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 			}
 		}
 	}
-	enrichFromOsquery(&inv, priv)
+	enrichFromOsquery(&inv)
 	return inv
+}
+
+// commandWithStdin runs a command with input on stdin (secrets never go into argv).
+func commandWithStdin(in string) func(name string, args ...string) (string, error) {
+	return func(name string, args ...string) (string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, name, args...)
+		cmd.Env = append(os.Environ(), "LC_ALL=C")
+		cmd.Stdin = strings.NewReader(in)
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
 }

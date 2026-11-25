@@ -70,6 +70,18 @@ func TestIntegration(t *testing.T) {
 	if err := s.seedConsoleUsers(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// removing someone from LIMDM_AUDITORS revokes them at the next start
+	s.cfg.Auditors = nil
+	if err := s.seedConsoleUsers(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var auditorDisabled bool
+	db.QueryRow(ctx, `SELECT disabled FROM console_users WHERE email='audit@firma.de'`).Scan(&auditorDisabled)
+	if !auditorDisabled {
+		t.Fatal("auditor removed from the environment stays enabled")
+	}
+	db.Exec(ctx, `UPDATE console_users SET disabled=false WHERE email='audit@firma.de'`)
+	s.cfg.Auditors = []string{"audit@firma.de"}
 	// OIDC "configured" without network discovery: sessions of OIDC users stay valid
 	s.rt.Store(&runtimeState{set: Settings{LocalLogin: true, StaleHours: 24, OIDCIssuer: "https://idp.test", OIDCClientID: "x"}, auth: &oidcAuth{}})
 
@@ -297,9 +309,10 @@ func TestIntegration(t *testing.T) {
 
 	// every admin page renders
 	pages := []string{"/", "/devices", "/devices?status=non-compliant&q=laptop", "/compliance", "/compliance?state=failing&level=1&framework=iso&sort=fail&q=luks", "/blueprints", "/blueprints/" + bpID, "/blueprints/new", "/library", "/library/new?type=com.limdm.packages", "/library/" + itemID("Debian tools"), "/tokens", "/audit"}
-	for _, tab := range []string{"overview", "hardware", "software", "compliance", "declarations", "commands"} {
+	for _, tab := range []string{"overview", "hardware", "network", "software", "software&sub=sources", "accounts", "accounts&sub=groups&system=1", "compliance", "declarations", "commands&type=reboot"} {
 		pages = append(pages, "/devices/"+er.DeviceID+"?tab="+tab+"&q=open&page=2")
 	}
+	pages = append(pages, "/profile", "/profile?tab=password", "/profile?tab=recovery")
 	for _, p := range pages {
 		if code, body := ui("GET", p, nil, auditor); code != 200 {
 			t.Fatalf("GET %s: %d %s", p, code, body)
@@ -387,7 +400,7 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("directory facts: %+v", facts)
 	}
 	// Entra deactivates with a string boolean; the device loses the group blueprint
-	if code := scim("PATCH", "/Users/"+created.ID, scimTok, map[string]any{"Operations": []map[string]any{{"op": "Replace", "path": "active", "value": "False"}}}, nil); code != 200 {
+	if code := scim("PATCH", "/Users/"+created.ID, scimTok, map[string]any{"schemas": []string{scimPatch}, "Operations": []map[string]any{{"op": "Replace", "path": "active", "value": "False"}}}, nil); code != 200 {
 		t.Fatalf("SCIM deactivate: %d", code)
 	}
 	tx1, _ := db.Begin(ctx)
@@ -400,18 +413,46 @@ func TestIntegration(t *testing.T) {
 		t.Fatal("directory page")
 	}
 
-	// certificate renewal revokes the old certificate
+	// tamper events mark the device and are audited separately
+	if code := call(dev, "/api/v1/checkin", api.CheckinRequest{Events: []string{"2026-11-25T08:00:00Z tamper: watchdog: limdm-agent.service was disabled, enabled again"}}, nil); code != 200 {
+		t.Fatalf("checkin with tamper event: %d", code)
+	}
+	var tamperedAt *time.Time
+	var tamperAudits int
+	db.QueryRow(ctx, `SELECT tampered_at FROM devices WHERE id=$1`, er.DeviceID).Scan(&tamperedAt)
+	db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action='agent.tamper'`).Scan(&tamperAudits)
+	if tamperedAt == nil || tamperAudits != 1 {
+		t.Fatalf("tamper event: tampered_at=%v audits=%d", tamperedAt, tamperAudits)
+	}
+	// routine events go to device_events, not into the chained audit log
+	if code := call(dev, "/api/v1/checkin", api.CheckinRequest{Events: []string{"2026-11-25T08:01:00Z created user anna", "no timestamp"}}, nil); code != 200 {
+		t.Fatalf("checkin with events: %d", code)
+	}
+	var routine, routineAudits int
+	db.QueryRow(ctx, `SELECT count(*) FROM device_events WHERE device_id=$1 AND detail IN ('created user anna','no timestamp')`, er.DeviceID).Scan(&routine)
+	db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE detail LIKE '%created user anna%'`).Scan(&routineAudits)
+	if routine != 2 || routineAudits != 0 {
+		t.Fatalf("routine events: stored=%d audited=%d", routine, routineAudits)
+	}
+	if _, err := db.Exec(ctx, `UPDATE device_events SET detail='x'`); err == nil {
+		t.Fatal("device_events must be append only")
+	}
+	// renewal: the old certificate stays valid until the new one is used (a lost
+	// response must not lock the device out), then it is revoked
 	key2, csr2 := newIdentity()
 	var rr api.EnrollResponse
 	if code := call(dev, "/api/v1/renew", api.RenewRequest{CSR: csr2}, &rr); code != 200 {
 		t.Fatalf("renew: %d", code)
 	}
-	if code := call(dev, "/api/v1/checkin", api.CheckinRequest{}, nil); code != http.StatusUnauthorized {
-		t.Fatalf("old certificate still accepted: %d", code)
+	if code := call(dev, "/api/v1/checkin", api.CheckinRequest{}, nil); code != 200 {
+		t.Fatalf("old certificate rejected before the new one was used: %d", code)
 	}
 	dev2 := clientFor(key2, rr.Cert)
 	if code := call(dev2, "/api/v1/checkin", api.CheckinRequest{}, nil); code != 200 {
 		t.Fatalf("renewed certificate rejected: %d", code)
+	}
+	if code := call(dev, "/api/v1/checkin", api.CheckinRequest{}, nil); code != http.StatusForbidden {
+		t.Fatalf("old certificate still accepted after the new one was used: %d", code)
 	}
 
 	// a certificate the device CA did not issue is rejected, even with a registered serial
@@ -478,7 +519,7 @@ func TestIntegration(t *testing.T) {
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/retire", url.Values{}, adminSess); code != http.StatusSeeOther {
 		t.Fatalf("retire: %d", code)
 	}
-	if code := call(dev2, "/api/v1/checkin", api.CheckinRequest{}, nil); code != http.StatusUnauthorized {
+	if code := call(dev2, "/api/v1/checkin", api.CheckinRequest{}, nil); code != http.StatusForbidden {
 		t.Fatalf("retired device still accepted: %d", code)
 	}
 
@@ -578,6 +619,27 @@ func TestIntegration(t *testing.T) {
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"reboot"}}, help); code != http.StatusSeeOther {
 		t.Fatalf("helpdesk command: %d", code)
 	}
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"shutdown"}, "minutes": {"5000"}}, help); code != http.StatusBadRequest {
+		t.Fatalf("delay out of range accepted: %d", code)
+	}
+	// lost mode and wipe: admins only, confirmed with the host name
+	var host string
+	db.QueryRow(ctx, `SELECT hostname FROM devices WHERE id=$1`, er.DeviceID).Scan(&host)
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"wipe"}, "confirm": {host}}, help); code != http.StatusForbidden {
+		t.Fatalf("helpdesk wipe: %d", code)
+	}
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"wipe"}, "confirm": {"wrong"}}, adminSess); code != http.StatusBadRequest {
+		t.Fatalf("wipe without confirmation: %d", code)
+	}
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"lost"}, "confirm": {host}, "message": {"call IT"}}, adminSess); code != http.StatusSeeOther {
+		t.Fatalf("lost mode: %d", code)
+	}
+	var pl string
+	ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"reboot"}, "minutes": {"0"}}, help)
+	db.QueryRow(ctx, `SELECT payload FROM commands WHERE type='reboot' ORDER BY id DESC LIMIT 1`).Scan(&pl)
+	if pl != "0" {
+		t.Fatalf("reboot now payload %q", pl)
+	}
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"script"}, "payload": {"id"}}, help); code != http.StatusForbidden {
 		t.Fatalf("helpdesk script must be refused: %d", code)
 	}
@@ -611,6 +673,10 @@ func TestIntegration(t *testing.T) {
 		t.Fatal("the last admin demoting themselves must be refused")
 	}
 	db.Exec(ctx, `UPDATE console_users SET disabled=false, role='admin' WHERE email='admin@firma.de'`)
+	if code, _ := ui("GET", "/", nil, adminSess); code != http.StatusFound {
+		t.Fatalf("a session revoked by disabling must stay invalid after re-enabling: %d", code)
+	}
+	db.QueryRow(ctx, `SELECT session_gen FROM console_users WHERE email='admin@firma.de'`).Scan(&adminSess.Gen) // signs in again
 
 	// ---- settings ----
 	if _, body := ui("POST", "/settings", url.Values{"stale_hours": {"48"}}, adminSess); !strings.Contains(body, "can only be disabled") {
@@ -767,6 +833,14 @@ func TestCompliancePolicy(t *testing.T) {
 	if audited != 3 {
 		t.Fatalf("notify, lock and unlock must be audited, got %d", audited)
 	}
+	// a removed lock action lifts an automatic lock even while failing
+	db.Exec(ctx, `UPDATE devices SET failing=1, auto_locked=true WHERE id='d1'`)
+	pol.LockAfterHours = 0
+	step(t0.Add(5 * time.Hour))
+	db.QueryRow(ctx, `SELECT auto_locked FROM devices WHERE id='d1'`).Scan(&locked)
+	if got := commands(); got[len(got)-1] != "unlock" || locked {
+		t.Fatalf("lock policy removed: cmds=%v locked=%v", got, locked)
+	}
 }
 
 func TestWebhookSignature(t *testing.T) {
@@ -785,6 +859,7 @@ func TestWebhookSignature(t *testing.T) {
 	case r := <-got:
 		body := <-bodies
 		mac := hmac.New(sha256.New, s.webhookKey())
+		mac.Write([]byte(r.Header.Get("X-LiMDM-Timestamp") + "."))
 		mac.Write(body)
 		if r.Header.Get("X-LiMDM-Signature") != "sha256="+hex.EncodeToString(mac.Sum(nil)) {
 			t.Fatal("signature does not verify")
@@ -907,6 +982,15 @@ func TestRecoveryEscrow(t *testing.T) {
 	if rotate || viewed != nil {
 		t.Fatal("rotation not cleared")
 	}
+	// lost mode: the escrowed key is attached at delivery, not stored in the command
+	cmds := []api.Command{{ID: 1, Type: "lost", Payload: `{"message":"call +49 1"}`}, {ID: 2, Type: "sync"}}
+	tx, _ = db.Begin(ctx)
+	err = s.attachRecoveryKeys(ctx, tx, "d1", cmds)
+	tx.Rollback(ctx)
+	var lm api.LostMode
+	if err != nil || json.Unmarshal([]byte(cmds[0].Payload), &lm) != nil || lm.Message != "call +49 1" || len(lm.Keys) != 1 || !lm.Keys[0].Valid() || cmds[1].Payload != "" {
+		t.Fatalf("lost mode payload: %v %s", err, cmds[0].Payload)
+	}
 	// package source templates from the inventory
 	db.Exec(ctx, `UPDATE devices SET inventory=$1 WHERE id='d1'`, `{"repos":[
 		{"type":"deb","name":"debian.sources","url":"http://deb.debian.org/debian/","suites":"trixie trixie-updates","components":"main","key_file":"/usr/share/keyrings/debian-archive-keyring.gpg","enabled":true,"signed":true,"file":"/etc/apt/sources.list.d/debian.sources"},
@@ -926,6 +1010,29 @@ func TestRecoveryEscrow(t *testing.T) {
 	}
 	if _, err := s.sourceTemplate(ctx, "d1", "/etc/apt/sources.list.d/limdm-osquery.sources", "disable"); err == nil {
 		t.Fatal("managed source offered")
+	}
+	// directory deactivation removes device accounts
+	db.Exec(ctx, `INSERT INTO dir_users(source, user_name, email, active) VALUES ('scim','gone','Gone@Example.com',false),('scim','here','here@example.com',true)`)
+	tx, _ = db.Begin(ctx)
+	us, err := activeUsers(ctx, tx, []api.User{{Username: "gone", Email: "gone@example.com"}, {Username: "here", Email: "here@example.com"}, {Username: "local", Email: "local@example.com"}})
+	tx.Rollback(ctx)
+	if err != nil || len(us) != 2 || us[0].Username != "here" {
+		t.Fatalf("active users: %+v %v", us, err)
+	}
+	// deleted from the directory (SCIM DELETE) counts like deactivated; provisioning again restores
+	db.Exec(ctx, `DELETE FROM dir_users WHERE email='here@example.com'`)
+	tx, _ = db.Begin(ctx)
+	us, _ = activeUsers(ctx, tx, []api.User{{Username: "here", Email: "here@example.com"}})
+	tx.Rollback(ctx)
+	if len(us) != 0 {
+		t.Fatalf("deleted directory user kept: %+v", us)
+	}
+	db.Exec(ctx, `INSERT INTO dir_users(source, user_name, email, active) VALUES ('scim','here','here@example.com',true)`)
+	tx, _ = db.Begin(ctx)
+	us, _ = activeUsers(ctx, tx, []api.User{{Username: "here", Email: "here@example.com"}})
+	tx.Rollback(ctx)
+	if len(us) != 1 {
+		t.Fatal("reprovisioned user still dropped")
 	}
 }
 
@@ -969,6 +1076,14 @@ func TestRecoveryCodeLogin(t *testing.T) {
 	}
 	if _, err := s.checkLocal(ctx, "alice", "wrong", newRecoveryCode(), "127.0.0.1"); err == nil {
 		t.Fatal("wrong password accepted")
+	}
+	// sign out ends every session of the account
+	_, gen0 := s.account(ctx, "local:alice")
+	if err := s.revokeSessions(ctx, db, "local:alice"); err != nil {
+		t.Fatal(err)
+	}
+	if _, gen1 := s.account(ctx, "local:alice"); gen1 != gen0+1 {
+		t.Fatalf("session generation not bumped: %d -> %d", gen0, gen1)
 	}
 	// the profile password check honours the lockout
 	for range maxFailures {

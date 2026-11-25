@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS commands (
     device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
     type       TEXT NOT NULL,
     payload    TEXT NOT NULL DEFAULT '',
-    status     TEXT NOT NULL DEFAULT 'pending', -- pending | sent | ok | failed
+    status     TEXT NOT NULL DEFAULT 'pending', -- pending | sent | ok | failed | expired
     output     TEXT NOT NULL DEFAULT '',
     created_by TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -200,4 +200,86 @@ CREATE TABLE IF NOT EXISTS local_recovery_codes (
     hash    TEXT NOT NULL,
     used_at TIMESTAMPTZ,
     PRIMARY KEY (name, hash)
+);
+
+-- Indexes for check in and console paths (lookups by member, inactive directory
+-- users, blueprint and primary user, metric retention).
+CREATE INDEX IF NOT EXISTS dir_members_user ON dir_members(user_id, group_id);
+CREATE INDEX IF NOT EXISTS dir_users_inactive ON dir_users(email) WHERE NOT active;
+CREATE INDEX IF NOT EXISTS dir_users_scim_username ON dir_users(lower(user_name)) WHERE source = 'scim';
+CREATE INDEX IF NOT EXISTS dir_users_source_ext ON dir_users(source, external_id);
+CREATE INDEX IF NOT EXISTS devices_blueprint ON devices(blueprint_id);
+CREATE INDEX IF NOT EXISTS devices_primary_user ON devices(primary_user_id);
+CREATE INDEX IF NOT EXISTS device_metrics_at ON device_metrics USING brin(at);
+-- last_seen and status updates change no indexed column: leave room for HOT updates
+ALTER TABLE devices SET (fillfactor = 70);
+
+-- Certificate renewal: the new serial is pending until the device first uses
+-- it, so a lost renewal response cannot lock the device out.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS pending_serial TEXT;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS pending_not_after TIMESTAMPTZ;
+
+-- People deleted from the directory (SCIM DELETE) must lose their device
+-- accounts like deactivated ones: a tombstone remembers the email until the
+-- person is provisioned again. Triggers cover every write path.
+CREATE TABLE IF NOT EXISTS dir_tombstones (
+    email      TEXT PRIMARY KEY,
+    removed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE OR REPLACE FUNCTION dir_users_tombstone() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO dir_tombstones(email) VALUES (lower(OLD.email)) ON CONFLICT (email) DO UPDATE SET removed_at = now();
+        RETURN OLD;
+    END IF;
+    DELETE FROM dir_tombstones WHERE email = lower(NEW.email);
+    RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS dir_users_tombstone ON dir_users;
+CREATE TRIGGER dir_users_tombstone AFTER INSERT OR UPDATE OF email OR DELETE ON dir_users
+    FOR EACH ROW EXECUTE FUNCTION dir_users_tombstone();
+
+-- Console users seeded from LIMDM_ADMINS / LIMDM_AUDITORS are disabled at start
+-- once they are no longer listed; users edited in the console are not.
+ALTER TABLE console_users ADD COLUMN IF NOT EXISTS from_env BOOLEAN NOT NULL DEFAULT false;
+
+-- Session generation: bumped on sign out, credential changes, reset, role
+-- change and disable; sessions issued under an older generation end.
+ALTER TABLE console_users ADD COLUMN IF NOT EXISTS session_gen BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE local_admins ADD COLUMN IF NOT EXISTS session_gen BIGINT NOT NULL DEFAULT 0;
+
+-- Last tamper event reported by the agent or its watchdog.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS tampered_at TIMESTAMPTZ;
+
+-- Routine agent events (changes made, desktop logins) are high volume; they
+-- live here instead of the hash chained audit log, append only, one multi row
+-- insert per check in and no global lock. Security events (tamper, escrow,
+-- command results, enrollment) stay in audit_log. Kept 365 days.
+CREATE TABLE IF NOT EXISTS device_events (
+    id        BIGSERIAL PRIMARY KEY,
+    device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    at        TIMESTAMPTZ NOT NULL,
+    detail    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS device_events_device ON device_events(device_id, id DESC);
+CREATE INDEX IF NOT EXISTS device_events_at ON device_events USING brin(at);
+CREATE OR REPLACE FUNCTION device_events_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'device_events is append only'; END $$;
+DROP TRIGGER IF EXISTS device_events_append_only ON device_events;
+CREATE TRIGGER device_events_append_only BEFORE UPDATE ON device_events
+    FOR EACH ROW EXECUTE FUNCTION device_events_append_only();
+
+-- Columns for list views, computed once on write instead of detoasting the
+-- inventory and check JSON of every device on every page view.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS os_name TEXT GENERATED ALWAYS AS (coalesce(inventory->>'os_name', '')) STORED;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS desktop TEXT GENERATED ALWAYS AS (coalesce(inventory->>'desktop', '')) STORED;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS memory_mb BIGINT GENERATED ALWAYS AS (coalesce((inventory->>'memory_mb')::bigint, 0)) STORED;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS checks_count INT GENERATED ALWAYS AS (CASE WHEN jsonb_typeof(checks) = 'array' THEN jsonb_array_length(checks) ELSE 0 END) STORED;
+
+-- Last verified position of the audit hash chain (incremental verification).
+CREATE TABLE IF NOT EXISTS audit_checkpoint (
+    one         BOOLEAN PRIMARY KEY DEFAULT true CHECK (one),
+    last_id     BIGINT NOT NULL,
+    last_hash   BYTEA NOT NULL,
+    verified_at TIMESTAMPTZ NOT NULL
 );

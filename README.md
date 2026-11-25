@@ -6,285 +6,83 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Declarative device management for Linux clients (Debian, Ubuntu, Fedora), modelled on
-Apple's Declarative Device Management. Administrators declare the desired state in
-blueprints; the agent converges to it on its own, also while offline, and reports
-status back. Compliance checks map to BSI IT-Grundschutz, CIS Benchmarks (Level 1
-and 2) and ISO/IEC 27001:2022 Annex A.
+Apple's Declarative Device Management. Administrators describe the desired state; the agent
+on every device converges to it on its own, also while offline, and reports back.
+Compliance checks map to BSI IT-Grundschutz, CIS Benchmarks (Level 1 and 2) and
+ISO/IEC 27001:2022 Annex A.
 
-> **Status:** early. The protocol, server and tests are complete; the agent has not
-> yet been exercised on real Debian, Ubuntu and Fedora machines. See
-> [Limitations](#limitations).
+> **Status:** early. Server and agent run on a Debian 13 test installation. Desktop
+> features (login, disk recovery keys, desktop helper) are not yet verified on real
+> Ubuntu and Fedora desktops. See [Limitations](#limitations).
 
-## Architecture
+## Features
 
-```
- Admin browser ── HTTPS + OIDC (Google Workspace, …) ──► limdm-server :8443 ─┐
-                                                                             ├─ PostgreSQL (TLS verify-full)
- limdm-agent ─────── mTLS, TLS 1.3, pinned device CA ──► limdm-server :8444 ─┘
-   (root service on every device)
-```
+* **Library items and blueprints.** Reusable, strictly validated configuration items
+  (packages, firewall, SSH, sudo, polkit, package sources, certificates, proxy and more)
+  are assigned through blueprints with nested conditions and inheritance.
+* **Compliance** with automatic remediation, grace periods, signed webhooks, automatic
+  lock and CSV evidence for auditors.
+* **Single sign on** for the console (OIDC, for example Google Workspace) and for the
+  desktop login, with a local password after SSO, mandatory reconfirmation and an
+  offline lock.
+* **Directory** sync via SCIM 2.0 or the Google Directory API; groups select blueprints,
+  deactivated people lose their device accounts.
+* **Disk encryption recovery keys** created on the device with the user's passphrase in a
+  branded desktop dialog, escrowed and sealed on the server.
+* **Inventory** via osquery: hardware, disks, volumes, packages, accounts, network
+  interfaces, package sources.
+* **mTLS only** between agent and server (TLS 1.3, private device CA, pinned fingerprint),
+  append only and hash chained audit log, console in English and German.
 
-| Concept | Meaning |
-|---|---|
-| Declaration | One piece of desired state: `identifier`, `type`, `payload`. Any change changes its `server_token`. |
-| Library item | A reusable, validated declaration payload, for example "CIS Level 1 baseline" or "Proxy Berlin". |
-| Blueprint | An assignment map: library items plus `if` nodes with rules on device facts (OS, version, architecture, desktop, vendor, model, hostname, tags, directory groups, department), nested freely. A blueprint can inherit from a parent, whose map is evaluated first. Each device has exactly one blueprint: set explicitly, through the group of its primary user, or `default`. The server merges the selected items into one declaration per type (lists are combined, otherwise the last item wins). |
-| Directory | People and groups from SCIM 2.0 (Okta, Entra ID, authentik, JumpCloud) or Google Workspace (Directory API, hourly). Groups map to blueprints; people become primary users of devices. |
-| Compliance policy | The compliance item carries a grace period, a signed webhook notification and optional automatic lock and unlock. |
-| Status | The agent reports per declaration whether it is `valid` and `active`, with reasons, plus status items (inventory, compliance checks). It only sends status when its hash changes. |
-| Command | One off actions only: `sync`, `update`, `reboot`, `shutdown`, `lock`, `unlock`, `script` (scripts only if allowed on the device at enrollment). |
-| Inventory | Hardware, disks, volumes with encryption state, memory, OS, desktop environment, packages, and (with consent via the privacy declaration) accounts and network interfaces. Collected with [osquery](https://osquery.io), which the agent requires. |
+## Quick start
 
-### Declaration types
-
-| Type | Payload |
-|---|---|
-| `com.limdm.agent` | `{"checkin_seconds": 300}` |
-| `com.limdm.compliance` | `{"level": 1, "remediate": true, "exclude": ["net.forwarding"]}` |
-| `com.limdm.updates` | `{"mode": "security", "window": "02:00-05:00", "reboot": false}` |
-| `com.limdm.packages` | `{"install": ["htop"], "remove": ["telnet"]}` |
-| `com.limdm.services` | `{"enable": [], "disable": ["cups"]}` |
-| `com.limdm.files` | `{"files": [{"path": "/etc/issue", "content": "...", "mode": "0644"}]}` |
-| `com.limdm.firewall` | `{"enforce": true, "allow": ["22/tcp"]}` |
-| `com.limdm.osversion` | `{"min": {"ubuntu": "24.04", "debian": "12", "fedora": "42"}}` |
-| `com.limdm.screenlock` | `{"idle_seconds": 300}` (GNOME, locked against user changes) |
-| `com.limdm.login` | `{"issuer": "https://accounts.google.com", "client_id": "...", "client_secret": "...", "allowed_domain": "example.com"}` |
-| `com.limdm.privacy` | `{"network_info": false, "logged_in_users": false}` |
-| `com.limdm.repositories` | signed package sources with a pinned key (https only) |
-| `com.limdm.certificates` | CA certificates for the system trust store |
-| `com.limdm.sysctl`, `com.limdm.kernelmodules` | kernel parameters, blocked modules |
-| `com.limdm.ssh`, `com.limdm.banner` | hardening sshd options (allowlist), login banner |
-| `com.limdm.dns`, `com.limdm.ntp`, `com.limdm.proxy` | resolvers, time servers, system proxy |
-| `com.limdm.flatpak`, `com.limdm.scripts` | Flatpak apps, recurring scripts (only where scripts are allowed) |
-| `com.limdm.diskencryption` | `{"escrow": true, "rotate_after_view": true}`: LUKS recovery keys stored on the server |
-| `com.limdm.polkit` | polkit rules per action or namespace and group, e.g. let users manage networks or printers |
-| `com.limdm.sudo` | sudo rules (principals, run as, absolute commands, NOPASSWD) checked with `visudo` before install |
-| `com.limdm.bootloader` | GRUB superuser and password; the console stores only the PBKDF2 hash, default entries stay bootable |
-
-The console shows an example payload for every type.
-
-Payloads are validated strictly (unknown fields, package and unit names against option
-injection, paths against traversal), by the server on save and again by the agent
-before applying them.
-
-## Security
-
-* **Agent channel is mTLS only, TLS 1.3.** The server runs its own device CA (ECDSA
-  P-384). The agent creates its key locally (P-256) and only sends a CSR. It pins the
-  CA by SHA-256 fingerprint at enrollment and afterwards trusts nothing else, no system
-  CAs. A TLS terminating proxy cannot sit in between.
-* **Revocation without CRLs:** the server accepts only the certificate serial currently
-  registered for a device. Retiring or rotating revokes the old certificate at once.
-  Certificates last 90 days and rotate automatically 30 days before expiry, with a new key.
-  A device that was offline past expiry may still renew for 180 days; the TLS handshake
-  proves possession of the key and the serial must still be the registered one. Client
-  certificates are verified against the device CA by the server itself, not only in the
-  handshake, so this exception applies to the renewal endpoint alone.
-* **Admin UI** over HTTPS only (without its own certificate it binds to loopback only,
-  behind a local TLS proxy). OIDC with PKCE, nonce, `email_verified` and domain checks.
-  Optional local admins as fallback (`LIMDM_LOCAL_LOGIN=true`): generated password
-  (argon2id) plus TOTP, single use codes, lockout after 5 failures, per IP rate limit.
-  Roles `admin` and `auditor` (read only). HMAC signed sessions, 30 min idle and 8 h
-  absolute timeout, CSRF tokens, strict CSP, HSTS, no JavaScript.
-* **Database** connections outside loopback must use `sslmode=verify-full`, otherwise
-  the server refuses to start.
-* **Audit log** is append only (a trigger blocks UPDATE, DELETE, TRUNCATE) and hash
-  chained; the audit page verifies the full chain. It records admin actions, logins,
-  enrollments, certificate rotations, command results, every change the agent makes on
-  a device and desktop logins.
-* **Agent updates** require an Ed25519 signature from an offline release key compiled
-  into the agent. No downgrades.
-* **Privacy:** IP addresses and logged in users are only collected when a
-  `com.limdm.privacy` declaration allows it. Default: off. No third party calls except
-  the configured identity provider.
-* **CSV exports** neutralise formula injection.
-
-## Compliance
-
-The agent runs the checks of the declared level (CIS Level 1 baseline, Level 2 for high
-protection needs) and remediates where that is safe. Every check references BSI
-IT-Grundschutz, CIS Benchmark and ISO/IEC 27001:2022 Annex A. The compliance page shows
-coverage per framework; CSV exports serve as audit evidence.
-
-| Check | L | Remediation | BSI | ISO 27001 |
-|---|---|---|---|---|
-| `os.supported` | 1 | | SYS.2.1, OPS.1.1.3 | A.8.8 |
-| `updates.auto`, `updates.security`, `updates.reboot` | 1 | maintenance window | SYS.2.1, SYS.2.3, OPS.1.1.3 | A.8.8, A.8.32 |
-| `disk.encryption` (LUKS) | 1 | | SYS.2.1, CON.1 | A.8.1, A.8.24, A.7.10 |
-| `firewall.active` | 1 | yes | SYS.2.1, SYS.2.3 | A.8.20 |
-| `mac.enabled` / `mac.enforcing` | 1 / 2 | | SYS.2.3, SYS.1.3 | A.8.7, A.8.9 |
-| `boot.secureboot` | 2 | | SYS.2.1 | A.8.1, A.8.9 |
-| `kernel.*`, `net.*` (sysctl) | 1/2 | yes | SYS.2.3 | A.8.9, A.8.20 |
-| `modules.*` (filesystems, USB storage, protocols) | 1/2 | yes | SYS.2.1, SYS.2.3 | A.7.10, A.8.9, A.8.12 |
-| `ssh.baseline` / `ssh.strict` | 1 / 2 | yes, `sshd -t` with rollback | SYS.2.3, SYS.1.3 | A.8.5, A.8.20 |
-| `accounts.empty_passwords`, `accounts.uid0` | 1 | partly | ORP.4, SYS.2.3 | A.5.17, A.8.2, A.8.5 |
-| `accounts.admins`, `auth.sso` | 1 | yes | ORP.4, SYS.2.1 | A.5.15, A.5.16, A.5.18, A.8.2, A.8.5 |
-| `accounts.pwquality` | 1 | yes | ORP.4 | A.5.17 |
-| `time.sync` | 1 | yes | OPS.1.2.6, OPS.1.1.5 | A.8.17 |
-| `logging.journald`, `logging.sudo` | 1 | yes | OPS.1.1.5, ORP.4 | A.8.2, A.8.15 |
-| `logging.auditd` | 2 | yes | OPS.1.1.5, SYS.2.3 | A.8.15, A.8.16 |
-| `desktop.screenlock` | 1 | yes | SYS.2.1 | A.7.7, A.8.1 |
-
-Exceptions are declared in `compliance.exclude` as documented risk acceptance and show
-as `excepted`, never as passed.
-
-ISO 27001 and BSI IT-Grundschutz certify an organisation's ISMS, not a tool. LiMDM
-provides the technical controls and evidence for Linux clients; organisational
-requirements (policies, roles, risk analysis, training) stay with the ISMS.
-
-## Operation
-
-### Server
-
-1. Provide PostgreSQL with TLS (`sslmode=verify-full`).
-2. Create two OAuth clients in Google Cloud:
-   * **Web application** for the admin UI, redirect `https://mdm.example.com/auth/callback`.
-   * **TVs and Limited Input devices** for desktop login (device flow); put it into the
-     `com.limdm.login` declaration.
-3. Copy [`packaging/server.env.example`](packaging/server.env.example) to
-   `/etc/limdm-server/server.env` (mode 0600) and fill it in.
-4. `systemctl enable --now limdm-server`. Expose port 8444 directly (no TLS terminating
-   proxy) and 8443 for the admin UI.
-5. Without OIDC, or as break glass access, create a local admin. The credentials
-   (password and an `otpauth://` URI for an authenticator app) go to a new 0600 file:
-
-   ```sh
-   sudo sh -c 'umask 077; sudo -u limdm limdm-server local-admin -env /etc/limdm-server/server.env add alice > /root/limdm-alice.txt'
-   ```
-
-   `reset`, `disable`, `enable` and `list` manage existing accounts.
-6. Everything else (OIDC, local login, stale threshold, compliance webhook, console users,
-   directory connections) is configured in the console under **Settings**, **Users** and
-   **Directory**. Secrets are stored encrypted with a key derived from `LIMDM_SESSION_KEY`.
-   The console is available in English and German.
-
-### Behind Caddy
-
-On a host install let the admin UI listen on loopback without its own
-certificate and put Caddy in front for automatic HTTPS ([`deploy/Caddyfile`](deploy/Caddyfile)):
+Server with Docker Compose, PostgreSQL and Caddy (automatic HTTPS):
 
 ```sh
-LIMDM_LISTEN=127.0.0.1:8080
-LIMDM_PUBLIC_URL=https://mdm.example.com
+git clone https://github.com/MalteKiefer/limdm && cd limdm/deploy/docker
+cp .env.example .env    # set LIMDM_DOMAIN, LIMDM_SESSION_KEY, POSTGRES_PASSWORD
+docker compose up -d
+docker compose exec limdm limdm-server local-admin add admin
 ```
 
-The agent port 8444 stays exposed directly; never terminate its mTLS in a proxy.
-`LIMDM_AGENT_HOSTS` adds extra names to the agent certificate, for example the IP
-address older agents enrolled with.
-
-### Docker
-
-[`deploy/docker/compose.yaml`](deploy/docker/compose.yaml) runs PostgreSQL (unix
-socket only), the server image `ghcr.io/maltekiefer/limdm-server` and Caddy. All
-images are pinned by digest; release images carry a build provenance attestation:
+Open `https://<LIMDM_DOMAIN>`, sign in with the printed password and TOTP secret, create an
+enrollment token and install the agent on a device:
 
 ```sh
-gh attestation verify oci://ghcr.io/maltekiefer/limdm-server:<version> --repo MalteKiefer/limdm
-```
-
-### Release key and builds
-
-```sh
-limdm-server keygen -out release.key
-```
-
-Store the public key as the repository variable `UPDATE_PUBKEY`; tagged releases embed
-it. Local builds:
-
-```sh
-make build VERSION=1.0.0 UPDATE_PUBKEY=<public key>
-```
-
-Publish an agent self update (signature made offline, directory copied to the server):
-
-```sh
-limdm-server release -key release.key -version 1.0.1 -dir releases amd64=dist/limdm-agent-linux-amd64 arm64=dist/limdm-agent-linux-arm64
-```
-
-### Installing and enrolling the agent
-
-Every release ships `limdm-agent` as deb and rpm (amd64, arm64). The Enrollment page in
-the console shows ready commands that always use the newest release:
-
-```sh
-# one device: installs osquery and the agent, then enrolls
 curl -fsSL https://mdm.example.com/install.sh | sudo LIMDM_TOKEN=lmt_... sh
 ```
 
-For mass deployment, distribute `/etc/limdm/enroll.conf` (mode 0600) with Ansible,
-Puppet or a golden image and install the package (or run the script without
-`LIMDM_TOKEN`). The agent enrolls during installation and deletes the file:
+Host installation with deb or rpm packages behind Caddy, OIDC and all options:
+[docs/installation.md](docs/installation.md).
 
-```toml
-server = "https://mdm.example.com:8444"
-fingerprint = "<device CA SHA-256>"
-token = "lmt_..."
-allow_scripts = false
-```
+## Documentation
 
-The script verifies the package against the release checksums and adds the official
-osquery repository, trusting only the signing key
-`1484 120A C4E9 F8A1 A577 AEEE 97A8 0C63 C9D8 B80B`. `LIMDM_RELEASE_REPO` (default
-`MalteKiefer/limdm`) selects the GitHub repository. Other systems use the tar.gz release,
-`scripts/install-agent.sh` and `limdm-agent enroll --config /etc/limdm/enroll.conf`.
-
-If osquery is removed later, the agent reinstalls it (retried hourly) and reports
-`agent.osquery` as failing until it is back. Only `osqueryi` is used.
-
-Local report without changes: `limdm-agent check --level 2`.
-
-### Disk recovery keys
-
-With `com.limdm.diskencryption` and `escrow` the agent reports every LUKS volume without an
-escrowed key. Only the user knows a current passphrase, so the desktop helper
-`limdm-desktop` (XDG autostart, runs as the user) shows a dialog with the company name and
-logo from the console settings, at login and then once a day, and on demand from the
-applications menu entry "Disk recovery key". It uses zenity (GNOME) or kdialog (KDE); no
-terminal is needed.
-
-The helper talks to the agent over `/run/limdm/agent.sock`. The agent checks the caller's
-peer credentials, answers only users with an active local session and allows five wrong
-passphrases per 15 minutes. It adds a generated recovery key in the systemd format, verifies
-it and sends it over mTLS. The server stores it sealed with AES-256-GCM; admins and helpdesk
-can reveal it on the device page, every view is audited. With `rotate_after_view` the device
-replaces a viewed key at its next check in and removes the old one only after the server
-confirmed the new key. Administrators can also run `sudo limdm-agent recovery-key`.
-
-### Desktop login
-
-With a `com.limdm.login` declaration the agent creates the users assigned to the device,
-manages `sudo`/`wheel` membership, and inserts `pam_exec` before `pam_unix` via
-`pam-auth-update` (Debian, Ubuntu) or its own `authselect` profile (Fedora). At login,
-GDM or the console shows a URL and code; the user confirms with their Workspace account
-on a second device. The agent verifies signature, issuer, audience, verified email,
-mapping to the local user and domain. Local unmanaged accounts keep password login.
-Removed users are locked; home directories stay.
-
-## Development
-
-```sh
-make test
-make lint
-make integration DB=postgres://limdm@127.0.0.1:5432/limdm
-make snapshot
-```
+| Topic | Content |
+|---|---|
+| [Installation](docs/installation.md) | Docker Compose, deb/rpm with Caddy, PostgreSQL, first sign in, upgrades |
+| [Configuration](docs/configuration.md) | Environment variables, console settings, OIDC, branding, roles |
+| [Concepts](docs/concepts.md) | Declarations, library, blueprints, conditions, inheritance, directory |
+| [Declarations](docs/declarations.md) | Reference of every library item type |
+| [Agent deployment](docs/agent.md) | Install script, mass deployment with `enroll.conf`, desktop helper, updates |
+| [Desktop login](docs/desktop-login.md) | SSO login, local password, reconfirmation, offline lock |
+| [Disk encryption](docs/disk-encryption.md) | Recovery key escrow and rotation |
+| [Compliance](docs/compliance.md) | Checks, frameworks, policies, webhooks, evidence |
+| [Security](docs/security.md) | Architecture, mTLS, sessions, audit log, privacy |
+| [Operations](docs/operations.md) | Backup, restore, releases, troubleshooting |
+| [Development](docs/development.md) | Building, tests, release process |
 
 ## Limitations
 
-* **Not yet run on real systems.** Unit and integration tests cover protocol, mTLS, SQL
-  and UI; the agent is built for Linux but not yet exercised on Debian 12, Ubuntu
-  22.04/24.04 or Fedora. Test PAM (GDM, lock screen, SELinux context of `pam_exec` on
-  Fedora), `authselect` and the `sshd` drop in on a VM per distribution first.
-* **BSI mapping is at module level.** Requirement IDs (for example SYS.2.3.Ax) and the
-  mapping to Grundschutz++ (BSI Standard 300-1) still need review by an information
-  security officer.
+* Desktop login, the desktop helper and LUKS escrow still need testing on real GNOME and
+  KDE desktops (GDM, SDDM, lock screen, SELinux context of `pam_exec` on Fedora).
+* The BSI mapping is at module level; requirement IDs and the mapping to Grundschutz++
+  (BSI Standard 300-1) need review by an information security officer.
 * Official CIS Benchmarks exist for Ubuntu and Debian; Fedora uses the RHEL
   recommendations as reference.
-* No offline login for centrally managed users.
-* The CA key is a 0600 file, no HSM/PKCS#11 yet; the agent key is a file, no TPM binding.
-* The desktop login client secret is stored unencrypted in the database and on the device
-  (0600, root only).
-* Console roles (admin, helpdesk, auditor) are assigned per user in the console, not yet from directory groups.
+* The device CA key is a 0600 file (no HSM or PKCS#11); agent keys are files (no TPM).
+* The client secret of the desktop login declaration is stored unencrypted in the
+  database and on the device (0600, root only).
+* Console roles are assigned per user, not yet from directory groups.
 
 ## License
 

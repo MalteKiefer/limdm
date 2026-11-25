@@ -416,7 +416,7 @@ func (s *Server) libraryEdit(w http.ResponseWriter, r *http.Request, sess sessio
 		return
 	}
 	s.render(w, r, sess, "item", map[string]any{"It": it, "Payload": pretty.String(), "AllTypes": sortedTypes(),
-		"Example": api.Types[it.Type], "UsedBy": use[it.ID]})
+		"Example": prettyJSON(api.Types[it.Type]), "UsedBy": use[it.ID]})
 }
 
 func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess session) {
@@ -425,7 +425,7 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		Description: strings.TrimSpace(r.FormValue("description")), Payload: json.RawMessage(r.FormValue("payload"))}
 	fail := func(err error) {
 		s.render(w, r, sess, "item", map[string]any{"It": it, "Payload": r.FormValue("payload"), "AllTypes": sortedTypes(),
-			"Example": api.Types[it.Type], "Error": err.Error()})
+			"Example": prettyJSON(api.Types[it.Type]), "Error": err.Error()})
 	}
 	if it.Type == api.TypeBootloader { // hash a plain password before it is validated and stored
 		p, err := api.PrepareBootloader(it.Payload)
@@ -660,4 +660,13 @@ func (s *Server) blueprintDelete(w http.ResponseWriter, r *http.Request, sess se
 		return
 	}
 	http.Redirect(w, r, "/blueprints", http.StatusSeeOther)
+}
+
+// prettyJSON indents an example payload for display.
+func prettyJSON(s string) string {
+	var b bytes.Buffer
+	if json.Indent(&b, []byte(s), "", "  ") != nil {
+		return s
+	}
+	return b.String()
 }

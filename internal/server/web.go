@@ -32,8 +32,9 @@ var pages = map[string]map[string]*template.Template{"en": parsePages("en"), "de
 func parsePages(lang string) map[string]*template.Template {
 	T := func(s string) string { return translate(lang, s) }
 	funcs := template.FuncMap{
-		"t":    T,
-		"lang": func() string { return lang },
+		"t":       T,
+		"lang":    func() string { return lang },
+		"version": func() string { return Version },
 		"ago": func(t *time.Time) string {
 			if t == nil {
 				return T("never")
@@ -51,6 +52,7 @@ func parsePages(lang string) map[string]*template.Template {
 		},
 		"frac":      func(v uint64, pct uint64) uint64 { return v * pct / 100 },
 		"inc":       func(n int) int { return n + 1 },
+		"sub":       func(a, b int) int { return a - b },
 		"dec":       func(n int) int { return n - 1 },
 		"list":      func(v ...string) []string { return v },
 		"deref":     func(p *int64) int64 { return *p },
@@ -63,8 +65,9 @@ func parsePages(lang string) map[string]*template.Template {
 			return t
 		},
 		"actionLabel": func(a string) string {
-			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot in 1 minute",
-				"shutdown": "Shut down in 1 minute", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script"}[a])
+			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot",
+				"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script",
+				"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour"}[a])
 		},
 		"join":      strings.Join,
 		"hasPrefix": strings.HasPrefix,
@@ -201,8 +204,8 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /tokens", s.page(s.tokens))
 	mux.HandleFunc("POST /tokens", s.page(s.tokenCreate))
 	mux.HandleFunc("GET /compliance", s.page(s.compliance))
-	mux.HandleFunc("GET /audit", s.page(s.auditPage))
-	mux.HandleFunc("GET /export/{kind}", s.page(s.export))
+	mux.HandleFunc("GET /audit", s.page(s.adminOrAuditor(s.auditPage)))
+	mux.HandleFunc("GET /export/{kind}", s.page(s.adminOrAuditor(s.export)))
 }
 
 // ---- devices ----
@@ -238,11 +241,10 @@ func (s *Server) status(d *deviceRow) {
 }
 
 func (s *Server) listDevices(ctx context.Context) ([]deviceRow, error) {
-	rows, err := s.db.Query(ctx, `SELECT d.id, d.hostname, coalesce(d.inventory->>'os_name',''), d.agent_version,
-		coalesce((SELECT b.name FROM blueprints b WHERE b.id=d.blueprint_id),'default') || coalesce(' · ' || nullif(array_to_string(d.tags, ', '), ''), ''),
-		coalesce(d.inventory->>'desktop',''), coalesce((d.inventory->>'memory_mb')::bigint, 0),
-		d.failing, jsonb_array_length(d.checks), d.last_seen, d.retired, d.grace_until, d.auto_locked
-		FROM devices d ORDER BY d.retired, d.hostname`)
+	rows, err := s.db.Query(ctx, `SELECT d.id, d.hostname, d.os_name, d.agent_version,
+		coalesce(b.name, 'default') || coalesce(' · ' || nullif(array_to_string(d.tags, ', '), ''), ''),
+		d.desktop, d.memory_mb, d.failing, d.checks_count, d.last_seen, d.retired, d.grace_until, d.auto_locked
+		FROM devices d LEFT JOIN blueprints b ON b.id = d.blueprint_id ORDER BY d.retired, d.hostname`)
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +307,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 	sort.Slice(oses, func(i, j int) bool {
 		return oses[i].Count > oses[j].Count || oses[i].Count == oses[j].Count && oses[i].Name < oses[j].Name
 	})
-	fc, err := s.fleetCompliance(ctx)
+	fc, err := s.fleetComplianceCached(ctx)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -451,6 +453,26 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		s.fail(w, err)
 		return
 	}
+	type deviceEvent struct {
+		At     time.Time
+		Detail string
+	}
+	var events []deviceEvent
+	if r.URL.Query().Get("tab") == "commands" {
+		rows, err := s.db.Query(ctx, `SELECT at, detail FROM device_events WHERE device_id=$1 ORDER BY id DESC LIMIT 100`, id)
+		if err == nil {
+			events, err = pgx.CollectRows(rows, pgx.RowToStructByPos[deviceEvent])
+		}
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+	var tampered *time.Time
+	if err := s.db.QueryRow(ctx, `SELECT tampered_at FROM devices WHERE id=$1 AND tampered_at > now() - interval '30 days'`, id).Scan(&tampered); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		s.fail(w, err)
+		return
+	}
 	// expected declarations, to show what the device has not confirmed yet
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -484,7 +506,14 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		Reasons                        []string
 	}
 	tab := r.URL.Query().Get("tab")
-	if !slices.Contains([]string{"overview", "hardware", "software", "compliance", "declarations", "commands"}, tab) {
+	sub := r.URL.Query().Get("sub")
+	switch {
+	case tab == "software" && sub != "sources":
+		sub = "packages"
+	case tab == "accounts" && sub != "groups":
+		sub = "users"
+	}
+	if !slices.Contains([]string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"}, tab) {
 		tab = "overview"
 	}
 	pkgQ := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
@@ -530,10 +559,11 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
-		"CommandTypes": api.CommandTypes,
-		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab,
-		"Resolved": res, "Tags": strings.Join(tags, ", "), "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery,
-		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "software", "compliance", "declarations", "commands"},
+		"CommandTypes": commandTypesFor(sess.Role),
+		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
+		"Resolved": res, "Tags": strings.Join(tags, ", "), "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery, "Tampered": tampered, "Events": events,
+		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"},
+		"Sub": sub, "ShowSystem": r.URL.Query().Get("system") == "1", "NetworkInfo": len(data.Inv.DNS)+len(data.Inv.Routes) > 0 || hasIPs(data.Inv.Interfaces),
 	})
 }
 
@@ -543,15 +573,58 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 		http.Error(w, "invalid command", http.StatusBadRequest)
 		return
 	}
-	if typ != "script" {
+	switch {
+	case typ == "reboot" || typ == "shutdown":
+		// payload is the delay in minutes, 0 = now
+		v := strings.TrimSpace(r.FormValue("minutes"))
+		if v == "" {
+			v = "1"
+		}
+		m, err := strconv.Atoi(v)
+		if err != nil || m < 0 || m > 1440 {
+			http.Error(w, "delay must be 0..1440 minutes", http.StatusBadRequest)
+			return
+		}
+		payload = strconv.Itoa(m)
+	case typ == "lost" || typ == "wipe" || typ == "found" || typ == "allow_uninstall":
+		// protective actions: admins only, lost and wipe confirmed by typing the host name
+		if sess.Role != "admin" {
+			http.Error(w, "this action requires the admin role", http.StatusForbidden)
+			return
+		}
+		if typ == "lost" || typ == "wipe" {
+			var host string
+			if err := s.db.QueryRow(r.Context(), `SELECT hostname FROM devices WHERE id=$1`, id).Scan(&host); err != nil ||
+				!strings.EqualFold(strings.TrimSpace(r.FormValue("confirm")), host) {
+				http.Error(w, "type the host name to confirm", http.StatusBadRequest)
+				return
+			}
+		}
 		payload = ""
-	} else if sess.Role != "admin" {
+		if typ == "lost" {
+			msg := strings.TrimSpace(r.FormValue("message"))
+			if len(msg) > 500 || strings.ContainsAny(msg, "\x00\r") {
+				http.Error(w, "message: up to 500 characters", http.StatusBadRequest)
+				return
+			}
+			b, _ := json.Marshal(api.LostMode{Message: msg})
+			payload = string(b)
+		}
+	case typ != "script":
+		payload = ""
+	case sess.Role != "admin":
 		http.Error(w, "scripts require the admin role", http.StatusForbidden)
 		return
 	}
 	err := s.auditAction(r.Context(), sess.Email, "command."+typ, id, truncate(payload, 2000), func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO commands(device_id, type, payload, created_by) VALUES ($1,$2,$3,$4)`, id, typ, payload, sess.Email)
-		return err
+		if _, err := tx.Exec(r.Context(), `INSERT INTO commands(device_id, type, payload, created_by) VALUES ($1,$2,$3,$4)`, id, typ, payload, sess.Email); err != nil {
+			return err
+		}
+		if typ == "unlock" || typ == "lock" { // a manual action takes over from the compliance policy
+			_, err := tx.Exec(r.Context(), `UPDATE devices SET auto_locked=false WHERE id=$1`, id)
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		s.fail(w, err)
@@ -640,7 +713,7 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 func (s *Server) deviceRetire(w http.ResponseWriter, r *http.Request, sess session) {
 	id := r.PathValue("id")
 	err := s.auditAction(r.Context(), sess.Email, "device.retire", id, "client certificate revoked", func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `UPDATE devices SET retired=true, cert_serial='' WHERE id=$1`, id)
+		_, err := tx.Exec(r.Context(), `UPDATE devices SET retired=true, cert_serial='', pending_serial=NULL WHERE id=$1`, id)
 		return err
 	})
 	if err != nil {
@@ -730,7 +803,7 @@ type fleetStats struct {
 }
 
 func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session) {
-	fc, err := s.fleetCompliance(r.Context())
+	fc, err := s.fleetComplianceCached(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -788,6 +861,26 @@ func (f complianceFilter) apply(checks []*checkAgg, controls []*controlAgg) ([]*
 }
 
 // fleetCompliance aggregates the latest check results of all active devices.
+const maxListedHosts = 20
+
+type fleetCache struct {
+	at time.Time
+	fs fleetStats
+}
+
+// fleetComplianceCached serves the fleet aggregation for a minute; it reads
+// and decodes the check results of every device.
+func (s *Server) fleetComplianceCached(ctx context.Context) (fleetStats, error) {
+	if c := s.fleet.Load(); c != nil && time.Since(c.at) < time.Minute {
+		return c.fs, nil
+	}
+	fs, err := s.fleetCompliance(ctx)
+	if err == nil {
+		s.fleet.Store(&fleetCache{at: time.Now(), fs: fs})
+	}
+	return fs, err
+}
+
 func (s *Server) fleetCompliance(ctx context.Context) (fleetStats, error) {
 	var fs fleetStats
 	rows, err := s.db.Query(ctx, `SELECT hostname, checks, last_seen, failing FROM devices WHERE NOT retired`)
@@ -829,7 +922,9 @@ func (s *Server) fleetCompliance(ctx context.Context) (fleetStats, error) {
 				a.Pass++
 			case "fail":
 				a.Fail++
-				a.FailingHosts = append(a.FailingHosts, host)
+				if len(a.FailingHosts) < maxListedHosts { // the count is in Fail; long lists help nobody
+					a.FailingHosts = append(a.FailingHosts, host)
+				}
 			case "excepted":
 				a.Excepted++
 			default:
@@ -895,6 +990,9 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session)
 		return
 	}
 	brokenAt, err := s.verifyAudit(r.Context())
+	if full := s.auditBroken.Load(); err == nil && brokenAt == 0 && full != 0 {
+		brokenAt = full
+	}
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -904,13 +1002,30 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session)
 
 // verifyAudit recomputes the hash chain. Returns the first broken id or 0.
 // ponytail: full scan per page view; checkpoint verified ranges when the log reaches millions of rows.
-func (s *Server) verifyAudit(ctx context.Context) (int64, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log ORDER BY id`)
+// verifyAudit checks the hash chain and returns the first broken entry (0 =
+// intact). The audit page verifies incrementally from the last checkpoint;
+// the daily background run verifies everything from the start.
+func (s *Server) verifyAudit(ctx context.Context) (int64, error) { return s.verifyAuditFrom(ctx, true) }
+
+func (s *Server) verifyAuditFrom(ctx context.Context, incremental bool) (int64, error) {
+	var from int64
+	prev := make([]byte, 32)
+	if incremental {
+		var hash []byte
+		err := s.db.QueryRow(ctx, `SELECT last_id, last_hash FROM audit_checkpoint`).Scan(&from, &hash)
+		switch {
+		case err == nil:
+			prev = hash
+		case !errors.Is(err, pgx.ErrNoRows):
+			return 0, err
+		}
+	}
+	rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE id > $1 ORDER BY id`, from)
 	if err != nil {
 		return 0, err
 	}
 	defer rows.Close()
-	prev := make([]byte, 32)
+	last := from
 	for rows.Next() {
 		var a auditRow
 		if err := rows.Scan(&a.ID, &a.At, &a.Actor, &a.Action, &a.Target, &a.Detail, &a.Prev, &a.Hash); err != nil {
@@ -919,9 +1034,16 @@ func (s *Server) verifyAudit(ctx context.Context) (int64, error) {
 		if !bytes.Equal(a.Prev, prev) || !bytes.Equal(a.Hash, auditHash(a.Prev, a.At, a.Actor, a.Action, a.Target, a.Detail)) {
 			return a.ID, nil
 		}
-		prev = a.Hash
+		prev, last = a.Hash, a.ID
 	}
-	return 0, rows.Err()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if last > from {
+		_, err = s.db.Exec(ctx, `INSERT INTO audit_checkpoint(one, last_id, last_hash, verified_at) VALUES (true, $1, $2, now())
+			ON CONFLICT (one) DO UPDATE SET last_id=EXCLUDED.last_id, last_hash=EXCLUDED.last_hash, verified_at=now()`, last, prev)
+	}
+	return 0, err
 }
 
 // ---- CSV exports (audit evidence) ----
@@ -991,4 +1113,23 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 		cw.Write(out)
 	}
 	cw.Flush()
+}
+
+func hasIPs(nics []api.NIC) bool {
+	for _, n := range nics {
+		if len(n.IPs) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// commandTypesFor hides scripts and the protective actions from non admins.
+func commandTypesFor(role string) []string {
+	if role == "admin" {
+		return api.CommandTypes
+	}
+	return slices.DeleteFunc(slices.Clone(api.CommandTypes), func(t string) bool {
+		return t == "script" || t == "lost" || t == "found" || t == "wipe" || t == "allow_uninstall"
+	})
 }

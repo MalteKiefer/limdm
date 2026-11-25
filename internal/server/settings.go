@@ -2,12 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/hkdf"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +13,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/maltekiefer/limdm/internal/api"
 )
 
 // Settings are the server options editable in the web UI. Bootstrap values
@@ -43,8 +39,9 @@ type storedSettings struct {
 }
 
 type runtimeState struct {
-	set  Settings
-	auth *oidcAuth // nil when OIDC is not configured
+	set      Settings
+	auth     *oidcAuth    // nil when OIDC is not configured
+	branding api.Branding // derived from set once, sent to agents and shown in the console
 }
 
 func (s *Server) settings() Settings { return s.rt.Load().set }
@@ -58,65 +55,6 @@ func envSettings(c Config) Settings {
 		AllowedDomain: c.AllowedDomain, LocalLogin: c.LocalLogin, StaleHours: int(c.StaleAfter.Hours())}
 }
 
-// settingsKey derives the encryption key for stored secrets from the session key.
-func (s *Server) settingsKey() ([]byte, error) {
-	return hkdf.Key(sha256.New, s.cfg.SessionKey, nil, "limdm settings secrets v1", 32)
-}
-
-func (s *Server) seal32(plain string) (string, error) {
-	if plain == "" {
-		return "", nil
-	}
-	key, err := s.settingsKey()
-	if err != nil {
-		return "", err
-	}
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return "", err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(gcm.Seal(nonce, nonce, []byte(plain), []byte("oidc_client_secret"))), nil
-}
-
-func (s *Server) open32(enc string) (string, error) {
-	if enc == "" {
-		return "", nil
-	}
-	raw, err := base64.StdEncoding.DecodeString(enc)
-	if err != nil {
-		return "", err
-	}
-	key, err := s.settingsKey()
-	if err != nil {
-		return "", err
-	}
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return "", err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-	if len(raw) < gcm.NonceSize() {
-		return "", errors.New("stored secret too short")
-	}
-	plain, err := gcm.Open(nil, raw[:gcm.NonceSize()], raw[gcm.NonceSize():], []byte("oidc_client_secret"))
-	if err != nil {
-		return "", errors.New("stored secret cannot be decrypted (session key changed?)")
-	}
-	return string(plain), nil
-}
-
-// loadSettings reads saved settings (or the environment) and activates them.
 func (s *Server) loadSettings(ctx context.Context) error {
 	set := envSettings(s.cfg)
 	var raw []byte
@@ -130,47 +68,52 @@ func (s *Server) loadSettings(ctx context.Context) error {
 		if err := json.Unmarshal(raw, &st); err != nil {
 			return err
 		}
-		if st.OIDCClientSecret, err = s.open32(st.SecretEnc); err != nil {
+		if st.OIDCClientSecret, err = s.openField("settings.oidc_client_secret", st.SecretEnc); err != nil {
 			return err
 		}
 		set = st.Settings
 	}
-	return s.activate(ctx, set)
+	rt, err := s.prepare(ctx, set)
+	if err != nil {
+		return err
+	}
+	s.rt.Store(rt)
+	return nil
 }
 
-// activate validates the settings and swaps them in; OIDC discovery runs here.
-func (s *Server) activate(ctx context.Context, set Settings) error {
+// prepare validates settings and builds the runtime state (OIDC discovery
+// runs here) without activating it.
+func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, error) {
 	if set.StaleHours < 1 || set.StaleHours > 24*90 {
-		return errors.New("stale hours must be between 1 and 2160")
+		return nil, errors.New("stale hours must be between 1 and 2160")
 	}
 	if set.WebhookURL != "" {
 		if u, err := url.Parse(set.WebhookURL); err != nil || u.Scheme != "https" || u.Host == "" {
-			return errors.New("webhook URL must be https")
+			return nil, errors.New("webhook URL must be https")
 		}
 	}
 	if len(set.CompanyName) > 80 || strings.ContainsAny(set.CompanyName, "\x00\n\r\t") {
-		return errors.New("company name: up to 80 characters on one line")
+		return nil, errors.New("company name: up to 80 characters on one line")
 	}
 	if err := validLogo(set.Logo); err != nil {
-		return err
+		return nil, err
 	}
 	var auth *oidcAuth
 	if set.OIDCIssuer != "" {
 		if !strings.HasPrefix(set.OIDCIssuer, "https://") || set.OIDCClientID == "" {
-			return errors.New("OIDC needs an https issuer and a client ID")
+			return nil, errors.New("OIDC needs an https issuer and a client ID")
 		}
 		var err error
 		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		if auth, err = newOIDCAuthFrom(cctx, set.OIDCIssuer, set.OIDCClientID, set.OIDCClientSecret, s.cfg.PublicURL); err != nil {
-			return fmt.Errorf("OIDC discovery failed: %w", err)
+			return nil, fmt.Errorf("OIDC discovery failed: %w", err)
 		}
 	}
 	if auth == nil && !set.LocalLogin {
-		return errors.New("enable at least one login method: OIDC or local accounts")
+		return nil, errors.New("enable at least one login method: OIDC or local accounts")
 	}
-	s.rt.Store(&runtimeState{set: set, auth: auth})
-	return nil
+	return &runtimeState{set: set, auth: auth, branding: computeBranding(set)}, nil
 }
 
 // ---- settings page ----
@@ -228,11 +171,14 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 			return
 		}
 	}
-	if err := s.activate(ctx, set); err != nil {
+	s.saveMu.Lock() // concurrent saves must not leave runtime and database apart
+	defer s.saveMu.Unlock()
+	rt, err := s.prepare(ctx, set)
+	if err != nil {
 		s.renderSettings(w, r, sess, set, "", err.Error())
 		return
 	}
-	enc, err := s.seal32(set.OIDCClientSecret)
+	enc, err := s.sealField("settings.oidc_client_secret", set.OIDCClientSecret)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -249,5 +195,6 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		s.fail(w, err)
 		return
 	}
+	s.rt.Store(rt) // only what is stored and audited becomes active
 	s.renderSettings(w, r, sess, set, "Settings saved and active.", "")
 }

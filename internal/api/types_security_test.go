@@ -27,18 +27,19 @@ func TestSecurityTypes(t *testing.T) {
 		t.Error("short password accepted")
 	}
 	bad := map[string][2]string{
-		"pkexec":           {TypePolkit, `{"rules":[{"name":"x","actions":["org.freedesktop.policykit.exec"],"groups":[],"result":"yes","local_active_only":true}]}`},
-		"js injection":     {TypePolkit, `{"rules":[{"name":"x","actions":["org.a.b\") || true || (\""],"groups":[],"result":"yes","local_active_only":false}]}`},
-		"broad namespace":  {TypePolkit, `{"rules":[{"name":"x","actions":["org.*"],"groups":[],"result":"yes","local_active_only":false}]}`},
-		"bad result":       {TypePolkit, `{"rules":[{"name":"x","actions":["org.a.b"],"groups":[],"result":"root","local_active_only":false}]}`},
-		"sudo comma":       {TypeSudo, `{"rules":[{"name":"x","principals":["%dev"],"run_as":"","commands":["/bin/ls, /bin/sh"],"nopasswd":false}]}`},
-		"sudo wildcard":    {TypeSudo, `{"rules":[{"name":"x","principals":["%dev"],"run_as":"","commands":["/bin/cat *"],"nopasswd":false}]}`},
-		"sudo relative":    {TypeSudo, `{"rules":[{"name":"x","principals":["%dev"],"run_as":"","commands":["sh"],"nopasswd":false}]}`},
-		"sudo all users":   {TypeSudo, `{"rules":[{"name":"x","principals":["ALL"],"run_as":"","commands":["ALL"],"nopasswd":true}]}`},
-		"sudo dotted name": {TypeSudo, `{"rules":[{"name":"a.b","principals":["%dev"],"run_as":"","commands":["ALL"],"nopasswd":false}]}`},
-		"sudo newline":     {TypeSudo, `{"rules":[{"name":"x","principals":["%dev"],"run_as":"root\nALL ALL=(ALL) NOPASSWD: ALL","commands":["ALL"],"nopasswd":false}]}`},
-		"sudo timeout":     {TypeSudo, `{"rules":[],"timestamp_timeout":999}`},
-		"grub bad hash":    {TypeBootloader, `{"superuser":"b","password_pbkdf2":"x\nset superusers=\"\"","unrestricted":true}`},
+		"pkexec":             {TypePolkit, `{"rules":[{"name":"x","actions":["org.freedesktop.policykit.exec"],"groups":[],"result":"yes","local_active_only":true}]}`},
+		"js injection":       {TypePolkit, `{"rules":[{"name":"x","actions":["org.a.b\") || true || (\""],"groups":[],"result":"yes","local_active_only":false}]}`},
+		"broad namespace":    {TypePolkit, `{"rules":[{"name":"x","actions":["org.*"],"groups":[],"result":"yes","local_active_only":false}]}`},
+		"bad result":         {TypePolkit, `{"rules":[{"name":"x","actions":["org.a.b"],"groups":[],"result":"root","local_active_only":false}]}`},
+		"sudo comma":         {TypeSudo, `{"rules":[{"name":"x","principals":["%dev"],"run_as":"","commands":["/bin/ls, /bin/sh"],"nopasswd":false}]}`},
+		"sudo wildcard":      {TypeSudo, `{"rules":[{"name":"x","principals":["%dev"],"run_as":"","commands":["/bin/cat *"],"nopasswd":false}]}`},
+		"sudo relative":      {TypeSudo, `{"rules":[{"name":"x","principals":["%dev"],"run_as":"","commands":["sh"],"nopasswd":false}]}`},
+		"sudo all users":     {TypeSudo, `{"rules":[{"name":"x","principals":["ALL"],"run_as":"","commands":["ALL"],"nopasswd":true}]}`},
+		"sudo dotted name":   {TypeSudo, `{"rules":[{"name":"a.b","principals":["%dev"],"run_as":"","commands":["ALL"],"nopasswd":false}]}`},
+		"sudo newline":       {TypeSudo, `{"rules":[{"name":"x","principals":["%dev"],"run_as":"root\nALL ALL=(ALL) NOPASSWD: ALL","commands":["ALL"],"nopasswd":false}]}`},
+		"sudo timeout":       {TypeSudo, `{"rules":[],"timestamp_timeout":999}`},
+		"polkit yes for all": {TypePolkit, `{"rules":[{"name":"x","actions":["org.freedesktop.systemd1.manage-units"],"groups":[],"result":"yes","local_active_only":false}]}`},
+		"grub bad hash":      {TypeBootloader, `{"superuser":"b","password_pbkdf2":"x\nset superusers=\"\"","unrestricted":true}`},
 	}
 	for name, c := range bad {
 		if (LibraryItem{Name: "x", Type: c[0], Payload: json.RawMessage(c[1])}).Validate() == nil {
@@ -52,7 +53,7 @@ func TestSecurityMerge(t *testing.T) {
 		{Name: "a", Type: TypeSudo, Payload: json.RawMessage(`{"rules":[{"name":"dev","principals":["%dev"],"run_as":"","commands":["ALL"],"nopasswd":false}],"timestamp_timeout":5}`)},
 		{Name: "b", Type: TypeSudo, Payload: json.RawMessage(`{"rules":[{"name":"ops","principals":["%ops"],"run_as":"","commands":["ALL"],"nopasswd":false}]}`)},
 		{Name: "c", Type: TypePolkit, Payload: json.RawMessage(`{"rules":[{"name":"n","actions":["org.a.b"],"groups":[],"result":"no","local_active_only":false}]}`)},
-		{Name: "d", Type: TypePolkit, Payload: json.RawMessage(`{"rules":[{"name":"n","actions":["org.a.b"],"groups":[],"result":"yes","local_active_only":false}]}`)},
+		{Name: "d", Type: TypePolkit, Payload: json.RawMessage(`{"rules":[{"name":"n","actions":["org.a.b"],"groups":["staff"],"result":"yes","local_active_only":false}]}`)},
 	})
 	if err != nil {
 		t.Fatal(err)

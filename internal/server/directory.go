@@ -9,11 +9,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/maltekiefer/limdm/internal/api"
 	"golang.org/x/oauth2/jwt"
 )
 
@@ -33,6 +36,8 @@ type dirUser struct {
 	Title       string
 	Active      bool
 	Groups      []string
+	GroupIDs    []int64
+	Updated     time.Time
 }
 
 type dirGroup struct {
@@ -80,9 +85,7 @@ func (s *Server) directoryPage(w http.ResponseWriter, r *http.Request, sess sess
 func (s *Server) renderDirectory(w http.ResponseWriter, r *http.Request, sess session, token, msg, errMsg string) {
 	ctx := r.Context()
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-	rows, err := s.db.Query(ctx, `SELECT u.id, u.external_id, u.source, u.user_name, u.email, u.display_name, u.department, u.title, u.active,
-		coalesce((SELECT array_agg(g.name ORDER BY g.name) FROM dir_members m JOIN dir_groups g ON g.id=m.group_id WHERE m.user_id=u.id), '{}')
-		FROM dir_users u WHERE $1 = '' OR lower(u.email || ' ' || u.display_name || ' ' || u.department) LIKE '%' || $1 || '%'
+	rows, err := s.db.Query(ctx, `SELECT `+dirUserCols+` FROM dir_users u WHERE $1 = '' OR lower(u.email || ' ' || u.display_name || ' ' || u.department) LIKE '%' || $1 || '%'
 		ORDER BY u.active DESC, u.display_name, u.email LIMIT 500`, q)
 	if err != nil {
 		s.fail(w, err)
@@ -221,7 +224,7 @@ func (s *Server) googleConfigure(w http.ResponseWriter, r *http.Request, sess se
 			s.renderDirectory(w, r, sess, "", "", "paste the service account JSON key file")
 			return
 		}
-		if g.KeyEnc, err = s.seal32(key); err != nil {
+		if g.KeyEnc, err = s.sealField("settings.google_service_account_key", key); err != nil {
 			s.fail(w, err)
 			return
 		}
@@ -276,7 +279,7 @@ func (s *Server) syncGoogle(ctx context.Context) (string, error) {
 	if err != nil || g.KeyEnc == "" {
 		return "", errors.Join(err, errors.New("not configured"))
 	}
-	key, err := s.open32(g.KeyEnc)
+	key, err := s.openField("settings.google_service_account_key", g.KeyEnc)
 	if err != nil {
 		return "", err
 	}
@@ -428,4 +431,32 @@ func googleList[T any](ctx context.Context, c *http.Client, base, field string) 
 		}
 	}
 	return nil, errors.New("too many pages")
+}
+
+// activeUsers drops device users whose directory entry is inactive or was
+// deleted. Users that never had a directory entry (local assignments) stay.
+func activeUsers(ctx context.Context, tx pgx.Tx, users []api.User) ([]api.User, error) {
+	if len(users) == 0 {
+		return users, nil
+	}
+	emails := make([]string, len(users))
+	for i, u := range users {
+		emails[i] = strings.ToLower(u.Email)
+	}
+	rows, err := tx.Query(ctx, `SELECT lower(email) FROM dir_users WHERE NOT active AND lower(email) = ANY($1)
+		UNION SELECT email FROM dir_tombstones WHERE email = ANY($1)`, emails)
+	if err != nil {
+		return nil, err
+	}
+	inactive, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, err
+	}
+	out := users[:0:0]
+	for _, u := range users {
+		if !slices.Contains(inactive, strings.ToLower(u.Email)) {
+			out = append(out, u)
+		}
+	}
+	return out, nil
 }

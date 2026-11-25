@@ -1,0 +1,106 @@
+# Configuration
+
+Bootstrap values (database, listeners, keys) come from the environment. Everything else is
+configured in the console and stored in the database; values saved in the console override
+the environment.
+
+## Environment variables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LIMDM_DATABASE_URL` | required | PostgreSQL URL. Remote hosts need `sslmode=verify-full`. |
+| `LIMDM_SESSION_KEY` | required | At least 32 bytes as hex (`openssl rand -hex 32`). Signs sessions and derives the keys for stored secrets, recovery keys and webhook signatures. Changing it invalidates sessions and makes stored secrets unreadable. |
+| `LIMDM_PUBLIC_URL` | required | Console URL as users see it, for example `https://mdm.example.com`. |
+| `LIMDM_AGENT_URL` | required | Agent API URL, `https://`. Its host goes into the server certificate agents verify. |
+| `LIMDM_AGENT_LISTEN` | `:8444` | Listener of the agent API (mTLS terminates here). |
+| `LIMDM_AGENT_HOSTS` | | Extra names or IPs for the agent certificate, comma separated. |
+| `LIMDM_LISTEN` | `127.0.0.1:8080`, `:8443` with a certificate | Console listener. Without a certificate only loopback is allowed. |
+| `LIMDM_TLS_CERT`, `LIMDM_TLS_KEY` | | Console certificate when no reverse proxy is used. |
+| `LIMDM_CA_DIR` | `/var/lib/limdm-server/ca` | Device CA (key file 0600). Back it up. |
+| `LIMDM_LOCAL_LOGIN` | `false` | Allow local accounts (password and TOTP). |
+| `LIMDM_OIDC_ISSUER`, `LIMDM_OIDC_CLIENT_ID`, `LIMDM_OIDC_CLIENT_SECRET` | | Console single sign on. Optional; also configurable in the console. |
+| `LIMDM_OIDC_ALLOWED_DOMAIN` | | Only accept this Google `hd` claim or email domain. |
+| `LIMDM_ADMINS`, `LIMDM_AUDITORS` | | Comma separated emails seeded as console users at start. |
+| `LIMDM_STALE_HOURS` | `24` | Hours without check in until a device counts as stale. |
+| `LIMDM_RELEASE_DIR` | | Directory with signed agent self update releases ([agent.md](agent.md#updates)). |
+| `LIMDM_RELEASE_REPO` | `MalteKiefer/limdm` | GitHub repository `/install.sh` downloads agent packages from. |
+
+The server refuses to start when OIDC and local login are both off, when OIDC is set without
+an administrator, or when the console would listen publicly without a certificate.
+
+## Console settings
+
+**Settings** (admins edit, auditors read):
+
+* **Single sign on (OIDC).** Issuer, client ID, client secret (stored AES-256-GCM encrypted)
+  and allowed domain. Changes are checked against the provider's discovery document before
+  they take effect, no restart needed. Redirect URI: `<LIMDM_PUBLIC_URL>/auth/callback`.
+* **Local accounts.** Can only be disabled while an OIDC administrator exists and you are
+  signed in with OIDC, so nobody locks everyone out.
+* **Stale threshold** and **compliance webhook** ([compliance.md](compliance.md#webhook)).
+* **Branding.** Company name (up to 80 characters) and a PNG logo (16 to 1024 pixels, up to
+  256 KiB, square works best). Shown in the console, on the sign in page and in the desktop
+  helper's dialogs and notifications on devices. Only PNG is accepted because an SVG served
+  from the console's origin could carry script.
+
+Every change is written to the audit log.
+
+## Google Workspace as identity provider
+
+Console sign in:
+
+1. Google Cloud console, APIs and Services, Credentials: create an OAuth client of type
+   **Web application** with the redirect URI `https://mdm.example.com/auth/callback`.
+2. Enter issuer `https://accounts.google.com`, client ID, secret and your Workspace domain
+   in **Settings**.
+3. Add the people who may use the console in **Users**.
+
+Desktop login uses a second OAuth client of type **TVs and Limited Input devices** (device
+authorization grant). See [desktop-login.md](desktop-login.md).
+
+Other providers (Entra ID, Okta, authentik, Keycloak) work the same way with their issuer URL.
+
+## Console users and roles
+
+| Role | May |
+|---|---|
+| `admin` | everything |
+| `helpdesk` | see devices, send commands except scripts, reveal disk recovery keys |
+| `auditor` | read everything, change nothing |
+
+Users are OIDC identities (email) or local accounts (`local:<name>`, password and TOTP).
+Rules enforced by the server:
+
+* At least one active administrator always remains.
+* Nobody can demote, disable or reset their own account. The own row in **Users** is read
+  only; personal settings live in the **Profile**.
+
+## Profile
+
+Every user opens the profile by clicking their name in the sidebar:
+
+* **Language:** English or German, stored in the browser. Without a choice the browser's
+  `Accept-Language` decides.
+* **Local accounts only:**
+  * change the password (current password required, 12 to 256 characters),
+  * move TOTP to a new authenticator app: a QR code is shown, the new secret takes effect
+    only after a code from the new app was entered,
+  * recovery codes: ten one time codes, usable instead of a TOTP code at sign in. They are
+    shown once and stored as SHA-256 hashes; the profile shows how many are left.
+    Generating new codes invalidates the old ones.
+
+Password checks in the profile count towards the same lockout as the sign in (5 failures,
+15 minutes). OIDC accounts are managed by the identity provider.
+
+## Directory
+
+**Directory** connects people and groups:
+
+* **SCIM 2.0** at `<LIMDM_PUBLIC_URL>/scim/v2` with a bearer token created on the page
+  (Okta, Microsoft Entra ID, authentik, JumpCloud).
+* **Google Workspace:** a service account with domain wide delegation for the scopes
+  `admin.directory.user.readonly`, `admin.directory.group.readonly` and
+  `admin.directory.group.member.readonly`, plus an admin email to impersonate. Synced hourly
+  and on demand.
+
+How groups select blueprints and what deactivation does: [concepts.md](concepts.md#directory).

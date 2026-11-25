@@ -76,3 +76,19 @@ func TestReleaseSignature(t *testing.T) {
 		t.Fatal("tampered release accepted")
 	}
 }
+
+func TestFilesRejectsDangerousTargets(t *testing.T) {
+	for name, payload := range map[string]string{
+		"setuid":        `{"files":[{"path":"/usr/local/bin/x","content":"x","mode":"4755"}]}`,
+		"user home":     `{"files":[{"path":"/home/anna/.bashrc","content":"x"}]}`,
+		"world tmp":     `{"files":[{"path":"/tmp/x","content":"x"}]}`,
+		"relative path": `{"files":[{"path":"etc/x","content":"x"}]}`,
+	} {
+		if (LibraryItem{Name: "x", Type: TypeFiles, Payload: json.RawMessage(payload)}).Validate() == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if err := (LibraryItem{Name: "x", Type: TypeFiles, Payload: json.RawMessage(`{"files":[{"path":"/etc/issue","content":"x","mode":"0644"}]}`)}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
