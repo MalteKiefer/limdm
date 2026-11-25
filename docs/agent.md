@@ -4,6 +4,18 @@
 and rpm for amd64 and arm64; the package also contains the desktop helper `limdm-desktop`.
 osquery is a hard dependency and comes from the official osquery repository.
 
+## Supported distributions
+
+| Family | Distributions | Packages | Init | Notes |
+|---|---|---|---|---|
+| Debian | Debian, Ubuntu, Mint, Pop!_OS | apt, `.deb` | systemd | full feature set |
+| Fedora | Fedora, CentOS Stream, RHEL, Rocky, Alma | dnf, `.rpm` | systemd | full feature set |
+| Arch | Arch, Manjaro, EndeavourOS | pacman, `.pkg.tar.zst` | systemd | no osquery (native inventory); pending updates need `pacman-contrib`; updates are always full upgrades |
+| Alpine | Alpine | apk, `.apk` | OpenRC | no osquery; no host firewall management; SSO login needs linux-pam; no systemd watchdog (supervise-daemon restarts the agent) |
+
+Arch and Alpine are rolling or have no separate security channel: every pending update
+counts for the security update check, and "install all updates" upgrades everything.
+
 ## Enrollment tokens
 
 **Enrollment** in the console creates tokens with a note, an optional blueprint, a number of

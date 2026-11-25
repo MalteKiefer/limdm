@@ -12,9 +12,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/maltekiefer/limdm/internal/api"
@@ -72,8 +74,13 @@ func (a *Agent) checkUpdateOutcome() {
 }
 
 func packageFormat(family string) string {
-	if family == "debian" {
+	switch family {
+	case "debian":
 		return "deb"
+	case "arch":
+		return "pkg.tar.zst"
+	case "alpine":
+		return "apk"
 	}
 	return "rpm"
 }
@@ -127,13 +134,29 @@ func (a *Agent) installUpdate(ctx context.Context, u api.AgentUpdate) error {
 	if err := os.WriteFile(updateMarker, b, 0o600); err != nil {
 		return err
 	}
-	args := []string{"--unit=limdm-agent-update-" + strconv.FormatInt(time.Now().Unix(), 10), "--collect", "--quiet"}
-	if a.host.family == "debian" {
-		args = append(args, "--setenv=DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "-q",
-			"-o", "Dpkg::Options::=--force-confold", "--allow-downgrades", pkg)
-	} else {
-		args = append(args, "dnf", "install", "-y", "-q", pkg)
+	var install []string
+	switch a.host.family {
+	case "debian":
+		install = []string{"apt-get", "install", "-y", "-q", "-o", "Dpkg::Options::=--force-confold", "--allow-downgrades", pkg}
+	case "arch":
+		install = []string{"pacman", "-U", "--noconfirm", pkg}
+	case "alpine":
+		// apk sees an unsigned package; its SHA-256 from the signed sums was checked above
+		install = []string{"apk", "add", "--allow-untrusted", "--no-interactive", pkg}
+	default:
+		install = []string{"dnf", "install", "-y", "-q", pkg}
 	}
+	if !systemd() { // OpenRC: a detached process outlives the agent's restart
+		cmd := exec.CommandContext(context.WithoutCancel(ctx), install[0], install[1:]...)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := cmd.Start(); err != nil {
+			os.Remove(updateMarker)
+			return fmt.Errorf("start installation: %w", err)
+		}
+		return nil
+	}
+	args := append([]string{"--unit=limdm-agent-update-" + strconv.FormatInt(time.Now().Unix(), 10), "--collect", "--quiet",
+		"--setenv=DEBIAN_FRONTEND=noninteractive"}, install...)
 	if out, err := sh("systemd-run", args...); err != nil {
 		os.Remove(updateMarker)
 		return fmt.Errorf("start installation: %s", lastLines(out, 2))

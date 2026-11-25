@@ -57,13 +57,11 @@ nfpms:
   - id: agent
     ids: [agent, desktop]
     package_name: limdm-agent
-    # osquery is the inventory source; scripts/install-agent.sh adds its repository first
-    dependencies: [osquery]
     homepage: https://github.com/MalteKiefer/limdm
     maintainer: Malte Kiefer <malte.kiefer@kiefer-networks.de>
-    description: LiMDM device agent, declarative device management for Debian, Ubuntu and Fedora
+    description: LiMDM device agent, declarative device management for Debian, Ubuntu, Fedora, CentOS, Arch and Alpine
     license: MIT
-    formats: [deb, rpm]
+    formats: [deb, rpm, archlinux, apk]
     bindir: /usr/bin
     contents:
       - src: packaging/limdm-agent.service
@@ -80,6 +78,11 @@ nfpms:
           mode: 0o644
       - src: packaging/limdm-watchdog.sh
         dst: /usr/lib/limdm/limdm-watchdog.sh
+        file_info:
+          mode: 0o755
+      - src: packaging/limdm-agent.openrc
+        dst: /etc/init.d/limdm-agent
+        packager: apk
         file_info:
           mode: 0o755
       - src: packaging/limdm-pam-config
@@ -136,6 +139,11 @@ nfpms:
         dependencies: [osquery, systemd, util-linux, cryptsetup, iproute, procps-ng, kmod, gnupg2]
         recommends: [firewalld, audit, dnf-plugins-core, nftables]
         suggests: [zenity, kdialog, libnotify, dconf, flatpak, python3-gobject, gtk4, libadwaita]
+      # osquery is not packaged for Arch and Alpine; the agent uses its native inventory there
+      archlinux:
+        dependencies: [systemd, util-linux, cryptsetup, iproute2, procps-ng, kmod, gnupg, shadow, pacman-contrib]
+      apk:
+        dependencies: [openrc, findmnt, lsblk, runuser, cryptsetup, iproute2, procps, kmod, gnupg, shadow]
   - id: server
     ids: [server]
     package_name: limdm-server

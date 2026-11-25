@@ -180,9 +180,12 @@ func (a *Agent) setAppRepos(src api.AppSource, remove bool) error {
 
 func (a *Agent) applyCertificates(certs []api.Certificate) error {
 	desired := map[string]string{}
-	dir, ext, update := "/usr/local/share/ca-certificates", ".crt", "update-ca-certificates"
-	if a.host.family != "debian" {
+	dir, ext, update := "/usr/local/share/ca-certificates", ".crt", "update-ca-certificates" // Debian family, Alpine
+	switch a.host.family {
+	case "fedora":
 		dir, ext, update = "/etc/pki/ca-trust/source/anchors", ".pem", "update-ca-trust"
+	case "arch":
+		dir, ext, update = "/etc/ca-certificates/trust-source/anchors", ".crt", "update-ca-trust"
 	}
 	for _, c := range certs {
 		desired["limdm-"+c.Name+ext] = strings.TrimSpace(c.PEM) + "\n"
@@ -265,7 +268,7 @@ func applySSHCustom(opts map[string]string) error {
 		return err
 	}
 	for _, unit := range []string{"ssh", "sshd"} {
-		_, _ = sh("systemctl", "try-reload-or-restart", unit)
+		_ = svc("reload-or-restart", unit)
 	}
 	return nil
 }
@@ -305,7 +308,7 @@ func applyDNS(d *api.DNS) error {
 	if err != nil || !changed {
 		return err
 	}
-	_, err = sh("systemctl", "try-restart", "systemd-resolved")
+	err = svc("try-restart", "systemd-resolved")
 	return err
 }
 
@@ -323,7 +326,7 @@ func applyNTP(n *api.NTP) error {
 		if err != nil || !changed {
 			return err
 		}
-		_, err = sh("systemctl", "restart", "systemd-timesyncd")
+		err = svc("restart", "systemd-timesyncd")
 		return err
 	case exists("/etc/chrony/sources.d"):
 		var b strings.Builder
@@ -370,9 +373,10 @@ func (a *Agent) applyProxy(p *api.Proxy) error {
 	_, e1 := writeOrRemove("/etc/profile.d/limdm-proxy.sh", profile, 0o644)
 	_, e2 := writeOrRemove("/etc/environment.d/60-limdm-proxy.conf", envd, 0o644)
 	var e3 error
-	if a.host.family == "debian" {
+	switch a.host.family { // pacman and apk read http_proxy from the environment
+	case "debian":
 		_, e3 = writeOrRemove("/etc/apt/apt.conf.d/60limdm-proxy", apt, 0o644)
-	} else {
+	case "fedora":
 		_, e3 = writeOrRemove("/etc/dnf/libdnf5.conf.d/60-limdm-proxy.conf", dnf, 0o644)
 	}
 	return errors.Join(e1, e2, e3)

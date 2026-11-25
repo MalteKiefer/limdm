@@ -614,7 +614,7 @@ func (a *Agent) enforce() {
 	}
 	for _, s := range p.Services.Enable {
 		if !unitActive(s) {
-			if _, err := sh("systemctl", "enable", "--now", s); err != nil {
+			if err := svc("enable-now", s); err != nil {
 				a.problem(api.TypeServices, "enable %s: %v", s, err)
 			} else {
 				a.event("enabled %s", s)
@@ -623,7 +623,7 @@ func (a *Agent) enforce() {
 	}
 	for _, s := range p.Services.Disable {
 		if unitActive(s) {
-			if _, err := sh("systemctl", "disable", "--now", s); err != nil {
+			if err := svc("disable-now", s); err != nil {
 				a.problem(api.TypeServices, "disable %s: %v", s, err)
 			} else {
 				a.event("disabled %s", s)

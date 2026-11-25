@@ -914,3 +914,33 @@ func TestSessionModeLocks(t *testing.T) {
 		}
 	}
 }
+
+func TestDistributionFamilies(t *testing.T) {
+	for osr, want := range map[string]string{
+		"ID=centos\nID_LIKE=\"rhel fedora\"\nVERSION_ID=\"9\"": "fedora",
+		"ID=rocky\nID_LIKE=\"rhel centos fedora\"":             "fedora",
+		"ID=arch":                      "arch",
+		"ID=manjaro\nID_LIKE=arch":     "arch",
+		"ID=endeavouros\nID_LIKE=arch": "arch",
+		"ID=alpine\nVERSION_ID=3.21.0": "alpine",
+		"ID=ubuntu\nID_LIKE=debian":    "debian",
+		"ID=nixos":                     "",
+	} {
+		if got := familyOf(parseOSRelease(osr)); got != want {
+			t.Errorf("%q: %q", osr, got)
+		}
+	}
+	p, _ := parsePacmanQ("linux 6.12.1.arch1-1\nfirefox 133.0-1\n", nil)
+	if len(p) != 2 || p[1].Name != "firefox" || p[1].Version != "133.0-1" {
+		t.Fatalf("pacman: %+v", p)
+	}
+	a, _ := parseApkInfo("musl-1.2.5-r8\nlibcrypto3-3.3.2-r4\nalpine-base-3.21.0-r0\n", nil)
+	if len(a) != 3 || a[1].Name != "libcrypto3" || a[1].Version != "3.3.2-r4" || a[2].Name != "alpine-base" {
+		t.Fatalf("apk: %+v", a)
+	}
+	for fam, want := range map[string]string{"debian": "deb", "fedora": "rpm", "arch": "pkg.tar.zst", "alpine": "apk"} {
+		if f := api.PackageName("1.0.0", "amd64", packageFormat(fam)); !api.PackageRe.MatchString(f) || !strings.HasSuffix(f, want) {
+			t.Errorf("%s: %s", fam, f)
+		}
+	}
+}

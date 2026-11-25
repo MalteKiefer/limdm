@@ -17,34 +17,35 @@ import (
 type dependency struct {
 	cmd            string   // program the agent calls, or a file pattern (contains "/")
 	debian, fedora string   // package providing it
+	arch, alpine   string   // where the name differs from Fedora's
 	desktop        bool     // only on devices with a desktop
 	with           []string // only if one of these programs is installed
 }
 
 var dependencies = []dependency{
 	{cmd: "cryptsetup", debian: "cryptsetup-bin", fedora: "cryptsetup"},
-	{cmd: "findmnt", debian: "util-linux", fedora: "util-linux"},
-	{cmd: "lsblk", debian: "util-linux", fedora: "util-linux"},
-	{cmd: "runuser", debian: "util-linux", fedora: "util-linux"},
-	{cmd: "ip", debian: "iproute2", fedora: "iproute"},
-	{cmd: "sysctl", debian: "procps", fedora: "procps-ng"},
+	{cmd: "findmnt", debian: "util-linux", fedora: "util-linux", alpine: "findmnt"},
+	{cmd: "lsblk", debian: "util-linux", fedora: "util-linux", alpine: "lsblk"},
+	{cmd: "runuser", debian: "util-linux", fedora: "util-linux", alpine: "runuser"},
+	{cmd: "ip", debian: "iproute2", fedora: "iproute", arch: "iproute2", alpine: "iproute2"},
+	{cmd: "sysctl", debian: "procps", fedora: "procps-ng", arch: "procps-ng", alpine: "procps"},
 	{cmd: "modprobe", debian: "kmod", fedora: "kmod"},
-	{cmd: "gpg", debian: "gpg", fedora: "gnupg2"},
+	{cmd: "gpg", debian: "gpg", fedora: "gnupg2", arch: "gnupg", alpine: "gnupg"},
 	{cmd: "nft", debian: "nftables", fedora: "nftables"},
 	{cmd: "auditctl", debian: "auditd", fedora: "audit"},
 	{cmd: "notify-send", debian: "libnotify-bin", fedora: "libnotify", desktop: true},
 	{cmd: "dconf", debian: "dconf-cli", fedora: "dconf", desktop: true},
 	// the GTK 4 desktop app (packaging/limdm-desktop-ui)
-	{cmd: "python3", debian: "python3", fedora: "python3", desktop: true},
-	{cmd: "/usr/lib*/python3*/*-packages/gi/__init__.py", debian: "python3-gi", fedora: "python3-gobject", desktop: true},
-	{cmd: "/usr/lib*/*/girepository-1.0/Gtk-4.0.typelib", debian: "gir1.2-gtk-4.0", fedora: "gtk4", desktop: true},
+	{cmd: "python3", debian: "python3", fedora: "python3", desktop: true, arch: "python", alpine: "python3"},
+	{cmd: "/usr/lib*/python3*/*-packages/gi/__init__.py", debian: "python3-gi", fedora: "python3-gobject", desktop: true, arch: "python-gobject", alpine: "py3-gobject3"},
+	{cmd: "/usr/lib*/*/girepository-1.0/Gtk-4.0.typelib", debian: "gir1.2-gtk-4.0", fedora: "gtk4", desktop: true, alpine: "gtk4.0"},
 	{cmd: "/usr/lib*/*/girepository-1.0/Adw-1.typelib", debian: "gir1.2-adw-1", fedora: "libadwaita", desktop: true},
 	// idle screen lock for compositors and window managers (screenlock.go)
 	{cmd: "swayidle", debian: "swayidle", fedora: "swayidle", desktop: true, with: waylandCompositors},
 	{cmd: "swaylock", debian: "swaylock", fedora: "swaylock", desktop: true, with: waylandCompositors},
 	{cmd: "xss-lock", debian: "xss-lock", fedora: "xss-lock", desktop: true, with: x11WindowManagers},
 	{cmd: "i3lock", debian: "i3lock", fedora: "i3lock", desktop: true, with: x11WindowManagers},
-	{cmd: "xset", debian: "x11-xserver-utils", fedora: "xset", desktop: true, with: x11WindowManagers},
+	{cmd: "xset", debian: "x11-xserver-utils", fedora: "xset", desktop: true, with: x11WindowManagers, arch: "xorg-xset"},
 	{cmd: "xfce4-screensaver", debian: "xfce4-screensaver", fedora: "xfce4-screensaver", desktop: true, with: []string{"xfce4-session"}},
 }
 
@@ -65,11 +66,7 @@ func missingPackages(family string, desktopPresent, kde bool, has func(string) b
 		if (d.desktop && !desktopPresent) || has(d.cmd) || (d.with != nil && !slices.ContainsFunc(d.with, has)) {
 			continue
 		}
-		if family == "debian" {
-			add(d.debian)
-		} else {
-			add(d.fedora)
-		}
+		add(d.pkg(family))
 	}
 	// dialogs for the desktop helper: kdialog on KDE Plasma, zenity elsewhere
 	if desktopPresent && !has("zenity") && !has("kdialog") {
@@ -111,4 +108,17 @@ func present(c string) bool {
 	}
 	_, err := exec.LookPath(c)
 	return err == nil
+}
+
+// pkg is the package providing the dependency on a family.
+func (d dependency) pkg(family string) string {
+	switch {
+	case family == "debian":
+		return d.debian
+	case family == "arch" && d.arch != "":
+		return d.arch
+	case family == "alpine" && d.alpine != "":
+		return d.alpine
+	}
+	return d.fedora
 }

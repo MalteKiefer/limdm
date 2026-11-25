@@ -1,0 +1,19 @@
+#!/sbin/openrc-run
+# LiMDM device agent on systems with OpenRC (Alpine).
+
+name="limdm-agent"
+description="LiMDM device agent"
+command="/usr/bin/limdm-agent"
+command_args="run"
+command_background="yes"
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/limdm-agent.log"
+error_log="/var/log/limdm-agent.log"
+umask=0077
+supervisor="supervise-daemon"
+respawn_delay=10
+
+depend() {
+	need net
+	after firewall
+}

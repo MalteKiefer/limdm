@@ -41,7 +41,9 @@ case "$(uname -m)" in
 esac
 if command -v apt-get >/dev/null 2>&1; then ext=deb
 elif command -v dnf >/dev/null 2>&1; then ext=rpm
-else echo "needs apt-get or dnf; other systems: install the tar.gz release manually" >&2; exit 1
+elif command -v pacman >/dev/null 2>&1; then ext=pkg.tar.zst
+elif command -v apk >/dev/null 2>&1; then ext=apk
+else echo "needs apt-get, dnf, pacman or apk; other systems: install the tar.gz release manually" >&2; exit 1
 fi
 
 install -d -m 0700 /etc/limdm
@@ -74,7 +76,12 @@ key=$(cat <<'KEY'
 [[.OsqueryKey]]
 KEY
 )
-if [ "$ext" = deb ]; then
+if [ "$ext" = pkg.tar.zst ]; then
+    pacman -U --noconfirm "$tmp/$pkg" # osquery is not packaged for Arch: native inventory
+elif [ "$ext" = apk ]; then
+    # apk does not know the release key; the SHA-256 was checked against the release sums above
+    apk add --allow-untrusted --no-interactive "$tmp/$pkg"
+elif [ "$ext" = deb ]; then
     install -d -m 0755 /etc/apt/keyrings
     printf '%s\n' "$key" > /etc/apt/keyrings/limdm-osquery.asc
     chmod 0644 /etc/apt/keyrings/limdm-osquery.asc
@@ -103,7 +110,11 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery
 REPO
     dnf install -y -q osquery "$tmp/$pkg"
 fi
-systemctl enable --now limdm-agent.service
+if [ -d /run/systemd/system ]; then
+    systemctl enable --now limdm-agent.service
+else
+    rc-update add limdm-agent default && rc-service limdm-agent start
+fi
 echo "limdm-agent $ver installed"
 `))
 

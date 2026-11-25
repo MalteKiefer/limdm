@@ -32,7 +32,7 @@ type UpdateResult struct {
 }
 
 // PackageRe matches the agent package names a release ships.
-var PackageRe = regexp.MustCompile(`^limdm-agent_([0-9][0-9A-Za-z.~+-]*)_linux_(amd64|arm64)\.(deb|rpm)$`)
+var PackageRe = regexp.MustCompile(`^limdm-agent_([0-9][0-9A-Za-z.~+-]*)_linux_(amd64|arm64)\.(deb|rpm|apk|pkg\.tar\.zst)$`)
 
 // SumsSigned is the message the release key signs.
 func SumsSigned(sums string) []byte { return []byte("limdm SHA256SUMS v1\n" + sums) }

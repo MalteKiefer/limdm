@@ -40,10 +40,12 @@ type pkgCache struct {
 
 // pkgDBStamp changes whenever packages are installed, removed or upgraded.
 func (h *host) pkgDBStamp() string {
-	paths := []string{"/var/lib/dpkg/status"}
-	if h.family != "debian" {
-		paths = []string{"/var/lib/rpm/rpmdb.sqlite", "/var/lib/rpm/Packages", "/usr/lib/sysimage/rpm/rpmdb.sqlite"}
-	}
+	paths := map[string][]string{
+		"debian": {"/var/lib/dpkg/status"},
+		"fedora": {"/var/lib/rpm/rpmdb.sqlite", "/var/lib/rpm/Packages", "/usr/lib/sysimage/rpm/rpmdb.sqlite"},
+		"arch":   {"/var/lib/pacman/local"},
+		"alpine": {"/lib/apk/db/installed"},
+	}[h.family]
 	var b strings.Builder
 	for _, p := range paths {
 		if st, err := os.Stat(p); err == nil {
@@ -62,16 +64,29 @@ type pendingCache struct {
 func detectHost() (*host, error) {
 	osr := parseOSRelease(readFile("/etc/os-release"))
 	h := &host{ID: osr["ID"], Version: osr["VERSION_ID"], Name: osr["PRETTY_NAME"]}
-	like := " " + osr["ID"] + " " + osr["ID_LIKE"] + " "
-	switch {
-	case strings.Contains(like, " debian ") || strings.Contains(like, " ubuntu "):
-		h.family = "debian"
-	case strings.Contains(like, " fedora ") || strings.Contains(like, " rhel "):
-		h.family = "fedora"
-	default:
+	h.family = familyOf(osr)
+	if h.family == "" {
 		return nil, fmt.Errorf("unsupported distribution %q", h.ID)
 	}
 	return h, nil
+}
+
+// familyOf maps os-release to the package family: debian (apt), fedora
+// (dnf: Fedora, CentOS Stream, RHEL, Rocky, Alma), arch (pacman: Arch,
+// Manjaro, EndeavourOS) or alpine (apk, OpenRC).
+func familyOf(osr map[string]string) string {
+	like := " " + osr["ID"] + " " + osr["ID_LIKE"] + " "
+	switch {
+	case strings.Contains(like, " debian ") || strings.Contains(like, " ubuntu "):
+		return "debian"
+	case strings.Contains(like, " fedora ") || strings.Contains(like, " rhel ") || strings.Contains(like, " centos "):
+		return "fedora"
+	case strings.Contains(like, " arch "):
+		return "arch"
+	case strings.Contains(like, " alpine "):
+		return "alpine"
+	}
+	return ""
 }
 
 func parseOSRelease(s string) map[string]string {
@@ -123,11 +138,6 @@ func lastLines(s string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, " | ")
-}
-
-func unitActive(name string) bool {
-	_, err := run(30*time.Second, "systemctl", "is-active", "--quiet", name)
-	return err == nil
 }
 
 // writeIfChanged writes atomically and reports whether the content changed.
@@ -190,6 +200,12 @@ func (h *host) installedPackages() ([]api.Package, string, error) {
 func (h *host) nativePackages() ([]api.Package, error) {
 	var out string
 	var err error
+	switch h.family {
+	case "arch":
+		return parsePacmanQ(run(time.Minute, "pacman", "-Q"))
+	case "alpine":
+		return parseApkInfo(run(time.Minute, "apk", "info", "-v"))
+	}
 	if h.family == "debian" {
 		out, err = run(time.Minute, "dpkg-query", "-W", "-f", "${db:Status-Abbrev}\t${Package}\t${Version}\t${Architecture}\n")
 	} else {
@@ -213,9 +229,16 @@ func (h *host) isInstalled(name string) bool {
 	if stamp := h.pkgDBStamp(); stamp != "" && stamp == h.pkgs.stamp {
 		return h.pkgs.names[name]
 	}
-	if h.family == "debian" {
+	switch h.family {
+	case "debian":
 		out, err := run(30*time.Second, "dpkg-query", "-W", "-f", "${db:Status-Abbrev}", name)
 		return err == nil && strings.HasPrefix(out, "ii")
+	case "arch":
+		_, err := run(30*time.Second, "pacman", "-Q", "--", name)
+		return err == nil
+	case "alpine":
+		_, err := run(30*time.Second, "apk", "info", "-e", "--", name)
+		return err == nil
 	}
 	_, err := run(30*time.Second, "rpm", "-q", "--quiet", name)
 	return err == nil
@@ -244,7 +267,15 @@ func (h *host) install(pkgs ...string) error {
 			"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold", "--"}, pkgs...)...)
 		return err
 	}
-	_, err := run(30*time.Minute, "dnf", append([]string{"install", "-y", "-q", "--"}, pkgs...)...)
+	var err error
+	switch h.family {
+	case "arch": // -Syu: Arch does not support partial upgrades
+		_, err = run(30*time.Minute, "pacman", append([]string{"-Syu", "--noconfirm", "--needed", "--"}, pkgs...)...)
+	case "alpine":
+		_, err = run(30*time.Minute, "apk", append([]string{"add", "--no-interactive", "--"}, pkgs...)...)
+	default:
+		_, err = run(30*time.Minute, "dnf", append([]string{"install", "-y", "-q", "--"}, pkgs...)...)
+	}
 	return err
 }
 
@@ -256,7 +287,15 @@ func (h *host) remove(pkgs ...string) error {
 		_, err := run(30*time.Minute, "apt-get", append([]string{"remove", "-y", "-q", "--"}, pkgs...)...)
 		return err
 	}
-	_, err := run(30*time.Minute, "dnf", append([]string{"remove", "-y", "-q", "--"}, pkgs...)...)
+	var err error
+	switch h.family {
+	case "arch":
+		_, err = run(30*time.Minute, "pacman", append([]string{"-R", "--noconfirm", "--"}, pkgs...)...)
+	case "alpine":
+		_, err = run(30*time.Minute, "apk", append([]string{"del", "--no-interactive", "--"}, pkgs...)...)
+	default:
+		_, err = run(30*time.Minute, "dnf", append([]string{"remove", "-y", "-q", "--"}, pkgs...)...)
+	}
 	return err
 }
 
@@ -264,6 +303,14 @@ func (h *host) remove(pkgs ...string) error {
 // family (security origins by default) and dnf's security filter on Fedora.
 func (h *host) upgrade(securityOnly bool) (string, error) {
 	h.pending = pendingCache{}
+	switch h.family { // rolling releases have no separate security channel: always everything
+	case "arch":
+		out, err := run(2*time.Hour, "pacman", "-Syu", "--noconfirm")
+		return out + flatpakUpgrade(), err
+	case "alpine":
+		out, err := run(2*time.Hour, "apk", "upgrade", "--update-cache", "--no-interactive")
+		return out + flatpakUpgrade(), err
+	}
 	if h.family == "debian" {
 		h.aptUpdated = time.Time{}
 		if err := h.aptUpdate(); err != nil {
@@ -312,6 +359,31 @@ func (h *host) pendingUpdates() (all, security int, err error) {
 		return h.pending.all, h.pending.security, h.pending.err
 	}
 	defer func() { h.pending = pendingCache{at: time.Now(), all: all, security: security, err: err} }()
+	switch h.family {
+	case "arch":
+		// checkupdates (pacman-contrib) uses its own database copy; pacman -Sy would
+		// leave the system in a partial upgrade state
+		if !hasCmd("checkupdates") {
+			return 0, 0, errors.New("checkupdates (pacman-contrib) missing")
+		}
+		out, cerr := run(10*time.Minute, "checkupdates")
+		var ee *exec.ExitError
+		if cerr != nil && (!errors.As(cerr, &ee) || ee.ExitCode() != 2) { // 2: nothing to update
+			return 0, 0, cerr
+		}
+		n := countLines(out) // rolling release: every pending update can carry security fixes
+		return n, n, nil
+	case "alpine":
+		if _, err = run(10*time.Minute, "apk", "update", "-q"); err != nil {
+			return
+		}
+		out, verr := run(5*time.Minute, "apk", "version", "-l", "<")
+		if verr != nil {
+			return 0, 0, verr
+		}
+		n := max(countLines(out)-1, 0) // first line is a header; no separate security channel
+		return n, n, nil
+	}
 	if h.family == "debian" {
 		if err = h.aptUpdate(); err != nil {
 			return
@@ -362,8 +434,11 @@ func countDnfLines(out string) int {
 }
 
 func (h *host) rebootRequired() bool {
-	if h.family == "debian" {
+	switch h.family {
+	case "debian":
 		return exists("/run/reboot-required")
+	case "arch", "alpine":
+		return kernelReplaced()
 	}
 	if !hasCmd("dnf") {
 		return false
@@ -378,7 +453,7 @@ func (h *host) adminGroup() string {
 	if h.family == "debian" {
 		return "sudo"
 	}
-	return "wheel"
+	return "wheel" // Fedora family, Arch, Alpine
 }
 
 // metrics reads memory, root filesystem usage and load for history charts.
@@ -495,4 +570,57 @@ func commandWithStdin(in string) func(name string, args ...string) (string, erro
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}
+}
+
+// kernelReplaced: the running kernel's modules are gone, the package
+// manager installed another kernel (Arch and Alpine keep only one).
+func kernelReplaced() bool {
+	rel := readTrim("/proc/sys/kernel/osrelease")
+	return rel != "" && !exists("/lib/modules/"+rel) && !exists("/usr/lib/modules/"+rel)
+}
+
+// parsePacmanQ reads "name version" lines of pacman -Q.
+func parsePacmanQ(out string, err error) ([]api.Package, error) {
+	if err != nil {
+		return nil, err
+	}
+	var pkgs []api.Package
+	for _, l := range strings.Split(out, "\n") {
+		if f := strings.Fields(l); len(f) == 2 {
+			pkgs = append(pkgs, api.Package{Name: f[0], Version: f[1]})
+		}
+	}
+	return pkgs, nil
+}
+
+// parseApkInfo reads "name-version-rREL" lines of apk info -v.
+func parseApkInfo(out string, err error) ([]api.Package, error) {
+	if err != nil {
+		return nil, err
+	}
+	var pkgs []api.Package
+	for _, l := range strings.Split(out, "\n") {
+		l = strings.TrimSpace(l)
+		// the version starts at the last dash followed by a digit, before -rN
+		i := strings.LastIndex(l, "-r")
+		if i <= 0 {
+			continue
+		}
+		j := strings.LastIndex(l[:i], "-")
+		if j <= 0 {
+			continue
+		}
+		pkgs = append(pkgs, api.Package{Name: l[:j], Version: l[j+1:]})
+	}
+	return pkgs, nil
+}
+
+func countLines(s string) int {
+	n := 0
+	for _, l := range strings.Split(s, "\n") {
+		if strings.TrimSpace(l) != "" {
+			n++
+		}
+	}
+	return n
 }
