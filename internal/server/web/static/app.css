@@ -413,10 +413,10 @@ table.library { table-layout: fixed; }
 table.library col.c-name { width: 32%; }
 table.library col.c-desc { width: 46%; }
 table.library col.c-used { width: 22%; }
-table.library tr.group th { background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; padding-top: 18px; text-transform: none; }
+table.library tr.group th { background: var(--surface-2); color: var(--text-2); font-size: 12px; font-weight: 600; padding: 8px 16px; border-top: 1px solid var(--line); }
 table.library tr.group th .n { color: var(--text-3); font-weight: 500; margin: 0 6px; }
-table.library tr.group th .mono { font-size: 11px; font-weight: 400; }
-table.library tbody + tbody tr.group th { border-top: 1px solid var(--line); }
+table.library tr.group th .mono { font-size: 11px; font-weight: 400; color: var(--text-3); }
+table.library thead th { border-bottom: 0; }
 @media (max-width: 860px) { table.library { table-layout: auto; } }
 dialog.modal.wide { width: min(760px, calc(100vw - 32px)); }
 .dialog-scroll { max-height: 60vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
@@ -424,3 +424,15 @@ dialog.modal.wide { width: min(760px, calc(100vw - 32px)); }
 .inline-actions form { margin: 0; }
 .actions form { margin: 0; }
 .nowrap, td.nowrap { white-space: nowrap; }
+
+/* ---- alignment: cells with controls, dialogs ---- */
+td { vertical-align: middle; }
+td:has(> .sub), td:has(> pre) { vertical-align: top; }
+td.row-actions { text-align: right; }
+td.row-actions form, td form.inline-form { display: inline-flex; margin: 0; vertical-align: middle; }
+td.row-actions button, td.row-actions .button { margin: 0; }
+.main > dialog.modal, .main > .page-head + dialog.modal, dialog.modal { margin: auto; }
+dialog.modal [data-dialog-content] { border: 0; padding: 0; box-shadow: none; background: transparent; }
+dialog.modal [data-dialog-content] > * + * { margin-top: 12px; }
+dialog.modal .form-foot { margin-top: 18px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+dialog.modal .recovery-key { font-size: 18px; line-height: 1.5; word-break: break-all; margin: 0; }

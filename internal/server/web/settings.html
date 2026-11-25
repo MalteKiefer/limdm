@@ -2,7 +2,7 @@
 {{define "content"}}
 <div class="page-head"><div><h1>{{t "Settings"}}</h1><div class="meta"><span>{{t "Database, listeners and keys stay in the server environment"}}</span></div></div></div>
 <nav class="tabs" aria-label="{{t "Settings"}}">
-  {{range .Tabs}}<a href="/settings?tab={{.}}" {{if eq $.Tab .}}class="on" aria-current="page"{{end}}>{{t (printf "settings.%s" .)}}</a>{{end}}
+  {{range .Tabs}}<a href="/settings?tab={{.Key}}" {{if eq $.Tab .Key}}class="on" aria-current="page"{{end}}>{{t .Label}}</a>{{end}}
 </nav>
 {{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
 {{if .Msg}}<div class="notice ok" role="status">{{t .Msg}}</div>{{end}}

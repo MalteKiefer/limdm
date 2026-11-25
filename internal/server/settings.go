@@ -135,13 +135,17 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 		tab = "general"
 	}
 	s.render(w, r, sess, "settings", map[string]any{"Set": set, "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
-		"Tab": tab, "Tabs": settingsTabs,
+		"Tab": tab, "Tabs": settingsTabLabels,
 		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": s.webhookSecretHex()})
 }
 
 // settingsTabs are the sections of the settings page; each tab saves only
 // its own fields.
 var settingsTabs = []string{"general", "sso", "monitoring", "branding", "integrations"}
+
+var settingsTabLabels = []struct{ Key, Label string }{
+	{"general", "General"}, {"sso", "SSO"}, {"monitoring", "Monitoring"}, {"branding", "Branding"}, {"integrations", "Integrations"},
+}
 
 func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()

@@ -315,7 +315,7 @@ var deCatalog = map[string]string{
 	"Enable": "Aktivieren", "No Flatpak remotes reported.": "Keine Flatpak Remotes gemeldet.", "Flatpak applications": "Flatpak Anwendungen",
 	"Application": "Anwendung", "Branch": "Branch", "No Flatpak applications reported.": "Keine Flatpak Anwendungen gemeldet.",
 	"Disk recovery keys": "Wiederherstellungsschlüssel", "escrowed": "hinterlegt",
-	"settings.general": "Allgemein", "settings.sso": "SSO", "settings.monitoring": "Monitoring", "settings.branding": "Branding", "settings.integrations": "Integrationen",
+	"General": "Allgemein", "Monitoring": "Monitoring",
 	"Access": "Zugriff", "Local accounts can only be switched off while an OIDC administrator exists.": "Lokale Konten lassen sich nur abschalten, solange ein OIDC Administrator existiert.",
 	"Google Workspace: create an OAuth client of type Web application with this redirect URI:": "Google Workspace: OAuth Client vom Typ Webanwendung mit dieser Weiterleitungs URI anlegen:",
 	"Signing key": "Signaturschlüssel", "Integrations": "Integrationen",
