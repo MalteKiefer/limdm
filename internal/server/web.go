@@ -833,7 +833,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		}
 	}
 	s.render(w, r, sess, "device", map[string]any{"EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames, "AppBusy": appBusy, "AppNotes": appNotes, "CatalogFlatpaks": catalogFlatpaks,
-		"PwError": pwError(r), "PwMin": s.settings().Password.Min(),
+		"PwError": pwError(r), "PwMin": s.settings().Rules.Min(),
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
@@ -958,7 +958,7 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 			return "", http.StatusBadRequest, err.Error()
 		}
 		if typ == "user_create" || typ == "user_password" {
-			if msg := s.settings().Password.Check(u.Password, u.Username); msg != "" {
+			if msg := s.settings().Rules.Check(u.Password, u.Username); msg != "" {
 				return "", http.StatusBadRequest, msg
 			}
 		}
