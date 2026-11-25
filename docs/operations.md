@@ -68,7 +68,7 @@ Manual signing: `limdm-server sign -key release.key limdm_<version>_SHA256SUMS`.
 | Enrollment fails with fingerprint mismatch | fingerprint copied from another server, or a proxy on 8444 |
 | Devices stay `pending` | no status yet; first check in takes up to one interval |
 | `/install.sh` reports "no release found" | no release in `LIMDM_RELEASE_REPO` yet, or GitHub not reachable |
-| Desktop helper does not ask | `limdm-desktop --now` in the session; zenity or kdialog installed; `/run/limdm/agent.sock` exists |
+| Desktop helper does not ask | `limdm-desktop --now` in the session; zenity or kdialog installed; `/run/limdm/agent.sock` exists. Compositors without XDG autostart (sway, Hyprland) get the dialog from the agent together with the daily notification |
 | Device locked unexpectedly | `/etc/nologin` text: manual lock, compliance lock or offline lock; check in from the device unlocks the offline lock |
 | Console sign in loops | clock skew (TOTP), cookies blocked, `LIMDM_PUBLIC_URL` differs from the URL in the browser |
 
