@@ -412,10 +412,6 @@ func (s *Server) renderAgents(w http.ResponseWriter, r *http.Request, sess sessi
 		return
 	}
 	slices.SortFunc(rels, func(a, b releaseView) int { return api.CompareVersions(b.Version, a.Version) })
-	type versionCount struct {
-		Version string
-		N       int
-	}
 	rows, err = s.db.Query(ctx, `SELECT agent_version, count(*) FROM devices WHERE NOT retired GROUP BY 1 ORDER BY 2 DESC`)
 	if err != nil {
 		s.fail(w, err)
@@ -459,8 +455,12 @@ func (s *Server) renderAgents(w http.ResponseWriter, r *http.Request, sess sessi
 			}
 		}
 	}
-	s.render(w, r, sess, "agents", map[string]any{"Policy": pol, "Releases": rels, "Fleet": fleet, "Repo": s.cfg.ReleaseRepo,
-		"Msg": msg, "Error": errMsg, "Latest": latest, "Outdated": outdated})
+	current, older := splitOlder(rels, fleet)
+	if r.URL.Query().Get("older") == "1" {
+		current, older = rels, nil
+	}
+	s.render(w, r, sess, "agents", map[string]any{"Policy": pol, "Releases": current, "Older": len(older), "ShowingAll": r.URL.Query().Get("older") == "1",
+		"Fleet": fleet, "Repo": s.cfg.ReleaseRepo, "Msg": msg, "Error": errMsg, "Latest": latest, "Outdated": outdated})
 }
 
 func (s *Server) agentsPolicy(w http.ResponseWriter, r *http.Request, sess session) {
@@ -491,6 +491,38 @@ func (s *Server) agentsFetch(w http.ResponseWriter, r *http.Request, sess sessio
 		return
 	}
 	s.renderAgents(w, r, sess, "Versions checked.", "")
+}
+
+// versionCount is the number of devices running an agent version.
+type versionCount struct {
+	Version string
+	N       int
+}
+
+// splitOlder moves versions below the oldest agent in use, and not running
+// anywhere, out of the default list (rels sorted newest first). Without
+// devices the three newest stay.
+func splitOlder(rels []releaseView, fleet []versionCount) (current, older []releaseView) {
+	oldest := ""
+	for _, v := range fleet {
+		if v.Version != "" && (oldest == "" || api.NewerVersion(oldest, v.Version)) {
+			oldest = v.Version
+		}
+	}
+	for i, r := range rels {
+		old := r.Devices == 0 && r.Failed == 0
+		if oldest != "" {
+			old = old && api.NewerVersion(oldest, r.Version)
+		} else {
+			old = old && i >= 3
+		}
+		if old {
+			older = append(older, r)
+		} else {
+			current = append(current, r)
+		}
+	}
+	return current, older
 }
 
 // deviceAgentUpdate lets the device take the newest approved version at its

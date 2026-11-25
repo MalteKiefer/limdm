@@ -436,3 +436,4 @@ dialog.modal [data-dialog-content] { border: 0; padding: 0; box-shadow: none; ba
 dialog.modal [data-dialog-content] > * + * { margin-top: 12px; }
 dialog.modal .form-foot { margin-top: 18px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 dialog.modal .recovery-key { font-size: 18px; line-height: 1.5; word-break: break-all; margin: 0; }
+td.more { text-align: center; padding: 12px; }
