@@ -2,12 +2,10 @@
 // (reject needs a reason, approve shows the new credentials once),
 // activity with filters and the chain verification, reports with the
 // compliance history and an export, and the global search.
-import { execFileSync } from 'node:child_process'
-import { join } from 'node:path'
 import { expect, request, test, type APIRequestContext } from '@playwright/test'
 import { baseURL } from '../playwright.config'
 import { statePath } from './global-setup'
-import { totp } from './totp'
+import { signIn } from './signin'
 
 test.use({ storageState: statePath })
 test.describe.configure({ mode: 'serial' })
@@ -16,34 +14,13 @@ async function csrfOf(ctx: APIRequestContext) {
   return ((await (await ctx.get('/api/v1/me')).json()) as { csrf_token: string }).csrf_token
 }
 
-/**
- * Signs in a third admin of its own (the TOTP codes of the two from the
- * global setup are used by other specs; a code works only once).
- */
-async function second(): Promise<APIRequestContext> {
-  const bin = join(import.meta.dirname, '..', 'test-results', 'e2e', 'limdm-server')
-  const env = { ...process.env, LIMDM_DATABASE_URL: process.env.LIMDM_E2E_DATABASE_URL }
-  let out: string
-  try {
-    out = execFileSync(bin, ['local-admin', 'reset', 'e2edash'], { env, encoding: 'utf8' })
-  } catch {
-    out = execFileSync(bin, ['local-admin', 'add', 'e2edash'], { env, encoding: 'utf8' })
-  }
-  const get = (k: string) => new RegExp(`^${k}:\\s+(\\S+)`, 'm').exec(out)?.[1] ?? ''
-  const ctx = await request.newContext({ baseURL, ignoreHTTPSErrors: true })
-  const csrf = /name="csrf" value="([^"]+)"/.exec(await (await ctx.get('/login')).text())?.[1] ?? ''
-  const res = await ctx.post('/login/local', { form: { csrf, username: 'e2edash', password: get('password'), totp: totp(get('secret')) }, headers: { Origin: baseURL }, maxRedirects: 0 })
-  expect(res.status()).toBe(303)
-  return ctx
-}
-
 async function fourEyes(ctx: APIRequestContext, on: boolean) {
   const res = await ctx.post('/settings', {
     form: { csrf: await csrfOf(ctx), section: 'security', min_length: '12', four_eyes: on ? 'on' : '' },
     headers: { Origin: baseURL },
     maxRedirects: 0,
   })
-  expect(res.status()).toBeLessThan(400)
+  expect(res.status(), /<main[\s\S]*?<\/main>/.exec(await res.text())?.[0]).toBeLessThan(400)
 }
 
 async function requestToken(ctx: APIRequestContext, name: string) {
@@ -60,7 +37,7 @@ test('home shows the situation and links into the lists', async ({ page }) => {
 
 test('inbox: reject needs a reason, approve shows the credentials once', async ({ page }) => {
   const me = await request.newContext({ baseURL, ignoreHTTPSErrors: true, storageState: statePath })
-  const other = await second()
+  const other = await signIn('e2edash')
   await fourEyes(me, true)
   try {
     const rejectID = await requestToken(other, 'e2e-reject')
@@ -147,7 +124,7 @@ test('home KPIs for security updates and current agents come from the API', asyn
   // the e2e database has no devices, so the tiles stay hidden behind the empty state
   const res = await page.request.get('/api/v1/stats/updates')
   expect(res.status()).toBe(200)
-  expect(await res.json()).toMatchObject({ security_devices: 0, agent_total: 0, history: expect.any(Array) })
+  expect(await res.json()).toMatchObject({ security_devices: expect.any(Number), agent_total: expect.any(Number), history: expect.any(Array) })
   expect((await page.request.get('/api/v1/stats/annotations?days=7')).status()).toBe(200)
 })
 

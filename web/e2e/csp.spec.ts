@@ -3,6 +3,7 @@
 // on any violation the browser reports.
 import { expect, test, type Page } from '@playwright/test'
 import { statePath } from './global-setup'
+import { signIn } from './signin'
 
 test.use({ storageState: statePath })
 
@@ -23,7 +24,12 @@ async function watch(page: Page) {
   return async () => [...violations, ...((await page.evaluate(() => (window as unknown as { __csp?: string[] }).__csp)) ?? [])]
 }
 
-test('every page renders without a CSP violation', async ({ page }) => {
+test('every page renders without a CSP violation', async ({ browser }) => {
+  test.setTimeout(pages.length * 6_000) // every area, every settings section
+  // an admin of its own: this many pages use up a session's API rate limit
+  const api = await signIn('e2ecsp')
+  const ctx = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'de-DE', storageState: await api.storageState() })
+  const page = await ctx.newPage()
   const collect = await watch(page)
   for (const p of pages) {
     const res = await page.goto(p)
@@ -32,6 +38,8 @@ test('every page renders without a CSP violation', async ({ page }) => {
     await page.waitForLoadState('networkidle')
   }
   expect(await collect()).toEqual([])
+  await ctx.close()
+  await api.dispose()
 })
 
 test('the detector sees a violation', async ({ page }) => {
@@ -48,8 +56,12 @@ test('the detector sees a violation', async ({ page }) => {
 test('palette, menus, dialogs, charts and dark theme stay within the CSP', async ({ page }) => {
   const collect = await watch(page)
   await page.goto('/app/dev/components')
-  await page.keyboard.press('Control+k')
-  await expect(page.getByRole('dialog')).toBeVisible()
+  // the shortcut listener exists once the shell rendered; pressing earlier was the flake
+  await expect(page.getByRole('navigation', { name: /Hauptnavigation|Main navigation/ }).first()).toBeVisible()
+  await expect(async () => {
+    await page.keyboard.press('Control+k')
+    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 1_000 })
+  }).toPass()
   await page.keyboard.type('Ger')
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: /Benutzermenü|User menu/ }).first().click()

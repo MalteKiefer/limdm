@@ -148,7 +148,7 @@ test('a sign in started in the app returns there', async ({ browser }) => {
   await expect(page).toHaveURL(/\/login\?next=%2Fapp%2Fsettings%3Fs%3Dusers$/)
   await expect(page.locator('input[name=next]')).toHaveValue('/app/settings?s=users')
   await page.goto('/login?next=https%3A%2F%2Fevil.example%2F')
-  await expect(page.locator('input[name=next]')).toHaveValue('/')
+  await expect(page.locator('input[name=next]')).toHaveValue('/app/')
   await ctx.close()
 })
 
@@ -158,4 +158,16 @@ test('deep links by section name open the section', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Branding', exact: true })).toBeVisible()
   await page.goto('/app/settings/sso')
   await expect(page).toHaveURL(/\/app\/settings\?s=signin$/)
+})
+
+test('the deep links of the first steps land on their screens', async ({ page }) => {
+  await page.goto('/app/settings/enrollment')
+  await expect(page).toHaveURL(/\/app\/devices\/enroll$/)
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  await page.goto('/app/config?tab=blueprints')
+  await expect(page.getByRole('tab', { name: 'Blueprints', selected: true })).toBeVisible()
+  await page.goto('/')
+  await expect(page).toHaveURL(/\/app\/$/)
+  await page.goto('/classic')
+  await expect(page.getByRole('link', { name: 'Neue Konsole' })).toHaveAttribute('href', '/app/')
 })
