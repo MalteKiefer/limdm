@@ -13,6 +13,8 @@ import (
 	"log/slog"
 	"math/big"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -254,5 +256,21 @@ func TestWithDatabase(t *testing.T) {
 	}
 	if _, err := withDatabase("host=db dbname=limdm", "x"); err == nil {
 		t.Fatal("key value DSN accepted")
+	}
+}
+
+func TestTargetSecretStaysWithHost(t *testing.T) {
+	s := &Server{}
+	prev := &StoreTarget{Name: "dav", Kind: "webdav", Endpoint: "https://dav.example.com", SecretEnc: "sealed"}
+	form := func(endpoint string) *http.Request {
+		r := httptest.NewRequest("POST", "/", strings.NewReader(url.Values{"endpoint": {endpoint}}.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return r
+	}
+	if tg, err := s.targetFromForm(form("https://dav.example.com"), "dav", "webdav", prev); err != nil || tg.SecretEnc != "sealed" {
+		t.Fatalf("secret lost on an unchanged target: %v", err)
+	}
+	if tg, err := s.targetFromForm(form("https://evil.example.net"), "dav", "webdav", prev); err != nil || tg.SecretEnc != "" {
+		t.Fatalf("stored secret kept for another host: %v", err)
 	}
 }

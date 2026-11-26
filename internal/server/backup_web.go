@@ -158,7 +158,9 @@ func (s *Server) backupSave(w http.ResponseWriter, r *http.Request, sess session
 	http.Redirect(w, r, "/settings/backup?done=saved", http.StatusSeeOther)
 }
 
-// targetFromForm reads a target; empty secret fields keep the stored ones.
+// targetFromForm reads a target; empty secret fields keep the stored ones
+// as long as the target still points at the same server (a stored
+// secret is never sent to a host it was not entered for).
 func (s *Server) targetFromForm(r *http.Request, name, kind string, prev *StoreTarget) (StoreTarget, error) {
 	port, _ := strconv.Atoi(r.FormValue("port"))
 	lockDays, _ := strconv.Atoi(r.FormValue("lock_days"))
@@ -171,7 +173,7 @@ func (s *Server) targetFromForm(r *http.Request, name, kind string, prev *StoreT
 	if t.LockMode == "" {
 		t.LockDays = 0
 	}
-	if prev != nil && prev.Kind == kind {
+	if prev != nil && prev.Kind == kind && prev.Endpoint == t.Endpoint && prev.Region == t.Region && prev.Host == t.Host && prev.Port == t.Port {
 		t.SecretEnc, t.KeyEnc = prev.SecretEnc, prev.KeyEnc
 	}
 	var err error
