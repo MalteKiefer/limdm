@@ -127,7 +127,7 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 |---|---|---|---|
 | `GET /api/v1/devices` | read | [filters](#device-filters), `limit`, `cursor` | `200` page of devices (`id`, `hostname`, `os`, `agent_version`, `blueprint`, `tags`, `status`, `failing`, `checks`, `last_seen`, `retired`) |
 | `GET /api/v1/devices/{id}` | read | | `200` device with `blueprint_id`, `enrolled_at` and `inventory` |
-| `PATCH /api/v1/devices/{id}` | admin | `{"tags": [...], "blueprint_id": 3}`; fields left out stay, `null` assigns default | `200` device; audited as `device.assign` |
+| `PATCH /api/v1/devices/{id}` | admin | `{"tags": [...], "blueprint_id": 3, "users": [{"username", "email", "admin"}], "primary_user": "jane@example.com"}`; fields left out stay, `null` assigns default, `""` clears the primary user | `200` device; audited as `device.assign` |
 | `GET /api/v1/devices/{id}/commands` | read | `limit`, `cursor` | `200` page of commands, newest first |
 | `POST /api/v1/devices/{id}/commands` | helpdesk | `{"type", "params"}`, see [Commands](#commands) | `202` command or `202` approval request |
 | `GET /api/v1/commands/{id}` | read | | `200` command: `id`, `device_id`, `type`, `status`, `output`, `created_by`, `created_at`, `updated_at` |
@@ -154,6 +154,22 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `DELETE /api/v1/tokens/{id}` | admin | | `204`; audited as `api_token.revoke` |
 | `GET /api/v1/tenants` | admin, global token | | `200` `{"items": [...]}` tenants with device counts; `404` without multi tenancy |
 | `POST /api/v1/tenants` | admin, global token | `{"name"}` | `201` `{"id"}`; `409` name taken; audited as `tenant.add` |
+| `GET /api/v1/devices/{id}/detail` | read | | `200` everything the device page shows: inventory, check results, declaration states, resolved chain, protective actions, recovery key metadata, network certificates, catalog state and app requests, 7 day metrics, and switches for the actions (shell, four eyes) |
+| `GET /api/v1/devices/{id}/packages` | read | | `200` `{"items": [{"name", "version", "arch"}]}` |
+| `GET /api/v1/devices/{id}/timeline` | read | `kind`, `limit`, `cursor` | `200` page of events, commands, script results, shell sessions (helpdesk: its own) and diagnostics bundles (admin, helpdesk), newest first |
+| `GET /api/v1/devices/{id}/diagnostics/{cid}` | helpdesk | | `200` text attachment; audited as `device.diagnostics.download` |
+| `POST /api/v1/devices/{id}/retire` | admin | | `200` device; audited as `device.retire` |
+| `DELETE /api/v1/devices/{id}` | admin | `confirm` (the host name) | `204`; `409` unless retired; audited as `device.delete` |
+| `POST /api/v1/devices/{id}/agent-update` | admin | `{"version"}` (empty: newest approved) | `202`; audited as `agent_update.request` |
+| `POST /api/v1/devices/{id}/recovery-keys/{uuid}/view` | helpdesk | `{"reason"}` | `200` `{"key", "rotate", ...}`; with four eyes for recovery keys `state` `reason`, `requested` or `pending` instead of the key; audited as `recovery.view` |
+| `POST /api/v1/devices/{id}/shell` | helpdesk, console session | `{"user"}` | `201` `{"id"}`, the terminal connects to `/shell/{id}/ws?csrf=`; `202` waits for approval; audited as `shell.start` |
+| `GET /api/v1/devices/{id}/shell-sessions`, `GET /api/v1/shell-sessions/{sid}` | read | | sessions; the transcript for admins and auditors after the end |
+| `POST /api/v1/shell-sessions/{sid}/end` | helpdesk | | `204`; the user who started it or an admin |
+| `POST /api/v1/devices/bulk` | helpdesk | `{"ids": [...], "action": "command:sync", "params": {...}}`; actions `command:<type>` (not `lost`, `wipe`), `agent-update`, `tag-add`, `tag-remove` (admin) | `202` `{"status": "queued"}` or `{"status": "approval", "approvals": n}` |
+| `GET /api/v1/devices/primary-users` | admin | `q` | `200` up to 20 directory email addresses |
+| `GET /api/v1/enrollment-tokens` | read | | `200` active tokens with `agent_url`, `public_url`, `fingerprint`, `release_repo` for the install command and `enroll.conf` |
+| `POST /api/v1/enrollment-tokens` | admin | `{"note", "blueprint_id", "uses", "days"}` | `201` `{"id", "token"}` (shown once); audited as `token.create` |
+| `DELETE /api/v1/enrollment-tokens/{id}` | admin | | `204`; audited as `token.revoke` |
 | `GET /api/v1/devices/facets` | read | [filters](#query-language) | `200` counts per status, OS, agent, blueprint and tag |
 | `GET /api/v1/me` | read | | `200` the caller: `login`, `role`, `tenant`, `super`, scope, `scopes`, `permissions` (`read`, `audit`, `commands`, `admin`, `tenants`), `four_eyes`, `locale`, `company_name`, `accent`, and for sessions `csrf_token` |
 | `GET /api/v1/events/stream` | read | | server sent events, see [Console app](#console-app) |
@@ -189,12 +205,23 @@ ordering are not evaluated.
 
 `filter` holds free words and `key:value` terms (`key:"value with spaces"`); every term
 must match. Free words search host name, OS, id, blueprint and tags. Keys of devices:
-`status` (`compliant`, `in-grace`, `non-compliant`, `stale`, `pending`, `retired`), `os`
-(part of the name), `tag`, `blueprint`, `agent`, `check` (id of a failing check), `pkg` (as
+`status` (`compliant`, `in-grace`, `non-compliant`, `stale`, `pending`, `retired`, and
+`locked`: locked by the compliance policy or a lock command), `os` (part of the name),
+`kind` (`desktop` or `server`), `tag`, `blueprint`, `agent`, `check` (id of a failing check), `pkg` (as
 above, `pkg:openssl<3.0.13`), `app`, `flatpak`, `remote` and `seen` (`>7d` last check in
 older than, `<2h` newer than; `m`, `h`, `d`). At most 20 terms of 200 characters; an
 unknown key or value is a 400. `sort` takes `hostname`, `os`, `agent`, `failing` or
-`last_seen`. `GET /api/v1/devices/facets` takes the same filters and answers
+`last_seen`.
+
+The console speaks German, so the German names of the prototype work as well and mean
+the same: keys `zustand` (status), `system` and `betriebssystem` (os), `art` (kind),
+`schlagwort` (tag), `pruefung` (check), `paket` (pkg), `quelle` (remote), `zuletzt` and
+`gesehen` (seen) and `offline` (`offline:7d` is `seen:>7d`); status values `konform`,
+`nicht-konform`, `in-karenz` (or `karenz`), `veraltet` and `offline` (stale),
+`ausstehend`, `ausgemustert` and `gesperrt` (locked); kind values `arbeitsplatz`, `laptop`,
+`notebook` (desktop) and `server`. Saved views keep the text as typed.
+
+`GET /api/v1/devices/facets` takes the same filters and answers
 `{"total", "facets": {"status", "os", "agent", "blueprint", "tag"}, "keys"}` with at most 25
 values per facet and the keys with a help text for the query bar.
 

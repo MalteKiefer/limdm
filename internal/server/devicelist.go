@@ -60,8 +60,9 @@ var ageRe = regexp.MustCompile(`^([<>])(\d{1,5})([mhd])$`)
 // deviceFilterKeys are the keys of the device filter with a short help
 // text, served with the facets so the query bar can suggest them.
 var deviceFilterKeys = []struct{ Key, Help string }{
-	{"status", "compliant, in-grace, non-compliant, stale, pending, retired"},
+	{"status", "compliant, in-grace, non-compliant, stale, pending, retired, locked"},
 	{"os", "part of the operating system name"},
+	{"kind", "desktop or server"},
 	{"tag", "device tag"},
 	{"blueprint", "effective blueprint name"},
 	{"agent", "agent version"},
@@ -73,6 +74,29 @@ var deviceFilterKeys = []struct{ Key, Help string }{
 	{"seen", "last check in: >7d older than, <2h newer than (m, h, d)"},
 }
 
+// deviceKeyAliases are German names of the filter keys, as the console
+// shows them; they mean the same as the English key.
+var deviceKeyAliases = map[string]string{
+	"zustand": "status", "system": "os", "betriebssystem": "os", "schlagwort": "tag", "pruefung": "check",
+	"paket": "pkg", "zuletzt": "seen", "gesehen": "seen", "offline": "seen", "quelle": "remote", "art": "kind",
+}
+
+// deviceStatusAliases are German and short names of the status values.
+var deviceStatusAliases = map[string]string{
+	"konform": "compliant", "ok": "compliant", "nicht konform": "non-compliant", "nonkonform": "non-compliant",
+	"karenz": "in grace", "in karenz": "in grace", "grace": "in grace", "veraltet": "stale", "offline": "stale",
+	"ausstehend": "pending", "ausgemustert": "retired", "gesperrt": "locked",
+}
+
+// deviceKindAliases map kind values to desktop or server.
+var deviceKindAliases = map[string]string{
+	"desktop": "desktop", "arbeitsplatz": "desktop", "laptop": "desktop", "notebook": "desktop", "server": "server",
+}
+
+// lockedSQL is true for a device locked by the compliance policy or by a
+// lock command that no unlock followed.
+const lockedSQL = `(d.auto_locked OR (SELECT c.type FROM commands c WHERE c.device_id = d.id AND c.type IN ('lock','unlock') ORDER BY c.id DESC LIMIT 1) = 'lock')`
+
 // parseDeviceFilter turns the device filter language into conditions on d.
 // Unknown keys and values are errors: ignoring a term would answer with
 // more devices than the caller asked for.
@@ -83,18 +107,40 @@ func parseDeviceFilter(s string, stale time.Duration) (sqlWhere, error) {
 		return w, err
 	}
 	for _, t := range toks {
+		if k, ok := deviceKeyAliases[t.Key]; ok {
+			if t.Key == "offline" && !strings.HasPrefix(t.Value, "<") && !strings.HasPrefix(t.Value, ">") {
+				t.Value = ">" + t.Value // offline:7d is offline for more than 7 days
+			}
+			t.Key = k
+		}
 		switch t.Key {
 		case "":
 			w.add(`strpos(lower(d.hostname || ' ' || d.os_name || ' ' || d.id || ' ' || coalesce(b.name, 'default') || ' ' || array_to_string(d.tags, ' ')), $1) > 0`, strings.ToLower(t.Value))
 		case "status":
-			st := strings.ReplaceAll(t.Value, "-", " ")
+			st := strings.ReplaceAll(strings.ToLower(t.Value), "-", " ")
+			if a, ok := deviceStatusAliases[st]; ok {
+				st = a
+			}
 			if st == "non compliant" {
 				st = "non-compliant"
+			}
+			if st == "locked" {
+				w.add(lockedSQL)
+				continue
 			}
 			if !slices.Contains(deviceStatuses, st) {
 				return w, errors.New("status: one of " + deviceFilterKeys[0].Help)
 			}
 			w.add(deviceStatusSQL+` = $2`, stale.Seconds(), st)
+		case "kind":
+			switch deviceKindAliases[strings.ToLower(t.Value)] {
+			case "desktop":
+				w.add(`d.desktop <> ''`)
+			case "server":
+				w.add(`d.desktop = ''`)
+			default:
+				return w, errors.New("kind: desktop or server")
+			}
 		case "os":
 			w.add(`strpos(lower(d.os_name), $1) > 0`, strings.ToLower(t.Value))
 		case "pkg":
