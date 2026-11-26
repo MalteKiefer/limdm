@@ -15,8 +15,9 @@ import { ago, fmt, pct } from '../../i18n/format'
 import { cx } from '../../lib/cx'
 import { useCheck, useCompliance, useComplianceStats, useExceptions, useHeatmap } from './api'
 import { ExportDialog } from './export'
-import { activeFor, filterChecks, frameworks, heatMatrix, passRate, refsOf, sortChecks, TARGET, type Check, type Control, type Framework } from './logic'
-import { ResultBadge, SectionNav, SeverityBadge } from './parts'
+import { activeFor, exceptionPath, filterChecks, frameworks, heatMatrix, passRate, refsOf, sortChecks, TARGET, type Check, type Control, type Framework } from './logic'
+import { ResultBadge, SeverityBadge } from '../../components/badges'
+import { SectionNav } from './parts'
 
 type S = ReturnType<typeof useOverviewSearch>
 const useOverviewSearch = () => useSearch({ strict: false }) as Record<string, string | undefined>
@@ -306,7 +307,7 @@ function Body({ d, s, go }: { d: NonNullable<ReturnType<typeof useCompliance>['d
 
 function CheckSheet({ id, total, onClose, onPrev, onNext }: { id: string; total: number; onClose: () => void; onPrev?: () => void; onNext?: () => void }) {
   const t = useT()
-  const admin = useCan('admin')
+  const path = exceptionPath(useMe())
   const q = useCheck(id)
   const exc = useExceptions()
   const c = q.data
@@ -330,9 +331,9 @@ function CheckSheet({ id, total, onClose, onPrev, onNext }: { id: string; total:
           <Link to="/devices" search={{ q: `check:${id}` } as never} className="btn btn-primary">
             {t('compliance.check.allInList')} <ArrowRight size={14} aria-hidden />
           </Link>
-          {admin && (
+          {path && (
             <Link to="/compliance/exceptions" search={{ new: id } as never} className="btn">
-              <ShieldOff size={14} aria-hidden /> {t('compliance.check.addException')}
+              <ShieldOff size={14} aria-hidden /> {t(path === 'direct' ? 'compliance.check.addException' : 'compliance.exc.request')}
             </Link>
           )}
         </>

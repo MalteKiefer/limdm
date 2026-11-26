@@ -13,9 +13,10 @@ import { useT } from '../../i18n'
 import { dateShort, dateTime, fmt } from '../../i18n/format'
 import { cx } from '../../lib/cx'
 import { useHistory } from './api'
-import { downloadExport } from './export'
+import { downloadExport } from '../../components/download'
 import { isoDay } from './logic'
-import { ResultBadge, SectionNav } from './parts'
+import { ResultBadge } from '../../components/badges'
+import { SectionNav } from './parts'
 
 type Row = { id: string; hostname: string; pass: number; fail: number; other: number }
 type Change = { check_id: string; status: string; detail: string; since: string; catalog_version: string }

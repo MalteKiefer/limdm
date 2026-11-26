@@ -13,9 +13,9 @@ import { toast } from '../../components/toast'
 import { Modal, PageHeader } from '../../components/ui'
 import { useT, type MessageKey } from '../../i18n'
 import { dateShort, dateTime } from '../../i18n/format'
-import { useAddException, useCompliance, useExceptions, useRevokeException } from './api'
-import { downloadExport } from './export'
-import { checkException, countStates, isoDay, type Exception, type ExceptionDraft } from './logic'
+import { useAddException, useCompliance, useExceptions, useRequestException, useRevokeException } from './api'
+import { downloadExport } from '../../components/download'
+import { checkException, countStates, exceptionPath, isoDay, type Exception, type ExceptionDraft } from './logic'
 import { ExceptionBadge, SectionNav } from './parts'
 
 type Tab = 'active' | 'expired' | 'revoked' | 'all'
@@ -27,6 +27,7 @@ export function ExceptionsPage() {
   const go = (patch: Record<string, string | undefined>) => void navigate({ to: '/compliance/exceptions', search: { ...s, ...patch } as never, replace: true })
   const admin = useCan('admin')
   const canExport = useCan('audit')
+  const path = exceptionPath(useMe())
   const q = useExceptions()
   const [revoking, setRevoking] = useState<Exception>()
   const revoke = useRevokeException()
@@ -81,9 +82,9 @@ export function ExceptionsPage() {
                 <Download size={15} aria-hidden /> {t('compliance.exc.csv')}
               </button>
             )}
-            {admin && (
+            {path && (
               <button type="button" className="btn btn-primary" onClick={() => go({ new: '1' })}>
-                <Plus size={15} aria-hidden /> {t('compliance.exc.add')}
+                <Plus size={15} aria-hidden /> {t(path === 'direct' ? 'compliance.exc.add' : 'compliance.exc.request')}
               </button>
             )}
           </>
@@ -124,7 +125,7 @@ export function ExceptionsPage() {
           )}
         />
       )}
-      {admin && s.new && <AddException key={s.new} check={s.new === '1' ? '' : s.new} onClose={() => go({ new: undefined })} />}
+      {path && s.new && <AddException key={s.new} request={path === 'request'} check={s.new === '1' ? '' : s.new} onClose={() => go({ new: undefined })} />}
       <Modal
         open={!!revoking}
         onClose={() => setRevoking(undefined)}
@@ -158,24 +159,27 @@ export function ExceptionsPage() {
 /** The server stores the first day after the expiry; show the last valid day. */
 const lastDay = (v: string) => new Date(new Date(v).getTime() - 1)
 
-function AddException({ check, onClose }: { check: string; onClose: () => void }) {
+function AddException({ check, request, onClose }: { check: string; request: boolean; onClose: () => void }) {
   const t = useT()
   const me = useMe()
   const known = useCompliance().data?.checks
   const add = useAddException()
-  const [d, setD] = useState<ExceptionDraft>({ check_id: check, mode: 'exclude', tag: '', reason: '', owner: '', approver: '', expires: '' })
+  const ask = useRequestException()
+  // a scoped account asks for one of its own tags (the server checks it again)
+  const scopeTags = me.role !== 'admin' ? me.scope_tags : []
+  const [d, setD] = useState<ExceptionDraft>({ check_id: check, mode: 'exclude', tag: scopeTags[0] ?? '', reason: '', owner: '', approver: '', expires: '' })
   const [shown, setShown] = useState(false)
-  const errs = checkException(d, { fourEyes: me.four_eyes, login: me.login })
+  const errs = checkException(d, { fourEyes: me.four_eyes, login: me.login, request })
   const err = (k: keyof ExceptionDraft) => (shown && errs[k] ? t(`compliance.exc.err.${errs[k]}` as MessageKey) : undefined)
   const set = (k: keyof ExceptionDraft) => (e: { target: { value: string } }) => setD({ ...d, [k]: e.target.value })
   const submit = (e: FormEvent) => {
     e.preventDefault()
     setShown(true)
     if (Object.keys(errs).length) return
-    add.mutate(
-      { check_id: d.check_id.trim(), mode: d.mode as 'exclude' | 'advisory', tag: d.tag.trim(), reason: d.reason.trim(), owner: d.owner.trim(), approver: d.approver.trim(), expires: d.expires },
-      { onSuccess: () => (toast(t('compliance.exc.added', { check: d.check_id.trim() })), onClose()), onError: (x) => toast(errorText(x), 'error') },
-    )
+    const body = { check_id: d.check_id.trim(), mode: d.mode as 'exclude' | 'advisory', tag: d.tag.trim(), reason: d.reason.trim(), owner: d.owner.trim(), expires: d.expires }
+    const onError = (x: unknown) => toast(errorText(x), 'error')
+    if (request) ask.mutate(body, { onSuccess: () => (toast(t('compliance.exc.requested', { check: body.check_id })), onClose()), onError })
+    else add.mutate({ ...body, approver: d.approver.trim() }, { onSuccess: () => (toast(t('compliance.exc.added', { check: body.check_id })), onClose()), onError })
   }
   const today = new Date()
   const max = new Date(today.getFullYear() + 3, today.getMonth(), today.getDate())
@@ -184,15 +188,15 @@ function AddException({ check, onClose }: { check: string; onClose: () => void }
       open
       onClose={onClose}
       wide
-      title={t('compliance.exc.form.title')}
-      description={t('compliance.exc.form.sub')}
+      title={t(request ? 'compliance.exc.form.requestTitle' : 'compliance.exc.form.title')}
+      description={t(request ? 'compliance.exc.form.requestSub' : 'compliance.exc.form.sub')}
       footer={
         <>
           <button type="button" className="btn" onClick={onClose}>
             {t('common.cancel')}
           </button>
-          <button type="submit" form="exc-form" className="btn btn-primary" disabled={add.isPending}>
-            {t('compliance.exc.form.submit')}
+          <button type="submit" form="exc-form" className="btn btn-primary" disabled={add.isPending || ask.isPending}>
+            {t(request ? 'compliance.exc.form.requestSubmit' : 'compliance.exc.form.submit')}
           </button>
         </>
       }
@@ -221,7 +225,19 @@ function AddException({ check, onClose }: { check: string; onClose: () => void }
           )}
         </Field>
         <Field label={t('compliance.exc.form.tag')} help={t('compliance.exc.form.tagHelp')} error={err('tag')}>
-          {({ id, describedBy, invalid }) => <input id={id} aria-describedby={describedBy} aria-invalid={invalid || undefined} className="field" spellCheck={false} value={d.tag} onChange={set('tag')} />}
+          {({ id, describedBy, invalid }) =>
+            scopeTags.length ? (
+              <select id={id} aria-describedby={describedBy} className="field" value={d.tag} onChange={set('tag')}>
+                {scopeTags.map((x) => (
+                  <option key={x} value={x}>
+                    {x}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input id={id} aria-describedby={describedBy} aria-invalid={invalid || undefined} className="field" spellCheck={false} value={d.tag} onChange={set('tag')} />
+            )
+          }
         </Field>
         <Field label={t('compliance.exc.form.expires')} help={t('compliance.exc.form.expiresHelp')} error={err('expires')} required>
           {({ id, describedBy, invalid }) => <input id={id} type="date" aria-describedby={describedBy} aria-invalid={invalid || undefined} className="field" min={isoDay(today)} max={isoDay(max)} value={d.expires} onChange={set('expires')} />}
@@ -234,9 +250,11 @@ function AddException({ check, onClose }: { check: string; onClose: () => void }
         <Field label={t('compliance.exc.form.owner')} error={err('owner')} required>
           {({ id, describedBy, invalid }) => <input id={id} maxLength={200} aria-describedby={describedBy} aria-invalid={invalid || undefined} className="field" value={d.owner} onChange={set('owner')} />}
         </Field>
-        <Field label={t('compliance.exc.form.approver')} help={me.four_eyes ? t('compliance.exc.form.approverFourEyes') : t('compliance.exc.form.approverHelp')} error={err('approver')} required>
-          {({ id, describedBy, invalid }) => <input id={id} maxLength={200} aria-describedby={describedBy} aria-invalid={invalid || undefined} className="field" value={d.approver} onChange={set('approver')} />}
-        </Field>
+        {!request && (
+          <Field label={t('compliance.exc.form.approver')} help={me.four_eyes ? t('compliance.exc.form.approverFourEyes') : t('compliance.exc.form.approverHelp')} error={err('approver')} required>
+            {({ id, describedBy, invalid }) => <input id={id} maxLength={200} aria-describedby={describedBy} aria-invalid={invalid || undefined} className="field" value={d.approver} onChange={set('approver')} />}
+          </Field>
+        )}
       </form>
     </Modal>
   )

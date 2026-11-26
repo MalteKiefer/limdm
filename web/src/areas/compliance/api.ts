@@ -39,6 +39,14 @@ export function useAddException() {
   })
 }
 
+export function useRequestException() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: Schemas['ExceptionRequest']) => unwrap(api.POST('/api/v1/exception-requests', { body })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['approvals'] }),
+  })
+}
+
 export function useRevokeException() {
   const qc = useQueryClient()
   return useMutation({
@@ -46,12 +54,6 @@ export function useRevokeException() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['compliance'] }),
   })
 }
-
-export type ExportKind = 'compliance.csv' | 'compliance-history.csv' | 'exceptions.csv' | 'inventory.csv' | 'audit.csv'
-
-/** Downloads an export through the API and returns its bytes for the checksum. */
-export const fetchExport = (kind: ExportKind, query: { at?: string; device?: string } = {}) =>
-  unwrap(api.GET('/api/v1/exports/{kind}', { params: { path: { kind }, query }, parseAs: 'blob' })) as Promise<unknown> as Promise<Blob>
 
 /** The latest export.done audit entries (row count and SHA-256 of each file). */
 export const useExportAudit = (enabled: boolean) =>

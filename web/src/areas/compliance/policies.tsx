@@ -12,7 +12,8 @@ import { useT } from '../../i18n'
 import { fmt } from '../../i18n/format'
 import { cx } from '../../lib/cx'
 import { useCompliance, usePolicies } from './api'
-import { SectionNav, SeverityBadge } from './parts'
+import { SeverityBadge } from '../../components/badges'
+import { SectionNav } from './parts'
 import type { Schemas } from '../../api/client'
 
 type Policy = Schemas['CompliancePolicies']['policies'][number]

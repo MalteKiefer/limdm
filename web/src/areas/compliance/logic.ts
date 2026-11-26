@@ -84,8 +84,12 @@ export type ExceptionDraft = { check_id: string; mode: string; tag: string; reas
 
 export type ExceptionError = 'check' | 'mode' | 'tag' | 'reason' | 'owner' | 'approver' | 'self' | 'expires'
 
-/** Validates a new exception like the server; returns the first error per field. */
-export function checkException(d: ExceptionDraft, opts: { fourEyes: boolean; login: string; today?: Date }): Partial<Record<keyof ExceptionDraft, ExceptionError>> {
+/** Whether the user adds exceptions directly (admin, four eyes off) or asks for them (helpdesk, or four eyes on). */
+export const exceptionPath = (me: { role: string; four_eyes: boolean; permissions: string[] }): 'direct' | 'request' | null =>
+  me.role === 'admin' && me.permissions.includes('admin') && !me.four_eyes ? 'direct' : me.permissions.includes('commands') || me.permissions.includes('admin') ? 'request' : null
+
+/** Validates a new exception like the server; returns the first error per field. A request has no approver. */
+export function checkException(d: ExceptionDraft, opts: { fourEyes: boolean; login: string; today?: Date; request?: boolean }): Partial<Record<keyof ExceptionDraft, ExceptionError>> {
   const err: Partial<Record<keyof ExceptionDraft, ExceptionError>> = {}
   if (!ident.test(d.check_id.trim())) err.check_id = 'check'
   if (d.mode !== 'exclude' && d.mode !== 'advisory') err.mode = 'mode'
@@ -93,8 +97,9 @@ export function checkException(d: ExceptionDraft, opts: { fourEyes: boolean; log
   if (!d.reason.trim() || d.reason.trim().length > 1000) err.reason = 'reason'
   if (!d.owner.trim() || d.owner.trim().length > 200) err.owner = 'owner'
   const who = opts.login.replace(/^local:/, '').toLowerCase()
-  if (!d.approver.trim() || d.approver.trim().length > 200) err.approver = 'approver'
-  else if (opts.fourEyes && d.approver.trim().toLowerCase() === who) err.approver = 'self'
+  // a request names no approver: the admin who approves it is recorded
+  if (!opts.request && (!d.approver.trim() || d.approver.trim().length > 200)) err.approver = 'approver'
+  else if (!opts.request && opts.fourEyes && d.approver.trim().toLowerCase() === who) err.approver = 'self'
   const today = opts.today ?? new Date()
   const day = /^\d{4}-\d{2}-\d{2}$/.test(d.expires) ? new Date(`${d.expires}T00:00:00`) : null
   const min = new Date(today.getFullYear(), today.getMonth(), today.getDate())
@@ -105,9 +110,3 @@ export function checkException(d: ExceptionDraft, opts: { fourEyes: boolean; log
 
 /** YYYY-MM-DD of a local date. */
 export const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-
-/** Hex SHA-256 of a download, to compare with its export.done audit entry. */
-export async function sha256Hex(data: ArrayBuffer): Promise<string> {
-  const h = await crypto.subtle.digest('SHA-256', data)
-  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('')
-}

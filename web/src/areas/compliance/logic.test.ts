@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { activeFor, checkException, countStates, filterChecks, heatMatrix, isoDay, passRate, sha256Hex, sortChecks, type Check, type Exception } from './logic'
+import { sha256Hex } from '../../components/download'
+import { activeFor, checkException, exceptionPath, countStates, filterChecks, heatMatrix, isoDay, passRate, sortChecks, type Check, type Exception } from './logic'
 
 const mk = (id: string, pass: number, fail: number, extra: Partial<Check> = {}): Check => ({ id, title: id, level: 1, refs: {}, pass, fail, na: 0, excepted: 0, failing_hosts: [], ...extra })
 const checks = [mk('ssh.baseline', 8, 2, { refs: { bsi: ['SYS.2.3'] } }), mk('net.tcp', 10, 0, { level: 2 }), mk('custom.x', 0, 0), mk('kernel.aslr', 5, 5)]
@@ -51,6 +52,16 @@ describe('exceptions', () => {
     expect(checkException({ ...ok, tag: 'a,b' }, { fourEyes: false, login: 'x', today }).tag).toBe('tag')
     expect(checkException({ ...ok, check_id: 'bad id' }, { fourEyes: false, login: 'x', today }).check_id).toBe('check')
     expect(checkException({ ...ok, reason: ' ' }, { fourEyes: false, login: 'x', today }).reason).toBe('reason')
+  })
+  it('lets a request go without an approver', () => {
+    expect(checkException({ ...ok, approver: '' }, { fourEyes: true, login: 'x', today, request: true })).toEqual({})
+    expect(checkException({ ...ok, approver: '' }, { fourEyes: true, login: 'x', today }).approver).toBe('approver')
+  })
+  it('chooses direct adding or a request', () => {
+    expect(exceptionPath({ role: 'admin', four_eyes: false, permissions: ['admin', 'commands'] })).toBe('direct')
+    expect(exceptionPath({ role: 'admin', four_eyes: true, permissions: ['admin', 'commands'] })).toBe('request')
+    expect(exceptionPath({ role: 'helpdesk', four_eyes: false, permissions: ['commands'] })).toBe('request')
+    expect(exceptionPath({ role: 'auditor', four_eyes: false, permissions: ['read', 'audit'] })).toBeNull()
   })
   it('counts states and finds active ones per check', () => {
     const list = [

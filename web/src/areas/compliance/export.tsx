@@ -9,36 +9,19 @@ import { toast } from '../../components/toast'
 import { Modal } from '../../components/ui'
 import { useT, type MessageKey } from '../../i18n'
 import { dateTime } from '../../i18n/format'
-import { fetchExport, useExportAudit, type ExportKind } from './api'
-import { isoDay, sha256Hex } from './logic'
+import { downloadExport, type ExportKind } from '../../components/download'
+import { useExportAudit } from './api'
+import { isoDay } from './logic'
 
-const kinds: ExportKind[] = ['compliance.csv', 'compliance-history.csv', 'exceptions.csv', 'inventory.csv', 'audit.csv']
+const kinds: ExportKind[] = ['evidence.pdf', 'evidence.json', 'compliance.csv', 'compliance-history.csv', 'exceptions.csv', 'inventory.csv', 'audit.csv']
+const windows = [30, 90, 365]
 
-/** Saves a blob under a file name (an object URL is same origin, CSP allows it). */
-export function saveBlob(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = name
-  document.body.append(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
-
-/** Downloads an export and returns the hex SHA-256 of its bytes. */
-export async function downloadExport(kind: ExportKind, query: { at?: string; device?: string } = {}) {
-  const blob = await fetchExport(kind, query)
-  const sha = await sha256Hex(await blob.arrayBuffer())
-  saveBlob(blob, `limdm-${isoDay(new Date()).replaceAll('-', '')}-${kind}`)
-  return sha
-}
-
-export function ExportDialog({ open, onClose, initial = 'compliance.csv', at: initialAt, device }: { open: boolean; onClose: () => void; initial?: ExportKind; at?: string; device?: string }) {
+export function ExportDialog({ open, onClose, initial = 'evidence.pdf', at: initialAt, device }: { open: boolean; onClose: () => void; initial?: ExportKind; at?: string; device?: string }) {
   const t = useT()
   const qc = useQueryClient()
   const [kind, setKind] = useState<ExportKind>(initial)
   const [at, setAt] = useState(initialAt ?? isoDay(new Date()))
+  const [days, setDays] = useState(90)
   const [busy, setBusy] = useState(false)
   const [sha, setSha] = useState<string>()
   const audit = useExportAudit(open)
@@ -46,7 +29,7 @@ export function ExportDialog({ open, onClose, initial = 'compliance.csv', at: in
   const run = async () => {
     setBusy(true)
     try {
-      const h = await downloadExport(kind, kind === 'compliance-history.csv' ? { at, device } : {})
+      const h = await downloadExport(kind, kind === 'compliance-history.csv' ? { at, device } : kind.startsWith('evidence.') ? { days } : {})
       setSha(h)
       toast(t('compliance.exp.done', { file: kind }))
       // the server writes export.done right after the last byte: look again briefly
@@ -96,6 +79,19 @@ export function ExportDialog({ open, onClose, initial = 'compliance.csv', at: in
         {kind === 'compliance-history.csv' && (
           <Field label={t('compliance.hist.at')} required>
             {({ id, describedBy }) => <input id={id} aria-describedby={describedBy} type="date" className="field" value={at} max={isoDay(new Date())} onChange={(e) => setAt(e.target.value)} />}
+          </Field>
+        )}
+        {kind.startsWith('evidence.') && (
+          <Field label={t('compliance.exp.window')} help={t('compliance.exp.windowHelp')}>
+            {({ id, describedBy }) => (
+              <select id={id} aria-describedby={describedBy} className="field" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+                {windows.map((d) => (
+                  <option key={d} value={d}>
+                    {t('compliance.exp.days', { count: d })}
+                  </option>
+                ))}
+              </select>
+            )}
           </Field>
         )}
         {sha && (
