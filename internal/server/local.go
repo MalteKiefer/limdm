@@ -336,12 +336,14 @@ func (s *Server) checkLocal(ctx context.Context, name, password, code, ip, sourc
 	var failures int
 	var lockedUntil *time.Time
 	result := "login.local.failed"
-	failed := func(detail string) (string, string, string, string, error) {
-		if !localFailures.take() { // committed without an entry; the process log has it
+	// failed is the audit action of a failure: none beyond the budget (the
+	// transaction still commits; the process log has it)
+	failed := func() string {
+		if !localFailures.take() {
 			s.log.Warn("local login failure not audited: more than 30 per minute", "user", name)
-			return "", "", "", "", nil
+			return ""
 		}
-		return localPrefix + name, result, ip, detail, nil
+		return result
 	}
 	err := s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
 		var accountLock *time.Time // set by failed checks of a signed in user (profile.go)
@@ -349,7 +351,7 @@ func (s *Server) checkLocal(ctx context.Context, name, password, code, ip, sourc
 			Scan(&role, &hash, &secret, &lastStep, &accountLock)
 		if errors.Is(qerr, pgx.ErrNoRows) {
 			checkPassword(dummyHash, password)
-			return failed("unknown user")
+			return localPrefix + name, failed(), ip, "unknown user", nil
 		}
 		if qerr != nil {
 			return "", "", "", "", qerr
@@ -360,7 +362,7 @@ func (s *Server) checkLocal(ctx context.Context, name, password, code, ip, sourc
 		}
 		if lockedUntil != nil && time.Now().Before(*lockedUntil) || accountLock != nil && time.Now().Before(*accountLock) {
 			checkPassword(dummyHash, password) // same timing as an active account
-			return failed("account locked for this source")
+			return localPrefix + name, failed(), ip, "account locked for this source", nil
 		}
 		pwOK := checkPassword(hash, password)
 		step, totpOK := verifyTOTP(secret, code, time.Now(), lastStep)
@@ -399,7 +401,7 @@ func (s *Server) checkLocal(ctx context.Context, name, password, code, ip, sourc
 		if lock != nil {
 			return localPrefix + name, result, ip, detail, nil // a lockout is always audited
 		}
-		return failed(detail)
+		return localPrefix + name, failed(), ip, detail, nil
 	})
 	if err != nil {
 		return "", err
