@@ -264,6 +264,19 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 		return nil, fmt.Errorf("audit key: %w", err)
 	}
 	s := &Server{cfg: cfg, db: db, ca: ca, cmdKey: cmdKey, log: log, geoSem: make(chan struct{}, 1)}
+	if itemSecrets, err = s.aead(infoItems); err != nil {
+		return nil, err
+	}
+	if err := s.sealLoginSecrets(ctx); err != nil {
+		return nil, fmt.Errorf("sealing login client secrets: %w", err)
+	}
+	// baseline version of items saved before versioning existed; here and not
+	// in schema.sql, so it holds the signed payload with secrets sealed
+	if _, err := db.Exec(ctx, `INSERT INTO library_item_versions(item_id, version, name, type, description, payload, signature, note, created_by, created_at)
+		SELECT i.id, 1, i.name, i.type, i.description, i.payload, i.signature, 'baseline', 'system', i.updated_at FROM library_items i
+		WHERE NOT EXISTS (SELECT 1 FROM library_item_versions v WHERE v.item_id = i.id)`); err != nil {
+		return nil, fmt.Errorf("library baseline versions: %w", err)
+	}
 	if err := s.seedConsoleUsers(ctx); err != nil {
 		return nil, err
 	}

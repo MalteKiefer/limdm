@@ -63,13 +63,18 @@ func (s *Server) oidcRole(ctx context.Context, email string) string {
 func (s *Server) account(ctx context.Context, login string) (string, int64) {
 	var role string
 	var gen int64
-	q := `SELECT role, session_gen FROM console_users WHERE email=$1 AND NOT disabled`
+	var fromGroup bool
+	var claim []string
+	q := `SELECT role, session_gen, from_group, oidc_groups FROM console_users WHERE email=$1 AND NOT disabled`
 	key := login
 	if name, ok := strings.CutPrefix(login, localPrefix); ok {
-		q, key = `SELECT role, session_gen FROM local_admins WHERE name=$1 AND NOT disabled`, name
+		q, key = `SELECT role, session_gen, false, '{}'::text[] FROM local_admins WHERE name=$1 AND NOT disabled`, name
 	}
-	if err := s.db.QueryRow(ctx, q, key).Scan(&role, &gen); err != nil {
+	if err := s.db.QueryRow(ctx, q, key).Scan(&role, &gen, &fromGroup, &claim); err != nil {
 		return "", 0
+	}
+	if fromGroup { // follows the directory: leaving the group ends access
+		role, _ = s.groupRole(ctx, login, claim)
 	}
 	return role, gen
 }
@@ -102,11 +107,14 @@ type consoleUser struct {
 	Disabled    bool
 	LastLogin   *time.Time
 	Local       bool
+	Tags        []string // device scope (helpdesk, auditor)
+	Groups      []string
+	FromGroup   bool // role from a directory group mapping
 }
 
 func (s *Server) consoleUsers(ctx context.Context) ([]consoleUser, error) {
-	rows, err := s.db.Query(ctx, `SELECT email, role, disabled, last_login, false FROM console_users
-		UNION ALL SELECT name, role, disabled, last_login, true FROM local_admins ORDER BY 5, 1`)
+	rows, err := s.db.Query(ctx, `SELECT email, role, disabled, last_login, false, scope_tags, scope_groups, from_group FROM console_users
+		UNION ALL SELECT name, role, disabled, last_login, true, scope_tags, scope_groups, false FROM local_admins ORDER BY 5, 1`)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +132,7 @@ func (s *Server) renderUsers(w http.ResponseWriter, r *http.Request, sess sessio
 		return
 	}
 	s.render(w, r, sess, "users", map[string]any{"Users": users, "Roles": roles, "Creds": creds, "Error": errMsg,
-		"LocalLogin": s.settings().LocalLogin, "OIDC": s.oidc() != nil})
+		"LocalLogin": s.settings().LocalLogin, "OIDC": s.oidc() != nil, "FourEyes": s.settings().FourEyes})
 }
 
 // enabledAdminsExcept counts active admins other than login.
@@ -184,43 +192,117 @@ func (s *Server) userAdd(w http.ResponseWriter, r *http.Request, sess session) {
 // userUpdate changes role or enabled state; self lockout and losing the last admin are refused.
 func (s *Server) userUpdate(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
-	login, role := r.FormValue("login"), r.FormValue("role")
-	disable := r.FormValue("disabled") == "on"
-	if !slices.Contains(roles, role) {
+	login := r.FormValue("login")
+	c := userChange{Role: r.FormValue("role"), Disabled: r.FormValue("disabled") == "on"}
+	if !slices.Contains(roles, c.Role) {
 		s.renderUsers(w, r, sess, "", "unknown role")
 		return
 	}
-	if login == sess.Email && (disable || role != sess.Role) {
+	if login == sess.Email && (c.Disabled || c.Role != sess.Role) {
 		s.renderUsers(w, r, sess, "", "you cannot demote or disable your own account")
 		return
 	}
-	err := s.auditAction(ctx, sess.Email, "user.update", login, fmt.Sprintf("role=%s disabled=%v", role, disable), func(tx pgx.Tx) error {
-		if role != "admin" || disable {
-			n, err := enabledAdminsExcept(ctx, tx, login)
-			if err != nil {
-				return err
-			}
-			if n == 0 {
-				return errors.New("at least one active administrator must remain")
-			}
+	var err error
+	if c.Tags, err = parseTags(r.FormValue("scope_tags")); err != nil {
+		s.renderUsers(w, r, sess, "", err.Error())
+		return
+	}
+	if c.Groups, err = parseScopeGroups(r.FormValue("scope_groups")); err != nil {
+		s.renderUsers(w, r, sess, "", err.Error())
+		return
+	}
+	if c.Role == "admin" {
+		c.Tags, c.Groups = []string{}, []string{} // admins are never scoped
+	}
+	cur := s.currentRole(ctx, login)
+	if cur == "" {
+		s.renderUsers(w, r, sess, "", "user not found")
+		return
+	}
+	if cur != c.Role && s.settings().FourEyes {
+		if err := s.requestApproval(ctx, sess, "user.update", login, c, strings.TrimSpace(r.FormValue("reason"))); err != nil {
+			s.renderUsers(w, r, sess, "", err.Error())
+			return
 		}
-		var tag interface{ RowsAffected() int64 }
-		var err error
-		if name, ok := strings.CutPrefix(login, localPrefix); ok {
-			tag, err = tx.Exec(ctx, `UPDATE local_admins SET role=$2, disabled=$3, session_gen=session_gen+1 WHERE name=$1`, name, role, disable)
-		} else {
-			tag, err = tx.Exec(ctx, `UPDATE console_users SET role=$2, disabled=$3, from_env=false, session_gen=session_gen+1 WHERE email=$1`, login, role, disable)
-		}
-		if err == nil && tag.RowsAffected() == 0 {
-			err = errors.New("user not found")
-		}
-		return err
+		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+		return
+	}
+	err = s.auditAction(ctx, sess.Email, "user.update", login, c.String(), func(tx pgx.Tx) error {
+		return s.applyUserChange(ctx, tx, login, c)
 	})
 	if err != nil {
 		s.renderUsers(w, r, sess, "", err.Error())
 		return
 	}
+	if cur != c.Role {
+		s.notifyRoleChange(sess.Email, login, cur, c.Role, "")
+	}
 	s.renderUsers(w, r, sess, "", "")
+}
+
+// userChange is the edit of a console account, applied directly or after
+// a four eyes approval.
+type userChange struct {
+	Role     string   `json:"role"`
+	Disabled bool     `json:"disabled"`
+	Tags     []string `json:"tags"`
+	Groups   []string `json:"groups"`
+}
+
+func (c userChange) String() string {
+	return fmt.Sprintf("role=%s disabled=%v scope_tags=%v scope_groups=%q", c.Role, c.Disabled, c.Tags, c.Groups)
+}
+
+// currentRole is the stored role of an account, enabled or not ("" unknown).
+func (s *Server) currentRole(ctx context.Context, login string) string {
+	var role string
+	q, key := `SELECT role FROM console_users WHERE email=$1`, login
+	if name, ok := strings.CutPrefix(login, localPrefix); ok {
+		q, key = `SELECT role FROM local_admins WHERE name=$1`, name
+	}
+	_ = s.db.QueryRow(ctx, q, key).Scan(&role)
+	return role
+}
+
+// applyUserChange stores c; losing the last admin, or the second one while
+// four eyes approval is on, is refused.
+func (s *Server) applyUserChange(ctx context.Context, tx pgx.Tx, login string, c userChange) error {
+	if c.Role != "admin" || c.Disabled {
+		n, err := enabledAdminsExcept(ctx, tx, login)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return errors.New("at least one active administrator must remain")
+		}
+		var isAdmin bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM console_users WHERE email=$1 AND role='admin' AND NOT disabled)
+			OR EXISTS(SELECT 1 FROM local_admins WHERE 'local:' || name = $1 AND role='admin' AND NOT disabled)`, login).Scan(&isAdmin); err != nil {
+			return err
+		}
+		if isAdmin && n < 2 && s.settings().FourEyes {
+			return errors.New("four eyes approval is on: at least two active administrators must remain")
+		}
+	}
+	if c.Tags == nil {
+		c.Tags = []string{}
+	}
+	if c.Groups == nil {
+		c.Groups = []string{}
+	}
+	var tag interface{ RowsAffected() int64 }
+	var err error
+	if name, ok := strings.CutPrefix(login, localPrefix); ok {
+		tag, err = tx.Exec(ctx, `UPDATE local_admins SET role=$2, disabled=$3, scope_tags=$4, scope_groups=$5, session_gen=session_gen+1 WHERE name=$1`,
+			name, c.Role, c.Disabled, c.Tags, c.Groups)
+	} else {
+		tag, err = tx.Exec(ctx, `UPDATE console_users SET role=$2, disabled=$3, scope_tags=$4, scope_groups=$5, from_env=false, from_group=false,
+			session_gen=session_gen+1 WHERE email=$1`, login, c.Role, c.Disabled, c.Tags, c.Groups)
+	}
+	if err == nil && tag.RowsAffected() == 0 {
+		err = errors.New("user not found")
+	}
+	return err
 }
 
 func (s *Server) userReset(w http.ResponseWriter, r *http.Request, sess session) {

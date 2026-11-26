@@ -41,8 +41,10 @@
 
 * HTTPS only. Without its own certificate the console binds to loopback and runs behind a
   local TLS proxy such as Caddy.
-* OIDC with PKCE, nonce, `email_verified` and domain checks. Roles are read from the
-  database on every request, so removing someone takes effect immediately.
+* OIDC with PKCE, nonce, `email_verified` and domain checks, optionally multi factor
+  authentication from the `amr` or `acr` claim ([configuration.md](configuration.md#console-settings)).
+  Roles and scopes are read from the database on every request, so removing someone takes
+  effect immediately.
 * Local accounts: argon2id password and TOTP (RFC 6238, codes usable once), one time
   recovery codes stored as SHA-256 hashes, lockout after 5 failures for 15 minutes, per IP
   rate limit (client IPs from `X-Forwarded-For` are only trusted from a loopback proxy).
@@ -51,9 +53,26 @@
 * Headers: strict Content Security Policy (`default-src 'self'`, no inline script or
   style), HSTS, `Referrer-Policy: same-origin`, no framing. The console works without
   JavaScript except the visual blueprint editor.
-* Secrets in the database (OIDC client secret, Google service account key) are sealed with
-  AES-256-GCM; recovery keys too, bound to device and volume. Keys derive from
-  `LIMDM_SESSION_KEY` with HKDF.
+* Secrets in the database (OIDC client secret, Google service account key, notification
+  credentials, the desktop login client secret) are sealed with AES-256-GCM; recovery keys
+  too, bound to device and volume. Keys derive from `LIMDM_SESSION_KEY` with HKDF.
+
+## Four eyes approval
+
+**Settings**, **Security**, **Four eyes approval** makes a second administrator approve:
+wipe, lost mode, scripts and role changes of console users, and optionally recovery key
+views. The action is stored as a request under **Approvals** (with an optional reason;
+for recovery keys the reason or ticket reference is required) and announced as
+`approval.request`. Another admin approves or rejects it; the requester can never decide
+their own request. An approved command or role change runs at once, in the name of the
+requester, with the approval number and the approver in its audit entry. An approved
+recovery key view opens for the requester once, within one hour. Requests nobody decides
+expire after 24 hours. Request, approval, rejection, expiry and use are audited.
+
+The setting can only be switched on with at least two active administrators (with one,
+nobody could approve), and while it is on the second to last admin cannot be demoted or
+disabled. With the setting off everything runs directly as before. Roles derived from
+directory groups follow the directory, not this approval.
 
 ## Database
 
@@ -62,7 +81,8 @@ start otherwise. Schema changes run as versioned migrations under an advisory lo
 
 ## Audit log
 
-Append only (a trigger blocks `UPDATE`, `DELETE` and `TRUNCATE`) and hash chained. Recorded:
+Append only (a trigger blocks `UPDATE` and `TRUNCATE` always, `DELETE` outside the retention
+job) and hash chained. Recorded:
 console actions, settings changes, sign ins (also failed ones: local, and OIDC as
 `login.failed` with the reason `state`, `code exchange`, `id token` or `claims` and the
 client address, never codes or tokens; at most 30 per minute, the process log has all),
@@ -121,6 +141,25 @@ the database is the external anchor of the chain.
 Routine agent events (every change the agent makes on a device, desktop logins) are high
 volume and kept separately in `device_events`: append only, 365 days, shown on the device
 page (Commands tab). They do not take part in the hash chain.
+
+**Retention.** The audit log is kept forever unless **Settings**, **Security**, **Audit log
+retention** sets 365 days or more. Then, once a day and only after the whole chain verified
+intact, entries older than the period are deleted. The id and hash of the last deleted entry
+are stored as the cut, with an HMAC under the audit chain key (the HKDF key from
+`command.key` above), and the incremental, daily and on demand verification start from there;
+entries behind the cut keep their scheme (plain before `audit-keyed-from`, keyed after it).
+The prune itself is an audit entry (`audit.prune`). A cut whose HMAC does not match is
+ignored, so the first remaining entry shows as broken; losing `command.key` therefore shows
+the chain as broken from the cut on. Rows of `audit_log` and
+`device_events` can only be deleted in a transaction that sets `limdm.retention`, which only
+the retention job and the device deletion do; a database administrator can still bypass
+any trigger, which the hash chain makes visible for the audit log. Finished commands are
+deleted after 180 days, except lock, lost mode and wipe, which the device page shows.
+
+**Deleting devices.** A retired device can be deleted on its page (admins, confirmed with
+the host name): the device row with its events, metrics, commands, recovery keys and app
+requests is removed. Audit entries naming the device stay until the audit retention
+removes them; the deletion is one of them (`device.delete`).
 
 ## Devices
 

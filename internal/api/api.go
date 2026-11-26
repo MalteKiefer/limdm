@@ -88,7 +88,7 @@ type agentPayload struct {
 type Compliance struct {
 	Level     int      `json:"level"`              // 1 = CIS Level 1 baseline, 2 = Level 2 strict
 	Remediate bool     `json:"remediate"`          // agent fixes failing checks that have an automatic fix
-	Exclude   []string `json:"exclude"`            // check IDs accepted as risk (documented exception)
+	Exclude   []string `json:"exclude"`            // check IDs excluded by policy; risk exceptions recorded on the server are merged in
 	Advisory  []string `json:"advisory,omitempty"` // reported, but not counted against compliance
 	// Evaluated by the server:
 	GraceHours          int  `json:"grace_hours,omitempty"`      // time to fix before the device counts as non-compliant

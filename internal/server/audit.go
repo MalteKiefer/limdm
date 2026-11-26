@@ -195,9 +195,10 @@ func VerifyAuditExport(r io.Reader, key []byte, keyedFrom int64) (n int, first, 
 	return n, first, last, 0, sc.Err()
 }
 
-// auditFilter turns the audit page query into a condition on audit_log. Every
-// value is a bind parameter; f holds the cleaned values for the form.
-func auditFilter(q url.Values) (f map[string]string, where string, args []any) {
+// auditFilter turns the audit page query into a condition on audit_log,
+// limited to the device scope of sess. Every value is a bind parameter; f
+// holds the cleaned values for the form. Page, CSV and JSON Lines export use it.
+func auditFilter(q url.Values, sess session) (f map[string]string, where string, args []any) {
 	f = map[string]string{"q": strings.TrimSpace(q.Get("q")), "actor": strings.TrimSpace(q.Get("actor")), "action": strings.TrimSpace(q.Get("action")),
 		"target": strings.TrimSpace(q.Get("target")), "from": q.Get("from"), "to": q.Get("to")}
 	conds := []string{"true"}
@@ -228,6 +229,10 @@ func auditFilter(q url.Values) (f map[string]string, where string, args []any) {
 			add(`at < $?::date + 1`, f[k])
 		}
 	}
+	if sess.scoped() {
+		cond, sargs := auditScope(sess, len(args))
+		conds, args = append(conds, cond), append(args, sargs...)
+	}
 	return f, strings.Join(conds, " AND "), args
 }
 
@@ -236,7 +241,7 @@ func auditFilter(q url.Values) (f map[string]string, where string, args []any) {
 // the SHA-256 of the file.
 func (s *Server) auditExportJSONL(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
-	_, where, args := auditFilter(r.URL.Query())
+	_, where, args := auditFilter(r.URL.Query(), sess)
 	s.streamExport(w, r, sess, "audit.jsonl", "application/x-ndjson", func(tx pgx.Tx, out io.Writer) (int, error) {
 		rows, err := tx.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE `+where+` ORDER BY id`, args...)
 		if err != nil {

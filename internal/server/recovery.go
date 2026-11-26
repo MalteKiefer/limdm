@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -103,6 +105,15 @@ func (s *Server) recoveryKeys(ctx context.Context, deviceID string) ([]recoveryR
 func (s *Server) recoveryView(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
 	id, uuid := r.PathValue("id"), r.FormValue("uuid")
+	reason := strings.TrimSpace(r.FormValue("reason"))
+	if len(reason) > 500 || strings.ContainsAny(reason, "\x00\r\n") {
+		http.Error(w, "reason: up to 500 characters on one line", http.StatusBadRequest)
+		return
+	}
+	if !s.inScope(ctx, sess, id) {
+		http.NotFound(w, r)
+		return
+	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		s.fail(w, err)
@@ -119,6 +130,48 @@ func (s *Server) recoveryView(w http.ResponseWriter, r *http.Request, sess sessi
 	} else if err != nil {
 		s.fail(w, err)
 		return
+	}
+	view := map[string]any{"ID": id, "Host": host, "Path": path, "UUID": uuid}
+	approvedBy := ""
+	if s.settings().FourEyesRecovery {
+		// an approved request of this viewer for this volume opens the key once
+		var aid int64
+		var by, aReason string
+		err := tx.QueryRow(ctx, `SELECT id, decided_by, reason FROM approvals WHERE action='recovery.view' AND target=$1 AND payload->>'uuid'=$2
+			AND requested_by=$3 AND status='approved' AND expires_at > now() ORDER BY id DESC LIMIT 1 FOR UPDATE`, id, uuid, sess.Email).Scan(&aid, &by, &aReason)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			_ = tx.Rollback(ctx)
+			var pending bool
+			if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approvals WHERE action='recovery.view' AND target=$1 AND payload->>'uuid'=$2
+				AND requested_by=$3 AND status='pending' AND expires_at > now())`, id, uuid, sess.Email).Scan(&pending); err != nil {
+				s.fail(w, err)
+				return
+			}
+			switch {
+			case pending:
+				view["State"] = "pending"
+			case reason == "":
+				view["State"] = "reason"
+			default:
+				if err := s.requestApproval(ctx, sess, "recovery.view", id, map[string]string{"uuid": uuid, "device": path}, reason); err != nil {
+					s.fail(w, err)
+					return
+				}
+				view["State"] = "requested"
+			}
+			w.Header().Set("Cache-Control", "no-store")
+			s.render(w, r, sess, "recovery", view)
+			return
+		case err != nil:
+			s.fail(w, err)
+			return
+		}
+		if _, err := tx.Exec(ctx, `UPDATE approvals SET status='used' WHERE id=$1`, aid); err != nil {
+			s.fail(w, err)
+			return
+		}
+		reason, approvedBy = aReason, fmt.Sprintf(" approval #%d by %s", aid, by)
 	}
 	key, err := s.openRecovery(id, uuid, sealed)
 	if err != nil {
@@ -137,7 +190,11 @@ func (s *Server) recoveryView(w http.ResponseWriter, r *http.Request, sess sessi
 		s.fail(w, err)
 		return
 	}
-	if err := audit(ctx, tx, sess.Email, "recovery.view", id, path+" "+uuid); err != nil {
+	detail := path + " " + uuid
+	if reason != "" {
+		detail += fmt.Sprintf(" reason=%q", reason)
+	}
+	if err := audit(ctx, tx, sess.Email, "recovery.view", id, detail+approvedBy); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -145,8 +202,11 @@ func (s *Server) recoveryView(w http.ResponseWriter, r *http.Request, sess sessi
 		s.fail(w, err)
 		return
 	}
+	s.notifyDevice(id, []notice{{Type: "recovery.view", Severity: "warning", Title: "Recovery key viewed",
+		Text: fmt.Sprintf("%s viewed the recovery key of %s. Reason: %s.", sess.Email, path, firstNonEmpty(reason, "none given"))}})
 	w.Header().Set("Cache-Control", "no-store")
-	s.render(w, r, sess, "recovery", map[string]any{"ID": id, "Host": host, "Path": path, "UUID": uuid, "Key": key, "Rotate": rotate})
+	view["Key"], view["Rotate"] = key, rotate
+	s.render(w, r, sess, "recovery", view)
 }
 
 // attachRecoveryKeys adds the escrowed keys to "lost" commands at delivery:

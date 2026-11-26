@@ -237,7 +237,7 @@ func (a *Agent) evaluate() []api.CheckResult {
 		}
 		r := api.CheckResult{ID: c.ID, Title: c.Title, Level: c.Level, Refs: c.Refs}
 		if slices.Contains(p.Exclude, c.ID) {
-			r.Status, r.Detail = "excepted", "documented exception (risk accepted)"
+			r.Status, r.Detail = "excepted", "excluded by policy (exception)"
 			out = append(out, r)
 			continue
 		}

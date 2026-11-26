@@ -1,0 +1,23 @@
+{{define "title"}}{{t "Approvals · LiMDM"}}{{end}}
+{{define "content"}}
+<div class="page-head"><div><h1>{{t "Approvals"}}</h1><div class="meta"><span>{{t "Four eyes approval: a second administrator decides wipe, lost mode, scripts, role changes and recovery key views"}}</span></div></div></div>
+{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+{{if not .FourEyes}}<div class="notice" role="status">{{t "Four eyes approval is off (Settings, Security). Actions run directly."}}</div>{{end}}
+<section class="tablecard">
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Request"}}</th><th>{{t "Target"}}</th><th>{{t "Requested by"}}</th><th>{{t "Reason"}}</th><th>{{t "Status"}}</th>{{if eq .Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
+    <tbody>{{range .Approvals}}<tr>
+      <td>{{if eq .Action "command"}}{{t "Command"}}{{else if eq .Action "user.update"}}{{t "Role change"}}{{else}}{{t "Recovery key view"}}{{end}}<span class="sub mono">{{printf "%s" .Payload}}</span></td>
+      <td class="mono">{{if eq .Action "user.update"}}{{.Target}}{{else}}<a href="/devices/{{.Target}}">{{.Target}}</a>{{end}}</td>
+      <td>{{.RequestedBy}}<span class="sub">{{fmtTime .CreatedAt}}</span></td>
+      <td>{{.Reason}}</td>
+      <td><span class="pill {{if eq .Status "pending"}}warn{{else if eq .Status "rejected"}}bad{{else if eq .Status "expired"}}{{else}}ok{{end}}">{{t .Status}}</span>
+        {{if .DecidedBy}}<span class="sub">{{deref2 .DecidedBy}}</span>{{else if eq .Status "pending"}}<span class="sub">{{t "expires"}} {{fmtTime .ExpiresAt}}</span>{{end}}</td>
+      {{if eq $.Sess.Role "admin"}}<td class="row-actions">{{if and (eq .Status "pending") (ne .RequestedBy $.Sess.Email)}}
+        <form class="inline-form" method="post" action="/approvals/{{.ID}}/approve">{{template "csrf" $.CSRF}}<button class="small" data-confirm="{{t "Approve this request? It runs now."}}">{{t "Approve"}}</button></form>
+        <form class="inline-form" method="post" action="/approvals/{{.ID}}/reject">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Reject"}}</button></form>
+      {{end}}</td>{{end}}
+    </tr>{{else}}<tr><td colspan="6" class="empty">{{t "No requests."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+{{end}}

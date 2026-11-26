@@ -172,8 +172,14 @@ CREATE TABLE IF NOT EXISTS audit_log (
     hash    BYTEA NOT NULL
 );
 
+-- UPDATE and TRUNCATE are refused always; DELETE only inside a transaction
+-- that set limdm.retention (the audit retention job, retention.go), which
+-- records a signed cut so the remaining chain stays verifiable.
 CREATE OR REPLACE FUNCTION audit_log_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
+    IF TG_OP = 'DELETE' AND current_setting('limdm.retention', true) = 'on' THEN
+        RETURN NULL;
+    END IF;
     RAISE EXCEPTION 'audit_log is append only';
 END $$;
 
@@ -469,10 +475,71 @@ CREATE TRIGGER library_item_versions_append_only BEFORE UPDATE OR DELETE ON libr
 DROP TRIGGER IF EXISTS blueprint_versions_append_only ON blueprint_versions;
 CREATE TRIGGER blueprint_versions_append_only BEFORE UPDATE OR DELETE ON blueprint_versions
     FOR EACH ROW EXECUTE FUNCTION rows_append_only();
--- baseline version of objects saved before versioning existed
-INSERT INTO library_item_versions(item_id, version, name, type, description, payload, signature, note, created_by, created_at)
-    SELECT i.id, 1, i.name, i.type, i.description, i.payload, i.signature, 'baseline', 'system', i.updated_at FROM library_items i
-    WHERE NOT EXISTS (SELECT 1 FROM library_item_versions v WHERE v.item_id = i.id);
+-- baseline version of objects saved before versioning existed (library
+-- items: at startup in server.go, after secrets are sealed and items signed)
 INSERT INTO blueprint_versions(blueprint_id, version, name, description, parent_id, tree, note, created_by, created_at)
     SELECT b.id, 1, b.name, b.description, b.parent_id, b.tree, 'baseline', 'system', b.updated_at FROM blueprints b
     WHERE NOT EXISTS (SELECT 1 FROM blueprint_versions v WHERE v.blueprint_id = b.id);
+-- W2
+-- Four eyes approvals: a second admin approves wipe, lost mode, scripts, role
+-- changes and (optionally) recovery key views before they run.
+CREATE TABLE IF NOT EXISTS approvals (
+    id           BIGSERIAL PRIMARY KEY,
+    action       TEXT NOT NULL,             -- command | user.update | recovery.view
+    target       TEXT NOT NULL,             -- device id or console login
+    payload      JSONB NOT NULL DEFAULT '{}',
+    reason       TEXT NOT NULL DEFAULT '',
+    requested_by TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected | expired | used
+    decided_by   TEXT,
+    decided_at   TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at   TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS approvals_status ON approvals(status, expires_at);
+-- Role scopes: helpdesk and auditor accounts limited to device tags or
+-- directory group names; empty means every device. Roles taken from
+-- directory groups (from_group) are derived again on every request.
+ALTER TABLE console_users ADD COLUMN IF NOT EXISTS scope_tags TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE console_users ADD COLUMN IF NOT EXISTS scope_groups TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE console_users ADD COLUMN IF NOT EXISTS from_group BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE console_users ADD COLUMN IF NOT EXISTS oidc_groups TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE local_admins ADD COLUMN IF NOT EXISTS scope_tags TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE local_admins ADD COLUMN IF NOT EXISTS scope_groups TEXT[] NOT NULL DEFAULT '{}';
+-- Risk acceptance: exceptions with reason, owner, approver and expiry; only
+-- active ones reach the agents (merged into the compliance declaration).
+CREATE TABLE IF NOT EXISTS risk_exceptions (
+    id         BIGSERIAL PRIMARY KEY,
+    check_id   TEXT NOT NULL,
+    mode       TEXT NOT NULL CHECK (mode IN ('exclude', 'advisory')),
+    tag        TEXT NOT NULL DEFAULT '',   -- '' = every device
+    reason     TEXT NOT NULL,
+    owner      TEXT NOT NULL,
+    approver   TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at TIMESTAMPTZ
+);
+-- Retention: rows of audit_log and device_events are deleted only by the
+-- retention job and the device deletion, which set limdm.retention for their
+-- transaction (audit_log_immutable above). audit_cut records where the chain
+-- starts after a prune, with an HMAC under the audit chain key, so the
+-- remaining chain stays verifiable.
+CREATE OR REPLACE FUNCTION device_events_retention_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('limdm.retention', true) = 'on' THEN
+        RETURN NULL;
+    END IF;
+    RAISE EXCEPTION 'device_events rows are deleted by the retention job only';
+END $$;
+DROP TRIGGER IF EXISTS device_events_retention_only ON device_events;
+CREATE TRIGGER device_events_retention_only BEFORE DELETE OR TRUNCATE ON device_events
+    FOR EACH STATEMENT EXECUTE FUNCTION device_events_retention_only();
+CREATE TABLE IF NOT EXISTS audit_cut (
+    one       BOOLEAN PRIMARY KEY DEFAULT true CHECK (one),
+    last_id   BIGINT NOT NULL,
+    last_hash BYTEA NOT NULL,
+    mac       BYTEA NOT NULL,
+    cut_at    TIMESTAMPTZ NOT NULL
+);

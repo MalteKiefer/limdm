@@ -214,14 +214,14 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /devices/{id}/command", s.helpdeskPage(s.deviceCommand))
 	mux.HandleFunc("POST /devices/{id}/agent-update", s.page(s.deviceAgentUpdate))
 	mux.HandleFunc("POST /devices/{id}/recovery", s.helpdeskPage(s.recoveryView))
-	mux.HandleFunc("GET /directory", s.page(s.adminOrAuditor(s.directoryPage)))
+	mux.HandleFunc("GET /directory", s.page(s.adminOrAuditor(s.unscoped(s.directoryPage))))
 	mux.HandleFunc("POST /directory/groups", s.page(s.groupAssign))
 	mux.HandleFunc("POST /directory/scim-token", s.page(s.scimToken))
 	mux.HandleFunc("POST /directory/google", s.page(s.googleConfigure))
 	mux.HandleFunc("POST /directory/google/sync", s.page(s.googleSyncNow))
 	mux.HandleFunc("GET /users", s.page(s.adminOrAuditor(s.usersPage)))
-	mux.HandleFunc("GET /agents", s.page(s.adminOrAuditor(s.agentsPage)))
-	mux.HandleFunc("GET /software", s.page(s.adminOrAuditor(s.softwarePage)))
+	mux.HandleFunc("GET /agents", s.page(s.adminOrAuditor(s.unscoped(s.agentsPage))))
+	mux.HandleFunc("GET /software", s.page(s.adminOrAuditor(s.unscoped(s.softwarePage))))
 	mux.HandleFunc("GET /software/new", s.page(s.adminOrAuditor(s.appEdit)))
 	mux.HandleFunc("GET /software/apps/{id}", s.page(s.adminOrAuditor(s.appEdit)))
 	mux.HandleFunc("GET /software/icons/{id}", s.page(func(w http.ResponseWriter, r *http.Request, _ session) { s.catalogIcon(w, r) }))
@@ -271,6 +271,12 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /audit/verify", s.selfPage(s.adminOrAuditor(s.auditVerify)))
 	mux.HandleFunc("GET /compliance/history", s.page(s.complianceHistory))
 	mux.HandleFunc("GET /export/{kind}", s.page(s.adminOrAuditor(s.export)))
+	// W2 governance
+	mux.HandleFunc("GET /approvals", s.page(s.approvalsPage))
+	mux.HandleFunc("POST /approvals/{id}/{op}", s.page(s.approvalDecide))
+	mux.HandleFunc("POST /devices/{id}/delete", s.page(s.deviceDelete))
+	mux.HandleFunc("POST /compliance/exceptions", s.page(s.exceptionAdd))
+	mux.HandleFunc("POST /compliance/exceptions/{id}/revoke", s.page(s.exceptionRevoke))
 }
 
 // ---- devices ----
@@ -353,6 +359,8 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 			break
 		}
 	}
+	cond, sargs := scopeCond(sess, len(args))
+	where, args = "("+where+") AND "+cond, append(args, sargs...)
 	list, err := s.listDevicesWhere(ctx, where, args...)
 	if err != nil {
 		s.fail(w, err)
@@ -372,7 +380,8 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 		shown = append(shown, d)
 	}
 	var tags []string
-	if err := s.db.QueryRow(ctx, `SELECT coalesce(array_agg(DISTINCT t ORDER BY t), '{}') FROM devices, unnest(tags) t WHERE NOT retired`).Scan(&tags); err != nil {
+	cond, sargs = scopeCond(sess, 0)
+	if err := s.db.QueryRow(ctx, `SELECT coalesce(array_agg(DISTINCT t ORDER BY t), '{}') FROM devices d, unnest(d.tags) t WHERE NOT d.retired AND `+cond, sargs...).Scan(&tags); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -410,7 +419,8 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 		return
 	}
 	var known int
-	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM devices WHERE id = ANY($1) AND NOT retired`, ids).Scan(&known); err != nil || known != len(ids) {
+	cond, sargs := scopeCond(sess, 1)
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM devices d WHERE d.id = ANY($1) AND NOT d.retired AND `+cond, append([]any{ids}, sargs...)...).Scan(&known); err != nil || known != len(ids) {
 		http.Error(w, "unknown or retired device selected", http.StatusBadRequest)
 		return
 	}
@@ -484,7 +494,8 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 // overview is the landing page: fleet state, OS mix, weakest controls, recent activity.
 func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
-	list, err := s.listDevices(ctx)
+	cond, sargs := scopeCond(sess, 0)
+	list, err := s.listDevicesWhere(ctx, cond, sargs...)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -509,7 +520,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 	sort.Slice(oses, func(i, j int) bool {
 		return oses[i].Count > oses[j].Count || oses[i].Count == oses[j].Count && oses[i].Name < oses[j].Name
 	})
-	fc, err := s.fleetComplianceCached(ctx)
+	fc, err := s.fleetComplianceFor(ctx, sess)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -526,7 +537,8 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 	}
 	var recent []auditRow
 	if sess.Role != "helpdesk" { // the audit log (script bodies included) is not theirs to read
-		rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log ORDER BY id DESC LIMIT 8`)
+		acond, aargs := auditScope(sess, 0)
+		rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE `+acond+` ORDER BY id DESC LIMIT 8`, aargs...)
 		if err != nil {
 			s.fail(w, err)
 			return
@@ -591,6 +603,10 @@ func firstNonEmpty(v ...string) string {
 func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
 	id := r.PathValue("id")
+	if !s.inScope(ctx, sess, id) {
+		http.NotFound(w, r)
+		return
+	}
 	var d deviceRow
 	var inv, checks, decl, users, pkgs []byte
 	var enrolled, certExp time.Time
@@ -862,6 +878,10 @@ func pwError(r *http.Request) string {
 
 func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess session) {
 	id, typ := r.PathValue("id"), r.FormValue("type")
+	if !s.inScope(r.Context(), sess, id) {
+		http.NotFound(w, r)
+		return
+	}
 	payload, code, msg := s.commandPayload(r, sess, id, typ)
 	if i := slices.Index(passwordErrors, msg); i >= 0 {
 		http.Redirect(w, r, "/devices/"+url.PathEscape(id)+"?tab=accounts&pwerr="+strconv.Itoa(i), http.StatusSeeOther)
@@ -871,10 +891,20 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 		http.Error(w, msg, code)
 		return
 	}
+	if s.needsApproval(typ) {
+		err := s.requestApproval(r.Context(), sess, "command", id, commandApproval{Type: typ, Payload: payload}, strings.TrimSpace(r.FormValue("reason")))
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+		return
+	}
 	if err := s.queueCommand(r.Context(), sess.Email, id, typ, payload); err != nil {
 		s.fail(w, err)
 		return
 	}
+	s.notifyCommand(sess.Email, id, typ)
 	back := "/devices/" + id
 	switch {
 	case typ == "app_install" || typ == "app_remove":
@@ -1201,7 +1231,12 @@ type fleetStats struct {
 }
 
 func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session) {
-	fc, err := s.fleetComplianceCached(r.Context())
+	fc, err := s.fleetComplianceFor(r.Context(), sess)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	exceptions, err := s.riskExceptions(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -1214,6 +1249,7 @@ func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session
 		"F": f, "Shown": len(checks), "All": len(fc.Checks),
 		"Checks": checks, "Controls": controls, "Total": fc.Total, "Compliant": fc.Compliant, "Stale": fc.Stale,
 		"NonCompliant": fc.Noncompl, "Pending": fc.Pending, "StaleHours": s.settings().StaleHours,
+		"Exceptions": exceptions,
 	})
 }
 
@@ -1272,16 +1308,26 @@ func (s *Server) fleetComplianceCached(ctx context.Context) (fleetStats, error) 
 	if c := s.fleet.Load(); c != nil && time.Since(c.at) < time.Minute {
 		return c.fs, nil
 	}
-	fs, err := s.fleetCompliance(ctx)
+	fs, err := s.fleetCompliance(ctx, "TRUE")
 	if err == nil {
 		s.fleet.Store(&fleetCache{at: time.Now(), fs: fs})
 	}
 	return fs, err
 }
 
-func (s *Server) fleetCompliance(ctx context.Context) (fleetStats, error) {
+// fleetComplianceFor aggregates the devices within the scope of sess
+// (scoped accounts bypass the fleet wide cache).
+func (s *Server) fleetComplianceFor(ctx context.Context, sess session) (fleetStats, error) {
+	if !sess.scoped() {
+		return s.fleetComplianceCached(ctx)
+	}
+	cond, args := scopeCond(sess, 0)
+	return s.fleetCompliance(ctx, cond, args...)
+}
+
+func (s *Server) fleetCompliance(ctx context.Context, where string, args ...any) (fleetStats, error) {
 	var fs fleetStats
-	rows, err := s.db.Query(ctx, `SELECT hostname, checks, last_seen, failing FROM devices WHERE NOT retired`)
+	rows, err := s.db.Query(ctx, `SELECT hostname, checks, last_seen, failing FROM devices d WHERE NOT retired AND `+where, args...)
 	if err != nil {
 		return fs, err
 	}
@@ -1379,7 +1425,7 @@ type auditRow struct {
 func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
 	q := r.URL.Query()
-	f, where, args := auditFilter(q)
+	f, where, args := auditFilter(q, sess)
 	filter := url.Values{}
 	for k, v := range f {
 		if v != "" {
@@ -1445,15 +1491,18 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session)
 func (s *Server) verifyAudit(ctx context.Context) (int64, error) { return s.verifyAuditFrom(ctx, true) }
 
 func (s *Server) verifyAuditFrom(ctx context.Context, incremental bool) (int64, error) {
-	var from int64
-	prev := make([]byte, 32)
+	from, prev, err := s.auditStart(ctx) // behind the last retention cut (retention.go)
+	if err != nil {
+		return 0, err
+	}
 	if incremental {
+		var id int64
 		var hash []byte
-		err := s.db.QueryRow(ctx, `SELECT last_id, last_hash FROM audit_checkpoint`).Scan(&from, &hash)
+		err := s.db.QueryRow(ctx, `SELECT last_id, last_hash FROM audit_checkpoint`).Scan(&id, &hash)
 		switch {
-		case err == nil:
-			prev = hash
-		case !errors.Is(err, pgx.ErrNoRows):
+		case err == nil && id > from:
+			from, prev = id, hash
+		case err != nil && !errors.Is(err, pgx.ErrNoRows):
 			return 0, err
 		}
 	}
@@ -1499,41 +1548,53 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 	var q string
 	var args []any
 	var header []string
+	cond, args := scopeCond(sess, 0)
 	switch kind {
 	case "compliance.csv":
 		header = []string{"device_id", "hostname", "last_seen", "agent_version", "catalog_version", "check_id", "level", "status", "detail",
-			"bsi", "cis", "cis_benchmark", "iso", "generated_at"}
+			"bsi", "cis", "cis_benchmark", "iso", "exception_reason", "exception_owner", "exception_approver", "exception_expires", "generated_at"}
 		q = `SELECT d.id, d.hostname, coalesce(d.last_seen::text,''), d.agent_version, d.catalog_version, c->>'id', coalesce(c->>'level',''), c->>'status', coalesce(c->>'detail',''),
 			coalesce((SELECT string_agg(x,'; ') FROM jsonb_array_elements_text(c->'refs'->'bsi') x),''),
 			coalesce((SELECT string_agg(x,'; ') FROM jsonb_array_elements_text(c->'refs'->'cis') x),''),
 			coalesce(c->'refs'->>'cis_benchmark',''),
-			coalesce((SELECT string_agg(x,'; ') FROM jsonb_array_elements_text(c->'refs'->'iso') x),''), $1::text
-			FROM devices d, jsonb_array_elements(d.checks) c WHERE NOT d.retired ORDER BY d.hostname, c->>'id'`
-		args = []any{time.Now().UTC().Format(time.RFC3339)}
+			coalesce((SELECT string_agg(x,'; ') FROM jsonb_array_elements_text(c->'refs'->'iso') x),''),
+			coalesce(e.reason,''), coalesce(e.owner,''), coalesce(e.approver,''), coalesce(e.expires_at::date::text,''), $` + strconv.Itoa(len(args)+1) + `::text
+			FROM devices d CROSS JOIN LATERAL jsonb_array_elements(d.checks) c
+			LEFT JOIN LATERAL (SELECT reason, owner, approver, expires_at FROM risk_exceptions x WHERE x.check_id = c->>'id' AND ` + activeExceptionSQL + `
+				AND (x.tag = '' OR x.tag = ANY(d.tags)) ORDER BY x.expires_at DESC LIMIT 1) e ON true
+			WHERE NOT d.retired AND ` + cond + ` ORDER BY d.hostname, c->>'id'`
+		args = append(args, time.Now().UTC().Format(time.RFC3339))
 	case "compliance-history.csv":
 		at, device, ok := historyParams(r.URL.Query())
 		if !ok {
 			http.Error(w, "at must be a date (YYYY-MM-DD)", http.StatusBadRequest)
 			return
 		}
+		hcond, hargs := scopeCond(sess, 4)
 		header = []string{"state_at", "device_id", "hostname", "check_id", "status", "detail", "since", "catalog_version", "generated_at"}
 		q = `SELECT $4::text, h.device_id, d.hostname, h.check_id, h.status, h.detail, h.at::text, h.catalog_version, $3::text
-			FROM (` + historyStateSQL + `) h JOIN devices d ON d.id = h.device_id ORDER BY d.hostname, h.check_id`
-		args = []any{at, device, time.Now().UTC().Format(time.RFC3339), at.AddDate(0, 0, -1).Format("2006-01-02")}
+			FROM (` + historyStateSQL + `) h JOIN devices d ON d.id = h.device_id WHERE ` + hcond + ` ORDER BY d.hostname, h.check_id`
+		args = append([]any{at, device, time.Now().UTC().Format(time.RFC3339), at.AddDate(0, 0, -1).Format("2006-01-02")}, hargs...)
 	case "inventory.csv":
 		header = []string{"device_id", "hostname", "os", "kernel", "agent", "serial", "vendor", "model", "cpu", "memory_mb", "disk_gb", "last_seen", "enrolled_at", "retired"}
 		q = `SELECT id, hostname, coalesce(inventory->>'os_name',''), coalesce(inventory->>'kernel',''), agent_version,
 			coalesce(inventory->>'serial',''), coalesce(inventory->>'vendor',''), coalesce(inventory->>'model',''), coalesce(inventory->>'cpu',''),
 			coalesce(inventory->>'memory_mb',''), coalesce(inventory->>'disk_gb',''), coalesce(last_seen::text,''), enrolled_at::text, retired::text
-			FROM devices ORDER BY hostname`
+			FROM devices d WHERE ` + cond + ` ORDER BY hostname`
 	case "audit.csv":
 		var where string
-		_, where, args = auditFilter(r.URL.Query())
+		_, where, args = auditFilter(r.URL.Query(), sess)
 		header = []string{"id", "at", "actor", "action", "target", "detail", "prev", "hash"}
 		q = `SELECT id::text, at::text, actor, action, target, detail, encode(prev,'hex'), encode(hash,'hex') FROM audit_log WHERE ` + where + ` ORDER BY id`
 	case "audit.jsonl":
 		s.auditExportJSONL(w, r, sess)
 		return
+	case "exceptions.csv":
+		header = []string{"id", "check_id", "mode", "tag", "reason", "owner", "approver", "expires_at", "created_by", "created_at", "state"}
+		args = nil
+		q = `SELECT id::text, check_id, mode, tag, reason, owner, approver, expires_at::text, created_by, created_at::text,
+			CASE WHEN revoked_at IS NOT NULL THEN 'revoked' WHEN expires_at <= now() THEN 'expired' ELSE 'active' END
+			FROM risk_exceptions x ORDER BY id`
 	default:
 		http.NotFound(w, r)
 		return

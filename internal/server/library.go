@@ -283,8 +283,10 @@ func resolveDevice(ctx context.Context, q pgx.Tx, deviceID string) (resolved, er
 	if res.Items, err = libraryItems(ctx, q, ids); err != nil {
 		return res, err
 	}
-	res.Decls, err = api.Merge(res.Items)
-	return res, err
+	if res.Decls, err = api.Merge(res.Items); err != nil {
+		return res, err
+	}
+	return res, applyExceptions(ctx, q, deviceID, res.Decls) // risk exceptions (exceptions.go)
 }
 
 // libraryItems loads items and returns them in the order of ids.
@@ -310,6 +312,11 @@ func libraryItems(ctx context.Context, q pgx.Tx, ids []int64) ([]api.LibraryItem
 			// changed outside the console (database write, restore of a foreign
 			// backup): never delivered, and loud in the log
 			slog.Error("library item signature invalid, item not delivered", "item", it.ID, "name", it.Name)
+			continue
+		}
+		var err error
+		if it.Payload, err = openItemSecrets(it.Type, raw); err != nil { // sealed client secret (loginsecret.go)
+			slog.Error("library item secret cannot be opened, item not delivered", "item", it.ID, "name", it.Name, "err", err)
 			continue
 		}
 		byID[it.ID] = it
@@ -547,6 +554,11 @@ func (s *Server) storeItem(ctx context.Context, actor, action, note string, it a
 	if err := it.Validate(); err != nil {
 		return err
 	}
+	sealed, _, err := sealItemSecrets(it.Type, it.Payload) // never stored, signed, versioned or audited in clear
+	if err != nil {
+		return err
+	}
+	it.Payload = sealed
 	var compact bytes.Buffer
 	if err := json.Compact(&compact, it.Payload); err != nil {
 		return err
