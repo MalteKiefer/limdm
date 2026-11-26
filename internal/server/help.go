@@ -125,7 +125,7 @@ var glossary = []struct{ Term, Text, Doc string }{
 }
 
 // auditActions names audit log actions; command.<type> uses the command name.
-var auditActions = map[string]string{
+var auditActions = map[string]string{ //nolint:gosec // action labels such as "Enrollment token created", no credentials
 	"agent.tamper": "Tamper attempt", "agent.update": "Agent updated", "agent.update_failed": "Agent update failed",
 	"agent_release.block": "Agent version blocked", "agent_update.request": "Agent update requested", "agent_updates.policy": "Agent update policy changed",
 	"blueprint.delete": "Blueprint deleted", "blueprint.save": "Blueprint saved",
