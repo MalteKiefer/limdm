@@ -13,7 +13,13 @@ func TestValidateOsquerySQL(t *testing.T) {
 		"WITH a AS (SELECT uid FROM users) SELECT count(*) AS n FROM a",
 		"SELECT replace(path, '/', '-') AS p FROM mounts",
 		"SELECT * FROM file WHERE path = '/tmp/insert; drop'", // keywords and ; inside a literal
-		"SELECT \"update\" FROM t",                            // quoted identifier
+		"SELECT \"update\" FROM users",                        // quoted identifier
+		"SELECT * FROM \"users\" u JOIN [groups] g ON u.gid = g.gid, `mounts`",
+		"SELECT * FROM main.users WHERE uid IN (SELECT uid FROM user_groups)",
+		"SELECT * FROM (SELECT * FROM users) AS s, (processes)",
+		"WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n LIMIT 3) SELECT x FROM n",
+		"SELECT 'curl' AS name, 'ä' FROM users", // names and unicode inside a literal
+		"SELECT * FROM users WHERE uid IN user_groups",
 	}
 	for _, q := range ok {
 		if err := ValidateOsquerySQL(q); err != nil {
@@ -36,6 +42,35 @@ func TestValidateOsquerySQL(t *testing.T) {
 		"SELECT 1\x00",
 		"PRAGMA table_info(users)",
 		strings.Repeat("x", 5000),
+		// quoting, schema and case tricks around a denied table (F3)
+		`SELECT result FROM "curl" WHERE url = 'http://169.254.169.254/'`,
+		"SELECT result FROM [curl]",
+		"SELECT result FROM `curl`",
+		"SELECT * FROM \"carves\"",
+		"SELECT * FROM main.\"curl\"",
+		"SELECT * FROM \"main\".curl",
+		"SELECT * FROM CURL",
+		// tables outside the allowlist in every table position
+		"SELECT * FROM ec2_instance_metadata",
+		"SELECT * FROM users, prometheus_metrics",
+		"SELECT * FROM users u JOIN process_envs e ON u.uid = e.pid, docker_containers",
+		"SELECT * FROM users JOIN processes ON 1 = 1, \"curl\"",
+		"SELECT * FROM ((\"curl\"))",
+		"SELECT (SELECT result FROM curl_certificate) FROM users",
+		"SELECT * FROM users WHERE 'x' IN azure_instance_metadata",
+		"SELECT * FROM users WHERE 'x' IN main.[curl]",
+		"SELECT * FROM sqlite_master",
+		"SELECT * FROM pragma_table_info('users')",
+		"WITH a AS (SELECT 1) SELECT * FROM users, (WITH curl AS (SELECT 1) SELECT * FROM curl)",
+		"SELECT * FROM a WHERE 1 IN (WITH a AS (SELECT 1) SELECT * FROM a)", // a is not declared at the top
+		// functions in quotes, unicode look alikes, comments
+		"SELECT \"load_extension\"('/tmp/x.so')",
+		"SELECT * FROM ｃｕｒｌ",
+		"SELECT * FROM \"cu​rl\"",
+		"SELECT 1 FROM users -- x",
+		"SELECT 1 FROM users /* x",
+		"SELECT * FROM",
+		"SELECT 1 FROM users\x7f",
 	}
 	for _, q := range bad {
 		if ValidateOsquerySQL(q) == nil {

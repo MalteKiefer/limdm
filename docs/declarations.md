@@ -79,8 +79,8 @@ Compliance checks defined by IT, counted like built in checks. Merged by `id`; a
 
 Every check has exactly one test. `op` is `eq`, `ne`, `lt`, `le`, `gt`, `ge` (numbers),
 `contains` or `matches` (RE2); `value` is up to 1024 characters. Queries run with `osqueryi`
-without extensions; writing statements and the tables `curl`, `curl_certificate` and `carves`
-are refused. Details: [compliance.md](compliance.md#custom-checks-comlimdmcustomchecks).
+without extensions and may read only an allowlist of local tables; writing statements and
+tables that reach the network or carve files are refused. Details: [compliance.md](compliance.md#custom-checks-comlimdmcustomchecks).
 
 ### `com.limdm.privacy`
 

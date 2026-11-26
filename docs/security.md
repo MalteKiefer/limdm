@@ -307,7 +307,9 @@ removes them; the deletion is one of them (`device.delete`).
 * The desktop socket authorizes by peer credentials and active local session.
 * Secrets on the device (`device.pem`, login configuration, state) are root only, 0600.
 * **Custom compliance checks** run no shell. A query check starts `osqueryi` with one read
-  only `SELECT` (validated on server and agent, no extensions, 30 seconds); file, sysctl,
+  only `SELECT` over an allowlist of local tables (validated on server and agent, enforced
+  again with `--enable_tables` and `--disable_tables`, no extensions, 30 seconds; only row
+  counts and a bounded compared value go back to the server); file, sysctl,
   package and service tests are evaluated by the agent itself. Expressions are RE2 (linear
   time). See [compliance.md](compliance.md#custom-checks-comlimdmcustomchecks).
 
