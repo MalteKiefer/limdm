@@ -49,6 +49,28 @@ switching it off also deletes stored values. `logged_in_users` reports active se
 `mode` is `off`, `security` or `all`. Updates run inside the local time window; with
 `reboot` the device restarts in the window when the update requires it.
 
+Optional patch management fields:
+
+```json
+{"mode": "security", "window": "22:00-04:00", "days": ["sat", "sun"], "hold": ["nginx"],
+ "autoremove": true, "snap_refresh": "window"}
+```
+
+* `days`: weekdays (`mon` … `sun`) the window applies to; empty means every day. A window
+  across midnight belongs to the day it starts on. Pending security updates count as
+  handled until the next window (up to 8 days with `days`, 48 hours without).
+* `hold`: packages kept at their installed version, also when `mode` is `off`. Debian
+  family: `apt-mark hold` (installed packages only); Fedora family: `excludepkgs` in a
+  libdnf5 drop in and in `/etc/dnf/dnf.conf` (dnf4), so dnf neither upgrades nor installs
+  them; Arch: `IgnorePkg` in `/etc/pacman.conf`. Not supported on Alpine (pin versions in
+  `/etc/apk/world`). Packages removed from the list are released again; values changed by
+  hand in `dnf.conf` or `pacman.conf` are left alone.
+* `autoremove`: after each update run remove packages nothing needs any more, old kernels
+  included (`apt-get autoremove --purge`, `dnf autoremove`, pacman orphans).
+* `snap_refresh` (only where snapd is installed): `hold` stops automatic snap refreshes,
+  `window` sets `refresh.timer` to the update window and days. Removing it restores the
+  snapd default.
+
 ### `com.limdm.packages` (list)
 
 ```json

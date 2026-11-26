@@ -695,7 +695,7 @@ func runSecurityUpdates(a *Agent) (string, string) {
 		return pass, detail
 	}
 	// Patch process working: pending updates are tolerated until the next window run.
-	if m := a.pol.Updates.Mode; m != "" && m != "off" && time.Since(a.state.LastUpdateRun) < 48*time.Hour {
+	if m := a.pol.Updates.Mode; m != "" && m != "off" && time.Since(a.state.LastUpdateRun) < updateGap(a.pol.Updates) {
 		return pass, detail + ", installed in the next maintenance window"
 	}
 	return fail, detail

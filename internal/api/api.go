@@ -101,7 +101,34 @@ type Updates struct {
 	Mode   string `json:"mode"`   // off | security | all
 	Window string `json:"window"` // local time "HH:MM-HH:MM"
 	Reboot bool   `json:"reboot"` // reboot inside the window when required
+	// Days limits the window to these weekdays (mon..sun); empty is every
+	// day. A window across midnight belongs to the day it starts on.
+	Days []string `json:"days,omitempty"`
+	// Hold keeps these packages at their installed version (apt-mark hold,
+	// dnf excludepkgs, pacman IgnorePkg).
+	Hold []string `json:"hold,omitempty"`
+	// Autoremove removes packages no longer needed, old kernels included,
+	// after each update run.
+	Autoremove bool `json:"autoremove,omitempty"`
+	// SnapRefresh controls snapd where it exists: "hold" stops automatic
+	// refreshes, "window" moves them into the update window; empty leaves
+	// snapd alone.
+	SnapRefresh string `json:"snap_refresh,omitempty"`
+	// Reboot deferral, see RebootDefer.
+	RebootDefer
 }
+
+// RebootDefer lets desktop users postpone a scheduled reboot: up to
+// MaxDefers times, each for DeferMinutes; the reboot is announced
+// NoticeMinutes ahead. MaxDefers 0 allows no deferral.
+type RebootDefer struct {
+	NoticeMinutes int `json:"reboot_notice_minutes,omitempty"` // 5 when unset, at most 120
+	MaxDefers     int `json:"reboot_max_defers,omitempty"`     // at most 5
+	DeferMinutes  int `json:"reboot_defer_minutes,omitempty"`  // 60 when unset, 15..480
+}
+
+// Weekdays are the values of Updates.Days, in time.Weekday order.
+var Weekdays = []string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
 
 type Packages struct {
 	Install []string `json:"install"`
@@ -266,8 +293,31 @@ func (d Declaration) apply(p *Policy) error {
 		default:
 			bad("mode must be off, security or all")
 		}
-		if p.Updates.Mode != "off" && !windowRe.MatchString(p.Updates.Window) {
+		u := p.Updates
+		if (u.Mode != "off" || u.SnapRefresh == "window") && !windowRe.MatchString(u.Window) {
 			bad("window must be HH:MM-HH:MM")
+		}
+		for i, d := range u.Days {
+			if !slices.Contains(Weekdays, d) || slices.Contains(u.Days[:i], d) {
+				bad("days: %q is not one of mon, tue, wed, thu, fri, sat, sun (each once)", d)
+			}
+		}
+		if len(u.Hold) > 200 {
+			bad("hold: at most 200 packages")
+		}
+		for _, n := range u.Hold {
+			if !pkgRe.MatchString(n) {
+				bad("hold: invalid package name %q", n)
+			}
+		}
+		switch u.SnapRefresh {
+		case "", "hold", "window":
+		default:
+			bad("snap_refresh must be hold or window")
+		}
+		if u.NoticeMinutes < 0 || u.NoticeMinutes > 120 || u.MaxDefers < 0 || u.MaxDefers > 5 ||
+			u.DeferMinutes != 0 && (u.DeferMinutes < 15 || u.DeferMinutes > 480) {
+			bad("reboot_notice_minutes 0..120, reboot_max_defers 0..5, reboot_defer_minutes 15..480")
 		}
 	case TypePackages:
 		if err := strict(d.Payload, &p.Packages); err != nil {

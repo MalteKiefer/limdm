@@ -137,7 +137,7 @@ func (a *Agent) applyProxy(p *api.Proxy) error {
 		_, e3 = writeOrRemove(proxyDnf5, dnf, 0o644)
 		if exists(dnfConf) {
 			var prev string
-			prev, e3 = syncDNFConf(dnfConf, dnfProxy, a.state.DNFProxy)
+			prev, e3 = syncINIKey(dnfConf, "main", "proxy", dnfProxy, a.state.DNFProxy)
 			if e3 == nil {
 				a.state.DNFProxy = prev
 			}
@@ -171,21 +171,21 @@ func (a *Agent) applyProxy(p *api.Proxy) error {
 	return errors.Join(e1, e2, e3, e4)
 }
 
-// syncDNFConf sets proxy= in the [main] section of dnf.conf (dnf4), or
+// syncINIKey sets key in section of an INI style file (dnf.conf, pacman.conf), or
 // removes it when want is empty and the value is still the one LiMDM wrote
 // (prev). It returns the value LiMDM now owns.
-func syncDNFConf(path, want, prev string) (string, error) {
+func syncINIKey(path, section, key, want, prev string) (string, error) {
 	b, err := os.ReadFile(path) //nolint:gosec // constant path
 	if err != nil {
 		return prev, err
 	}
 	s := string(b)
-	cur := iniValue(s, "main", "proxy")
+	cur := iniValue(s, section, key)
 	switch {
 	case want != "" && cur != want:
-		s = setINIValue(s, "main", "proxy", want)
+		s = setINIValue(s, section, key, want)
 	case want == "" && prev != "" && cur == prev:
-		s = removeINIKey(s, "main", "proxy")
+		s = removeINIKey(s, section, key)
 	default:
 		return want, nil // already right, or changed by hand and not ours any more
 	}

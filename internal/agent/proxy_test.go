@@ -41,22 +41,22 @@ func TestAgentProxyFollowsDeclaration(t *testing.T) {
 	}
 }
 
-func TestSyncDNFConf(t *testing.T) {
+func TestSyncINIKey(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "dnf.conf")
 	if err := os.WriteFile(p, []byte("[main]\ngpgcheck=1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	owned, err := syncDNFConf(p, "http://proxy:3128", "")
+	owned, err := syncINIKey(p, "main", "proxy", "http://proxy:3128", "")
 	if b, _ := os.ReadFile(p); err != nil || owned != "http://proxy:3128" || !strings.Contains(string(b), "proxy=http://proxy:3128") {
 		t.Fatalf("set: %v %q\n%s", err, owned, b)
 	}
-	owned, err = syncDNFConf(p, "", owned)
+	owned, err = syncINIKey(p, "main", "proxy", "", owned)
 	if b, _ := os.ReadFile(p); err != nil || owned != "" || strings.Contains(string(b), "proxy") || !strings.Contains(string(b), "gpgcheck=1") {
 		t.Fatalf("remove: %v %q\n%s", err, owned, b)
 	}
 	// a proxy set by hand is never removed
 	os.WriteFile(p, []byte("[main]\nproxy=http://own:8080\n"), 0o644) //nolint:errcheck,gosec // test file
-	if owned, _ = syncDNFConf(p, "", "http://proxy:3128"); owned != "" {
+	if owned, _ = syncINIKey(p, "main", "proxy", "", "http://proxy:3128"); owned != "" {
 		t.Fatalf("owned %q", owned)
 	}
 	if b, _ := os.ReadFile(p); !strings.Contains(string(b), "proxy=http://own:8080") {

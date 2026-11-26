@@ -93,6 +93,10 @@ type State struct {
 	OfflineLocked  bool                 `json:"offline_locked,omitempty"`
 	FallbackDNS    bool                 `json:"fallback_dns,omitempty"` // server allows the DNS over HTTPS fallback
 	DNFProxy       string               `json:"dnf_proxy,omitempty"`    // proxy= value LiMDM wrote to dnf.conf (dnf4)
+	Held           []string             `json:"held,omitempty"`         // packages LiMDM put on apt hold
+	DNFExclude     string               `json:"dnf_exclude,omitempty"`  // excludepkgs= value LiMDM wrote to dnf.conf
+	PacmanIgnore   string               `json:"pacman_ignore,omitempty"`
+	SnapRefresh    string               `json:"snap_refresh,omitempty"` // "hold" or "timer=..." LiMDM set in snapd
 }
 
 type Agent struct {
@@ -718,6 +722,12 @@ func (a *Agent) enforce() {
 	if err := a.applyUsers(); err != nil {
 		a.problem(api.TypeLogin, "users: %v", err)
 	}
+	if err := a.applyHolds(p.Updates.Hold); err != nil {
+		a.problem(api.TypeUpdates, "hold: %v", err)
+	}
+	if err := a.applySnapRefresh(p.Updates); err != nil {
+		a.problem(api.TypeUpdates, "snap refresh: %v", err)
+	}
 	a.applyExtra()
 	// osquery is mandatory as inventory source; retry hourly, not every cycle
 	if !hasOsquery() && time.Since(a.osqueryTried) > time.Hour {
@@ -757,7 +767,7 @@ func inWindow(now time.Time, window string) bool {
 // maintenance installs updates once per window and reboots if declared.
 func (a *Agent) maintenance(now time.Time) {
 	u := a.pol.Updates
-	if u.Mode == "" || u.Mode == "off" || !inWindow(now, u.Window) {
+	if u.Mode == "" || u.Mode == "off" || !inWindow(now, u.Window) || !updateDay(now, u.Window, u.Days) {
 		return
 	}
 	if now.Sub(a.state.LastUpdateRun) > 20*time.Hour {
@@ -767,6 +777,13 @@ func (a *Agent) maintenance(now time.Time) {
 			a.problem(api.TypeUpdates, "updates (%s) failed: %v", u.Mode, err)
 		} else {
 			a.event("updates (%s) installed: %s", u.Mode, lastLines(out, 3))
+			if u.Autoremove {
+				if out, err := a.host.autoremove(); err != nil {
+					a.problem(api.TypeUpdates, "autoremove failed: %v", err)
+				} else if strings.TrimSpace(out) != "" {
+					a.event("autoremove: %s", lastLines(out, 3))
+				}
+			}
 		}
 	}
 	// Schedule once: a new shutdown call would replace and postpone the pending one.
