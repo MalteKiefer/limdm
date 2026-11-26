@@ -148,15 +148,14 @@ Files removed from the declaration are deleted from the device: the agent rememb
 paths it wrote (from this version on) and removes the undeclared ones, except while a files
 declaration is invalid.
 
-Paths whose content runs as code are refused unless the device was enrolled with
-`allow_scripts`, the same opt in remote scripts need: cron, systemd units, sudoers and doas,
-shell profiles and `/etc/environment`, PAM, `ld.so.preload` and `ld.so.conf`, rc and init
-scripts, polkit, udev, modprobe, sysctl, tmpfiles and binfmt, package manager hooks and
-configuration, kernel and initramfs hooks, GRUB and `/boot`, logrotate, X11 and autostart,
-network hooks, sshd, the account databases, the agent's own directories, `/root` and binary
-and library directories (`/usr/bin`, `/usr/lib`, `/opt` …). The agent also resolves a
-symlinked parent before the check, and refuses files with an execute bit. The full list is
-`rootCodePaths` in `internal/api/api.go`.
+On devices enrolled without `allow_scripts` (the opt in remote scripts need) only plain
+text locations are accepted: `/etc/motd`, `/etc/issue`, `/etc/issue.net`, and files below
+`/etc/motd.d`, `/srv`, `/etc/opt` and `/var/opt`. Everything else is refused, because
+almost every other system path is read as code by something running as root (cron,
+systemd, sudo, PAM, shell profiles, the dynamic linker, D-Bus, package manager hooks …).
+There the agent also refuses files with an execute bit and paths with a symlink in any
+component, the file itself included, so a link cannot redirect the write. With
+`allow_scripts` any absolute path outside user writable directories works as before.
 
 ### `com.limdm.certificates` (list)
 

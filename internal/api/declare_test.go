@@ -31,15 +31,14 @@ func TestUpdatesPatchFields(t *testing.T) {
 	}
 }
 
-func TestRootCodePath(t *testing.T) {
+func TestSafeFilePath(t *testing.T) {
 	for p, want := range map[string]bool{
-		"/etc/cron.d/backup": true, "/etc/crontab": true, "/etc/sudoers": true, "/etc/sudoers.d/x": true, "/etc/systemd/system/x.service": true,
-		"/etc/profile.d/x.sh": true, "/etc/pam.d/sshd": true, "/etc/ld.so.preload": true, "/etc/init.d/x": true, "/etc/polkit-1/rules.d/x.rules": true,
-		"/etc/udev/rules.d/99.rules": true, "/etc/modprobe.d/x.conf": true, "/usr/local/bin/tool": true, "/etc/limdm/agent.json": true,
-		"/etc/default/grub.d/x.cfg": true,
-		"/etc/motd":                 false, "/etc/issue": false, "/etc/chrony/chrony.conf": false, "/etc/profiles": false, "/srv/app/config.yml": false,
+		"/etc/motd": true, "/etc/issue.net": true, "/srv/app/config.yml": true, "/etc/opt/app/app.conf": true, "/etc/motd.d/10-it": true,
+		"/etc/cron.d/backup": false, "/etc/sudo.conf": false, "/etc/environment": false, "/etc/dbus-1/system.d/x.conf": false,
+		"/etc/xdg/autostart/x.desktop": false, "/usr/lib/systemd/system/x.service": false, "/srv": false, "/srv/": false,
+		"/srv/../etc/cron.d/x": false, "/srv/a/../../etc/passwd": false, "/etc/motdx": false, "srv/x": false,
 	} {
-		if RootCodePath(p) != want {
+		if SafeFilePath(p) != want {
 			t.Errorf("%s: want %v", p, want)
 		}
 	}

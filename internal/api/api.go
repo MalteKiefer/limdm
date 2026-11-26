@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -153,8 +154,30 @@ type File struct {
 }
 
 type Firewall struct {
-	Enforce bool     `json:"enforce"`
-	Allow   []string `json:"allow"` // "22/tcp", "60000:61000/udp"
+	Enforce bool           `json:"enforce"`
+	Allow   []string       `json:"allow"`           // "22/tcp", "60000:61000/udp"
+	Rules   []FirewallRule `json:"rules,omitempty"` // allow rules limited to source networks
+}
+
+// FirewallRule allows a port only from a source network.
+type FirewallRule struct {
+	Port string `json:"port"` // as in Allow
+	From string `json:"from"` // CIDR or address
+}
+
+// FirewallRules is the effective set of allow rules: Allow without a source
+// plus Rules.
+func (f Firewall) FirewallRules() []FirewallRule {
+	out := make([]FirewallRule, 0, len(f.Allow)+len(f.Rules))
+	for _, a := range f.Allow {
+		out = append(out, FirewallRule{Port: a})
+	}
+	for _, r := range f.Rules {
+		if !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 type osPayload struct {
@@ -368,6 +391,16 @@ func (d Declaration) apply(p *Policy) error {
 		for _, a := range p.Firewall.Allow {
 			if !validPortRule(a) {
 				bad("invalid firewall rule %q (port 1..65535, ranges low:high)", a)
+			}
+		}
+		for _, r := range p.Firewall.Rules {
+			if !validPortRule(r.Port) {
+				bad("invalid firewall rule %q (port 1..65535, ranges low:high)", r.Port)
+			}
+			if _, err := netip.ParsePrefix(r.From); err != nil {
+				if _, err := netip.ParseAddr(r.From); err != nil || strings.Contains(r.From, "%") {
+					bad("firewall rule %s: from must be a network (CIDR) or an address, got %q", r.Port, r.From)
+				}
 			}
 		}
 	case TypeOSVersion:
@@ -990,36 +1023,28 @@ func CompareVersions(a, b string) int {
 	return 0
 }
 
-// rootCodePaths are files and directories (trailing slash) whose content
-// root or the system runs as code: cron, systemd units, sudoers, shell
-// profiles, PAM, the dynamic linker, init scripts, polkit, udev, modprobe,
-// package manager hooks, binaries and the agent itself. Files declarations
-// may write there only on devices enrolled with allow_scripts.
-var rootCodePaths = []string{
-	"/etc/cron.d/", "/etc/cron.hourly/", "/etc/cron.daily/", "/etc/cron.weekly/", "/etc/cron.monthly/", "/etc/crontab", "/etc/anacrontab", "/etc/periodic/",
-	"/etc/systemd/", "/usr/lib/systemd/", "/lib/systemd/", "/usr/local/lib/systemd/", "/run/systemd/", "/etc/xdg/systemd/",
-	"/etc/sudoers", "/etc/sudoers.d/", "/etc/doas.conf", "/etc/doas.d/",
-	"/etc/profile", "/etc/profile.d/", "/etc/bash.bashrc", "/etc/bashrc", "/etc/environment", "/etc/zsh/", "/etc/zshenv", "/etc/zprofile", "/etc/zshrc", "/etc/csh.cshrc", "/etc/csh.login", "/etc/fish/",
-	"/etc/pam.d/", "/etc/pam.conf", "/etc/security/", "/lib/security/", "/usr/lib/security/", "/lib64/security/", "/usr/lib64/security/",
-	"/etc/ld.so.preload", "/etc/ld.so.conf", "/etc/ld.so.conf.d/",
-	"/etc/rc.local", "/etc/rc.d/", "/etc/init.d/", "/etc/init/", "/etc/rc0.d/", "/etc/rc1.d/", "/etc/rc2.d/", "/etc/rc3.d/", "/etc/rc4.d/", "/etc/rc5.d/", "/etc/rc6.d/", "/etc/rcS.d/",
-	"/etc/local.d/", "/etc/conf.d/", "/etc/runlevels/",
-	"/etc/polkit-1/", "/usr/share/polkit-1/",
-	"/etc/udev/", "/usr/lib/udev/", "/lib/udev/",
-	"/etc/modprobe.d/", "/usr/lib/modprobe.d/", "/lib/modprobe.d/", "/etc/modules-load.d/", "/etc/modules", "/etc/binfmt.d/", "/etc/sysctl.conf", "/etc/sysctl.d/", "/etc/tmpfiles.d/",
-	"/etc/apt/apt.conf.d/", "/etc/dpkg/", "/etc/dnf/", "/etc/yum/", "/etc/pacman.conf", "/etc/pacman.d/", "/usr/share/libalpm/", "/etc/apk/",
-	"/etc/kernel/", "/etc/initramfs-tools/", "/etc/dracut.conf.d/", "/etc/grub.d/", "/etc/default/grub", "/boot/",
-	"/etc/logrotate.d/", "/etc/logrotate.conf", "/etc/X11/", "/etc/xdg/autostart/", "/etc/NetworkManager/dispatcher.d/", "/etc/network/", "/etc/ppp/",
-	"/etc/ssh/", "/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow", "/etc/nsswitch.conf",
-	"/etc/limdm/", "/var/lib/limdm/", "/usr/lib/limdm/", "/root/",
-	"/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/", "/usr/local/bin/", "/usr/local/sbin/", "/lib/", "/lib64/", "/usr/lib/", "/usr/lib64/", "/usr/libexec/", "/usr/local/lib/", "/usr/local/libexec/", "/opt/",
-}
+// safeFiles and safeDirs (trailing slash) are where a files declaration
+// may write on devices enrolled without allow_scripts: plain text that no
+// program runs as code. Everything else (cron, systemd, sudoers, profiles,
+// PAM, the dynamic linker, D-Bus, binaries, the agent …) needs allow_scripts,
+// the same opt in remote scripts need. An allowlist, because a denylist of
+// code loading paths is never complete.
+var (
+	safeFiles = []string{"/etc/motd", "/etc/issue", "/etc/issue.net"}
+	safeDirs  = []string{"/etc/motd.d/", "/srv/", "/etc/opt/", "/var/opt/"}
+)
 
-// RootCodePath reports whether a files declaration writing p (an absolute,
-// clean path) amounts to running code as root; see rootCodePaths.
-func RootCodePath(p string) bool {
-	for _, d := range rootCodePaths {
-		if p == d || p == strings.TrimSuffix(d, "/") || strings.HasSuffix(d, "/") && strings.HasPrefix(p, d) || !strings.HasSuffix(d, "/") && strings.HasPrefix(p, d+".") {
+// SafeFilePath reports whether p (absolute and clean) may be written by a
+// files declaration on a device without allow_scripts.
+func SafeFilePath(p string) bool {
+	if filepath.Clean(p) != p || !filepath.IsAbs(p) {
+		return false
+	}
+	if slices.Contains(safeFiles, p) {
+		return true
+	}
+	for _, d := range safeDirs {
+		if strings.HasPrefix(p, d) && len(p) > len(d) {
 			return true
 		}
 	}

@@ -13,22 +13,40 @@ import (
 	"github.com/maltekiefer/limdm/internal/api"
 )
 
-// fileAllowed refuses targets that run as code unless the device allows
-// scripts: denylisted paths (also behind a symlinked parent) and files
-// with an execute bit.
+// fileAllowed limits devices without allow_scripts to the allowlist of
+// plain text locations (api.SafeFilePath), refuses files with an execute
+// bit there, and makes sure no component of the path is a symlink: a link
+// in a parent would redirect the write elsewhere, and a link as the file
+// itself would make the mode change follow it.
 func fileAllowed(f api.File, allowScripts bool) error {
 	if allowScripts {
 		return nil
 	}
-	resolved := f.Path
-	if dir, err := filepath.EvalSymlinks(filepath.Dir(f.Path)); err == nil {
-		resolved = filepath.Join(dir, filepath.Base(f.Path))
-	}
-	if api.RootCodePath(f.Path) || api.RootCodePath(resolved) {
-		return errors.New("path runs as code (cron, systemd, sudoers, PAM, profile, binaries …); only on devices enrolled with allow_scripts")
+	if !api.SafeFilePath(f.Path) {
+		return errors.New("only /etc/motd, /etc/issue, /etc/issue.net, /etc/motd.d, /srv, /etc/opt and /var/opt on devices enrolled without allow_scripts")
 	}
 	if m, _ := f.FileMode(); m&0o111 != 0 {
 		return errors.New("executable files only on devices enrolled with allow_scripts")
+	}
+	return noSymlinks(f.Path)
+}
+
+// noSymlinks fails when the deepest existing directory of p resolves to a
+// different path, or p itself is a symlink.
+func noSymlinks(p string) error {
+	dir := filepath.Dir(p)
+	for !exists(dir) && dir != "/" {
+		dir = filepath.Dir(dir)
+	}
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
+	if real != dir {
+		return fmt.Errorf("%s is a symlink to %s", dir, real)
+	}
+	if st, err := os.Lstat(p); err == nil && st.Mode()&os.ModeSymlink != 0 {
+		return errors.New("the file is a symlink")
 	}
 	return nil
 }
