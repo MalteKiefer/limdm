@@ -1388,4 +1388,7 @@ var deCatalog = map[string]string{
 	// v0.16.0 integration
 	"Webhook signing secret": "Webhook Signaturgeheimnis",
 	"Generate a new webhook signing secret? Every webhook receiver needs it.": "Neues Webhook Signaturgeheimnis erzeugen? Jeder Webhook Empfänger benötigt es.",
+	// review
+	"New administrator":               "Neuer Administrator",
+	"Administrator credentials reset": "Zugangsdaten eines Administrators zurückgesetzt",
 }

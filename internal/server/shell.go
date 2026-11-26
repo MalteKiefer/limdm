@@ -80,32 +80,47 @@ func remoteShellForm(r *http.Request) RemoteShellSettings {
 var errAwaitingApproval = errors.New("the action waits for approval")
 
 // requireApproval applies four eyes approval (approvals.go) to a remote
-// shell when the setting asks for it: an approved request of this user for
-// this device is used up and the action runs; otherwise a request is filed
-// (once) and errAwaitingApproval returned. Other actions run.
-func (s *Server) requireApproval(ctx context.Context, sess session, action, target string) error { //nolint:unparam // the E3 hook takes the action name
+// shell when the setting asks for it. The approval names the local user, so
+// an approval for one account never opens a shell as another. It returns the
+// approved request for useApproval (0 when no approval is needed); otherwise
+// a request is filed (once) and errAwaitingApproval returned.
+func (s *Server) requireApproval(ctx context.Context, sess session, action, target, user string) (int64, error) { //nolint:unparam // the E3 hook takes the action name
 	if action != "remote_shell" || !s.settings().FourEyesShell {
-		return nil
+		return 0, nil
 	}
-	tag, err := s.db.Exec(ctx, `UPDATE approvals SET status='used' WHERE id = (SELECT id FROM approvals
-		WHERE action=$1 AND target=$2 AND requested_by=$3 AND status='approved' AND expires_at > now() ORDER BY id DESC LIMIT 1)`, action, target, sess.Email)
-	if err != nil {
-		return err
+	var id int64
+	err := s.db.QueryRow(ctx, `SELECT id FROM approvals WHERE action=$1 AND target=$2 AND requested_by=$3 AND payload->>'user'=$4
+		AND status='approved' AND expires_at > now() ORDER BY id DESC LIMIT 1`, action, target, sess.Email, user).Scan(&id)
+	if err == nil {
+		return id, nil
 	}
-	if tag.RowsAffected() == 1 {
-		return nil
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, err
 	}
 	var pending bool
 	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approvals WHERE action=$1 AND target=$2 AND requested_by=$3
-		AND status='pending' AND expires_at > now())`, action, target, sess.Email).Scan(&pending); err != nil {
-		return err
+		AND payload->>'user'=$4 AND status='pending' AND expires_at > now())`, action, target, sess.Email, user).Scan(&pending); err != nil {
+		return 0, err
 	}
 	if !pending {
-		if _, err := s.requestApproval(ctx, sess, action, target, map[string]string{}, ""); err != nil {
-			return err
+		if _, err := s.requestApproval(ctx, sess, action, target, map[string]string{"user": user}, ""); err != nil {
+			return 0, err
 		}
 	}
-	return errAwaitingApproval
+	return 0, errAwaitingApproval
+}
+
+// useApproval marks an approved request as used in the transaction that
+// starts the action, so a failed start keeps the approval.
+func useApproval(ctx context.Context, tx pgx.Tx, id int64) error {
+	if id == 0 {
+		return nil
+	}
+	tag, err := tx.Exec(ctx, `UPDATE approvals SET status='used' WHERE id=$1 AND status='approved' AND expires_at > now()`, id)
+	if err == nil && tag.RowsAffected() != 1 {
+		err = errAwaitingApproval
+	}
+	return err
 }
 
 type shellHub struct {
@@ -315,7 +330,12 @@ func (s *Server) shellStart(w http.ResponseWriter, r *http.Request, sess session
 		back("user")
 		return
 	}
-	if err := s.requireApproval(ctx, sess, "remote_shell", id); errors.Is(err, errAwaitingApproval) {
+	user := cmd.User
+	if user == "" {
+		user = "limdm-support"
+	}
+	approvalID, err := s.requireApproval(ctx, sess, "remote_shell", id, user)
+	if errors.Is(err, errAwaitingApproval) {
 		back("approval")
 		return
 	} else if err != nil {
@@ -323,12 +343,11 @@ func (s *Server) shellStart(w http.ResponseWriter, r *http.Request, sess session
 		return
 	}
 	payload, _ := json.Marshal(cmd)
-	user := cmd.User
-	if user == "" {
-		user = "limdm-support"
-	}
 	var cmdID int64
-	err := s.auditAction(ctx, sess.Email, "shell.start", id, "session "+cmd.Session+" as "+user, func(tx pgx.Tx) error {
+	err = s.auditAction(ctx, sess.Email, "shell.start", id, "session "+cmd.Session+" as "+user, func(tx pgx.Tx) error {
+		if err := useApproval(ctx, tx, approvalID); err != nil {
+			return err
+		}
 		var err error
 		if cmdID, err = s.insertCommand(ctx, tx, id, "shell", string(payload), sess.Email); err != nil {
 			return err

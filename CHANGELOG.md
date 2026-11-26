@@ -95,6 +95,7 @@ change behavior they rely on.
 - Every document in docs/ was checked against the code and rewritten where it was wrong or incomplete.
 
 ### Fixed
+- Four eyes approval covers every change to an administrator account (add, disable or enable, credential reset; new credentials go to the approver), refuses approvals by the creator of the requesting API token, and binds a remote shell approval to its local user; an approval is used only when the session really starts.
 - A key rotation whose database transaction failed left `keys.json` on the new keys while the database named the old ones; `keys.json` is now replaced only after the commit.
 - A session key rotation changed the webhook signature and broke every receiver.
 - The proxy declaration reaches the agent; dnf4, pacman, apk and flatpak honor it.

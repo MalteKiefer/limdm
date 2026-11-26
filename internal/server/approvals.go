@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -59,7 +60,9 @@ func (s *Server) requestApproval(ctx context.Context, sess session, action, targ
 		// the tenant that decides: the requester's, else the target device's or user's
 		err := tx.QueryRow(ctx, `INSERT INTO approvals(action, target, payload, reason, requested_by, expires_at, tenant_id)
 			VALUES ($1,$2,$3,$4,$5, now() + make_interval(secs => $6), coalesce(nullif($7::bigint, 0), (SELECT tenant_id FROM devices WHERE id=$2),
-				(SELECT tenant_id FROM console_users WHERE email=$2), (SELECT tenant_id FROM local_admins WHERE 'local:' || name = $2), 1)) RETURNING id, tenant_id`,
+				(SELECT tenant_id FROM console_users WHERE email=$2), (SELECT tenant_id FROM local_admins WHERE 'local:' || name = $2), 1)) RETURNING id,
+				coalesce(nullif($7::bigint, 0), (SELECT tenant_id FROM devices WHERE id=$2), (SELECT tenant_id FROM console_users WHERE email=$2),
+					(SELECT tenant_id FROM local_admins WHERE 'local:' || name = $2), 0)`,
 			action, target, b, reason, sess.Email, approvalTTL.Seconds(), sess.Tenant).Scan(&id, &tenant)
 		return sess.Email, "approval.request", target, fmt.Sprintf("#%d %s %s reason=%q", id, action, truncate(string(b), 2000), reason), err
 	})
@@ -68,7 +71,7 @@ func (s *Server) requestApproval(ctx context.Context, sess session, action, targ
 	}
 	s.notify(notice{Type: "approval.request", Severity: "warning", Title: "Approval requested: " + action + " " + target,
 		Text: fmt.Sprintf("%s asks for %s on %s. Reason: %s. Another admin decides under Approvals within 24 hours.", sess.Email, action, target, firstNonEmpty(reason, "none given")),
-		URL:  s.cfg.PublicURL + "/approvals", Tenant: tenant}) // the tenant's channels and the global ones
+		URL:  s.cfg.PublicURL + "/approvals", Tenant: tenant}) // the tenant's channels and the global ones; 0 for global accounts
 	return id, nil
 }
 
@@ -77,6 +80,14 @@ func (s *Server) approvalsPage(w http.ResponseWriter, r *http.Request, sess sess
 }
 
 func (s *Server) renderApprovals(w http.ResponseWriter, r *http.Request, sess session, errMsg string) {
+	s.renderApprovalsWith(w, r, sess, errMsg, "")
+}
+
+func (s *Server) renderApprovalsCreds(w http.ResponseWriter, r *http.Request, sess session, creds string) {
+	s.renderApprovalsWith(w, r, sess, "", creds)
+}
+
+func (s *Server) renderApprovalsWith(w http.ResponseWriter, r *http.Request, sess session, errMsg, creds string) {
 	tcond, targs := tenantCond(sess, "tenant_id", 1)
 	q := `SELECT id, action, target, payload, reason, requested_by, status, decided_by, decided_at, created_at, expires_at
 		FROM approvals WHERE ($1 = '' OR requested_by = $1) AND ` + tcond + ` ORDER BY status <> 'pending', id DESC LIMIT 200`
@@ -94,7 +105,7 @@ func (s *Server) renderApprovals(w http.ResponseWriter, r *http.Request, sess se
 		s.fail(w, err)
 		return
 	}
-	s.render(w, r, sess, "approvals", map[string]any{"Approvals": list, "FourEyes": s.settings().FourEyes, "Error": errMsg})
+	s.render(w, r, sess, "approvals", map[string]any{"Approvals": list, "FourEyes": s.settings().FourEyes, "Error": errMsg, "Creds": creds})
 }
 
 // approvalDecide approves or rejects a pending request (admins only, never
@@ -109,6 +120,7 @@ func (s *Server) approvalDecide(w http.ResponseWriter, r *http.Request, sess ses
 		return
 	}
 	var notices []func()
+	var creds string // new local credentials, shown once to the approver
 	err = func() error {
 		tx, err := s.db.Begin(ctx)
 		if err != nil {
@@ -128,7 +140,7 @@ func (s *Server) approvalDecide(w http.ResponseWriter, r *http.Request, sess ses
 			return errApproval("this request was decided already")
 		case time.Now().After(a.ExpiresAt):
 			return errApproval("this request has expired")
-		case a.RequestedBy == sess.Email:
+		case s.sameActor(ctx, tx, a.RequestedBy, sess.Email):
 			return errApproval("you cannot decide your own request")
 		}
 		status, expires := "rejected", a.ExpiresAt
@@ -168,6 +180,25 @@ func (s *Server) approvalDecide(w http.ResponseWriter, r *http.Request, sess ses
 					return err
 				}
 				notices = append(notices, func() { s.notifyRoleChange(a.RequestedBy, a.Target, old, c.Role, sess.Email) })
+			case "user.add":
+				var c userAddition
+				if err := json.Unmarshal(a.Payload, &c); err != nil {
+					return err
+				}
+				if creds, err = c.apply(ctx, tx); err != nil {
+					return errApproval(err.Error())
+				}
+				if err := audit(ctx, tx, a.RequestedBy, "user.add", a.Target, c.Kind+" "+c.Role+fmt.Sprintf(" (approval #%d by %s)", a.ID, sess.Email)); err != nil {
+					return err
+				}
+			case "user.reset":
+				name := strings.TrimPrefix(a.Target, localPrefix)
+				if creds, err = localReset(ctx, tx, name); err != nil {
+					return errApproval(err.Error())
+				}
+				if err := audit(ctx, tx, a.RequestedBy, "user.reset", a.Target, fmt.Sprintf("new password and TOTP (approval #%d by %s)", a.ID, sess.Email)); err != nil {
+					return err
+				}
 			case "recovery.view", "remote_shell":
 				expires = time.Now().Add(viewWindow) // the requester opens the key or shell within the hour
 			default:
@@ -198,6 +229,10 @@ func (s *Server) approvalDecide(w http.ResponseWriter, r *http.Request, sess ses
 	for _, n := range notices {
 		n()
 	}
+	if creds != "" {
+		s.renderApprovalsCreds(w, r, sess, creds)
+		return
+	}
 	http.Redirect(w, r, "/approvals", http.StatusSeeOther)
 }
 
@@ -215,7 +250,7 @@ func (s *Server) expireApprovals(ctx context.Context) error {
 	}
 	defer tx.Rollback(ctx)
 	rows, err := tx.Query(ctx, `UPDATE approvals SET status='expired'
-		WHERE (status = 'pending' OR status = 'approved' AND action = 'recovery.view') AND expires_at < now()
+		WHERE (status = 'pending' OR status = 'approved' AND action IN ('recovery.view', 'remote_shell')) AND expires_at < now()
 		RETURNING id, action, target, requested_by`)
 	if err != nil {
 		return err
@@ -234,4 +269,26 @@ func (s *Server) expireApprovals(ctx context.Context) error {
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// sameActor reports whether a request was made by the deciding admin: the
+// same login, or an API token that admin created.
+func (s *Server) sameActor(ctx context.Context, tx pgx.Tx, requestedBy, email string) bool {
+	if requestedBy == email {
+		return true
+	}
+	rest, ok := strings.CutPrefix(requestedBy, "api:")
+	if !ok {
+		return false
+	}
+	i := strings.LastIndexByte(rest, '#')
+	id, err := strconv.ParseInt(rest[i+1:], 10, 64)
+	if i < 0 || err != nil {
+		return true // an API requester we cannot resolve never passes as someone else
+	}
+	var creator string
+	if err := tx.QueryRow(ctx, `SELECT created_by FROM api_tokens WHERE id=$1`, id).Scan(&creator); err != nil {
+		return true
+	}
+	return creator == email
 }

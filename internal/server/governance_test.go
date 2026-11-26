@@ -218,20 +218,38 @@ func TestGovernance(t *testing.T) {
 	shellSet.FourEyesShell = true
 	s.rt.Store(&runtimeState{set: shellSet, auth: &oidcAuth{}})
 	asA := session{Email: "a@x.de", Role: "admin"}
-	if err := s.requireApproval(ctx, asA, "remote_shell", "d1"); !errors.Is(err, errAwaitingApproval) {
+	if _, err := s.requireApproval(ctx, asA, "remote_shell", "d1", "alice"); !errors.Is(err, errAwaitingApproval) {
 		t.Fatalf("shell without approval: %v", err)
 	}
-	s.requireApproval(ctx, asA, "remote_shell", "d1") // no second request while one is pending
+	s.requireApproval(ctx, asA, "remote_shell", "d1", "alice") // no second request while one is pending
 	var shellID int64
 	db.QueryRow(ctx, `SELECT count(*), max(id) FROM approvals WHERE action='remote_shell' AND status='pending'`).Scan(&n, &shellID)
 	if n != 1 {
 		t.Fatalf("shell requests: %d", n)
 	}
 	ui("POST", "/approvals/"+strconv.FormatInt(shellID, 10)+"/approve", url.Values{}, "b@x.de", "admin")
-	if err := s.requireApproval(ctx, asA, "remote_shell", "d1"); err != nil {
-		t.Fatalf("approved shell: %v", err)
+	if _, err := s.requireApproval(ctx, asA, "remote_shell", "d1", "root"); !errors.Is(err, errAwaitingApproval) {
+		t.Fatal("an approval for alice opened a shell as root")
 	}
-	if err := s.requireApproval(ctx, asA, "remote_shell", "d1"); !errors.Is(err, errAwaitingApproval) {
+	aid, err := s.requireApproval(ctx, asA, "remote_shell", "d1", "alice")
+	if err != nil || aid != shellID {
+		t.Fatalf("approved shell: %d %v", aid, err)
+	}
+	use := func() error {
+		tx, err := db.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(ctx)
+		if err := useApproval(ctx, tx, aid); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+	if err := use(); err != nil {
+		t.Fatalf("use approval: %v", err)
+	}
+	if err := use(); !errors.Is(err, errAwaitingApproval) {
 		t.Fatal("a shell approval was used twice")
 	}
 	// role changes wait too, and the last two admins stay admins
@@ -252,6 +270,45 @@ func TestGovernance(t *testing.T) {
 	db.QueryRow(ctx, `SELECT status FROM approvals WHERE id=$1`, id).Scan(&st)
 	if st != "expired" {
 		t.Fatalf("expired request: %s", st)
+	}
+
+	// ---- account management cannot get around four eyes ----
+	ui("POST", "/users", url.Values{"kind": {"local"}, "login": {"second"}, "role": {"admin"}}, "a@x.de", "admin")
+	if s.currentRole(ctx, "local:second") != "" {
+		t.Fatal("an admin account was created without approval")
+	}
+	var addID int64
+	db.QueryRow(ctx, `SELECT id FROM approvals WHERE status='pending' AND action='user.add'`).Scan(&addID)
+	if code, body := ui("POST", "/approvals/"+strconv.FormatInt(addID, 10)+"/approve", url.Values{}, "b@x.de", "admin"); code != http.StatusOK || !strings.Contains(body, "creds") {
+		t.Fatalf("approved admin account: %d, credentials not shown to the approver", code)
+	}
+	if s.currentRole(ctx, "local:second") != "admin" {
+		t.Fatal("approved admin account not created")
+	}
+	ui("POST", "/users/reset", url.Values{"login": {"local:second"}}, "a@x.de", "admin")
+	var resetN int
+	db.QueryRow(ctx, `SELECT count(*) FROM approvals WHERE status='pending' AND action='user.reset' AND target='local:second'`).Scan(&resetN)
+	if resetN != 1 {
+		t.Fatal("an admin's credentials were reset without approval")
+	}
+	ui("POST", "/users/update", url.Values{"login": {"local:second"}, "role": {"admin"}, "disabled": {"on"}}, "a@x.de", "admin")
+	var disabled bool
+	db.QueryRow(ctx, `SELECT disabled FROM local_admins WHERE name='second'`).Scan(&disabled)
+	if disabled {
+		t.Fatal("an admin was disabled without approval")
+	}
+	// a request through an API token counts as its creator's
+	must(`INSERT INTO api_tokens(name, prefix, token_hash, role, read_only, created_by, expires_at) VALUES ('t','p','h-own','admin',false,'a@x.de', now() + interval '1 day')`)
+	var tokID int64
+	db.QueryRow(ctx, `SELECT id FROM api_tokens WHERE token_hash='h-own'`).Scan(&tokID)
+	tokReq, err := s.requestApproval(ctx, apiCaller{ID: tokID, Name: "t", Role: "admin"}.sess(), "command", "d1", commandApproval{Type: "sync", Payload: "{}"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ui("POST", "/approvals/"+strconv.FormatInt(tokReq, 10)+"/approve", url.Values{}, "a@x.de", "admin")
+	db.QueryRow(ctx, `SELECT status FROM approvals WHERE id=$1`, tokReq).Scan(&st)
+	if st != "pending" {
+		t.Fatalf("the token creator approved their own request: %s", st)
 	}
 
 	// ---- risk exceptions reach the compliance declaration while active ----

@@ -166,11 +166,16 @@ global only.
 ## Four eyes approval
 
 **Settings**, **Security**, **Four eyes approval** makes a second administrator approve:
-wipe, lost mode, scripts and role changes of console users, and optionally recovery key
-views and remote shell sessions. The action is stored as a request under **Approvals** (with an optional reason;
+wipe, lost mode, scripts, role changes of console users, every change to an administrator
+account (adding one, disabling or enabling one, resetting a local administrator's
+credentials), and optionally recovery key views and remote shell sessions. New local
+administrator credentials after an approved add or reset are shown once to the approving
+admin, who hands them over, so the requester never holds a second administrator account. A
+remote shell approval names the local user: an approval for one account never opens a shell
+as another. The action is stored as a request under **Approvals** (with an optional reason;
 for recovery keys the reason or ticket reference is required) and announced as
 `approval.request`. Another admin approves or rejects it; the requester can never decide
-their own request. An approved command or role change runs at once, in the name of the
+their own request, also not through an API token they created. An approved command or role change runs at once, in the name of the
 requester, with the approval number and the approver in its audit entry. An approved
 recovery key view or remote shell opens for the requester once, within one hour. Requests nobody decides
 expire after 24 hours. Request, approval, rejection, expiry and use are audited. Bulk

@@ -160,6 +160,21 @@ func (s *Server) userAdd(w http.ResponseWriter, r *http.Request, sess session) {
 	if sess.Tenant != 0 {
 		tenantID = &sess.Tenant
 	}
+	if role == "admin" && s.settings().FourEyes {
+		// a second admin decides; local credentials are shown to the approver,
+		// so the requester never holds a second admin account
+		add := userAddition{Kind: kind, Login: strings.TrimSpace(r.FormValue("login")), Role: role, Tenant: tenantID}
+		if err := add.normalize(); err != nil {
+			s.renderUsers(w, r, sess, "", err.Error())
+			return
+		}
+		if _, err := s.requestApproval(ctx, sess, "user.add", add.target(), add, strings.TrimSpace(r.FormValue("reason"))); err != nil {
+			s.renderUsers(w, r, sess, "", err.Error())
+			return
+		}
+		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+		return
+	}
 	if kind == "oidc" {
 		addr, err := mail.ParseAddress(strings.TrimSpace(r.FormValue("login")))
 		if err != nil || addr.Name != "" {
@@ -236,7 +251,7 @@ func (s *Server) userUpdate(w http.ResponseWriter, r *http.Request, sess session
 		s.renderUsers(w, r, sess, "", "user not found")
 		return
 	}
-	if cur != c.Role && s.settings().FourEyes {
+	if (cur != c.Role || cur == "admin") && s.settings().FourEyes {
 		if _, err := s.requestApproval(ctx, sess, "user.update", login, c, strings.TrimSpace(r.FormValue("reason"))); err != nil {
 			s.renderUsers(w, r, sess, "", err.Error())
 			return
@@ -352,6 +367,15 @@ func (s *Server) userReset(w http.ResponseWriter, r *http.Request, sess session)
 		s.renderUsers(w, r, sess, "", "user not found")
 		return
 	}
+	if s.currentRole(ctx, localPrefix+name) == "admin" && s.settings().FourEyes {
+		// the new credentials are shown to the approving admin, not the requester
+		if _, err := s.requestApproval(ctx, sess, "user.reset", localPrefix+name, map[string]string{"login": localPrefix + name}, strings.TrimSpace(r.FormValue("reason"))); err != nil {
+			s.renderUsers(w, r, sess, "", err.Error())
+			return
+		}
+		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+		return
+	}
 	var creds string
 	err := s.auditAction(ctx, sess.Email, "user.reset", localPrefix+name, "new password and TOTP", func(tx pgx.Tx) error {
 		var err error
@@ -363,4 +387,53 @@ func (s *Server) userReset(w http.ResponseWriter, r *http.Request, sess session)
 		return
 	}
 	s.renderUsers(w, r, sess, creds, "")
+}
+
+// userAddition is a new console account waiting for four eyes approval.
+type userAddition struct {
+	Kind   string `json:"kind"` // oidc | local
+	Login  string `json:"login"`
+	Role   string `json:"role"`
+	Tenant *int64 `json:"tenant,omitempty"`
+}
+
+func (a *userAddition) normalize() error {
+	if a.Kind == "oidc" {
+		addr, err := mail.ParseAddress(a.Login)
+		if err != nil || addr.Name != "" {
+			return errors.New("enter a plain email address")
+		}
+		a.Login = strings.ToLower(addr.Address)
+		return nil
+	}
+	a.Kind, a.Login = "local", strings.ToLower(a.Login)
+	if !localNameRe.MatchString(a.Login) {
+		return errors.New("local name: 2..32 lowercase letters, digits, dot, dash, underscore")
+	}
+	return nil
+}
+
+// target is the login the account will have.
+func (a userAddition) target() string {
+	if a.Kind == "local" {
+		return localPrefix + a.Login
+	}
+	return a.Login
+}
+
+// apply creates the account in tx and returns local credentials ("" for OIDC).
+func (a userAddition) apply(ctx context.Context, tx pgx.Tx) (string, error) {
+	if a.Kind == "oidc" {
+		tag, err := tx.Exec(ctx, `INSERT INTO console_users(email, role, tenant_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, a.Login, a.Role, a.Tenant)
+		if err == nil && tag.RowsAffected() == 0 {
+			err = errors.New("user exists already")
+		}
+		return "", err
+	}
+	creds, err := localAdd(ctx, tx, a.Login, a.Role)
+	if err != nil {
+		return "", err
+	}
+	_, err = tx.Exec(ctx, `UPDATE local_admins SET tenant_id=$2 WHERE name=$1`, a.Login, a.Tenant)
+	return creds, err
 }
