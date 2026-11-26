@@ -815,12 +815,15 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	tx, err := s.db.Begin(ctx)
+	dbTx, err := s.db.Begin(ctx)
 	if err != nil {
 		s.failAPI(w, err)
 		return
 	}
-	defer tx.Rollback(ctx)
+	defer dbTx.Rollback(ctx)
+	// audit entries (command results, tamper events, escrow, compliance) are
+	// appended at the commit, so the global audit lock is held only there
+	tx := &auditTx{Tx: dbTx}
 	// one check in per device at a time: a retry or a poll triggered check in
 	// running in parallel would otherwise overwrite this one's results
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM devices WHERE id=$1 FOR UPDATE`, id); err != nil {
@@ -1058,6 +1061,10 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 // any later modification of a row breaks verification of every following row;
 // the hash is keyed (audit.go), so it cannot be recomputed from the database.
 func audit(ctx context.Context, tx pgx.Tx, actor, action, target, detail string) error {
+	if d, ok := tx.(*auditTx); ok {
+		d.pending = append(d.pending, auditEntry{ctxTenant(ctx), actor, action, target, detail})
+		return nil
+	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7363)`); err != nil {
 		return err
 	}
@@ -1082,6 +1089,29 @@ func audit(ctx context.Context, tx pgx.Tx, actor, action, target, detail string)
 	_, err = tx.Exec(ctx, `INSERT INTO audit_log(at, actor, action, target, detail, prev, hash, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
 		at, actor, action, target, detail, prev, auditHash(auditKey, prev, at, auditFields(actor, action, target, detail, tenant)...), tenant)
 	return err
+}
+
+// auditTx is a transaction whose audit entries are appended at its commit:
+// the global audit lock is then held for the append and the commit only, not
+// for the rest of a long transaction such as a check in. Entries made inside
+// a savepoint (tx.Begin) are written at once.
+type auditTx struct {
+	pgx.Tx
+	pending []auditEntry
+}
+
+type auditEntry struct {
+	tenant                        int64 // of the request (ctxTenant)
+	actor, action, target, detail string
+}
+
+func (t *auditTx) Commit(ctx context.Context) error {
+	for _, e := range t.pending {
+		if err := audit(withTenant(ctx, e.tenant), t.Tx, e.actor, e.action, e.target, e.detail); err != nil {
+			return err
+		}
+	}
+	return t.Tx.Commit(ctx)
 }
 
 // auditTenant is the tenant of an entry: the tenant the request acts for,

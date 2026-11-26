@@ -55,7 +55,7 @@ PostgreSQL itself is made highly available with the usual tools (see
 | Console sessions, OIDC state, nonce and PKCE verifier | sealed cookies (`LIMDM_SESSION_KEY`), valid on every instance |
 | Desktop login (device code flow) | runs between the device and the identity provider; the server only hands out the configuration |
 | Console settings | stored in PostgreSQL; a trigger sends `NOTIFY limdm_settings`, every instance reloads within milliseconds. Saves are serialized across instances (advisory lock) and load a newer change first, so two admins saving on different instances do not undo each other |
-| Audit chain | appends take the advisory lock 7363, so ids and hashes stay in order with any number of instances |
+| Audit chain | appends take the advisory lock 7363, so ids and hashes stay in order with any number of instances. A check in appends its entries (command results, tamper events, escrow, compliance actions) at its commit, so the lock is held for the append only and check ins of different devices run in parallel; no transaction takes a second pool connection while it holds the lock |
 | Result of the last full audit verification | PostgreSQL (`settings` key `audit_verification`), shown on the audit page and in `/metrics` of every instance |
 | SCIM read, modify and write | advisory lock across instances |
 | Remote shell | relayed between instances, see [below](#remote-shell) |
