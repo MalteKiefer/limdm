@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -263,6 +264,8 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /tokens/{id}/revoke", s.page(s.tokenRevoke))
 	mux.HandleFunc("GET /compliance", s.page(s.compliance))
 	mux.HandleFunc("GET /audit", s.page(s.adminOrAuditor(s.auditPage)))
+	mux.HandleFunc("POST /audit/verify", s.selfPage(s.adminOrAuditor(s.auditVerify)))
+	mux.HandleFunc("GET /compliance/history", s.page(s.complianceHistory))
 	mux.HandleFunc("GET /export/{kind}", s.page(s.adminOrAuditor(s.export)))
 }
 
@@ -880,7 +883,8 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 	http.Redirect(w, r, back, http.StatusSeeOther)
 }
 
-// queueCommand stores a command for a device and audits it.
+// queueCommand stores a command for a device and audits it. The entry names
+// the command ID, like the command.result entry of the device later does.
 func (s *Server) queueCommand(ctx context.Context, actor, id, typ, payload string) error {
 	detail := payload
 	var u api.UserCommand
@@ -889,16 +893,24 @@ func (s *Server) queueCommand(ctx context.Context, actor, id, typ, payload strin
 		b, _ := json.Marshal(u) //nolint:gosec // the password was cleared just above
 		detail = string(b)
 	}
-	return s.auditAction(ctx, actor, "command."+typ, id, truncate(detail, 2000), func(tx pgx.Tx) error {
-		if err := s.insertCommand(ctx, tx, id, typ, payload, actor); err != nil {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	cmdID, err := s.insertCommand(ctx, tx, id, typ, payload, actor)
+	if err != nil {
+		return err
+	}
+	if typ == "unlock" || typ == "lock" { // a manual action takes over from the compliance policy
+		if _, err := tx.Exec(ctx, `UPDATE devices SET auto_locked=false WHERE id=$1`, id); err != nil {
 			return err
 		}
-		if typ == "unlock" || typ == "lock" { // a manual action takes over from the compliance policy
-			_, err := tx.Exec(ctx, `UPDATE devices SET auto_locked=false WHERE id=$1`, id)
-			return err
-		}
-		return nil
-	})
+	}
+	if err := audit(ctx, tx, actor, "command."+typ, id, truncate(fmt.Sprintf("command %d %s", cmdID, detail), 2000)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // commandPayload checks a command from the form and builds its payload; a
@@ -1361,34 +1373,23 @@ type auditRow struct {
 }
 
 func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session) {
+	ctx := r.Context()
 	q := r.URL.Query()
-	f := map[string]string{"q": strings.TrimSpace(q.Get("q")), "actor": strings.TrimSpace(q.Get("actor")), "action": strings.TrimSpace(q.Get("action")),
-		"target": strings.TrimSpace(q.Get("target")), "from": q.Get("from"), "to": q.Get("to")}
-	where, args := []string{"true"}, []any{}
-	add := func(cond string, v any) {
-		args = append(args, v)
-		where = append(where, strings.ReplaceAll(cond, "$?", "$"+strconv.Itoa(len(args))))
-	}
-	if f["q"] != "" {
-		add(`(actor || ' ' || action || ' ' || target || ' ' || detail) ILIKE '%' || $? || '%'`, f["q"])
-	}
-	if f["actor"] != "" {
-		add(`actor ILIKE '%' || $? || '%'`, f["actor"])
-	}
-	if f["action"] != "" {
-		add(`action LIKE $? || '%'`, f["action"])
-	}
-	if f["target"] != "" {
-		add(`target = $?`, f["target"])
-	}
-	for k, cond := range map[string]string{"from": `at >= $?::date`, "to": `at < $?::date + 1`} {
-		if _, err := time.Parse("2006-01-02", f[k]); err == nil {
-			add(cond, f[k])
-		} else {
-			f[k] = ""
+	f, where, args := auditFilter(q)
+	filter := url.Values{}
+	for k, v := range f {
+		if v != "" {
+			filter.Set(k, v)
 		}
 	}
-	rows, err := s.db.Query(r.Context(), `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE `+strings.Join(where, " AND ")+` ORDER BY id DESC LIMIT 300`, args...)
+	const pageSize = 100
+	before, _ := strconv.ParseInt(q.Get("before"), 10, 64)
+	if before > 0 {
+		args = append(args, before)
+		where += " AND id < $" + strconv.Itoa(len(args))
+	}
+	rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE `+where+
+		` ORDER BY id DESC LIMIT `+strconv.Itoa(pageSize+1), args...)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -1398,7 +1399,20 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session)
 		s.fail(w, err)
 		return
 	}
-	brokenAt, err := s.verifyAudit(r.Context())
+	var older, newest string
+	if len(list) > pageSize {
+		list = list[:pageSize]
+		v := url.Values{}
+		for k := range filter {
+			v.Set(k, filter.Get(k))
+		}
+		v.Set("before", strconv.FormatInt(list[len(list)-1].ID, 10))
+		older = "/audit?" + v.Encode()
+	}
+	if before > 0 {
+		newest = "/audit?" + filter.Encode()
+	}
+	brokenAt, err := s.verifyAudit(ctx)
 	if full := s.auditBroken.Load(); err == nil && brokenAt == 0 && full != 0 {
 		brokenAt = full
 	}
@@ -1406,18 +1420,24 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session)
 		s.fail(w, err)
 		return
 	}
+	var verifiedAt *time.Time
+	if v := s.auditVerifiedAt.Load(); v != 0 {
+		t := time.Unix(v, 0)
+		verifiedAt = &t
+	}
 	var actions []string
-	if rows, err := s.db.Query(r.Context(), `SELECT DISTINCT action FROM audit_log ORDER BY 1`); err == nil {
+	if rows, err := s.db.Query(ctx, `SELECT DISTINCT action FROM audit_log ORDER BY 1`); err == nil {
 		actions, _ = pgx.CollectRows(rows, pgx.RowTo[string])
 	}
-	s.render(w, r, sess, "audit", map[string]any{"Entries": list, "BrokenAt": brokenAt, "F": f, "Actions": actions})
+	s.render(w, r, sess, "audit", map[string]any{"Entries": list, "BrokenAt": brokenAt, "F": f, "Actions": actions,
+		"Older": older, "Newest": newest, "CSV": "/export/audit.csv?" + filter.Encode(), "JSONL": "/export/audit.jsonl?" + filter.Encode(),
+		"VerifiedAt": verifiedAt, "Keyed": auditKeyedFrom > 0, "KeyedFrom": auditKeyedFrom})
 }
 
-// verifyAudit recomputes the hash chain. Returns the first broken id or 0.
-// ponytail: full scan per page view; checkpoint verified ranges when the log reaches millions of rows.
 // verifyAudit checks the hash chain and returns the first broken entry (0 =
 // intact). The audit page verifies incrementally from the last checkpoint;
-// the daily background run verifies everything from the start.
+// the daily background run and the "verify whole chain" action verify
+// everything from the start.
 func (s *Server) verifyAudit(ctx context.Context) (int64, error) { return s.verifyAuditFrom(ctx, true) }
 
 func (s *Server) verifyAuditFrom(ctx context.Context, incremental bool) (int64, error) {
@@ -1444,7 +1464,7 @@ func (s *Server) verifyAuditFrom(ctx context.Context, incremental bool) (int64, 
 		if err := rows.Scan(&a.ID, &a.At, &a.Actor, &a.Action, &a.Target, &a.Detail, &a.Prev, &a.Hash); err != nil {
 			return 0, err
 		}
-		if !bytes.Equal(a.Prev, prev) || !bytes.Equal(a.Hash, auditHash(a.Prev, a.At, a.Actor, a.Action, a.Target, a.Detail)) {
+		if !auditEntryOK(auditKey, auditKeyedFrom, prev, a) {
 			return a.ID, nil
 		}
 		prev, last = a.Hash, a.ID
@@ -1473,15 +1493,29 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
 	kind := r.PathValue("kind")
 	var q string
+	var args []any
 	var header []string
 	switch kind {
 	case "compliance.csv":
-		header = []string{"device_id", "hostname", "last_seen", "check_id", "level", "status", "detail", "bsi", "cis", "iso"}
-		q = `SELECT d.id, d.hostname, coalesce(d.last_seen::text,''), c->>'id', coalesce(c->>'level',''), c->>'status', coalesce(c->>'detail',''),
+		header = []string{"device_id", "hostname", "last_seen", "agent_version", "catalog_version", "check_id", "level", "status", "detail",
+			"bsi", "cis", "cis_benchmark", "iso", "generated_at"}
+		q = `SELECT d.id, d.hostname, coalesce(d.last_seen::text,''), d.agent_version, d.catalog_version, c->>'id', coalesce(c->>'level',''), c->>'status', coalesce(c->>'detail',''),
 			coalesce((SELECT string_agg(x,'; ') FROM jsonb_array_elements_text(c->'refs'->'bsi') x),''),
 			coalesce((SELECT string_agg(x,'; ') FROM jsonb_array_elements_text(c->'refs'->'cis') x),''),
-			coalesce((SELECT string_agg(x,'; ') FROM jsonb_array_elements_text(c->'refs'->'iso') x),'')
+			coalesce(c->'refs'->>'cis_benchmark',''),
+			coalesce((SELECT string_agg(x,'; ') FROM jsonb_array_elements_text(c->'refs'->'iso') x),''), $1::text
 			FROM devices d, jsonb_array_elements(d.checks) c WHERE NOT d.retired ORDER BY d.hostname, c->>'id'`
+		args = []any{time.Now().UTC().Format(time.RFC3339)}
+	case "compliance-history.csv":
+		at, device, ok := historyParams(r.URL.Query())
+		if !ok {
+			http.Error(w, "at must be a date (YYYY-MM-DD)", http.StatusBadRequest)
+			return
+		}
+		header = []string{"state_at", "device_id", "hostname", "check_id", "status", "detail", "since", "catalog_version", "generated_at"}
+		q = `SELECT $4::text, h.device_id, d.hostname, h.check_id, h.status, h.detail, h.at::text, h.catalog_version, $3::text
+			FROM (` + historyStateSQL + `) h JOIN devices d ON d.id = h.device_id ORDER BY d.hostname, h.check_id`
+		args = []any{at, device, time.Now().UTC().Format(time.RFC3339), at.AddDate(0, 0, -1).Format("2006-01-02")}
 	case "inventory.csv":
 		header = []string{"device_id", "hostname", "os", "kernel", "agent", "serial", "vendor", "model", "cpu", "memory_mb", "disk_gb", "last_seen", "enrolled_at", "retired"}
 		q = `SELECT id, hostname, coalesce(inventory->>'os_name',''), coalesce(inventory->>'kernel',''), agent_version,
@@ -1489,13 +1523,58 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 			coalesce(inventory->>'memory_mb',''), coalesce(inventory->>'disk_gb',''), coalesce(last_seen::text,''), enrolled_at::text, retired::text
 			FROM devices ORDER BY hostname`
 	case "audit.csv":
-		header = []string{"id", "at", "actor", "action", "target", "detail", "hash"}
-		q = `SELECT id::text, at::text, actor, action, target, detail, encode(hash,'hex') FROM audit_log ORDER BY id`
+		var where string
+		_, where, args = auditFilter(r.URL.Query())
+		header = []string{"id", "at", "actor", "action", "target", "detail", "prev", "hash"}
+		q = `SELECT id::text, at::text, actor, action, target, detail, encode(prev,'hex'), encode(hash,'hex') FROM audit_log WHERE ` + where + ` ORDER BY id`
+	case "audit.jsonl":
+		s.auditExportJSONL(w, r, sess)
+		return
 	default:
 		http.NotFound(w, r)
 		return
 	}
-	if err := s.auditAction(ctx, sess.Email, "export", kind, "", nil); err != nil {
+	s.streamExport(w, r, sess, kind, "text/csv; charset=utf-8", func(tx pgx.Tx, out io.Writer) (int, error) {
+		rows, err := tx.Query(ctx, q, args...)
+		if err != nil {
+			return 0, err
+		}
+		defer rows.Close()
+		cw := csv.NewWriter(out)
+		cw.Write(header)
+		vals := make([]string, len(header))
+		ptrs := make([]any, len(header))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		n := 0
+		for rows.Next() {
+			if err := rows.Scan(ptrs...); err != nil {
+				return n, err
+			}
+			out := make([]string, len(vals))
+			for i, v := range vals {
+				out[i] = csvSafe(v)
+			}
+			cw.Write(out)
+			n++
+		}
+		cw.Flush()
+		if err := rows.Err(); err != nil {
+			return n, err
+		}
+		return n, cw.Error()
+	})
+}
+
+// streamExport sends an export from one transaction and audits it twice:
+// before (who, what, which filter) and after, with the row count and the
+// SHA-256 of exactly the bytes sent, so a file handed to an auditor can be
+// matched to its audit entry.
+func (s *Server) streamExport(w http.ResponseWriter, r *http.Request, sess session, kind, ctype string, write func(pgx.Tx, io.Writer) (int, error)) {
+	ctx := r.Context()
+	filter := truncate(r.URL.RawQuery, 500)
+	if err := s.auditAction(ctx, sess.Email, "export", kind, filter, nil); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -1511,39 +1590,21 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 		s.fail(w, err)
 		return
 	}
-	rows, err := tx.Query(ctx, q)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	defer rows.Close()
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="limdm-%s-%s"`, time.Now().Format("20060102"), kind))
-	cw := csv.NewWriter(w)
-	cw.Write(header)
-	vals := make([]string, len(header))
-	ptrs := make([]any, len(header))
-	for i := range vals {
-		ptrs[i] = &vals[i]
-	}
-	for rows.Next() {
-		if err := rows.Scan(ptrs...); err != nil {
-			s.log.Error("export", "err", err)
-			return
-		}
-		out := make([]string, len(vals))
-		for i, v := range vals {
-			out[i] = csvSafe(v)
-		}
-		cw.Write(out)
-	}
-	if err := rows.Err(); err != nil {
+	h := sha256.New()
+	n, err := write(tx, io.MultiWriter(w, h))
+	detail := fmt.Sprintf("rows=%d sha256=%s", n, hex.EncodeToString(h.Sum(nil)))
+	if err != nil {
 		// the header is sent already: mark the file as incomplete instead of
 		// handing out a truncated export that looks complete
 		s.log.Error("export incomplete", "kind", kind, "err", err)
-		cw.Write([]string{"ERROR: export incomplete, run it again"})
+		_, _ = io.WriteString(w, "\nERROR: export incomplete, run it again\n")
+		detail += " incomplete"
 	}
-	cw.Flush()
+	if err := s.auditAction(context.WithoutCancel(ctx), sess.Email, "export.done", kind, detail, nil); err != nil {
+		s.log.Error("audit export.done", "err", err)
+	}
 }
 
 func hasIPs(nics []api.NIC) bool {

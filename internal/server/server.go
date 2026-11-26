@@ -12,7 +12,6 @@ import (
 	"crypto/x509"
 	_ "embed"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -64,6 +63,7 @@ type Config struct {
 	SessionKey    []byte
 	ReleaseDir    string
 	StaleAfter    time.Duration
+	Syslog        string // udp://host:port or tcp://host:port: audit entries and device events as RFC 5424
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -95,6 +95,7 @@ func ConfigFromEnv() (Config, error) {
 		AgentHosts:    split(os.Getenv("LIMDM_AGENT_HOSTS")),
 		ReleaseRepo:   os.Getenv("LIMDM_RELEASE_REPO"),
 		GeoIPURL:      envOr("LIMDM_GEOIP_URL", "https://ipwho.is/"),
+		Syslog:        os.Getenv("LIMDM_SYSLOG"),
 	}
 	if c.GeoIPURL == "off" {
 		c.GeoIPURL = ""
@@ -203,6 +204,8 @@ type Server struct {
 	fleet  atomic.Pointer[fleetCache]
 	// first broken audit entry found by the last full verification, 0 = intact
 	auditBroken atomic.Int64
+	// when the last full verification ran (Unix seconds), 0 = not yet
+	auditVerifiedAt atomic.Int64
 }
 
 func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
@@ -257,6 +260,9 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	if err := signExistingItems(ctx, db, cfg.CADir); err != nil {
 		return nil, fmt.Errorf("signing library items: %w", err)
 	}
+	if err := initAuditKey(ctx, db, cfg.CADir, cmdKey); err != nil {
+		return nil, fmt.Errorf("audit key: %w", err)
+	}
 	s := &Server{cfg: cfg, db: db, ca: ca, cmdKey: cmdKey, log: log, geoSem: make(chan struct{}, 1)}
 	if err := s.seedConsoleUsers(ctx); err != nil {
 		return nil, err
@@ -272,7 +278,7 @@ func (s *Server) Close() { s.db.Close() }
 // Background runs periodic jobs until ctx ends.
 func (s *Server) Background(ctx context.Context) {
 	for name, loop := range map[string]func(context.Context){"google sync": s.googleSyncLoop, "history": s.historyLoop,
-		"releases": s.releaseLoop, "catalog icons": s.iconLoop} {
+		"releases": s.releaseLoop, "catalog icons": s.iconLoop, "syslog": s.syslogLoop} {
 		go s.background(ctx, name, loop)
 	}
 	go s.rediscoverLoop(ctx)
@@ -688,8 +694,13 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st := req.Status; st != nil {
-		if _, err := tx.Exec(ctx, `UPDATE devices SET hostname=$2, inventory=$3, checks=$4, decl_status=$5, failing=$6, status_hash=$7 WHERE id=$1`,
-			id, truncate(st.Inventory.Hostname, 255), jsonb(st.Inventory), jsonb(st.Checks), jsonb(st.Declarations), countFailing(st.Checks), truncate(req.StatusHash, 128)); err != nil {
+		if err := recordCheckChanges(ctx, tx, id, st.Checks, st.CatalogVersion); err != nil {
+			s.failAPI(w, err)
+			return
+		}
+		if _, err := tx.Exec(ctx, `UPDATE devices SET hostname=$2, inventory=$3, checks=$4, decl_status=$5, failing=$6, status_hash=$7, catalog_version=$8 WHERE id=$1`,
+			id, truncate(st.Inventory.Hostname, 255), jsonb(st.Inventory), jsonb(st.Checks), jsonb(st.Declarations), countFailing(st.Checks), truncate(req.StatusHash, 128),
+			truncate(st.CatalogVersion, 32)); err != nil {
 			s.failAPI(w, err)
 			return
 		}
@@ -728,7 +739,15 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			notices = append(notices, notice{Type: "command.failed", Severity: "critical", Title: "Command failed: " + typ,
 				Text: truncate(strings.TrimSpace(res.Output), 500)})
 		}
-		if err := audit(ctx, tx, "device:"+id, "command.result", strconv.FormatInt(res.ID, 10), status); err != nil {
+		// target is the device like the entry of the enqueue; both name the
+		// command ID, so the chain alone links who sent what with its result
+		detail := fmt.Sprintf("command %d %s %s", res.ID, firstNonEmpty(typ, "unknown"), status)
+		// the reason of a failure only: script output can hold anything, and
+		// the chain cannot forget it
+		if out := strings.TrimSpace(res.Output); out != "" && !res.OK {
+			detail += ": " + truncate(lastLine(out), 200)
+		}
+		if err := audit(ctx, tx, "device:"+id, "command.result", id, detail); err != nil {
 			s.failAPI(w, err)
 			return
 		}
@@ -871,7 +890,8 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 // ---- audit ----
 
 // audit appends a hash chained entry. Each hash covers the previous hash, so
-// any later modification of a row breaks verification of every following row.
+// any later modification of a row breaks verification of every following row;
+// the hash is keyed (audit.go), so it cannot be recomputed from the database.
 func audit(ctx context.Context, tx pgx.Tx, actor, action, target, detail string) error {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7363)`); err != nil {
 		return err
@@ -882,19 +902,8 @@ func audit(ctx context.Context, tx pgx.Tx, actor, action, target, detail string)
 	}
 	at := time.Now().UTC().Truncate(time.Microsecond)
 	_, err := tx.Exec(ctx, `INSERT INTO audit_log(at, actor, action, target, detail, prev, hash) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		at, actor, action, target, detail, prev, auditHash(prev, at, actor, action, target, detail))
+		at, actor, action, target, detail, prev, auditHash(auditKey, prev, at, actor, action, target, detail))
 	return err
-}
-
-func auditHash(prev []byte, at time.Time, fields ...string) []byte {
-	h := sha256.New()
-	h.Write(prev)
-	h.Write(binary.BigEndian.AppendUint64(nil, uint64(at.UnixMicro())))
-	for _, f := range fields {
-		h.Write(binary.BigEndian.AppendUint64(nil, uint64(len(f))))
-		h.Write([]byte(f))
-	}
-	return h.Sum(nil)
 }
 
 // auditAction runs an admin change and its audit entry in one transaction.

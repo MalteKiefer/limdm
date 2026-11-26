@@ -123,21 +123,21 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	c, err := r.Cookie(flowCookie)
 	if err != nil || s.unseal(c.Value, &f) != nil || time.Now().After(f.Exp) ||
 		!hmac.Equal([]byte(r.URL.Query().Get("state")), []byte(f.State)) {
-		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "state")
+		s.auditLoginFailure(ctx, r, "state")
 		http.Error(w, "login expired, start again", http.StatusBadRequest)
 		return
 	}
 	s.setCookie(w, flowCookie, "", -1)
 	tok, err := auth.oauth.Exchange(ctx, r.URL.Query().Get("code"), oauth2.VerifierOption(f.Verifier))
 	if err != nil {
-		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "code exchange")
+		s.auditLoginFailure(ctx, r, "code exchange")
 		http.Error(w, "login failed", http.StatusUnauthorized)
 		return
 	}
 	raw, _ := tok.Extra("id_token").(string)
 	idt, err := auth.verifier.Verify(ctx, raw)
 	if err != nil || idt.Nonce != f.Nonce {
-		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "id token")
+		s.auditLoginFailure(ctx, r, "id token")
 		http.Error(w, "login failed", http.StatusUnauthorized)
 		return
 	}
@@ -147,7 +147,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		HD            string `json:"hd"`
 	}
 	if err := idt.Claims(&claims); err != nil {
-		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "claims")
+		s.auditLoginFailure(ctx, r, "claims")
 		http.Error(w, "login failed", http.StatusUnauthorized)
 		return
 	}

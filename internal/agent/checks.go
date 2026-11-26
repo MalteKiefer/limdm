@@ -60,14 +60,14 @@ const (
 
 // BSI requirements (Edition 2023) the checks give evidence for.
 const (
-	bsiUpdatesAuto = "SYS.2.1.A3"    // Aktivieren von Autoupdate-Mechanismen
-	bsiAdminAuth   = "SYS.2.3.A1"    // Authentisierung von Administratoren
-	bsiUpdates     = "SYS.2.3.A4"    // Einspielen von Updates und Patches
-	bsiMAC         = "SYS.2.3.A8"    // Einsatz von Sicherheitserweiterungen
-	bsiPasswords   = "SYS.2.3.A9"    // Sichere Verwendung von Passwörtern
-	bsiPatchRegul  = "OPS.1.1.3.A15" // Regelmäßige Aktualisierung von IT-Systemen und Software
-	bsiLogConfig   = "OPS.1.1.5.A3"  // Konfiguration der Protokollierung auf System- und Netzebene
-	bsiCryptoAlgo  = "CON.1.A1"      // Auswahl geeigneter kryptografischer Verfahren
+	bsiUpdatesAuto = "SYS.2.1.A3"    // enable automatic updates
+	bsiAdminAuth   = "SYS.2.3.A1"    // authentication of administrators
+	bsiUpdates     = "SYS.2.3.A4"    // installing updates and patches
+	bsiMAC         = "SYS.2.3.A8"    // security extensions (AppArmor, SELinux)
+	bsiPasswords   = "SYS.2.3.A9"    // secure use of passwords
+	bsiPatchRegul  = "OPS.1.1.3.A15" // regular updates of systems and software
+	bsiLogConfig   = "OPS.1.1.5.A3"  // logging configuration on system and network level
+	bsiCryptoAlgo  = "CON.1.A1"      // choice of suitable cryptographic methods
 )
 
 func refs(bsi, iso []string, cis ...string) api.Refs {

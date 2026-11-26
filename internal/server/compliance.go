@@ -103,7 +103,7 @@ func (s *Server) enforceCompliance(ctx context.Context, tx pgx.Tx, deviceID stri
 }
 
 func (s *Server) queuePolicyCommand(ctx context.Context, tx pgx.Tx, deviceID, typ string, locked bool) error {
-	if err := s.insertCommand(ctx, tx, deviceID, typ, "", "policy"); err != nil {
+	if _, err := s.insertCommand(ctx, tx, deviceID, typ, "", "policy"); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE devices SET auto_locked=$2 WHERE id=$1`, deviceID, locked)
@@ -172,12 +172,12 @@ var webhookClient = notifyClient
 
 // insertCommand stores a command with its signature: the ID and creation
 // time come from the insert, the signature covers them with the payload.
-func (s *Server) insertCommand(ctx context.Context, tx pgx.Tx, deviceID, typ, payload, by string) error {
+func (s *Server) insertCommand(ctx context.Context, tx pgx.Tx, deviceID, typ, payload, by string) (int64, error) {
 	c := api.Command{Type: typ, Payload: payload}
 	if err := tx.QueryRow(ctx, `INSERT INTO commands(device_id, type, payload, created_by, created_at) VALUES ($1,$2,$3,$4, date_trunc('microseconds', now()))
 		RETURNING id, created_at`, deviceID, typ, payload, by).Scan(&c.ID, &c.CreatedAt); err != nil {
-		return err
+		return 0, err
 	}
 	_, err := tx.Exec(ctx, `UPDATE commands SET signature=$2 WHERE id=$1`, c.ID, api.SignCommand(s.cmdKey, deviceID, c))
-	return err
+	return c.ID, err
 }

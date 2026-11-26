@@ -402,3 +402,32 @@ END $$;
 DROP TRIGGER IF EXISTS dir_users_tombstone ON dir_users;
 CREATE TRIGGER dir_users_tombstone AFTER INSERT OR UPDATE OF email OR DELETE ON dir_users
     FOR EACH ROW EXECUTE FUNCTION dir_users_tombstone();
+
+-- W3
+CREATE OR REPLACE FUNCTION rows_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION '% is append only', TG_TABLE_NAME; END $$;
+-- Catalog version of the device's last check report (evidence export).
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS catalog_version TEXT NOT NULL DEFAULT '';
+
+-- Compliance history: one row per change of a check result (devices report
+-- only changes). Pruned after 365 days like device_events, keeping the last
+-- row before the cutoff so the state at any date stays known.
+CREATE TABLE IF NOT EXISTS compliance_changes (
+    id              BIGSERIAL PRIMARY KEY,
+    device_id       TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    at              TIMESTAMPTZ NOT NULL,
+    check_id        TEXT NOT NULL,
+    status          TEXT NOT NULL, -- pass | fail | na | excepted | advisory | removed
+    detail          TEXT NOT NULL DEFAULT '',
+    catalog_version TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS compliance_changes_device ON compliance_changes(device_id, check_id, id);
+CREATE INDEX IF NOT EXISTS compliance_changes_at ON compliance_changes USING brin(at);
+DROP TRIGGER IF EXISTS compliance_changes_append_only ON compliance_changes;
+CREATE TRIGGER compliance_changes_append_only BEFORE UPDATE ON compliance_changes
+    FOR EACH ROW EXECUTE FUNCTION rows_append_only();
+-- baseline for devices that reported before the history existed
+INSERT INTO compliance_changes(device_id, at, check_id, status, detail, catalog_version)
+    SELECT d.id, coalesce(d.last_seen, now()), c->>'id', coalesce(c->>'status', ''), coalesce(c->>'detail', ''), d.catalog_version
+    FROM devices d, jsonb_array_elements(d.checks) c
+    WHERE c->>'id' IS NOT NULL AND NOT EXISTS (SELECT 1 FROM compliance_changes x WHERE x.device_id = d.id);

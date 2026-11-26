@@ -2,7 +2,7 @@
 {{define "content"}}
 <div class="page-head">
   <div><h1>{{t "Compliance"}}</h1><div class="meta"><span>{{.Total}} {{t "active devices"}}</span><span>{{t "BSI IT-Grundschutz · CIS · ISO/IEC 27001:2022"}}</span></div></div>
-  <div class="actions"><a class="button secondary" href="/export/inventory.csv">{{t "Inventory CSV"}}</a><a class="button secondary" href="/export/audit.csv">{{t "Audit CSV"}}</a><a class="button" href="/export/compliance.csv">{{t "Evidence CSV"}}</a></div>
+  <div class="actions"><a class="button secondary" href="/compliance/history">{{t "History"}}</a><a class="button secondary" href="/export/inventory.csv">{{t "Inventory CSV"}}</a><a class="button secondary" href="/export/audit.csv">{{t "Audit CSV"}}</a><a class="button" href="/export/compliance.csv">{{t "Evidence CSV"}}</a></div>
 </div>
 <div class="stats">
   <div class="stat"><div class="label"><span class="dot ok"></span>{{t "Compliant"}}</div><div class="value">{{.Compliant}}</div></div>
