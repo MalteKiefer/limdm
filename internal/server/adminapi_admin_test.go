@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Approvals, exceptions, tokens and tenants through the admin API, token
@@ -116,8 +119,23 @@ func TestAdminAPIManagement(t *testing.T) {
 	if resp, _ = call(bob, "PUT", bpLoc, `{"name":"lab","description":"bob","tree":[]}`, "If-Match", etag); resp.StatusCode != 200 {
 		t.Fatalf("put with current etag: %d", resp.StatusCode)
 	}
-	if resp, _ = call(alice, "PUT", bpLoc, `{"name":"lab","description":"alice","tree":[]}`, "If-Match", etag); resp.StatusCode != http.StatusPreconditionFailed {
-		t.Fatalf("lost update: %d", resp.StatusCode)
+	current := resp.Header.Get("ETag")
+	if resp, _ = call(alice, "PUT", bpLoc, `{"name":"lab","description":"alice","tree":[]}`, "If-Match", etag); resp.StatusCode != http.StatusPreconditionFailed ||
+		resp.Header.Get("ETag") != current {
+		t.Fatalf("lost update: %d %q", resp.StatusCode, resp.Header.Get("ETag"))
+	}
+	// the check runs in the save transaction: a row changed after the
+	// request started is still compared
+	var bpID int64
+	db.QueryRow(ctx, `SELECT id FROM blueprints WHERE name='lab'`).Scan(&bpID)
+	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE blueprints SET updated_at = updated_at + interval '1 second' WHERE id=$1`, bpID); err != nil {
+			return err
+		}
+		return checkIfMatch(context.WithValue(ctx, ifMatchKey{}, current), tx, "blueprints", bpID)
+	})
+	if !errors.Is(err, errPrecondition) {
+		t.Fatalf("If-Match inside the transaction: %v", err)
 	}
 
 	// exceptions

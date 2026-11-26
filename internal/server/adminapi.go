@@ -970,18 +970,21 @@ func (s *Server) apiItemSave(w http.ResponseWriter, r *http.Request, c apiCaller
 	if !decodeJSON(w, r, &it) {
 		return
 	}
-	if id != 0 && !s.ifMatch(w, r, "library_items", id) {
-		return
-	}
 	it.ID = id
 	it.Name, it.Description = strings.TrimSpace(it.Name), strings.TrimSpace(it.Description)
-	if err := s.saveLibraryItem(r.Context(), c.actor(), &it); err != nil {
+	if id != 0 && s.itemNeedsApproval(it) { // a request is no save: compare before it is queued
+		if err := pgx.BeginFunc(r.Context(), s.db, func(tx pgx.Tx) error { return checkIfMatch(withIfMatch(r), tx, "library_items", id) }); err != nil {
+			s.preconditionFail(w, r, "library_items", id, err)
+			return
+		}
+	}
+	if err := s.saveLibraryItem(withIfMatch(r), c.actor(), &it); err != nil {
 		if aid, ok := pendingApproval(err); ok { // four eyes: an admin decides in the console
 			w.Header().Set("Location", "/approvals")
 			writeJSONStatus(w, http.StatusAccepted, map[string]any{"approval_id": aid, "status": "pending"})
 			return
 		}
-		s.apiFail(w, err)
+		s.preconditionFail(w, r, "library_items", id, err)
 		return
 	}
 	status := http.StatusOK
@@ -1095,12 +1098,9 @@ func (s *Server) apiBlueprintSave(w http.ResponseWriter, r *http.Request, c apiC
 	if body.ParentID != nil && *body.ParentID <= 0 {
 		body.ParentID = nil
 	}
-	if id != 0 && !s.ifMatch(w, r, "blueprints", id) {
-		return
-	}
 	bp := blueprintRec{ID: id, Name: strings.TrimSpace(body.Name), Desc: strings.TrimSpace(body.Description), Parent: body.ParentID, Tree: body.Tree}
-	if err := s.saveBlueprint(r.Context(), c.actor(), &bp); err != nil {
-		s.apiFail(w, err)
+	if err := s.saveBlueprint(withIfMatch(r), c.actor(), &bp); err != nil {
+		s.preconditionFail(w, r, "blueprints", id, err)
 		return
 	}
 	saved, err := scanBlueprint(s.db.QueryRow(r.Context(), `SELECT `+blueprintCols+` FROM blueprints WHERE id=$1`, bp.ID))

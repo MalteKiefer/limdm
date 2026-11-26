@@ -806,6 +806,9 @@ func writeItem(ctx context.Context, tx pgx.Tx, actor, note string, it *api.Libra
 		if err := tenantGuard(ctx, tx, "library_items", id); err != nil {
 			return err
 		}
+		if err := checkIfMatch(ctx, tx, "library_items", id); err != nil {
+			return err
+		}
 		if err := ensureItemBaseline(ctx, tx, id); err != nil {
 			return err
 		}
@@ -1070,6 +1073,9 @@ func (s *Server) storeBlueprint(ctx context.Context, actor, action, note string,
 		var exists bool
 		if id > 0 {
 			if err := tenantGuard(ctx, tx, "blueprints", id); err != nil {
+				return err
+			}
+			if err := checkIfMatch(ctx, tx, "blueprints", id); err != nil {
 				return err
 			}
 			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blueprints WHERE id=$1)`, id).Scan(&exists); err != nil {

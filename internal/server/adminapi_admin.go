@@ -486,34 +486,39 @@ func (s *Server) setETag(ctx context.Context, w http.ResponseWriter, table strin
 	}
 }
 
-// ifMatch checks If-Match of a PUT against the current entity tag; on a
-// mismatch it answers 412 and returns false. Without If-Match the request
-// goes ahead, as before.
-// ponytail: checked before the save, not in its transaction; a change in
-// between is lost as without If-Match. Move into the save when that matters.
-func (s *Server) ifMatch(w http.ResponseWriter, r *http.Request, table string, id int64) bool {
-	want := r.Header.Get("If-Match")
+// ifMatchKey carries the If-Match header of a PUT to the save (withIfMatch).
+type ifMatchKey struct{}
+
+func withIfMatch(r *http.Request) context.Context {
+	return context.WithValue(r.Context(), ifMatchKey{}, r.Header.Get("If-Match"))
+}
+
+// checkIfMatch compares the If-Match of the request in ctx with the entity
+// tag of row id of table, locked in tx: the check and the save are one
+// transaction, so a change committed in between cannot be overwritten.
+// Without If-Match (or *) the save goes ahead, as before.
+func checkIfMatch(ctx context.Context, tx pgx.Tx, table string, id int64) error {
+	want, _ := ctx.Value(ifMatchKey{}).(string)
 	if want == "" || want == "*" {
-		return true
+		return nil
 	}
 	var at time.Time
-	err := s.db.QueryRow(r.Context(), `SELECT updated_at FROM `+table+` WHERE id=$1`, id).Scan(&at)
+	err := tx.QueryRow(ctx, `SELECT updated_at FROM `+table+` WHERE id=$1 FOR UPDATE`, id).Scan(&at)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return true // the save answers 404
+		return nil // the save answers 404
 	}
 	if err != nil {
-		s.apiFail(w, err)
-		return false
+		return err
 	}
 	for _, tag := range strings.Split(want, ",") {
 		if strings.TrimSpace(tag) == etagOf(at) {
-			return true
+			return nil
 		}
 	}
-	w.Header().Set("ETag", etagOf(at))
-	problem(w, http.StatusPreconditionFailed, "changed since it was read: get it again and repeat the change")
-	return false
+	return errPrecondition
 }
+
+var errPrecondition = &userError{http.StatusPreconditionFailed, "changed since it was read: get it again and repeat the change"}
 
 // ---- API reference ----
 
@@ -600,3 +605,11 @@ var apiReferenceTpl = template.Must(template.New("ref").Parse(`<!doctype html>
 </section>{{end}}
 </main></body></html>
 `))
+
+// preconditionFail answers err; a failed If-Match carries the current ETag.
+func (s *Server) preconditionFail(w http.ResponseWriter, r *http.Request, table string, id int64, err error) {
+	if errors.Is(err, errPrecondition) {
+		s.setETag(r.Context(), w, table, id)
+	}
+	s.apiFail(w, err)
+}

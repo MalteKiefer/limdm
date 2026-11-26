@@ -226,8 +226,9 @@ cannot be renamed (`404`) or deleted (`409`), and never inherits.
 
 `GET` and every save of a single item or blueprint answer with an `ETag`. Send it back as
 `If-Match` with a `PUT`: when the object changed since (another automation or the console),
-the answer is `412` with the current `ETag` and nothing is saved. A `PUT` without `If-Match`
-replaces as before.
+the answer is `412` with the current `ETag` and nothing is saved. The comparison locks the row
+in the transaction of the save, so two writers with the same `ETag` cannot both win. A `PUT`
+without `If-Match` replaces as before.
 
 ## Metrics
 
