@@ -174,7 +174,7 @@ func ConfigFromEnv() (Config, error) {
 	}
 	c.LogLevel = envOr("LIMDM_LOG_LEVEL", "info")
 	if f := os.Getenv("LIMDM_SYSLOG_CA"); f != "" {
-		pem, err := os.ReadFile(f)
+		pem, err := os.ReadFile(f) //nolint:gosec // a path from the administrator's environment
 		if err != nil {
 			return c, fmt.Errorf("LIMDM_SYSLOG_CA: %w", err)
 		}
