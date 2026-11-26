@@ -181,17 +181,21 @@ type apiException struct {
 	State     string     `json:"state"`
 }
 
+func apiExceptionsOf(list []riskException) []apiException {
+	out := make([]apiException, len(list))
+	for i, e := range list {
+		out[i] = apiException{e.ID, e.CheckID, e.Mode, e.Tag, e.Reason, e.Owner, e.Approver, e.Expires, e.CreatedBy, e.Created, e.Revoked, e.State()}
+	}
+	return out
+}
+
 func (s *Server) apiExceptions(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	list, err := s.riskExceptions(r.Context())
 	if err != nil {
 		s.apiFail(w, err)
 		return
 	}
-	out := make([]apiException, len(list))
-	for i, e := range list {
-		out[i] = apiException{e.ID, e.CheckID, e.Mode, e.Tag, e.Reason, e.Owner, e.Approver, e.Expires, e.CreatedBy, e.Created, e.Revoked, e.State()}
-	}
-	writeJSON(w, listPage{Items: out})
+	writeJSON(w, listPage{Items: apiExceptionsOf(list)})
 }
 
 func (s *Server) apiExceptionAdd(w http.ResponseWriter, r *http.Request, c apiCaller) {
@@ -207,10 +211,15 @@ func (s *Server) apiExceptionAdd(w http.ResponseWriter, r *http.Request, c apiCa
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	id, err := s.addException(r.Context(), c.sess(), riskException{CheckID: body.CheckID, Mode: body.Mode, Tag: body.Tag, Reason: body.Reason,
+	id, pending, err := s.addOrRequestException(r.Context(), c.sess(), riskException{CheckID: body.CheckID, Mode: body.Mode, Tag: body.Tag, Reason: body.Reason,
 		Owner: body.Owner, Approver: body.Approver}, body.Expires)
 	if err != nil {
 		s.apiFail(w, err)
+		return
+	}
+	if pending { // four eyes: another admin approves it and is recorded as approver
+		w.Header().Set("Location", "/api/v1/approvals/"+strconv.FormatInt(id, 10))
+		writeJSONStatus(w, http.StatusAccepted, map[string]any{"approval_id": id, "status": "pending"})
 		return
 	}
 	w.Header().Set("Location", "/api/v1/exceptions/"+strconv.FormatInt(id, 10))
