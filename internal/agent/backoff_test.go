@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/maltekiefer/limdm/internal/api"
 )
 
 func TestBusyBackoff(t *testing.T) {
@@ -28,6 +30,28 @@ func TestBusyBackoff(t *testing.T) {
 	b.note(busyError{after: time.Minute}) // never shortens
 	if w := b.wait(time.Second); w < 59*time.Minute {
 		t.Fatalf("backoff not kept: %v", w)
+	}
+}
+
+func TestStatusHashIgnoresSmallChanges(t *testing.T) {
+	sso := time.Date(2026, 11, 26, 8, 0, 0, 0, time.UTC)
+	st := func(free uint64, at time.Time, host string) api.Status {
+		return api.Status{Inventory: api.Inventory{Hostname: host, Volumes: []api.Volume{{Mount: "/", SizeGB: 500, FreeGB: free}},
+			Accounts: []api.Account{{Name: "anna", SSO: true, LastSSO: &at}}}}
+	}
+	base := statusHashOf(st(203, sso, "pc"))
+	if statusHashOf(st(201, sso.Add(3*time.Hour), "pc")) != base {
+		t.Fatal("a few GB or an SSO confirmation the same day resend the inventory")
+	}
+	for _, other := range []api.Status{st(150, sso, "pc"), st(203, sso.Add(24*time.Hour), "pc"), st(203, sso, "pc2")} {
+		if statusHashOf(other) == base {
+			t.Fatalf("real change not noticed: %+v", other.Inventory)
+		}
+	}
+	s := st(201, sso, "pc")
+	statusHashOf(s)
+	if s.Inventory.Volumes[0].FreeGB != 201 {
+		t.Fatal("the status sent must keep exact values")
 	}
 }
 

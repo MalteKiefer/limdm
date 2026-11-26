@@ -1,13 +1,19 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	mrand "math/rand/v2"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"time"
+
+	"github.com/maltekiefer/limdm/internal/api"
 )
 
 // busyError is a server answer of 503 or 429: it is overloaded (too many
@@ -62,6 +68,30 @@ func (b *backoff) note(err error) {
 // wait stretches d to the end of a running backoff.
 func (b *backoff) wait(d time.Duration) time.Duration {
 	return max(d, time.Until(time.Unix(0, b.until.Load())))
+}
+
+// statusHashOf is the hash that decides whether the full status goes to the
+// server. Values that move a little at every check in are coarsened for it,
+// so the inventory is not resent each time: free space in steps of 5 % of the
+// volume, SSO confirmations by the day. The status sent keeps exact values.
+func statusHashOf(st api.Status) string {
+	inv := st.Inventory
+	inv.Volumes = slices.Clone(inv.Volumes)
+	for i, v := range inv.Volumes {
+		step := max(v.SizeGB/20, 1)
+		inv.Volumes[i].FreeGB = v.FreeGB / step * step
+	}
+	inv.Accounts = slices.Clone(inv.Accounts)
+	for i, ac := range inv.Accounts {
+		if ac.LastSSO != nil {
+			day := ac.LastSSO.UTC().Truncate(24 * time.Hour)
+			inv.Accounts[i].LastSSO = &day
+		}
+	}
+	st.Inventory = inv
+	b, _ := json.Marshal(st)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 // checkinWait is the pause before the next check in: the interval plus up to

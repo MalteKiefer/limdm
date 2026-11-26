@@ -72,7 +72,10 @@ The request carries `agent_version`, `arch`, the hashes of what the agent alread
 `id`, `ok`, `output` and for scripts and diagnostics their structured result), `metrics`,
 `recovery_keys` (new LUKS recovery keys to escrow), `update_result`, `events`,
 `app_requests` (self service requests), `script_results` (recurring scripts) and
-`command_key` (the pinned command key).
+`command_key` (the pinned command key). `status_hash` leaves out small changes (free space
+within 5 % of a volume, SSO confirmations on the same day), so the full `status` is sent
+only when something relevant changed; the compliance detail of a pending reboot names the
+date since when, not a running duration.
 
 The response carries:
 

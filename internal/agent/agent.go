@@ -612,9 +612,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	a.lastSystem = DesktopSystem{OS: strings.TrimSpace(inv.OSName + " " + inv.OSVersion), Kernel: inv.Kernel, Arch: inv.Arch,
 		Inventory: inv.Source, Vendor: inv.Vendor, Model: inv.Model, Serial: inv.Serial}
 	status := api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus(), CatalogVersion: CatalogVersion}
-	sb, _ := json.Marshal(status)
-	sum := sha256.Sum256(sb)
-	statusHash := hex.EncodeToString(sum[:])
+	statusHash := statusHashOf(status)
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
 		StatusHash: statusHash, Results: a.state.Results, Events: a.pendingEvents(), Metrics: metrics(), BrandingHash: a.state.BrandingHash,
 		UpdateResult: a.state.UpdateResult, ScriptResults: a.state.ScriptResults, CommandKey: a.state.CommandKey}
