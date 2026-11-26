@@ -170,9 +170,17 @@ is reported to the server and appears in the audit log.
   not prevent that.
 * The local password never leaves the device. It is stored by `chpasswd` with the system's
   password hashing (yescrypt on current distributions).
-* The client secret of the device flow client is stored unencrypted on the server and on the
-  device (root only). Device flow clients are public clients at most providers; treat the
-  secret as not confidential.
+* The client secret of the device flow client is stored encrypted on the server: the console
+  seals `client_secret` of a `com.limdm.login` item with AES-256-GCM under a key derived from
+  `LIMDM_SESSION_KEY` (the editor then shows `sealed:v1:…`; type a new secret in clear to
+  replace it). Items saved by older versions are sealed at the first start. The audit log
+  records the sealed form only. The server opens the secret when it builds a device's
+  declarations and sends it over mTLS.
+* On the device the secret stays in clear (`/etc/limdm/login.json` and the agent state, root
+  only, 0600): the agent sends it to the provider in the device authorization grant and has
+  no key the server could seal it for. Device flow clients are public clients at most
+  providers; treat the secret as not confidential and restrict the client to the device
+  flow.
 * Unmanaged local accounts keep their normal password login.
 
 ## Login managers

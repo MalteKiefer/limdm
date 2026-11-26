@@ -258,6 +258,12 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 		return nil, fmt.Errorf("signing library items: %w", err)
 	}
 	s := &Server{cfg: cfg, db: db, ca: ca, cmdKey: cmdKey, log: log, geoSem: make(chan struct{}, 1)}
+	if itemSecrets, err = s.aead(infoItems); err != nil {
+		return nil, err
+	}
+	if err := s.sealLoginSecrets(ctx); err != nil {
+		return nil, fmt.Errorf("sealing login client secrets: %w", err)
+	}
 	if err := s.seedConsoleUsers(ctx); err != nil {
 		return nil, err
 	}

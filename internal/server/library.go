@@ -312,6 +312,11 @@ func libraryItems(ctx context.Context, q pgx.Tx, ids []int64) ([]api.LibraryItem
 			slog.Error("library item signature invalid, item not delivered", "item", it.ID, "name", it.Name)
 			continue
 		}
+		var err error
+		if it.Payload, err = openItemSecrets(it.Type, raw); err != nil { // sealed client secret (loginsecret.go)
+			slog.Error("library item secret cannot be opened, item not delivered", "item", it.ID, "name", it.Name, "err", err)
+			continue
+		}
 		byID[it.ID] = it
 	}
 	rows.Close()
@@ -512,6 +517,12 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		fail(err)
 		return
 	}
+	sealed, _, serr := sealItemSecrets(it.Type, it.Payload) // never stored, signed or audited in clear
+	if serr != nil {
+		fail(serr)
+		return
+	}
+	it.Payload = sealed
 	var compact bytes.Buffer
 	if err := json.Compact(&compact, it.Payload); err != nil {
 		fail(err)
