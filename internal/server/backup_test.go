@@ -179,6 +179,11 @@ func TestBackupRestore(t *testing.T) {
 		cfg2.DatabaseURL = strings.Replace(dsn, "/"+strings.TrimSuffix(target, "_restore"), "/"+target, 1)
 	}
 	cfg2.CADir = filepath.Join(t.TempDir(), "ca")
+	swapped := *m
+	swapped.Name = "another archive"
+	if err := restoreArchive(ctx, open, []age.Identity{id}, &swapped, restoreOptions{DatabaseURL: cfg2.DatabaseURL, CADir: cfg2.CADir, Window: time.Hour}); err == nil || !strings.Contains(err.Error(), "changed") {
+		t.Fatalf("restored an archive other than the verified one: %v", err)
+	}
 	if err := restoreArchive(ctx, open, []age.Identity{id}, m, restoreOptions{DatabaseURL: cfg2.DatabaseURL, CADir: cfg2.CADir, Window: time.Hour}); err != nil {
 		t.Fatal(err)
 	}

@@ -19,6 +19,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -231,7 +232,24 @@ func restoreArchive(ctx context.Context, open func() (io.ReadCloser, error), ids
 	if err := os.RemoveAll(staged); err != nil {
 		return err
 	}
-	defer os.RemoveAll(staged)
+	// uploaded packages land next to the CA directory; nothing of a failed
+	// or unverified restore stays behind, and staged is kept when only the
+	// final move fails
+	artDir := filepath.Join(filepath.Dir(o.CADir), "artifacts.restore")
+	if !o.SkipCA {
+		if err := os.RemoveAll(artDir); err != nil {
+			return err
+		}
+	}
+	committed, keep := false, false
+	defer func() {
+		if !keep {
+			os.RemoveAll(staged)
+		}
+		if !committed && !o.SkipCA {
+			os.RemoveAll(artDir)
+		}
+	}()
 	byName := map[string]backupTable{}
 	for _, t := range m.Tables {
 		byName[t.Name] = t
@@ -241,7 +259,7 @@ func restoreArchive(ctx context.Context, open func() (io.ReadCloser, error), ids
 		return err
 	}
 	defer rc.Close()
-	_, err = readArchive(rc, ids, func(name string, body io.Reader) error {
+	m2, err := readArchive(rc, ids, func(name string, body io.Reader) error {
 		dir, rest, _ := strings.Cut(name, "/")
 		switch dir {
 		case "db":
@@ -258,12 +276,17 @@ func restoreArchive(ctx context.Context, open func() (io.ReadCloser, error), ids
 				return nil
 			}
 			// next to the CA directory; the operator moves them (docs/backup.md)
-			return writeStaged(filepath.Join(filepath.Dir(o.CADir), "artifacts.restore", filepath.FromSlash(rest)), body)
+			return writeStaged(filepath.Join(artDir, filepath.FromSlash(rest)), body)
 		}
 		return nil
 	})
 	if err != nil {
 		return err
+	}
+	// the archive is opened twice: the second read must be the archive
+	// whose signer and version were checked
+	if !reflect.DeepEqual(m, m2) {
+		return errors.New("the archive changed between verification and restore")
 	}
 	for seq, v := range m.Sequences {
 		if _, err := tx.Exec(ctx, `SELECT setval(to_regclass($1), $2) WHERE to_regclass($1) IS NOT NULL`, pgx.Identifier{seq}.Sanitize(), v); err != nil {
@@ -283,7 +306,12 @@ func restoreArchive(ctx context.Context, open func() (io.ReadCloser, error), ids
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
-	return placeStaged(staged, o.CADir)
+	committed = true
+	if err := placeStaged(staged, o.CADir); err != nil {
+		keep = true
+		return fmt.Errorf("database restored, but moving the CA files into %s failed; they are in %s: %w", o.CADir, staged, err)
+	}
+	return nil
 }
 
 // ensureEmptyDir accepts a missing or empty directory (or any with force).
