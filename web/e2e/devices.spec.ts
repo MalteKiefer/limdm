@@ -76,8 +76,18 @@ test('device page: tabs, message, details, activity', async ({ page }) => {
     await page.getByRole('tab', { name: new RegExp(`^${tab}`) }).click()
     await expect(page).toHaveURL(tab === 'Übersicht' ? /\/devices\/e2e-ws1$/ : /tab=/)
   }
+  // health cards of the overview: words, not only colours
+  await expect(page.getByText('Firewall', { exact: true })).toBeVisible()
+  await expect(page.getByText('Aktiv', { exact: true })).toBeVisible()
+  await expect(page.getByText('Verbunden', { exact: true })).toBeVisible()
+
   await page.getByRole('tab', { name: 'Software' }).click()
   await expect(page.getByText('openssl')).toBeVisible()
+  // removing asks in the console's dialog, not the browser's confirm()
+  await page.getByRole('row', { name: /openssl/ }).getByRole('button', { name: 'Entfernen' }).click()
+  await expect(page.getByRole('dialog', { name: 'openssl von diesem Gerät entfernen?' })).toBeVisible()
+  await page.getByRole('dialog').getByRole('button', { name: 'Abbrechen' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 
   // send a message through the action menu
   await page.getByRole('button', { name: 'Aktionen für e2e-ws1' }).click()
@@ -90,6 +100,11 @@ test('device page: tabs, message, details, activity', async ({ page }) => {
   await page.getByRole('button', { name: 'Aktionen für e2e-ws1' }).click()
   await page.getByRole('menuitem', { name: 'Gerätedetails bearbeiten' }).click()
   await page.getByRole('dialog').getByLabel('Tags').fill('prod, berlin, edited')
+  // a desktop user: the person, then the proposed user name
+  await page.getByRole('dialog').getByRole('button', { name: 'Desktop Benutzer hinzufügen' }).click()
+  await page.getByRole('dialog').getByLabel('Person 1 (E Mail Adresse)').fill('jane.doe@example.com')
+  await page.getByRole('dialog').getByLabel('Benutzername 1').focus()
+  await expect(page.getByRole('dialog').getByLabel('Benutzername 1')).toHaveValue('janedoe')
   await page.getByRole('dialog').getByRole('button', { name: 'Speichern' }).click()
   await expect(page.getByText('Gerätedetails gespeichert')).toBeVisible()
   await expect(page.getByRole('link', { name: '#edited' })).toBeVisible()
@@ -98,6 +113,12 @@ test('device page: tabs, message, details, activity', async ({ page }) => {
   await page.getByRole('tab', { name: 'Aktivität' }).click()
   await expect(page.getByText('Nachricht', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('checked in from the e2e seed')).toBeVisible()
+  // compliance changes and audit entries of the device
+  await page.getByRole('radio', { name: 'Compliance' }).click()
+  await expect(page.getByText('Prüfung SSH root login disabled')).toBeVisible()
+  await page.getByRole('radio', { name: 'Audit' }).click()
+  await expect(page.getByRole('feed').getByRole('listitem').first()).toBeVisible()
+  await page.getByRole('radio', { name: 'Alle' }).click()
 
   // reboot later validates its delay
   await page.getByRole('button', { name: 'Aktionen für e2e-ws1' }).click()
@@ -105,6 +126,15 @@ test('device page: tabs, message, details, activity', async ({ page }) => {
   await page.getByRole('dialog').getByLabel('Verzögerung in Minuten').fill('0')
   await expect(page.getByRole('dialog').getByRole('button', { name: 'Planen' })).toBeDisabled()
   await page.keyboard.press('Escape')
+})
+
+test('phone width: cut off tabs show a hint that scrolls them', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 })
+  await page.goto('/app/devices/e2e-ws1')
+  const more = page.getByRole('button', { name: 'Weitere Einträge rechts' }).first()
+  await expect(more).toBeVisible()
+  await more.click()
+  await expect(page.getByRole('button', { name: 'Weitere Einträge links' }).first()).toBeVisible()
 })
 
 test('retire and delete a device', async ({ page }) => {
