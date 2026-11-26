@@ -141,7 +141,7 @@ function Text({ label, value, onChange, help, required, error, type = 'text', mo
     <Field label={label} help={help} required={required} error={error}>
       {({ id, describedBy, invalid }) =>
         area ? (
-          <textarea id={id} name={name} rows={area} className={mono ? 'field font-mono text-[12.5px]' : 'field'} aria-describedby={describedBy} aria-invalid={invalid || undefined} value={value} maxLength={max} required={required} spellCheck={!mono} onChange={(e) => onChange(e.target.value)} autoFocus={autoFocus} />
+          <textarea id={id} name={name} rows={area} className={mono ? 'field font-mono text-meta' : 'field'} aria-describedby={describedBy} aria-invalid={invalid || undefined} value={value} maxLength={max} required={required} spellCheck={!mono} onChange={(e) => onChange(e.target.value)} autoFocus={autoFocus} />
         ) : (
           <input id={id} name={name} type={type} className={mono ? 'field font-mono' : 'field'} aria-describedby={describedBy} aria-invalid={invalid || undefined} value={value} maxLength={max} required={required} autoComplete="off" spellCheck={false} onChange={(e) => onChange(e.target.value)} autoFocus={autoFocus} />
         )
@@ -266,7 +266,7 @@ function ProtectDialog({ type, target, onClose }: { type: 'lost' | 'wipe'; targe
       footer={<Foot form="dlg-protect" onClose={onClose} label={t(type === 'lost' ? 'devices.f.lostGo' : 'devices.cmd.wipe')} danger busy={pending} disabled={!ok} />}
     >
       <form id="dlg-protect" className="flex flex-col gap-4" onSubmit={(e) => (e.preventDefault(), run(type, params, onClose))}>
-        <p className="rounded-lg bg-bad-soft p-3 text-[13px] text-bad">{t(type === 'lost' ? 'devices.f.lostHelp' : 'devices.f.wipeHelp')}</p>
+        <p className="rounded-lg bg-bad-soft p-3 text-body text-bad">{t(type === 'lost' ? 'devices.f.lostHelp' : 'devices.f.wipeHelp')}</p>
         {type === 'lost' && <Text label={t('devices.f.lostMessage')} help={t('devices.f.lostMessageHelp')} value={message} onChange={setMessage} area={3} max={500} />}
         <Text label={t('devices.f.confirmHost', { host: target.hostname })} value={confirm} onChange={setConfirm} required mono autoFocus />
         <Reason show={fourEyes(target.detail, type)} value={reason} onChange={setReason} />
@@ -301,7 +301,7 @@ function ScriptDialog({ target, onClose }: { target: Target; onClose: () => void
       <form id="dlg-script" className="flex flex-col gap-4" onSubmit={(e) => (e.preventDefault(), run('script', { ...scriptParams(v), ...(reason ? { reason } : {}) }, onClose))}>
         <ScriptFields v={v} set={set} />
         <Reason show={fourEyes(target.detail, 'script')} value={reason} onChange={setReason} />
-        {fourEyes(target.detail, 'script') && <p className="text-[12.5px] text-muted">{t('devices.f.fourEyesNote')}</p>}
+        {fourEyes(target.detail, 'script') && <p className="text-meta text-muted">{t('devices.f.fourEyesNote')}</p>}
       </form>
     </Modal>
   )
@@ -333,7 +333,7 @@ function UserDialog({ target, user, onClose }: { target: Target; user?: string; 
         <Text label={t(user ? 'devices.user.newPassword' : 'devices.user.initialPassword')} help={t('devices.user.passwordHelp', { min })} type="password" value={pw} onChange={setPw} required error={short ? t('devices.user.passwordShort', { min }) : undefined} autoFocus={!!user} />
         <Text label={t('devices.user.repeat')} type="password" value={pw2} onChange={setPw2} required error={mismatch ? t('devices.user.mismatch') : undefined} />
         {!user && (
-          <label className="flex items-center gap-2 text-[13px]">
+          <label className="flex items-center gap-2 text-body">
             <input type="checkbox" checked={admin} onChange={(e) => setAdmin(e.target.checked)} /> {t('devices.user.admin')}
           </label>
         )}
@@ -398,7 +398,7 @@ function EditDialog({ target, onClose }: { target: Target; onClose: () => void }
     <Modal open wide onClose={onClose} title={t('devices.cmd.edit')} description={target.hostname} footer={<Foot form="dlg-edit" onClose={onClose} label={t('common.save')} busy={patch.isPending} disabled={!!pu.error || !!pt.error} />}>
       <form id="dlg-edit" className="flex flex-col gap-4" onSubmit={(e) => (e.preventDefault(), submit())}>
         {err && (
-          <p role="alert" className="text-[13px] font-medium text-bad">
+          <p role="alert" className="text-body font-medium text-bad">
             {err}
           </p>
         )}
@@ -473,7 +473,7 @@ function DeleteDialog({ target, onClose }: { target: Target; onClose: () => void
           del.mutate(confirm, { onSuccess: () => (toast(t('devices.delete.done')), void nav({ to: '/devices' })), onError: (er) => toast(errorText(er), 'error') })
         }}
       >
-        <p className="text-[13px]">{t('devices.delete.help')}</p>
+        <p className="text-body">{t('devices.delete.help')}</p>
         <Text label={t('devices.f.confirmHost', { host: target.hostname })} value={confirm} onChange={setConfirm} required mono autoFocus />
       </form>
     </Modal>
@@ -491,14 +491,14 @@ function RecoveryDialog({ uuid, path, target, onClose }: { uuid: string; path: s
   if (res?.key) {
     body = (
       <div className="flex flex-col gap-3">
-        <p className="rounded-lg bg-surface-2 p-3 text-center font-mono text-[15px] tracking-wide break-all select-all" aria-label={t('devices.rec.key')}>
+        <p className="rounded-lg bg-surface-2 p-3 text-center font-mono text-title tracking-wide break-all select-all" aria-label={t('devices.rec.key')}>
           {res.key}
         </p>
         <button type="button" className="btn w-fit" onClick={() => void navigator.clipboard?.writeText(res.key ?? '').then(() => toast(t('devices.copied')))}>
           {t('devices.copy')}
         </button>
-        <p className="text-[12.5px] text-muted">{t('devices.rec.keyHelp')}</p>
-        {res.rotate && <p className="text-[12.5px] text-warn">{t('devices.rec.rotate')}</p>}
+        <p className="text-meta text-muted">{t('devices.rec.keyHelp')}</p>
+        {res.rotate && <p className="text-meta text-warn">{t('devices.rec.rotate')}</p>}
       </div>
     )
   } else if (res?.state === 'pending') body = <p>{t('devices.rec.pending')}</p>
@@ -506,7 +506,7 @@ function RecoveryDialog({ uuid, path, target, onClose }: { uuid: string; path: s
   else
     body = (
       <form id="dlg-rec" className="flex flex-col gap-4" onSubmit={(e) => (e.preventDefault(), ask())}>
-        <p className="text-[13px] text-muted">{t(four ? 'devices.rec.fourEyes' : 'devices.rec.audited')}</p>
+        <p className="text-body text-muted">{t(four ? 'devices.rec.fourEyes' : 'devices.rec.audited')}</p>
         <Text label={t('devices.rec.reason')} value={reason} onChange={setReason} required={four} max={500} autoFocus />
       </form>
     )
@@ -557,7 +557,7 @@ function ShellDialog({ target, onClose }: { target: Target; onClose: () => void 
         }}
       >
         <Text label={t('devices.shell.user')} help={t(s?.allow_root ? 'devices.shell.userHelpRoot' : 'devices.shell.userHelp')} value={user} onChange={setUser} mono autoFocus />
-        {s?.four_eyes && <p className="text-[12.5px] text-muted">{t('devices.shell.fourEyes')}</p>}
+        {s?.four_eyes && <p className="text-meta text-muted">{t('devices.shell.fourEyes')}</p>}
       </form>
     </Modal>
   )

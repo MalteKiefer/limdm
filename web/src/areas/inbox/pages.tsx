@@ -109,7 +109,7 @@ export function InboxPage() {
           ]}
         />
       </div>
-      <div className="flex flex-wrap items-center gap-3 px-[var(--pad-card)] py-2 text-[12.5px] text-muted">
+      <div className="flex flex-wrap items-center gap-3 px-[var(--pad-card)] py-2 text-meta text-muted">
         <label className="flex items-center gap-1.5">
           <input type="checkbox" checked={history} onChange={(e) => set({ hist: e.target.checked ? '1' : undefined })} /> {t('inbox.showDecided')}
         </label>
@@ -142,7 +142,7 @@ export function InboxPage() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{r.title}</span>
-                  <span className="block truncate text-[12.5px] text-muted">{r.meta}</span>
+                  <span className="block truncate text-meta text-muted">{r.meta}</span>
                 </span>
                 {r.approval && r.approval.status !== 'pending' ? <StatusBadge status={r.approval.status} /> : <Badge tone={tone(r.risk)}>{t(`inbox.risk.${r.risk}` as MessageKey)}</Badge>}
               </Link>
@@ -197,7 +197,7 @@ export function InboxPage() {
   return (
     <div>
       <PageHeader title={t('inbox.title')} sub={t('inbox.sub')} />
-      {!me.four_eyes && <p className="mb-3 rounded-lg bg-surface-2 p-3 text-[13px] text-muted">{t('inbox.fourEyesOff')}</p>}
+      {!me.four_eyes && <p className="mb-3 rounded-lg bg-surface-2 p-3 text-body text-muted">{t('inbox.fourEyesOff')}</p>}
       <SplitView list={list} detail={detail || undefined} />
       <Modal
         open={!!creds}
@@ -210,7 +210,7 @@ export function InboxPage() {
           </button>
         }
       >
-        <pre className="overflow-x-auto rounded-lg bg-surface-2 p-3 font-mono text-[12.5px] whitespace-pre-wrap">{creds}</pre>
+        <pre className="overflow-x-auto rounded-lg bg-surface-2 p-3 font-mono text-meta whitespace-pre-wrap">{creds}</pre>
       </Modal>
     </div>
   )
@@ -223,7 +223,7 @@ function StatusBadge({ status }: { status: Approval['status'] }) {
 
 function Prop({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid grid-cols-[130px_1fr] gap-2 py-1.5 text-[13px] max-sm:grid-cols-1">
+    <div className="grid grid-cols-[130px_1fr] gap-2 py-1.5 text-body max-sm:grid-cols-1">
       <dt className="text-muted">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
@@ -267,7 +267,7 @@ function ApprovalDetail({ a, onDone }: { a: Approval; onDone: (credentials?: str
   return (
     <div className="flex flex-col gap-4">
       {destructive && a.status === 'pending' && (
-        <p role="note" className="flex gap-2 rounded-lg bg-bad-soft p-3 text-[13px] text-bad">
+        <p role="note" className="flex gap-2 rounded-lg bg-bad-soft p-3 text-body text-bad">
           <TriangleAlert size={16} className="mt-0.5 shrink-0" aria-hidden /> {cmd === 'wipe' ? t('inbox.wipeWarning') : t('inbox.shellWarning')}
         </p>
       )}
@@ -302,7 +302,7 @@ function ApprovalDetail({ a, onDone }: { a: Approval; onDone: (credentials?: str
       {a.status === 'pending' && isAdmin && (
         <div className="flex flex-wrap gap-2 border-t border-line pt-4">
           {own ? (
-            <p className="text-[13px] text-muted">{t('inbox.ownRequest')}</p>
+            <p className="text-body text-muted">{t('inbox.ownRequest')}</p>
           ) : (
             <>
               <button type="button" className="btn btn-primary" onClick={() => setOp('approve')}>
@@ -364,17 +364,17 @@ function Payload({ a }: { a: Approval }) {
   const current = useLibraryItem(item?.id || undefined)
   let body: ReactNode
   if (a.action === 'command') {
-    body = <pre className="max-h-[50vh] overflow-auto rounded-lg bg-surface-2 p-3 font-mono text-[12.5px] whitespace-pre-wrap">{typeof p.payload === 'string' && p.payload ? p.payload : t('inbox.noPayload')}</pre>
+    body = <pre className="max-h-[50vh] overflow-auto rounded-lg bg-surface-2 p-3 font-mono text-meta whitespace-pre-wrap">{typeof p.payload === 'string' && p.payload ? p.payload : t('inbox.noPayload')}</pre>
   } else if (a.action === 'recovery.view' || a.action === 'remote_shell') {
-    body = <p className="text-[13px] text-muted">{a.action === 'remote_shell' ? t('inbox.shellBody') : t('inbox.recoveryBody')}</p>
+    body = <p className="text-body text-muted">{a.action === 'remote_shell' ? t('inbox.shellBody') : t('inbox.recoveryBody')}</p>
   } else if (item) {
-    body = current.data ? <DiffViewer before={pretty(current.data)} after={pretty({ ...current.data, ...item })} label={t('inbox.diff')} /> : <pre className="max-h-[50vh] overflow-auto rounded-lg bg-surface-2 p-3 font-mono text-[12.5px]">{pretty(p)}</pre>
+    body = current.data ? <DiffViewer before={pretty(current.data)} after={pretty({ ...current.data, ...item })} label={t('inbox.diff')} /> : <pre className="max-h-[50vh] overflow-auto rounded-lg bg-surface-2 p-3 font-mono text-meta">{pretty(p)}</pre>
   } else {
-    body = <pre className="max-h-[50vh] overflow-auto rounded-lg bg-surface-2 p-3 font-mono text-[12.5px]">{pretty(p)}</pre>
+    body = <pre className="max-h-[50vh] overflow-auto rounded-lg bg-surface-2 p-3 font-mono text-meta">{pretty(p)}</pre>
   }
   return (
     <section aria-label={t('inbox.payload')}>
-      <h3 className="mb-2 text-[12.5px] font-semibold text-muted">{t('inbox.payload')}</h3>
+      <h3 className="mb-2 text-meta font-semibold text-muted">{t('inbox.payload')}</h3>
       {body}
     </section>
   )
@@ -397,8 +397,8 @@ function CommandDetail({ c }: { c: Schemas['FleetCommand'] }) {
         <Prop label={t('inbox.failedAt')}>{dateTime(c.updated_at)}</Prop>
       </dl>
       <section aria-label={t('inbox.output')}>
-        <h3 className="mb-2 text-[12.5px] font-semibold text-muted">{t('inbox.output')}</h3>
-        <pre className="max-h-[50vh] overflow-auto rounded-lg bg-surface-2 p-3 font-mono text-[12.5px] whitespace-pre-wrap">{c.output || t('inbox.noOutput')}</pre>
+        <h3 className="mb-2 text-meta font-semibold text-muted">{t('inbox.output')}</h3>
+        <pre className="max-h-[50vh] overflow-auto rounded-lg bg-surface-2 p-3 font-mono text-meta whitespace-pre-wrap">{c.output || t('inbox.noOutput')}</pre>
       </section>
       <Link to="/activity" search={{ target: c.device_id }} className="btn self-start">
         {t('inbox.deviceActivity')}

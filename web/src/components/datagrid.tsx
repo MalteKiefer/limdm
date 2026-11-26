@@ -135,8 +135,8 @@ export function DataGrid<T>({ data, columns, getRowId, label, sort, onSortChange
   const pad = { top: items[0]?.start ?? 0, bottom: v.getTotalSize() - (last?.end ?? 0) }
   return (
     <div ref={scroller} className="card overflow-auto" style={{ maxHeight }}>
-      <table className="w-full text-left text-[13px]" aria-label={label} aria-rowcount={rows.length + 1}>
-        <thead className="sticky top-0 z-10 bg-surface text-[12px] text-muted shadow-[0_1px_0_var(--c-line)]">
+      <table className="w-full text-left text-body" aria-label={label} aria-rowcount={rows.length + 1}>
+        <thead className="sticky top-0 z-10 bg-surface text-meta text-muted shadow-[0_1px_0_var(--c-line)]">
           {table.getHeaderGroups().map((hg) => (
             <tr key={hg.id}>
               {hg.headers.map((h) => {
@@ -196,7 +196,7 @@ export function DataGrid<T>({ data, columns, getRowId, label, sort, onSortChange
         </tbody>
       </table>
       {loadingMore && (
-        <p role="status" className="p-2 text-center text-[12.5px] text-muted">
+        <p role="status" className="p-2 text-center text-meta text-muted">
           {t('grid.loadingMore')}
         </p>
       )}
@@ -225,7 +225,7 @@ export function BulkActionBar({ count, onClear, children }: { count: number; onC
   if (count === 0) return null
   return (
     <div role="region" aria-label={t('bulk.selected', { count })} className="fade-in sticky bottom-4 z-20 mx-auto mt-3 flex w-fit max-w-full flex-wrap items-center gap-2 rounded-xl bg-fg px-3 py-2 text-bg shadow-pop">
-      <span className="num px-1 text-[13px] font-medium">{t('bulk.selected', { count })}</span>
+      <span className="num px-1 text-body font-medium">{t('bulk.selected', { count })}</span>
       <div className="flex flex-wrap gap-1.5 [&_.btn]:border-transparent [&_.btn]:bg-bg/10 [&_.btn]:text-bg [&_.btn:hover]:bg-bg/20">{children}</div>
       <button type="button" className="rounded p-1 hover:bg-bg/20" aria-label={t('bulk.clear')} onClick={onClear}>
         <X size={15} />

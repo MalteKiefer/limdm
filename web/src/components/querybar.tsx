@@ -45,7 +45,7 @@ export function QueryBar({ value, onChange, keys, placeholder, label }: { value:
       >
         <Search size={16} aria-hidden className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted" />
         <input
-          className="field !h-9 pl-9 font-mono text-[13px]"
+          className="field !h-9 pl-9 font-mono text-body"
           aria-label={label ?? t('query.label')}
           role="combobox"
           aria-expanded={showList}
@@ -87,8 +87,8 @@ export function QueryBar({ value, onChange, keys, placeholder, label }: { value:
                 }}
                 className={cx('flex cursor-default items-baseline gap-3 rounded-md px-2 py-1.5', i === active && 'bg-surface-2')}
               >
-                <span className="font-mono text-[13px]">{k.key}:</span>
-                <span className="truncate text-[12.5px] text-muted">{k.help}</span>
+                <span className="font-mono text-body">{k.key}:</span>
+                <span className="truncate text-meta text-muted">{k.help}</span>
               </li>
             ))}
           </ul>
@@ -100,7 +100,7 @@ export function QueryBar({ value, onChange, keys, placeholder, label }: { value:
             const text = formatToken(tok)
             return (
               <li key={text}>
-                <span className="inline-flex items-center gap-1 rounded-md border border-line bg-surface py-0.5 pr-0.5 pl-2 font-mono text-[12px]">
+                <span className="inline-flex items-center gap-1 rounded-md border border-line bg-surface py-0.5 pr-0.5 pl-2 font-mono text-meta">
                   {text}
                   <button type="button" className="grid size-5 place-items-center rounded hover:bg-surface-2" aria-label={t('query.remove', { token: text })} onClick={() => onChange(removeToken(value, tok))}>
                     <X size={12} />
@@ -110,7 +110,7 @@ export function QueryBar({ value, onChange, keys, placeholder, label }: { value:
             )
           })}
           <li>
-            <button type="button" className="btn btn-ghost !h-7 text-[12.5px] text-accent" onClick={() => onChange('')}>
+            <button type="button" className="btn btn-ghost !h-7 text-meta text-accent" onClick={() => onChange('')}>
               {t('query.clear')}
             </button>
           </li>
@@ -129,7 +129,7 @@ export function Facets({ facets, value, onChange }: { facets: Facet[]; value: st
     <nav aria-label={t('query.facets')} className="flex flex-col gap-4">
       {facets.map((f) => (
         <section key={f.key}>
-          <h3 className="mb-1 text-[11.5px] font-semibold tracking-wide text-muted uppercase">{f.title}</h3>
+          <h3 className="mb-1 text-micro font-semibold tracking-wide text-muted uppercase">{f.title}</h3>
           <ul className="flex flex-col">
             {f.values.map((v) => {
               const tok = { key: f.key, value: v.value }
@@ -140,10 +140,10 @@ export function Facets({ facets, value, onChange }: { facets: Facet[]; value: st
                     type="button"
                     aria-pressed={on}
                     onClick={() => onChange(on ? removeToken(value, tok) : addToken(value, tok))}
-                    className={cx('flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-[13px] hover:bg-surface-2', on && 'bg-accent-soft text-on-accent-soft')}
+                    className={cx('flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-body hover:bg-surface-2', on && 'bg-accent-soft text-on-accent-soft')}
                   >
                     <span className="min-w-0 flex-1 truncate">{v.label ?? (v.value || '–')}</span>
-                    <span className="num text-[12px] text-muted">{fmt(v.count)}</span>
+                    <span className="num text-meta text-muted">{fmt(v.count)}</span>
                   </button>
                 </li>
               )

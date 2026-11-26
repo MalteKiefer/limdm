@@ -43,11 +43,11 @@ export function HistoryPage() {
   )
   const stateCols = useMemo<GridColumn<Change>[]>(
     () => [
-      { id: 'check', header: t('compliance.col.check'), cell: ({ row: { original: r } }) => <span className="font-mono text-[12.5px]">{r.check_id}</span> },
+      { id: 'check', header: t('compliance.col.check'), cell: ({ row: { original: r } }) => <span className="font-mono text-meta">{r.check_id}</span> },
       { id: 'status', header: t('compliance.exc.col.state'), cell: ({ row: { original: r } }) => <ResultBadge status={r.status} /> },
       { id: 'since', header: t('compliance.hist.since'), cell: ({ row: { original: r } }) => <span className="num">{dateTime(r.since)}</span> },
       { id: 'detail', header: t('compliance.hist.detail'), cell: ({ row: { original: r } }) => <span className="truncate text-muted" title={r.detail}>{r.detail}</span> },
-      { id: 'catalog', header: t('compliance.hist.catalog'), cell: ({ row: { original: r } }) => <span className="font-mono text-[12px] text-muted">{r.catalog_version}</span> },
+      { id: 'catalog', header: t('compliance.hist.catalog'), cell: ({ row: { original: r } }) => <span className="font-mono text-meta text-muted">{r.catalog_version}</span> },
     ],
     [t],
   )
@@ -106,10 +106,10 @@ export function HistoryPage() {
       ) : (
         <div className="flex flex-col gap-[var(--gap)]">
           <Card title={`${t('compliance.hist.state')}: ${host}`} id="hist-state" bodyClass="!p-0">
-            <DataGrid label={t('compliance.hist.state')} data={d.state} columns={stateCols} getRowId={(r) => r.check_id} maxHeight="420px" empty={<EmptyState title={t('compliance.hist.none')} />} card={(r) => <span className="flex justify-between gap-2"><span className="font-mono text-[12.5px]">{r.check_id}</span><ResultBadge status={r.status} /></span>} />
+            <DataGrid label={t('compliance.hist.state')} data={d.state} columns={stateCols} getRowId={(r) => r.check_id} maxHeight="420px" empty={<EmptyState title={t('compliance.hist.none')} />} card={(r) => <span className="flex justify-between gap-2"><span className="font-mono text-meta">{r.check_id}</span><ResultBadge status={r.status} /></span>} />
           </Card>
           <Card title={t('compliance.hist.changes')} id="hist-changes" bodyClass="!p-0">
-            <DataGrid label={t('compliance.hist.changes')} data={d.changes} columns={changeCols} getRowId={(r) => `${r.since}|${r.check_id}|${r.status}`} maxHeight="420px" empty={<EmptyState title={t('compliance.hist.noChanges')} />} card={(r) => <span className="flex justify-between gap-2"><span className="font-mono text-[12.5px]">{r.check_id}</span><ResultBadge status={r.status} /></span>} />
+            <DataGrid label={t('compliance.hist.changes')} data={d.changes} columns={changeCols} getRowId={(r) => `${r.since}|${r.check_id}|${r.status}`} maxHeight="420px" empty={<EmptyState title={t('compliance.hist.noChanges')} />} card={(r) => <span className="flex justify-between gap-2"><span className="font-mono text-meta">{r.check_id}</span><ResultBadge status={r.status} /></span>} />
           </Card>
         </div>
       )}

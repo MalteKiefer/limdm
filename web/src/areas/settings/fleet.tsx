@@ -36,7 +36,7 @@ export function Directory() {
   const blueprints = (bps.data?.items ?? []).filter((b) => b.id != null) as { id: number; name?: string }[]
   type G = Schemas['DirectoryGroup']
   const columns: GridColumn<G>[] = [
-    { id: 'name', header: t('settings.dir.group'), cell: (c) => <span className="flex flex-col"><span className="font-medium">{c.row.original.name}</span><span className="text-[12px] text-muted">{c.row.original.source}</span></span> },
+    { id: 'name', header: t('settings.dir.group'), cell: (c) => <span className="flex flex-col"><span className="font-medium">{c.row.original.name}</span><span className="text-meta text-muted">{c.row.original.source}</span></span> },
     { id: 'members', header: t('settings.dir.members'), cell: (c) => <span className="num">{fmt(c.row.original.members)}</span> },
     {
       id: 'bp',
@@ -118,11 +118,11 @@ export function Directory() {
       <FormSection title="SCIM" description={t('settings.dir.scimHelp')}>
         <Facts
           rows={[
-            [t('settings.dir.scimUrl'), <code className="font-mono text-[12.5px] break-all">{d.scim.url}</code>],
+            [t('settings.dir.scimUrl'), <code className="font-mono text-meta break-all">{d.scim.url}</code>],
             [t('settings.dir.state'), d.scim.configured ? <Badge tone="ok">{t('settings.dir.tokenSet')}</Badge> : <Badge tone="off">{t('settings.dir.noToken')}</Badge>],
           ]}
         />
-        <p className="text-[12.5px] text-muted">{t('settings.dir.scimNets')}</p>
+        <p className="text-meta text-muted">{t('settings.dir.scimNets')}</p>
         {admin && (
           <button type="button" className="btn self-start" onClick={() => setRotate(true)}>
             {d.scim.configured ? t('settings.dir.rotate') : t('settings.dir.create')}
@@ -131,9 +131,9 @@ export function Directory() {
       </FormSection>
       <section className="py-6">
         <h3 className="font-semibold">{t('settings.dir.groups')}</h3>
-        <p className="mb-3 text-[13px] text-muted">{t('settings.dir.groupsHelp')}</p>
+        <p className="mb-3 text-body text-muted">{t('settings.dir.groupsHelp')}</p>
         <DataGrid label={t('settings.dir.groups')} data={d.groups} columns={columns} getRowId={(g) => String(g.id)} maxHeight="420px" empty={<EmptyState icon={FolderTree} title={t('settings.dir.noGroups')}>{t('settings.dir.noGroupsBody')}</EmptyState>} card={(g) => <span>{g.name} · {fmt(g.members)}</span>} />
-        <p className="mt-3 text-[12.5px] text-muted">
+        <p className="mt-3 text-meta text-muted">
           {t('settings.dir.roleGroups', { n: d.role_groups.length })}{' '}
           <a className="text-accent underline-offset-2 hover:underline" href="/app/settings?s=signin">
             {t('settings.nav.signin')}
@@ -168,11 +168,11 @@ function People() {
   const users = useDirectoryUsers(deferred.trim())
   type U = Schemas['DirectoryUser']
   const columns: GridColumn<U>[] = [
-    { id: 'name', header: t('settings.dir.person'), cell: (c) => <span className="flex flex-col"><span className="font-medium">{c.row.original.display_name || c.row.original.user_name}</span><span className="text-[12px] text-muted">{c.row.original.email}</span></span> },
+    { id: 'name', header: t('settings.dir.person'), cell: (c) => <span className="flex flex-col"><span className="font-medium">{c.row.original.display_name || c.row.original.user_name}</span><span className="text-meta text-muted">{c.row.original.email}</span></span> },
     { id: 'dept', header: t('settings.dir.department'), cell: (c) => [c.row.original.department, c.row.original.title].filter(Boolean).join(' · ') },
     { id: 'groups', header: t('settings.dir.groups'), cell: (c) => c.row.original.groups.join(', ') },
     { id: 'state', header: t('settings.tokens.state'), cell: (c) => (c.row.original.active ? <Badge tone="ok">{t('settings.tenants.active')}</Badge> : <Badge tone="off">{t('settings.users.disabled')}</Badge>) },
-    { id: 'src', header: t('settings.dir.source'), cell: (c) => <span className="text-[12px]">{c.row.original.source} · {ago(c.row.original.updated_at)}</span> },
+    { id: 'src', header: t('settings.dir.source'), cell: (c) => <span className="text-meta">{c.row.original.source} · {ago(c.row.original.updated_at)}</span> },
   ]
   return (
     <section className="pb-6">
@@ -207,10 +207,10 @@ export function Network() {
   const tone = { valid: 'ok', expired: 'off', revoked: 'bad' } as const
   const columns: GridColumn<C>[] = [
     { id: 'host', header: t('settings.net.device'), cell: (c) => <a className="font-mono text-accent underline-offset-2 hover:underline" href={`/app/devices?sel=${encodeURIComponent(c.row.original.device_id)}`}>{c.row.original.hostname || c.row.original.device_id}</a> },
-    { id: 'subject', header: t('settings.net.subject'), cell: (c) => <span className="flex flex-col"><span className="font-mono text-[12px]">{c.row.original.subject}</span><span className="text-[12px] text-muted">{c.row.original.sans}</span></span> },
+    { id: 'subject', header: t('settings.net.subject'), cell: (c) => <span className="flex flex-col"><span className="font-mono text-meta">{c.row.original.subject}</span><span className="text-meta text-muted">{c.row.original.sans}</span></span> },
     { id: 'valid', header: t('settings.net.valid'), cell: (c) => `${dateTime(c.row.original.not_before)} – ${dateTime(c.row.original.not_after)}` },
-    { id: 'state', header: t('settings.tokens.state'), cell: (c) => <span className="flex flex-col"><Badge tone={tone[c.row.original.state]}>{t(`settings.net.state.${c.row.original.state}` as MessageKey)}</Badge>{c.row.original.reason && <span className="text-[12px] text-muted">{c.row.original.reason}</span>}</span> },
-    { id: 'serial', header: t('settings.net.serial'), cell: (c) => <code className="font-mono text-[11.5px]">{c.row.original.serial}</code> },
+    { id: 'state', header: t('settings.tokens.state'), cell: (c) => <span className="flex flex-col"><Badge tone={tone[c.row.original.state]}>{t(`settings.net.state.${c.row.original.state}` as MessageKey)}</Badge>{c.row.original.reason && <span className="text-meta text-muted">{c.row.original.reason}</span>}</span> },
+    { id: 'serial', header: t('settings.net.serial'), cell: (c) => <code className="font-mono text-micro">{c.row.original.serial}</code> },
   ]
   return (
     <>
@@ -226,8 +226,8 @@ export function Network() {
       <FormSection title={t('settings.net.ca')} description={t('settings.net.caHelp')}>
         <Facts
           rows={[
-            [t('settings.net.subject'), <span className="font-mono text-[12.5px]">{n.ca_subject}</span>],
-            [t('settings.net.fingerprint'), <code className="font-mono text-[12px] break-all">{n.ca_fingerprint}</code>],
+            [t('settings.net.subject'), <span className="font-mono text-meta">{n.ca_subject}</span>],
+            [t('settings.net.fingerprint'), <code className="font-mono text-meta break-all">{n.ca_fingerprint}</code>],
             [t('settings.net.until'), dateTime(n.ca_not_after)],
           ]}
         />
@@ -235,7 +235,7 @@ export function Network() {
       <FormSection title={t('settings.net.crl')} description={t('settings.net.crlHelp')}>
         <Facts
           rows={[
-            ['URL', <code className="font-mono text-[12.5px] break-all">{n.crl_url}</code>],
+            ['URL', <code className="font-mono text-meta break-all">{n.crl_url}</code>],
             [t('settings.dir.state'), n.crl_token_set ? <Badge tone="ok">{t('settings.dir.tokenSet')}</Badge> : <Badge tone="off">{t('settings.dir.noToken')}</Badge>],
           ]}
         />
@@ -289,18 +289,18 @@ export function Agents() {
   type R = Schemas['AgentRelease']
   const columns: GridColumn<R>[] = [
     { id: 'v', header: t('settings.agents.version'), cell: (c) => <span className="flex items-center gap-1.5 font-mono">{c.row.original.version}{c.row.original.version === a.latest && <Badge tone="accent">{t('settings.agents.latest')}</Badge>}</span> },
-    { id: 'pub', header: t('settings.agents.published'), cell: (c) => <span className="flex flex-col"><span>{dateTime(c.row.original.published_at)}</span>{c.row.original.signed && <span className="text-[12px] text-muted">{t('settings.agents.signed')}</span>}</span> },
+    { id: 'pub', header: t('settings.agents.published'), cell: (c) => <span className="flex flex-col"><span>{dateTime(c.row.original.published_at)}</span>{c.row.original.signed && <span className="text-meta text-muted">{t('settings.agents.signed')}</span>}</span> },
     {
       id: 'state',
       header: t('settings.tokens.state'),
       cell: (c) => {
         const r = c.row.original
-        if (r.blocked) return <span className="flex flex-col"><Badge tone="bad">{t('settings.agents.blocked')}</Badge><span className="text-[12px] text-muted">{r.blocked_reason}</span></span>
-        if (r.approved_at) return <span className="flex flex-col"><Badge tone="ok">{t('settings.agents.approved')}</Badge><span className="text-[12px] text-muted">{r.approved_by} · {ago(r.approved_at)}</span></span>
+        if (r.blocked) return <span className="flex flex-col"><Badge tone="bad">{t('settings.agents.blocked')}</Badge><span className="text-meta text-muted">{r.blocked_reason}</span></span>
+        if (r.approved_at) return <span className="flex flex-col"><Badge tone="ok">{t('settings.agents.approved')}</Badge><span className="text-meta text-muted">{r.approved_by} · {ago(r.approved_at)}</span></span>
         return <Badge tone="warn">{t('settings.agents.waiting')}</Badge>
       },
     },
-    { id: 'dev', header: t('settings.agents.devices'), cell: (c) => <span className="flex flex-col"><span className="num">{fmt(c.row.original.devices)}</span>{c.row.original.failed > 0 && <span className="text-[12px] text-bad">{t('settings.agents.failed', { n: c.row.original.failed })}</span>}</span> },
+    { id: 'dev', header: t('settings.agents.devices'), cell: (c) => <span className="flex flex-col"><span className="num">{fmt(c.row.original.devices)}</span>{c.row.original.failed > 0 && <span className="text-meta text-bad">{t('settings.agents.failed', { n: c.row.original.failed })}</span>}</span> },
     ...(admin
       ? [
           {
@@ -365,7 +365,7 @@ export function Agents() {
         <FormSection title={t('settings.agents.fleet')} description={a.outdated.length ? t('settings.agents.outdated', { n: a.outdated.length, v: a.latest }) : t('settings.agents.current')}>
           <StackBar label={t('settings.agents.fleet')} parts={a.fleet.map((x, i) => ({ label: x.version || t('settings.agents.unknown'), value: x.devices, color: palette[i % palette.length], note: fmt(x.devices) }))} />
           {a.outdated.length > 0 && (
-            <ul className="flex max-h-40 flex-col gap-0.5 overflow-y-auto text-[13px]">
+            <ul className="flex max-h-40 flex-col gap-0.5 overflow-y-auto text-body">
               {a.outdated.slice(0, 50).map((d) => (
                 <li key={d.id}>
                   <a className="font-mono text-accent underline-offset-2 hover:underline" href={`/app/devices?sel=${encodeURIComponent(d.id)}`}>{d.hostname}</a> <span className="text-muted">{d.version || '?'}</span>

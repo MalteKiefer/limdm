@@ -73,11 +73,11 @@ export function Schedules() {
                     <div className="font-medium">
                       {s.name} <Badge>{t(`reports.cadence.${s.cadence}` as MessageKey)}</Badge>
                     </div>
-                    <div className="text-[12.5px] text-muted">
+                    <div className="text-meta text-muted">
                       {t('reports.sched.to', { to: [...s.channels.map(name), ...s.emails].join(', ') })} · {t('reports.sched.next', { at: dateTime(s.next_run) })}
                       {s.last_run && ` · ${t('reports.sched.last', { at: dateTime(s.last_run) })}`} · {s.owner}
                     </div>
-                    {s.last_error && <div className="text-[12.5px] font-medium text-bad">{s.last_error}</div>}
+                    {s.last_error && <div className="text-meta font-medium text-bad">{s.last_error}</div>}
                     <Runs id={s.id} />
                   </div>
                   <div className="flex gap-2">
@@ -127,19 +127,19 @@ export function Schedules() {
               )}
             </Field>
             <fieldset className="flex flex-col gap-1" aria-describedby={errFor('channels') ? 'sched-ch-err' : undefined}>
-              <legend className="text-[13px] font-medium">{t('reports.sched.channels')}</legend>
+              <legend className="text-body font-medium">{t('reports.sched.channels')}</legend>
               {chans.length ? (
                 chans.map((c) => (
-                  <label key={c.id} className="flex items-center gap-2 text-[13px]">
+                  <label key={c.id} className="flex items-center gap-2 text-body">
                     <input type="checkbox" checked={channels.includes(c.id)} onChange={(e) => setChannels(e.target.checked ? [...channels, c.id] : channels.filter((x) => x !== c.id))} />
                     {c.name} <span className="text-muted">({c.kind})</span>
                   </label>
                 ))
               ) : (
-                <p className="text-[12.5px] text-muted">{t('reports.sched.noChannels')}</p>
+                <p className="text-meta text-muted">{t('reports.sched.noChannels')}</p>
               )}
               {errFor('channels') && (
-                <p id="sched-ch-err" className="text-[12.5px] font-medium text-bad">
+                <p id="sched-ch-err" className="text-meta font-medium text-bad">
                   {errFor('channels')}
                 </p>
               )}
@@ -168,7 +168,7 @@ function Runs({ id }: { id: number }) {
     queryFn: () => unwrap(api.GET('/api/v1/report-schedules/{id}/runs', { params: { path: { id } } })).then((p) => p.items),
   })
   return (
-    <details className="mt-1 text-[12.5px]" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+    <details className="mt-1 text-meta" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
       <summary className="cursor-pointer text-accent">{t('reports.sched.runs')}</summary>
       {runs.data && !runs.data.length && <p className="text-muted">{t('reports.sched.noRuns')}</p>}
       <ul className="mt-1 flex flex-col gap-1">
@@ -183,7 +183,7 @@ function Runs({ id }: { id: number }) {
                 <a className="inline-flex items-center gap-1 text-accent hover:underline" href={`/api/v1/report-runs/${r.id}`} download>
                   <Download size={12} aria-hidden /> {t('reports.download')}
                 </a>
-                <span className="font-mono text-[11px] break-all text-muted" title="SHA-256">
+                <span className="font-mono text-micro break-all text-muted" title="SHA-256">
                   {r.sha256.slice(0, 16)}
                 </span>
               </>

@@ -152,7 +152,7 @@ export function Access() {
                 <FormSection title={t('settings.access.console')} description={t('settings.access.consoleHelp', { ip: s.client_ip })}>
                   <ListField form={f} name="console_allow" label={t('settings.access.allow')} help={t('settings.access.allowHelp')} placeholder="10.0.0.0/8 2001:db8::/32" />
                   <ListField form={f} name="console_block" label={t('settings.access.block')} help={t('settings.access.blockHelp')} placeholder="203.0.113.0/24" />
-                  <p className="text-[12.5px] text-muted">{t('settings.access.lockout')}</p>
+                  <p className="text-meta text-muted">{t('settings.access.lockout')}</p>
                 </FormSection>
                 <FormSection title={t('settings.access.scim')} description={t('settings.access.scimHelp')}>
                   <ListField form={f} name="scim_allow" label={t('settings.access.scimAllow')} help={t('settings.access.empty')} placeholder="198.51.100.0/24" rows={2} />
@@ -244,13 +244,13 @@ export function SignIn() {
             {(f) => (
               <>
                 <FormSection title={t('settings.signin.oidc')} description={t('settings.signin.oidcHelp')}>
-                  <Facts rows={[[t('settings.signin.redirect'), <code className="font-mono text-[12.5px] break-all">{s.redirect_uri}</code>]]} />
+                  <Facts rows={[[t('settings.signin.redirect'), <code className="font-mono text-meta break-all">{s.redirect_uri}</code>]]} />
                   <TextField form={f} name="oidc_issuer" label={t('settings.signin.issuer')} placeholder="https://accounts.google.com" mono />
                   <TextField form={f} name="oidc_client_id" label={t('settings.signin.clientId')} mono />
                   <TextField form={f} name="oidc_client_secret" type="password" autoComplete="new-password" label={t('settings.signin.secret')} help={s.has_oidc_secret ? t('settings.signin.secretKept') : t('settings.signin.secretNone')} />
                   {s.has_oidc_secret && <Toggle form={f} name="clear_secret" label={t('settings.signin.secretClear')} />}
                   <TextField form={f} name="allowed_domain" label={t('settings.signin.domain')} help={t('settings.signin.domainHelp')} placeholder="example.com" />
-                  <p className="text-[12.5px] text-muted">{t('settings.signin.checked')}</p>
+                  <p className="text-meta text-muted">{t('settings.signin.checked')}</p>
                 </FormSection>
                 <FormSection title={t('settings.signin.mfa')} description={t('settings.signin.mfaHelp')}>
                   <Toggle form={f} name="require_mfa" label={t('settings.signin.mfaToggle')} help={t('settings.signin.mfaToggleHelp')} />
@@ -330,7 +330,7 @@ export function Approvals() {
                   <Toggle form={f} name="four_eyes" label={t('settings.approvals.toggle')} help={t('settings.approvals.twoAdmins')} />
                   <Toggle form={f} name="four_eyes_recovery" label={t('settings.approvals.recovery')} disabled={!on} />
                   <Toggle form={f} name="four_eyes_shell" label={t('settings.approvals.shell')} disabled={!on} />
-                  <a className="text-[13px] text-accent underline-offset-2 hover:underline" href="/app/inbox">
+                  <a className="text-body text-accent underline-offset-2 hover:underline" href="/app/inbox">
                     {t('settings.approvals.inbox')}
                   </a>
                 </FormSection>
@@ -418,7 +418,7 @@ export function Retention() {
                       />
                     )
                   })}
-                  <p className="text-[12.5px] text-muted">{t('settings.retention.backups')}</p>
+                  <p className="text-meta text-muted">{t('settings.retention.backups')}</p>
                 </FormSection>
               )}
             </SettingsForm>
@@ -512,8 +512,8 @@ export function Monitoring({ s, save, ro }: { s: Settings; save: (section: Secti
           {s.webhook_secret && (
             <Facts
               rows={[
-                [t('settings.monitor.key'), <code className="font-mono text-[12px] break-all">{s.webhook_secret}</code>],
-                [t('settings.monitor.header'), <code className="font-mono text-[12px]">X-LiMDM-Signature: sha256=HMAC-SHA256(key, timestamp + "." + body)</code>],
+                [t('settings.monitor.key'), <code className="font-mono text-meta break-all">{s.webhook_secret}</code>],
+                [t('settings.monitor.header'), <code className="font-mono text-meta">X-LiMDM-Signature: sha256=HMAC-SHA256(key, timestamp + "." + body)</code>],
               ]}
             />
           )}

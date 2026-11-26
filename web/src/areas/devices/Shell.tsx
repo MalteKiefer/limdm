@@ -48,7 +48,7 @@ export function ShellPage() {
   const x = s.data
   return (
     <div className="flex flex-col gap-[var(--gap)]">
-      <Link to="/devices/$id" params={{ id }} search={{ tab: 'activity' }} className="inline-flex w-fit items-center gap-1 text-[13px] text-muted hover:text-fg">
+      <Link to="/devices/$id" params={{ id }} search={{ tab: 'activity' }} className="inline-flex w-fit items-center gap-1 text-body text-muted hover:text-fg">
         <ArrowLeft size={14} aria-hidden /> {x.hostname}
       </Link>
       <PageHeader
@@ -65,12 +65,12 @@ export function ShellPage() {
       {x.live ? (
         <Terminal sid={sid} />
       ) : x.state !== 'ended' && x.state !== 'interrupted' ? (
-        <p role="status" className="card p-4 text-[13px]">
+        <p role="status" className="card p-4 text-body">
           {t('devices.shell.running')}
         </p>
       ) : (
         <Card title={t('devices.shell.transcript')} id="sh-tr">
-          <dl className="mb-4 grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-[13px]">
+          <dl className="mb-4 grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-body">
             <dt className="text-muted">{t('devices.sw.state')}</dt>
             <dd>{t(`devices.shell.state.${x.state}` as MessageKey)}</dd>
             <dt className="text-muted">{t('devices.shell.connected')}</dt>
@@ -85,7 +85,7 @@ export function ShellPage() {
               {x.truncated && ` (${t('devices.shell.truncated')})`}
             </dd>
           </dl>
-          {x.transcript ? <pre className="max-h-[60dvh] overflow-auto rounded-md bg-surface-2 p-3 font-mono text-[12px] whitespace-pre-wrap">{x.transcript}</pre> : <p className="text-[13px] text-muted">{t('devices.shell.noOutput')}</p>}
+          {x.transcript ? <pre className="max-h-[60dvh] overflow-auto rounded-md bg-surface-2 p-3 font-mono text-meta whitespace-pre-wrap">{x.transcript}</pre> : <p className="text-body text-muted">{t('devices.shell.noOutput')}</p>}
         </Card>
       )}
     </div>
@@ -145,7 +145,7 @@ function Terminal({ sid }: { sid: string }) {
   }, [sid, t])
   return (
     <section className="card flex flex-col gap-2 p-[var(--pad-card)]">
-      <p role="status" aria-live="polite" className="text-[13px] text-muted">
+      <p role="status" aria-live="polite" className="text-body text-muted">
         {status}
       </p>
       <div ref={el} className="h-[60dvh] min-h-[320px] w-full overflow-hidden rounded-md p-1" aria-label={t('devices.shell.title')} />

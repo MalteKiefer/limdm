@@ -32,12 +32,12 @@ export function PoliciesPage() {
         cell: ({ row: { original: c } }) => (
           <Link to="/compliance" search={{ sel: c.id } as never} className="flex min-w-0 flex-col hover:text-accent">
             <span className="truncate font-medium">{c.title}</span>
-            <span className="truncate font-mono text-[11.5px] text-muted">{c.id}</span>
+            <span className="truncate font-mono text-micro text-muted">{c.id}</span>
           </Link>
         ),
       },
       { id: 'severity', header: t('compliance.pol.severity'), cell: ({ row: { original: c } }) => <span className="flex gap-1"><Badge>L{c.level}</Badge><SeverityBadge severity={c.severity} /></span> },
-      { id: 'test', header: t('compliance.pol.test'), cell: ({ row: { original: c } }) => <span className="font-mono text-[12px]">{c.test}</span> },
+      { id: 'test', header: t('compliance.pol.test'), cell: ({ row: { original: c } }) => <span className="font-mono text-meta">{c.test}</span> },
       {
         id: 'fleet',
         header: t('compliance.pol.fleet'),
@@ -70,7 +70,7 @@ export function PoliciesPage() {
       <SectionNav />
       <div className="flex flex-col gap-[var(--gap)]">
         <Card title={t('compliance.pol.graceTitle')} id="pol-grace">
-          <div className="grid gap-4 text-[13px] md:grid-cols-2">
+          <div className="grid gap-4 text-body md:grid-cols-2">
             <p className="flex gap-2">
               <Clock size={16} className="mt-0.5 shrink-0 text-muted" aria-hidden />
               {t('compliance.pol.graceBody')}
@@ -88,7 +88,7 @@ export function PoliciesPage() {
         ) : (
           <>
             <section aria-labelledby="pol-list">
-              <h2 id="pol-list" className="mb-2 text-[15px] font-semibold">
+              <h2 id="pol-list" className="mb-2 text-title font-semibold">
                 {t('compliance.pol.policies')}
               </h2>
               {!q.data.policies.length ? (
@@ -114,7 +114,7 @@ export function PoliciesPage() {
                 card={(c) => (
                   <span className="flex flex-col">
                     <span className="font-medium">{c.title}</span>
-                    <span className="font-mono text-[11.5px] text-muted">{c.id} · {c.item_name}</span>
+                    <span className="font-mono text-micro text-muted">{c.id} · {c.item_name}</span>
                   </span>
                 )}
               />
@@ -148,7 +148,7 @@ function PolicyCard({ p }: { p: Policy }) {
         </Link>
       }
     >
-      <dl className="grid grid-cols-[minmax(140px,auto)_1fr] gap-x-4 gap-y-1.5 text-[13px]">
+      <dl className="grid grid-cols-[minmax(140px,auto)_1fr] gap-x-4 gap-y-1.5 text-body">
         {rows.map(([k, v]) => (
           <div key={k} className="contents">
             <dt className="text-muted">{k}</dt>
@@ -159,7 +159,7 @@ function PolicyCard({ p }: { p: Policy }) {
         <dd className="flex flex-wrap gap-1">{list(p.advisory)}</dd>
         <dt className="text-muted">
           {t('compliance.pol.exclude')}
-          <span className="block text-[11.5px]">{t('compliance.pol.excludeHint')}</span>
+          <span className="block text-micro">{t('compliance.pol.excludeHint')}</span>
         </dt>
         <dd className="flex flex-wrap gap-1">{list(p.exclude)}</dd>
         <dt className="text-muted">{t('compliance.pol.blueprints')}</dt>

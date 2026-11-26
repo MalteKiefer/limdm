@@ -37,7 +37,7 @@ export function DevicePage() {
   const failing = d.check_results.filter((c) => (c as { status: string }).status === 'fail').length
   return (
     <div className="flex flex-col gap-[var(--gap)]">
-      <Link to="/devices" className="inline-flex w-fit items-center gap-1 text-[13px] text-muted hover:text-fg">
+      <Link to="/devices" className="inline-flex w-fit items-center gap-1 text-body text-muted hover:text-fg">
         <ArrowLeft size={14} aria-hidden /> {t('devices.title')}
       </Link>
       <Header d={d} target={target} menu={menu} open={setDialog} />
@@ -65,8 +65,8 @@ export function DevicePage() {
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[12px] text-muted">{label}</dt>
-      <dd className="truncate text-[13px]">{children || '–'}</dd>
+      <dt className="text-meta text-muted">{label}</dt>
+      <dd className="truncate text-body">{children || '–'}</dd>
     </div>
   )
 }
@@ -85,8 +85,8 @@ function Header({ d, target, menu, open }: { d: DeviceDetail; target: Target; me
           {inv.desktop ? <Monitor size={22} /> : <Server size={22} />}
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate font-mono text-[20px] font-semibold">{d.hostname}</h1>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted">
+          <h1 className="truncate font-mono text-heading font-semibold">{d.hostname}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-body text-muted">
             <StatusPill status={d.status as DeviceStatus} />
             <span>{inv.os_name || d.os}</span>
             <span>{t('devices.seen', { ago: d.last_seen ? ago(d.last_seen) : t('devices.never') })}</span>
@@ -132,7 +132,7 @@ function Header({ d, target, menu, open }: { d: DeviceDetail; target: Target; me
         </Fact>
         <Fact label={t('devices.fact.blueprint')}>
           {d.blueprints.find((b) => b.applies)?.name ?? d.blueprint}
-          <span className="block text-[12px] text-muted">
+          <span className="block text-meta text-muted">
             {d.blueprint_source.Kind === 'device'
               ? t('devices.bp.device')
               : d.blueprint_source.Kind === 'group'
@@ -145,16 +145,16 @@ function Header({ d, target, menu, open }: { d: DeviceDetail; target: Target; me
             {d.agent_version}
           </Link>
           {d.update_requested ? (
-            <span className="block text-[12px] text-muted">{t('devices.agent.requested')}</span>
+            <span className="block text-meta text-muted">{t('devices.agent.requested')}</span>
           ) : d.update_state ? (
-            <span className="block text-[12px] text-muted">
+            <span className="block text-meta text-muted">
               {d.update_version} {d.update_state}
             </span>
           ) : null}
         </Fact>
         <Fact label={t('devices.fact.network')}>
           <span className="font-mono">{d.external_ip}</span>
-          {d.place && <span className="block text-[12px] text-muted">{d.place}</span>}
+          {d.place && <span className="block text-meta text-muted">{d.place}</span>}
         </Fact>
         <Fact label={t('devices.fact.tags')}>
           {d.tags.length
@@ -185,7 +185,7 @@ function Notices({ d }: { d: DeviceDetail }) {
   const t = useT()
   const audit = useCan('audit')
   const box = (tone: 'bad' | 'warn' | 'ok', key: string, children: ReactNode) => (
-    <div key={key} role="status" className={cx('flex flex-wrap items-center gap-2 rounded-lg border px-4 py-2.5 text-[13px]', tone === 'bad' ? 'border-bad/30 bg-bad-soft' : tone === 'warn' ? 'border-warn/30 bg-warn-soft' : 'border-ok/30 bg-ok-soft')}>
+    <div key={key} role="status" className={cx('flex flex-wrap items-center gap-2 rounded-lg border px-4 py-2.5 text-body', tone === 'bad' ? 'border-bad/30 bg-bad-soft' : tone === 'warn' ? 'border-warn/30 bg-warn-soft' : 'border-ok/30 bg-ok-soft')}>
       {children}
     </div>
   )
@@ -252,9 +252,9 @@ function Health({ icon: I, label, value, tone, note }: { icon: typeof Cpu; label
         <I size={18} />
       </span>
       <div className="min-w-0">
-        <div className="text-[12.5px] text-muted">{label}</div>
+        <div className="text-meta text-muted">{label}</div>
         <div className="font-semibold">{value}</div>
-        <div className="truncate text-[12px] text-muted">{note}</div>
+        <div className="truncate text-meta text-muted">{note}</div>
       </div>
     </div>
   )
@@ -296,12 +296,12 @@ function Overview({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
       </div>
       <div className="grid gap-[var(--gap)] xl:grid-cols-3">
         <Card className="xl:col-span-2" title={t('devices.load.title')} sub={t('devices.load.sub')} id="dv-load">
-          {d.metrics.length < 2 ? <p className="text-[13px] text-muted">{t('devices.load.none')}</p> : <LoadChart d={d} />}
+          {d.metrics.length < 2 ? <p className="text-body text-muted">{t('devices.load.none')}</p> : <LoadChart d={d} />}
         </Card>
         <Card title={t('devices.open.title')} id="dv-open">
           {root && (
             <div className="mb-4">
-              <div className="mb-1.5 flex justify-between text-[12.5px]">
+              <div className="mb-1.5 flex justify-between text-meta">
                 <span className="text-muted">{t('devices.open.root')}</span>
                 <span className="num">{t('devices.open.rootUse', { pct: usedPct(root.size_gb, root.free_gb), size: root.size_gb })}</span>
               </div>
@@ -311,19 +311,19 @@ function Overview({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
             </div>
           )}
           {failing.length ? (
-            <ul className="flex flex-col gap-1.5 text-[13px]">
+            <ul className="flex flex-col gap-1.5 text-body">
               {failing.slice(0, 6).map((c) => (
                 <li key={c.id} className="flex items-start gap-2">
                   <CircleAlert size={14} className="mt-0.5 shrink-0 text-bad" aria-hidden />
                   <span className="min-w-0">
                     <span className="block truncate">{c.title || c.id}</span>
-                    {c.detail && <span className="block truncate text-[12px] text-muted">{c.detail}</span>}
+                    {c.detail && <span className="block truncate text-meta text-muted">{c.detail}</span>}
                   </span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-[13px] text-muted">{t('devices.open.none')}</p>
+            <p className="text-body text-muted">{t('devices.open.none')}</p>
           )}
         </Card>
       </div>
@@ -426,9 +426,9 @@ function Compliance({ d }: { d: DeviceDetail }) {
         </div>
       ) : (
         <div className="card overflow-x-auto">
-          <table className="w-full text-left text-[13px]">
+          <table className="w-full text-left text-body">
             <caption className="sr-only">{t('devices.tab.compliance')}</caption>
-            <thead className="text-[12px] text-muted">
+            <thead className="text-meta text-muted">
               <tr>
                 <th scope="col" className="px-3 py-2 font-medium">{t('devices.comp.status')}</th>
                 <th scope="col" className="px-3 py-2 font-medium">{t('devices.comp.check')}</th>
@@ -444,11 +444,11 @@ function Compliance({ d }: { d: DeviceDetail }) {
                 <tr key={c.id} className="border-t border-line align-top">
                   <td className="px-3 py-2">
                     <Badge tone={checkTone(c.status)}>{t(`devices.check.${c.status}` as MessageKey)}</Badge>
-                    {c.remediated && <span className="mt-1 block text-[12px] text-ok">{t('devices.comp.remediated')}</span>}
+                    {c.remediated && <span className="mt-1 block text-meta text-ok">{t('devices.comp.remediated')}</span>}
                   </td>
                   <td className="px-3 py-2">
                     {c.title || c.id}
-                    <span className="block font-mono text-[11.5px] text-muted">{c.id}</span>
+                    <span className="block font-mono text-micro text-muted">{c.id}</span>
                   </td>
                   <td className="px-3 py-2">{c.severity ? t(`devices.sev.${c.severity}` as MessageKey) : c.level ? `L${c.level}` : '–'}</td>
                   <td className="max-w-md px-3 py-2 text-muted">{c.detail || '–'}</td>
@@ -458,7 +458,7 @@ function Compliance({ d }: { d: DeviceDetail }) {
                   <td className="px-3 py-2">
                     <Refs list={c.refs?.iso} />
                   </td>
-                  <td className="px-3 py-2 text-[12px] text-muted">{c.refs?.cis?.join('; ') || '–'}</td>
+                  <td className="px-3 py-2 text-meta text-muted">{c.refs?.cis?.join('; ') || '–'}</td>
                 </tr>
               ))}
             </tbody>
@@ -493,26 +493,26 @@ function Config({ d }: { d: DeviceDetail }) {
         }
       >
         {d.items.length ? (
-          <ol className="flex flex-col divide-y divide-line text-[13px]">
+          <ol className="flex flex-col divide-y divide-line text-body">
             {d.items.map((it, i) => (
               <li key={it.id} className="flex items-center gap-3 py-1.5">
                 <span className="num w-6 text-muted">{i + 1}</span>
                 <Link to="/config/library/$id" params={{ id: String(it.id) }} className="flex-1 hover:underline">
                   {it.name}
                 </Link>
-                <span className="font-mono text-[12px] text-muted">{it.type}</span>
+                <span className="font-mono text-meta text-muted">{it.type}</span>
               </li>
             ))}
           </ol>
         ) : (
-          <p className="text-[13px] text-muted">{t('devices.cfg.noItems')}</p>
+          <p className="text-body text-muted">{t('devices.cfg.noItems')}</p>
         )}
       </Card>
       <Card title={t('devices.cfg.decls')} id="dv-decl">
         {d.declarations.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-[13px]">
-              <thead className="text-[12px] text-muted">
+            <table className="w-full text-left text-body">
+              <thead className="text-meta text-muted">
                 <tr>
                   <th scope="col" className="py-1.5 pr-3 font-medium">{t('devices.comp.status')}</th>
                   <th scope="col" className="py-1.5 pr-3 font-medium">{t('devices.cfg.identifier')}</th>
@@ -526,8 +526,8 @@ function Config({ d }: { d: DeviceDetail }) {
                     <td className="py-1.5 pr-3">
                       <Badge tone={declTone(x.state)}>{t(`devices.decl.${x.state.replace(' ', '_')}` as MessageKey)}</Badge>
                     </td>
-                    <td className="py-1.5 pr-3 font-mono text-[12.5px]">{x.identifier}</td>
-                    <td className="py-1.5 pr-3 font-mono text-[12.5px] text-muted">{x.type}</td>
+                    <td className="py-1.5 pr-3 font-mono text-meta">{x.identifier}</td>
+                    <td className="py-1.5 pr-3 font-mono text-meta text-muted">{x.type}</td>
                     <td className="py-1.5 text-muted">{x.reasons.join('; ') || '–'}</td>
                   </tr>
                 ))}
@@ -535,14 +535,14 @@ function Config({ d }: { d: DeviceDetail }) {
             </table>
           </div>
         ) : (
-          <p className="text-[13px] text-muted">{t('devices.cfg.noDecls')}</p>
+          <p className="text-body text-muted">{t('devices.cfg.noDecls')}</p>
         )}
       </Card>
       {certs.length > 0 && (
         <Card title={t('devices.cfg.certs')} sub={t('devices.cfg.certsSub')} id="dv-certs">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-[13px]">
-              <thead className="text-[12px] text-muted">
+            <table className="w-full text-left text-body">
+              <thead className="text-meta text-muted">
                 <tr>
                   <th scope="col" className="py-1.5 pr-3 font-medium">{t('devices.cfg.name')}</th>
                   <th scope="col" className="py-1.5 pr-3 font-medium">{t('devices.cfg.subject')}</th>
@@ -554,9 +554,9 @@ function Config({ d }: { d: DeviceDetail }) {
                 {certs.map((c) => (
                   <tr key={c.sha256} className="border-t border-line">
                     <td className="py-1.5 pr-3">{c.name}</td>
-                    <td className="py-1.5 pr-3 font-mono text-[12px]">{c.subject}</td>
+                    <td className="py-1.5 pr-3 font-mono text-meta">{c.subject}</td>
                     <td className="py-1.5 pr-3 whitespace-nowrap">{dateTime(c.not_after)}</td>
-                    <td className="py-1.5 font-mono text-[12px]" title={c.sha256}>
+                    <td className="py-1.5 font-mono text-meta" title={c.sha256}>
                       {c.sha256.slice(0, 16)}…
                     </td>
                   </tr>

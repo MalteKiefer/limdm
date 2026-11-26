@@ -136,8 +136,8 @@ function StatusBadge({ status }: { status: string }) {
 function Table({ caption, head, rows, empty }: { caption: string; head: string[]; rows: React.ReactNode[][]; empty: string }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-left text-[13px]">
-        <caption className="mb-2 text-left text-[12.5px] font-semibold text-muted">{caption}</caption>
+      <table className="w-full text-left text-body">
+        <caption className="mb-2 text-left text-meta font-semibold text-muted">{caption}</caption>
         <thead>
           <tr className="border-b border-line text-muted">
             {head.map((h) => (
@@ -183,7 +183,7 @@ function Exports() {
             <FileBarChart2 size={18} className="mt-0.5 shrink-0 text-muted" aria-hidden />
             <div className="min-w-0 flex-1">
               <div className="font-medium">{t(`reports.kind.${k}` as MessageKey)}</div>
-              <p className="text-[12.5px] text-muted">{t(`reports.kindHelp.${k}` as MessageKey)}</p>
+              <p className="text-meta text-muted">{t(`reports.kindHelp.${k}` as MessageKey)}</p>
             </div>
             <a className="btn shrink-0" href={presetHref({ kind: k })} download aria-label={`${t('reports.download')}: ${t(`reports.kind.${k}` as MessageKey)}`}>
               <Download size={14} aria-hidden />
@@ -236,9 +236,9 @@ function Builder() {
         <a className="btn btn-primary" href={presetHref(p)} download>
           <Download size={14} aria-hidden /> {t('reports.run')}
         </a>
-        <span className="font-mono text-[12px] break-all text-muted">{presetHref(p)}</span>
+        <span className="font-mono text-meta break-all text-muted">{presetHref(p)}</span>
       </div>
-      {!params.length && <p className="mt-3 text-[12.5px] text-muted">{t('reports.noParams')}</p>}
+      {!params.length && <p className="mt-3 text-meta text-muted">{t('reports.noParams')}</p>}
     </Card>
   )
 }

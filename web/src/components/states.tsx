@@ -41,7 +41,7 @@ export function ErrorState({ error, onRetry, title }: { error: unknown; onRetry?
       </div>
       <h3 className="font-semibold">{title ?? tr('state.errorTitle')}</h3>
       <p className="max-w-md text-muted">{errorText(error)}</p>
-      {rid && <p className="font-mono text-[11.5px] text-muted">{tr('state.requestId', { id: rid })}</p>}
+      {rid && <p className="font-mono text-micro text-muted">{tr('state.requestId', { id: rid })}</p>}
       {onRetry && (
         <button type="button" className="btn mt-2" onClick={onRetry}>
           <RotateCcw size={14} aria-hidden /> {tr('state.retry')}

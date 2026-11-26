@@ -35,15 +35,15 @@ export function Keys() {
   type K = Schemas['KeyStatus']
   const columns: GridColumn<K>[] = [
     { id: 'kind', header: t('settings.keys.key'), cell: (c) => <span className="font-medium">{t(`settings.keys.kind.${c.row.original.kind}` as MessageKey)}</span> },
-    { id: 'active', header: t('settings.keys.active'), cell: (c) => <code className="font-mono text-[12px] break-all">{c.row.original.active}</code> },
+    { id: 'active', header: t('settings.keys.active'), cell: (c) => <code className="font-mono text-meta break-all">{c.row.original.active}</code> },
     {
       id: 'prev',
       header: t('settings.keys.retiring'),
       cell: (c) =>
         c.row.original.previous ? (
           <span className="flex flex-col">
-            <code className="font-mono text-[12px] break-all">{c.row.original.previous}</code>
-            {c.row.original.since && <span className="text-[12px] text-muted">{dateTime(c.row.original.since)}</span>}
+            <code className="font-mono text-meta break-all">{c.row.original.previous}</code>
+            {c.row.original.since && <span className="text-meta text-muted">{dateTime(c.row.original.since)}</span>}
           </span>
         ) : (
           <span className="text-muted">{t('settings.none')}</span>
@@ -66,14 +66,14 @@ export function Keys() {
         )
       },
     },
-    { id: 'loc', header: t('settings.keys.stored'), cell: (c) => <span className="font-mono text-[12px]">{c.row.original.location}</span> },
+    { id: 'loc', header: t('settings.keys.stored'), cell: (c) => <span className="font-mono text-meta">{c.row.original.location}</span> },
     {
       id: 'act',
       header: '',
       cell: (c) => {
         const k = c.row.original
         if (k.previous) return <button type="button" className="btn" onClick={() => setAct({ kind: k.kind, op: 'finish' })}>{t('settings.keys.finish')}</button>
-        if (k.kind === 'session') return <code className="font-mono text-[11.5px] text-muted">limdm-server keys rotate session</code>
+        if (k.kind === 'session') return <code className="font-mono text-micro text-muted">limdm-server keys rotate session</code>
         return <button type="button" className="btn" onClick={() => setAct({ kind: k.kind, op: 'rotate' })}>{t('settings.keys.rotate')}</button>
       },
     },
@@ -102,13 +102,13 @@ export function Keys() {
         }
       >
         {act?.op === 'rotate' && act.kind !== 'webhook' && (
-          <label className="flex flex-col gap-1 text-[13px] font-medium">
+          <label className="flex flex-col gap-1 text-body font-medium">
             {t('settings.keys.newName')}
             <input className="field font-mono" value={name} onChange={(e) => setName(e.target.value)} />
           </label>
         )}
         {act?.op === 'finish' && act.kind !== 'session' && (
-          <label className="flex items-center gap-2 text-[13px]">
+          <label className="flex items-center gap-2 text-body">
             <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} /> {t('settings.keys.force')}
           </label>
         )}
@@ -142,7 +142,7 @@ export function Notifications() {
       cell: (c) => (
         <span className="flex flex-col">
           <span className="font-medium">{c.row.original.name}</span>
-          <span className="font-mono text-[12px] text-muted">{c.row.original.target}</span>
+          <span className="font-mono text-meta text-muted">{c.row.original.target}</span>
         </span>
       ),
     },
@@ -168,9 +168,9 @@ export function Notifications() {
           <span className="flex flex-col">
             <span className="flex items-center gap-1.5">
               <Badge tone={x.last_ok ? 'ok' : 'bad'}>{x.last_ok ? t('settings.notify.delivered') : t('settings.notify.failed')}</Badge>
-              {x.last_at && <span className="text-[12px] text-muted">{ago(x.last_at)}</span>}
+              {x.last_at && <span className="text-meta text-muted">{ago(x.last_at)}</span>}
             </span>
-            {!x.last_ok && <span className="text-[12px] text-bad">{x.last_error}</span>}
+            {!x.last_ok && <span className="text-meta text-bad">{x.last_error}</span>}
           </span>
         )
       },
@@ -223,7 +223,7 @@ export function Notifications() {
           card={(x) => (
             <span className="flex flex-col">
               <span className="font-medium">{x.name}</span>
-              <span className="text-[12px] text-muted">{t(`settings.notify.k.${x.kind}` as MessageKey)}</span>
+              <span className="text-meta text-muted">{t(`settings.notify.k.${x.kind}` as MessageKey)}</span>
             </span>
           )}
         />
@@ -231,8 +231,8 @@ export function Notifications() {
           <div className="mt-4">
             <Facts
               rows={[
-                [t('settings.notify.tenantKey'), <code className="font-mono text-[12px] break-all">{q.data.tenant_signing_key}</code>],
-                [t('settings.monitor.header'), <code className="font-mono text-[12px] break-all">{`X-LiMDM-Signature: sha256=HMAC-SHA256(key, timestamp + "." + "${q.data.tenant_id}" + "." + body), X-LiMDM-Tenant: ${q.data.tenant_id}`}</code>],
+                [t('settings.notify.tenantKey'), <code className="font-mono text-meta break-all">{q.data.tenant_signing_key}</code>],
+                [t('settings.monitor.header'), <code className="font-mono text-meta break-all">{`X-LiMDM-Signature: sha256=HMAC-SHA256(key, timestamp + "." + "${q.data.tenant_id}" + "." + body), X-LiMDM-Tenant: ${q.data.tenant_id}`}</code>],
               ]}
             />
           </div>
@@ -308,14 +308,14 @@ function AddChannel({ events, onClose }: { events: { type: string; label: string
           return (
             <div className="flex flex-col gap-4">
               <fieldset>
-                <legend className="mb-2 text-[13px] font-medium">{t('settings.notify.kind')}</legend>
+                <legend className="mb-2 text-body font-medium">{t('settings.notify.kind')}</legend>
                 <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
                   {(['slack', 'discord', 'email', 'webhook'] as const).map((k) => (
-                    <label key={k} className="flex cursor-pointer flex-col rounded-md border border-line p-2.5 text-[13px] has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
+                    <label key={k} className="flex cursor-pointer flex-col rounded-md border border-line p-2.5 text-body has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
                       <span className="flex items-center gap-2 font-medium">
                         <input type="radio" value={k} {...f.register('kind')} /> {t(`settings.notify.k.${k}` as MessageKey)}
                       </span>
-                      <span className="text-[12px] text-muted">{t(`settings.notify.kh.${k}` as MessageKey)}</span>
+                      <span className="text-meta text-muted">{t(`settings.notify.kh.${k}` as MessageKey)}</span>
                     </label>
                   ))}
                 </div>
@@ -337,14 +337,14 @@ function AddChannel({ events, onClose }: { events: { type: string; label: string
                 </div>
               )}
               <fieldset className="flex flex-col gap-1.5">
-                <legend className="text-[13px] font-medium">{t('settings.notify.events')}</legend>
-                <p className="text-[12.5px] text-muted">{t('settings.notify.eventsHelp')}</p>
+                <legend className="text-body font-medium">{t('settings.notify.events')}</legend>
+                <p className="text-meta text-muted">{t('settings.notify.eventsHelp')}</p>
                 <div className="grid gap-1.5 md:grid-cols-2">
                   {events.map((e) => (
-                    <label key={e.type} className="flex items-start gap-2 text-[13px]">
+                    <label key={e.type} className="flex items-start gap-2 text-body">
                       <input type="checkbox" className="mt-1" value={e.type} {...f.register('events')} />
                       <span>
-                        {t(`settings.notify.e.${e.type}` as MessageKey) || e.label} <code className="font-mono text-[11px] text-muted">{e.type}</code>
+                        {t(`settings.notify.e.${e.type}` as MessageKey) || e.label} <code className="font-mono text-micro text-muted">{e.type}</code>
                       </span>
                     </label>
                   ))}
@@ -420,7 +420,7 @@ export function Backup() {
                 <Badge tone="ok">{t('settings.backup.ruleMet')}</Badge>
               ) : (
                 <span className="flex flex-wrap items-center gap-1.5">
-                  <Badge tone="warn">{t('settings.backup.ruleNot')}</Badge> <span className="text-[12.5px] text-muted">{t('settings.backup.ruleHelp')}</span>
+                  <Badge tone="warn">{t('settings.backup.ruleNot')}</Badge> <span className="text-meta text-muted">{t('settings.backup.ruleHelp')}</span>
                 </span>
               ),
             ],
@@ -437,9 +437,9 @@ export function Backup() {
             <ListField form={f} name="recipients" label={t('settings.backup.recipients')} help={t('settings.backup.recipientsHelp')} placeholder="age1…" />
             <TextField form={f} name="time_zone" label={t('settings.backup.tz')} help={t('settings.backup.tzHelp')} placeholder="Europe/Berlin" />
             <fieldset className="flex flex-col gap-2">
-              <legend className="text-[13px] font-medium">{t('settings.backup.keepOutside')}</legend>
+              <legend className="text-body font-medium">{t('settings.backup.keepOutside')}</legend>
               <KeepFields form={f} prefix="keep" />
-              <p className="text-[12.5px] text-muted">{t('settings.backup.keepHelp')}</p>
+              <p className="text-meta text-muted">{t('settings.backup.keepHelp')}</p>
             </fieldset>
           </FormSection>
         )}
@@ -452,7 +452,7 @@ export function Backup() {
             <li key={x.name} className="flex flex-wrap items-center justify-between gap-2 py-2">
               <span className="min-w-0">
                 <span className="font-mono font-medium">{x.name}</span> <Badge>{t(`settings.backup.kind.${x.kind}` as MessageKey)}</Badge> {x.lock_mode && <Badge tone="ok">Object Lock {x.lock_mode}, {x.lock_days} d</Badge>}
-                <span className="block truncate font-mono text-[12px] text-muted">{where(x)}</span>
+                <span className="block truncate font-mono text-meta text-muted">{where(x)}</span>
               </span>
               <span className="flex gap-1">
                 <button type="button" className="btn" disabled={test.isPending} onClick={() => void test.mutate(x.name)}>
@@ -480,8 +480,8 @@ export function Backup() {
             <li key={s.name} className="flex flex-wrap items-start justify-between gap-2 py-2">
               <span className="min-w-0">
                 <span className="font-mono font-medium">{s.name}</span> {s.paused && <Badge tone="off">{t('settings.backup.paused')}</Badge>}
-                <span className="block text-[12.5px]">{describe(t, s as Schedule)}</span>
-                <span className="block text-[12px] text-muted">
+                <span className="block text-meta">{describe(t, s as Schedule)}</span>
+                <span className="block text-meta text-muted">
                   {s.next.length ? `${t('settings.backup.next')} ${dateTime(s.next[0])}` : ''} · {t('settings.backup.keeps', { kept: s.preview.kept, runs: s.preview.runs })} · {s.targets.join(', ')}
                 </span>
               </span>
@@ -552,7 +552,7 @@ function History({ rows, onVerify }: { rows: Schemas['BackupRun'][]; onVerify: (
   type R = Schemas['BackupRun']
   const columns: GridColumn<R>[] = [
     { id: 'at', header: t('settings.backup.started'), cell: (c) => dateTime(c.row.original.started_at) },
-    { id: 'reason', header: t('settings.backup.reason'), cell: (c) => <span className="flex flex-col"><span>{c.row.original.reason}</span><span className="text-[12px] text-muted">{c.row.original.actor}</span></span> },
+    { id: 'reason', header: t('settings.backup.reason'), cell: (c) => <span className="flex flex-col"><span>{c.row.original.reason}</span><span className="text-meta text-muted">{c.row.original.actor}</span></span> },
     { id: 'size', header: t('settings.backup.size'), cell: (c) => <span className="num">{bytes(c.row.original.size)}</span> },
     {
       id: 'status',
@@ -568,7 +568,7 @@ function History({ rows, onVerify }: { rows: Schemas['BackupRun'][]; onVerify: (
               {r.restore_tested_at && !r.restore_test_error && <Badge tone="ok">{t('settings.backup.restoreTested')}</Badge>}
             </span>
             {(r.error || r.verify_error || r.restore_test_error) && (
-              <span className="flex items-start gap-1 text-[12px] text-bad">
+              <span className="flex items-start gap-1 text-meta text-bad">
                 <TriangleAlert size={12} className="mt-0.5 shrink-0" aria-hidden /> {r.error || r.verify_error || r.restore_test_error}
               </span>
             )}
@@ -582,7 +582,7 @@ function History({ rows, onVerify }: { rows: Schemas['BackupRun'][]; onVerify: (
   return (
     <section className="py-6">
       <h3 className="mb-1 font-semibold">{t('settings.backup.history')}</h3>
-      <p className="mb-3 text-[13px] text-muted">{t('settings.backup.historyHelp')}</p>
+      <p className="mb-3 text-body text-muted">{t('settings.backup.historyHelp')}</p>
       <DataGrid label={t('settings.backup.history')} data={rows} columns={columns} getRowId={(r) => String(r.id)} maxHeight="480px" empty={<EmptyState icon={DatabaseBackup} title={t('settings.backup.noHistory')} />} card={(r) => <span>{dateTime(r.started_at)} · {r.status}</span>} />
     </section>
   )
@@ -815,41 +815,41 @@ function ScheduleFields({ f, targets, toSchedule, schema }: { f: UseFormReturn<S
       </div>
       {kind === 'weekly' && (
         <fieldset>
-          <legend className="mb-1 text-[13px] font-medium">{t('settings.backup.days')}</legend>
+          <legend className="mb-1 text-body font-medium">{t('settings.backup.days')}</legend>
           <div className="flex flex-wrap gap-3">
             {weekOrder.map((d) => (
-              <label key={d} className="flex items-center gap-1.5 text-[13px]">
+              <label key={d} className="flex items-center gap-1.5 text-body">
                 <input type="checkbox" value={String(d)} {...f.register('days')} /> {t(dayKey(d))}
               </label>
             ))}
           </div>
-          {f.formState.errors.days && <p className="mt-1 text-[12.5px] text-bad">{String(f.formState.errors.days.message)}</p>}
+          {f.formState.errors.days && <p className="mt-1 text-meta text-bad">{String(f.formState.errors.days.message)}</p>}
         </fieldset>
       )}
       <fieldset>
-        <legend className="mb-1 text-[13px] font-medium">{t('settings.backup.targets')}</legend>
+        <legend className="mb-1 text-body font-medium">{t('settings.backup.targets')}</legend>
         <div className="flex flex-wrap gap-3">
           {targets.map((x) => (
-            <label key={x} className="flex items-center gap-1.5 font-mono text-[13px]">
+            <label key={x} className="flex items-center gap-1.5 font-mono text-body">
               <input type="checkbox" value={x} {...f.register('targets')} /> {x}
             </label>
           ))}
         </div>
-        {f.formState.errors.targets && <p className="mt-1 text-[12.5px] text-bad">{String(f.formState.errors.targets.message)}</p>}
+        {f.formState.errors.targets && <p className="mt-1 text-meta text-bad">{String(f.formState.errors.targets.message)}</p>}
       </fieldset>
       <fieldset className="flex flex-col gap-2">
-        <legend className="text-[13px] font-medium">{t('settings.backup.keepSchedule')}</legend>
+        <legend className="text-body font-medium">{t('settings.backup.keepSchedule')}</legend>
         <KeepFields form={f} prefix="keep" />
       </fieldset>
       <Toggle form={f} name="paused" label={t('settings.backup.paused')} />
-      <section aria-live="polite" className="rounded-md bg-sunken p-3 text-[13px]">
+      <section aria-live="polite" className="rounded-md bg-sunken p-3 text-body">
         <h4 className="mb-1 font-semibold">{t('settings.backup.preview')}</h4>
         {!valid && <p className="text-muted">{t('settings.backup.previewWait')}</p>}
         {valid && preview.error && <p className="text-bad">{preview.error}</p>}
         {valid && preview.data && (
           <>
             <p>{t('settings.backup.nextRuns')}</p>
-            <ul className="mb-2 list-disc pl-5 font-mono text-[12.5px]">
+            <ul className="mb-2 list-disc pl-5 font-mono text-meta">
               {preview.data.next.map((n) => (
                 <li key={n}>{dateTime(n)}</li>
               ))}

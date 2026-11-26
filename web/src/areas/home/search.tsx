@@ -77,7 +77,7 @@ export function SearchResults({ term, group, go }: { term: string; group: string
               <Command.Item key={x.id} value={`${term} ${x.id} ${x.label}`} onSelect={x.run} className="flex cursor-default items-center gap-2.5 rounded-md px-2.5 py-2 data-[selected=true]:bg-surface-2">
                 <r.icon size={16} className="text-muted" aria-hidden />
                 <span className="flex-1 truncate">{x.label}</span>
-                {x.hint && <span className="text-[12px] text-muted">{x.hint}</span>}
+                {x.hint && <span className="text-meta text-muted">{x.hint}</span>}
               </Command.Item>
             ))}
           </Command.Group>

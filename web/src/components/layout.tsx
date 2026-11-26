@@ -39,7 +39,7 @@ export function TabBar<T extends string>({ tabs, value, onChange, label, idBase 
           className={cx('-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 font-medium whitespace-nowrap', value === tab.value ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg')}
         >
           {tab.label}
-          {tab.count != null && <span className="num rounded-full bg-surface-2 px-1.5 text-[11px]">{tab.count}</span>}
+          {tab.count != null && <span className="num rounded-full bg-surface-2 px-1.5 text-micro">{tab.count}</span>}
         </button>
       ))}
     </div>
@@ -80,10 +80,10 @@ export function SideSheet({ title, sub, onClose, onPrev, onNext, actions, childr
     <aside ref={ref} aria-labelledby={headingId} className="sheet-in card flex max-h-[calc(100dvh-88px)] min-w-0 flex-col overflow-hidden lg:sticky lg:top-[72px]">
       <header className="flex items-start gap-2 border-b border-line px-[var(--pad-card)] py-3">
         <div className="min-w-0 flex-1">
-          <h2 id={headingId} className="truncate text-[15px] font-semibold">
+          <h2 id={headingId} className="truncate text-title font-semibold">
             {title}
           </h2>
-          {sub && <div className="text-[12.5px] text-muted">{sub}</div>}
+          {sub && <div className="text-meta text-muted">{sub}</div>}
         </div>
         {onPrev && (
           <button type="button" className="btn btn-ghost px-1.5" onClick={onPrev} aria-label={t('sheet.prev')}>
@@ -130,7 +130,7 @@ export function Wizard({ steps, step, onStep, onFinish, finishLabel, busy }: { s
       <nav aria-label={t('wizard.steps')}>
         <ol className="flex flex-wrap gap-2">
           {steps.map((s, i) => (
-            <li key={s.id} aria-current={i === step ? 'step' : undefined} className={cx('flex items-center gap-2 rounded-full px-3 py-1 text-[12.5px]', i === step ? 'bg-accent text-on-accent' : i < step ? 'bg-accent-soft text-on-accent-soft' : 'bg-surface-2 text-muted')}>
+            <li key={s.id} aria-current={i === step ? 'step' : undefined} className={cx('flex items-center gap-2 rounded-full px-3 py-1 text-meta', i === step ? 'bg-accent text-on-accent' : i < step ? 'bg-accent-soft text-on-accent-soft' : 'bg-surface-2 text-muted')}>
               <span className="num font-semibold">{i + 1}</span> {s.title}
             </li>
           ))}

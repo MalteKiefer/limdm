@@ -81,7 +81,7 @@ export function DevicesPage() {
               }}
             >
               <Field label={t('devices.pkg.label')}>
-                {({ id }) => <input id={id} className="field !h-9 w-64 font-mono text-[13px]" placeholder={t('devices.pkg.placeholder')} value={pkg} onChange={(e) => setPkg(e.target.value)} spellCheck={false} />}
+                {({ id }) => <input id={id} className="field !h-9 w-64 font-mono text-body" placeholder={t('devices.pkg.placeholder')} value={pkg} onChange={(e) => setPkg(e.target.value)} spellCheck={false} />}
               </Field>
               <button type="submit" className="btn">
                 <Package size={15} aria-hidden /> {t('devices.pkg.add')}
@@ -186,7 +186,7 @@ function useColumns(): GridColumn<Device>[] {
       },
       { id: 'memory', header: t('devices.col.memory'), meta: { label: t('devices.col.memory'), className: 'text-right' }, cell: ({ row: { original: d } }) => <span className="num">{d.memory_mb ? bytes(d.memory_mb * 1024 * 1024) : '–'}</span> },
       { id: 'blueprint', header: t('devices.col.blueprint'), meta: { label: t('devices.col.blueprint') }, cell: ({ row: { original: d } }) => d.blueprint },
-      { id: 'agent', header: t('devices.col.agent'), meta: { sortKey: 'agent', label: t('devices.col.agent') }, cell: ({ row: { original: d } }) => <span className="font-mono text-[12.5px]">{d.agent_version}</span> },
+      { id: 'agent', header: t('devices.col.agent'), meta: { sortKey: 'agent', label: t('devices.col.agent') }, cell: ({ row: { original: d } }) => <span className="font-mono text-meta">{d.agent_version}</span> },
       {
         id: 'last_seen',
         header: t('devices.col.lastSeen'),
@@ -206,7 +206,7 @@ function DeviceCard({ d }: { d: Device }) {
         <span className="truncate font-medium">{d.hostname}</span>
         <StatusPill status={d.status as DeviceStatus} />
       </div>
-      <div className="flex justify-between gap-2 text-[12.5px] text-muted">
+      <div className="flex justify-between gap-2 text-meta text-muted">
         <span className="truncate">{d.os}</span>
         <span>{d.last_seen ? ago(d.last_seen) : t('devices.never')}</span>
       </div>
@@ -248,7 +248,7 @@ function DeviceSheet({ d, onClose, onPrev, onNext }: { d: Device; onClose: () =>
         </>
       }
     >
-      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px]">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-body">
         <dt className="text-muted">{t('devices.col.os')}</dt>
         <dd>{d.os || '–'}</dd>
         <dt className="text-muted">{t('devices.col.blueprint')}</dt>
@@ -262,27 +262,27 @@ function DeviceSheet({ d, onClose, onPrev, onNext }: { d: Device; onClose: () =>
         <dt className="text-muted">{t('devices.fact.serial')}</dt>
         <dd className="font-mono">{detail.data?.inventory.serial || '–'}</dd>
       </dl>
-      <h3 className="mt-5 mb-2 text-[12.5px] font-semibold text-muted">{t('devices.sheet.failing', { count: failing.length })}</h3>
+      <h3 className="mt-5 mb-2 text-meta font-semibold text-muted">{t('devices.sheet.failing', { count: failing.length })}</h3>
       {detail.isPending ? (
         <LoadingState rows={2} />
       ) : failing.length ? (
-        <ul className="flex flex-col gap-2 text-[13px]">
+        <ul className="flex flex-col gap-2 text-body">
           {failing.slice(0, 8).map((c) => (
             <li key={c.id} className="rounded-md border border-line p-2">
               <div className="font-medium">{c.title || c.id}</div>
-              {c.detail && <div className="text-[12.5px] text-muted">{c.detail}</div>}
+              {c.detail && <div className="text-meta text-muted">{c.detail}</div>}
             </li>
           ))}
         </ul>
       ) : (
-        <p className="text-[13px] text-muted">{t('devices.sheet.allPass')}</p>
+        <p className="text-body text-muted">{t('devices.sheet.allPass')}</p>
       )}
-      <h3 className="mt-5 mb-2 text-[12.5px] font-semibold text-muted">{t('devices.sheet.commands')}</h3>
-      <ul className="flex flex-col gap-1.5 text-[13px]">
+      <h3 className="mt-5 mb-2 text-meta font-semibold text-muted">{t('devices.sheet.commands')}</h3>
+      <ul className="flex flex-col gap-1.5 text-body">
         {(cmds.data?.pages[0]?.items ?? []).map((c) => (
           <li key={c.id} className="flex items-center justify-between gap-2">
             <span>{t(`devices.type.${c.title}` as MessageKey)}</span>
-            <span className="flex items-center gap-2 text-[12px] text-muted">
+            <span className="flex items-center gap-2 text-meta text-muted">
               <Badge tone={statusTone(c.status)}>{t(`devices.cstatus.${c.status}` as MessageKey)}</Badge>
               {ago(c.at)}
             </span>
@@ -480,7 +480,7 @@ function BulkApps({ busy, onClose, onRun }: { busy: boolean; onClose: () => void
           </select>
         )}
       </Field>
-      {apps.data && !apps.data.length && <p className="mt-3 text-[13px] text-muted">{t('devices.bulk.noApps')}</p>}
+      {apps.data && !apps.data.length && <p className="mt-3 text-body text-muted">{t('devices.bulk.noApps')}</p>}
     </Modal>
   )
 }

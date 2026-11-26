@@ -73,7 +73,7 @@ export function SettingsPage() {
         <nav aria-label={t('settings.sections')} className="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible">
           {groups.map((g) => (
             <div key={g} className="contents lg:flex lg:flex-col lg:gap-0.5 lg:pb-3">
-              <span className="hidden px-2.5 pb-1 text-[11.5px] font-semibold tracking-wide text-muted uppercase lg:block">{t(`settings.group.${g}` as MessageKey)}</span>
+              <span className="hidden px-2.5 pb-1 text-micro font-semibold tracking-wide text-muted uppercase lg:block">{t(`settings.group.${g}` as MessageKey)}</span>
               {list
                 .filter((x) => x.group === g)
                 .map((x) => (

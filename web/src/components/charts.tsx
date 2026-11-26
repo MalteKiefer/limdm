@@ -91,7 +91,7 @@ export function ChartFrame({ chart, table, caption }: { chart: ReactNode; table:
       </div>
       {asTable ? (
         <div className="max-h-[260px] overflow-auto">
-          <table className="num w-full text-[12.5px]">
+          <table className="num w-full text-meta">
             <caption className="sr-only">{caption}</caption>
             <thead className="sticky top-0 bg-surface text-left text-muted">
               <tr>
@@ -223,7 +223,7 @@ export function FleetGrid({ cells, onPick, cell = 12 }: { cells: FleetCell[]; on
           ))}
         </svg>
       </div>
-      <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[12.5px]">
+      <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-meta">
         {counts.map(([s, n]) => (
           <li key={s} className="flex items-center gap-1.5">
             <StatusSwatch status={s} />
@@ -244,13 +244,13 @@ export function StackBar({ parts, label }: { parts: { label: string; value: numb
       <div className="flex h-3 gap-[2px] overflow-hidden rounded-full bg-surface-2" role="img" aria-label={`${label}: ${parts.map((p) => `${p.label} ${p.value}`).join(', ')}`}>
         {parts.map((p) => p.value > 0 && <div key={p.label} style={{ width: `${(p.value / total) * 100}%`, background: p.color }} />)}
       </div>
-      <ul className="mt-3 flex flex-col gap-1 text-[12.5px]">
+      <ul className="mt-3 flex flex-col gap-1 text-meta">
         {parts.map((p) => (
           <li key={p.label} className="flex items-center gap-2">
             <span className="size-2.5 shrink-0 rounded-sm" style={{ background: p.color }} aria-hidden />
             <span className="truncate text-fg-2">{p.label}</span>
             <span className="num ml-auto font-semibold">{fmt(p.value)}</span>
-            {p.note && <span className="text-[11px] text-muted">{p.note}</span>}
+            {p.note && <span className="text-micro text-muted">{p.note}</span>}
           </li>
         ))}
       </ul>

@@ -87,7 +87,7 @@ function CatalogView({ q, setQ }: { q: string; setQ: (q: string) => void }) {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px] text-left">
               <caption className="sr-only">{t('config.swCatalog')}</caption>
-              <thead className="text-[12px] text-muted">
+              <thead className="text-meta text-muted">
                 <tr className="border-b border-line">
                   <th className="w-12 px-[var(--pad-card)] py-2">
                     <span className="sr-only">{t('config.icon')}</span>
@@ -112,12 +112,12 @@ function CatalogView({ q, setQ }: { q: string; setQ: (q: string) => void }) {
                           <span className="ml-1">{t('config.paused')}</span>
                         </Badge>
                       )}
-                      <div className="text-[12px] text-muted">{a.summary || a.category}</div>
+                      <div className="text-meta text-muted">{a.summary || a.category}</div>
                     </td>
                     <td>
                       <Badge tone={modeTone[a.mode as Mode] ?? 'neutral'}>{t(`config.mode.${a.mode}` as MessageKey)}</Badge>
                     </td>
-                    <td className="font-mono text-[12px] text-muted">{a.sources.map((s) => (s.kind === 'flatpak' ? s.flatpak : [s.debian, s.fedora].filter(Boolean).join(' / '))).join(', ')}</td>
+                    <td className="font-mono text-meta text-muted">{a.sources.map((s) => (s.kind === 'flatpak' ? s.flatpak : [s.debian, s.fedora].filter(Boolean).join(' / '))).join(', ')}</td>
                     <td className="num">
                       {a.installs ? (
                         <Link to="/devices" search={{ q: `app:${a.id}` }} className="hover:text-accent">
@@ -127,7 +127,7 @@ function CatalogView({ q, setQ }: { q: string; setQ: (q: string) => void }) {
                         <span className="text-muted">0</span>
                       )}
                     </td>
-                    <td className="pr-[var(--pad-card)] text-[12px] text-muted">{ago(a.updated_at)}</td>
+                    <td className="pr-[var(--pad-card)] text-meta text-muted">{ago(a.updated_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -140,12 +140,12 @@ function CatalogView({ q, setQ }: { q: string; setQ: (q: string) => void }) {
           <ul className="mb-3 flex flex-col gap-1">
             {cat.data.fleet.map((f) => (
               <li key={f.id}>
-                <label className="flex items-center gap-2 text-[13px]">
+                <label className="flex items-center gap-2 text-body">
                   {admin && <input type="checkbox" checked={take.includes(f.id)} onChange={(e) => setTake(e.target.checked ? [...take, f.id] : take.filter((x) => x !== f.id))} />}
                   <span className="font-medium">{f.name}</span>
-                  <span className="font-mono text-[12px] text-muted">{f.id}</span>
+                  <span className="font-mono text-meta text-muted">{f.id}</span>
                   {f.origin && f.origin !== 'flathub' && <Badge>{f.origin}</Badge>}
-                  <span className="ml-auto text-[12px] text-muted">{t('config.devicesN', { count: f.devices })}</span>
+                  <span className="ml-auto text-meta text-muted">{t('config.devicesN', { count: f.devices })}</span>
                 </label>
               </li>
             ))}
@@ -212,8 +212,8 @@ function FlathubSearch({ open, onClose }: { open: boolean; onClose: () => void }
             {h.icon ? <img src={`/software/flathub/icon?u=${encodeURIComponent(h.icon)}`} alt="" width={32} height={32} className="rounded" /> : <AppWindow size={28} className="text-muted" aria-hidden />}
             <div className="min-w-0 flex-1">
               <div className="font-medium">{h.name}</div>
-              <div className="truncate text-[12px] text-muted">{h.summary}</div>
-              <div className="font-mono text-[11.5px] text-muted">{h.id}</div>
+              <div className="truncate text-meta text-muted">{h.summary}</div>
+              <div className="font-mono text-micro text-muted">{h.id}</div>
             </div>
             <button
               type="button"
@@ -269,11 +269,11 @@ function RequestsView() {
                   <Badge tone={r.status === 'pending' ? 'warn' : r.status === 'approved' ? 'ok' : 'off'}>{t(`config.req.${r.status}` as MessageKey)}</Badge>
                   {r.flatpak && !r.app && <Badge>{t('config.outsideCatalog')}</Badge>}
                 </div>
-                <div className="text-[12.5px] text-muted">
+                <div className="text-meta text-muted">
                   {t('config.requestBy', { user: r.user || '·', host: r.hostname })} · {ago(r.created_at)}
                   {r.decided_by && ` · ${t('config.decidedBy', { by: r.decided_by })}`}
                 </div>
-                {r.note && <p className="mt-0.5 text-[13px]">„{r.note}“</p>}
+                {r.note && <p className="mt-0.5 text-body">„{r.note}“</p>}
               </div>
               {admin && r.status === 'pending' && (
                 <span className="flex flex-wrap gap-2">
@@ -321,8 +321,8 @@ function RemotesView() {
                   <Badge tone={r.state === 'blocked' ? 'bad' : 'ok'}>{t(r.state === 'blocked' ? 'config.blocked' : 'config.allowed')}</Badge>
                   {r.catalog_only && <Badge tone="info">{t('config.catalogOnly')}</Badge>}
                 </div>
-                <div className="truncate font-mono text-[12px] text-muted">{r.url}</div>
-                <div className="text-[12px] text-muted">{t('config.devicesN', { count: r.devices })}</div>
+                <div className="truncate font-mono text-meta text-muted">{r.url}</div>
+                <div className="text-meta text-muted">{t('config.devicesN', { count: r.devices })}</div>
               </div>
               {admin && (
                 <span className="flex flex-wrap gap-1.5">
@@ -357,8 +357,8 @@ function RemotesView() {
               <li key={r.name} className="flex flex-wrap items-center gap-3 px-[var(--pad-card)] py-2.5">
                 <div className="min-w-0 flex-1 basis-64">
                   <div className="font-medium">{r.title || r.name}</div>
-                  <div className="truncate font-mono text-[12px] text-muted">{r.url}</div>
-                  <Link to="/devices" search={{ q: `remote:${r.name}` }} className="text-[12px] text-accent hover:underline">
+                  <div className="truncate font-mono text-meta text-muted">{r.url}</div>
+                  <Link to="/devices" search={{ q: `remote:${r.name}` }} className="text-meta text-accent hover:underline">
                     {t('config.devicesN', { count: r.devices })}
                   </Link>
                 </div>
@@ -434,10 +434,10 @@ function RemoteForm({ remote, onClose }: { remote: Remote; onClose: () => void }
             { value: 'blocked', label: t('config.blocked') },
           ]}
         />
-        <label className="flex items-center justify-between gap-4 text-[13px]">
+        <label className="flex items-center justify-between gap-4 text-body">
           <span>
             <span className="font-medium">{t('config.catalogOnly')}</span>
-            <span className="block text-[12.5px] text-muted">{t('config.catalogOnlyHelp')}</span>
+            <span className="block text-meta text-muted">{t('config.catalogOnlyHelp')}</span>
           </span>
           <Switch checked={r.catalog_only} onChange={(v) => setR({ ...r, catalog_only: v })} label={t('config.catalogOnly')} />
         </label>
@@ -465,10 +465,10 @@ function SettingsView() {
         {rows.map(([k, label, help]) => (
           <li key={k} className="flex items-start justify-between gap-6">
             <div>
-              <div className="text-[13px] font-medium" id={`set-${k}`}>
+              <div className="text-body font-medium" id={`set-${k}`}>
                 {t(label)}
               </div>
-              <p className="text-[12.5px] text-muted">{t(help)}</p>
+              <p className="text-meta text-muted">{t(help)}</p>
             </div>
             <Switch
               checked={set[k]}
@@ -598,7 +598,7 @@ function AppEditor({ app }: { app?: CatalogApp }) {
   )
   return (
     <form onSubmit={submit} className="pb-24" noValidate>
-      <Link to="/config" search={{ tab: 'software' }} className="mb-3 inline-flex items-center gap-1 text-[13px] text-muted hover:text-fg">
+      <Link to="/config" search={{ tab: 'software' }} className="mb-3 inline-flex items-center gap-1 text-body text-muted hover:text-fg">
         <ArrowLeft size={14} aria-hidden /> {t('config.tabSoftware')}
       </Link>
       <PageHeader title={app?.name ?? t('config.addApp')} sub={app && t('config.devicesN', { count: app.installs })} />
@@ -670,40 +670,40 @@ function AppEditor({ app }: { app?: CatalogApp }) {
             </div>
             <details className="mt-4 rounded-lg border border-line p-3" open={!!(f.debUrl || f.rpmUrl)}>
               <summary className="cursor-pointer font-medium">{t('config.vendorRepo')}</summary>
-              <p className="mt-1 mb-3 text-[12.5px] text-muted">{t('config.vendorRepoHelp')}</p>
-              {needsPkgs && <p className="mb-2 text-[12.5px] font-medium text-bad">{t('config.vendorNeedsPkgs')}</p>}
+              <p className="mt-1 mb-3 text-meta text-muted">{t('config.vendorRepoHelp')}</p>
+              {needsPkgs && <p className="mb-2 text-meta font-medium text-bad">{t('config.vendorNeedsPkgs')}</p>}
               <div className="grid gap-4 md:grid-cols-3">
                 {field('debUrl', t('config.debUrl'), undefined, true)}
                 {field('debSuite', t('config.suite'), undefined, true)}
                 {field('debComponents', t('config.components'), undefined, true)}
               </div>
               <Field label={t('config.debKey')} help={t('config.keyHelp')}>
-                {({ id, describedBy }) => <textarea id={id} aria-describedby={describedBy} rows={3} spellCheck={false} className="field font-mono text-[12px]" value={f.debKey} onChange={(e) => set({ debKey: e.target.value })} />}
+                {({ id, describedBy }) => <textarea id={id} aria-describedby={describedBy} rows={3} spellCheck={false} className="field font-mono text-meta" value={f.debKey} onChange={(e) => set({ debKey: e.target.value })} />}
               </Field>
               <div className="mt-4 grid gap-4">
                 {field('rpmUrl', t('config.rpmUrl'), t('config.rpmUrlHelp'), true)}
                 <Field label={t('config.rpmKey')} help={t('config.keyHelp')}>
-                  {({ id, describedBy }) => <textarea id={id} aria-describedby={describedBy} rows={3} spellCheck={false} className="field font-mono text-[12px]" value={f.rpmKey} onChange={(e) => set({ rpmKey: e.target.value })} />}
+                  {({ id, describedBy }) => <textarea id={id} aria-describedby={describedBy} rows={3} spellCheck={false} className="field font-mono text-meta" value={f.rpmKey} onChange={(e) => set({ rpmKey: e.target.value })} />}
                 </Field>
-                <label className="flex items-center gap-2 text-[13px]">
+                <label className="flex items-center gap-2 text-body">
                   <input type="checkbox" checked={f.rpmSigned} onChange={(e) => set({ rpmSigned: e.target.checked })} /> {t('config.signedMetadata')}
                 </label>
               </div>
             </details>
           </Card>
           <Card title={t('config.availability')}>
-            <label className="mb-4 flex items-center justify-between gap-4 text-[13px]">
+            <label className="mb-4 flex items-center justify-between gap-4 text-body">
               <span className="font-medium">{t('config.inCatalogLabel')}</span>
               <Switch checked={f.enabled} onChange={(v) => set({ enabled: v })} label={t('config.inCatalogLabel')} />
             </label>
             <fieldset>
-              <legend className="text-[13px] font-medium">{t('config.onlyFor')}</legend>
-              <p className="mb-2 text-[12.5px] text-muted">{t('config.onlyForHelp')}</p>
+              <legend className="text-body font-medium">{t('config.onlyFor')}</legend>
+              <p className="mb-2 text-meta text-muted">{t('config.onlyForHelp')}</p>
               <div className="flex flex-wrap gap-2">
                 {(bps.data?.items ?? [])
                   .filter((b) => !b.pilot_of)
                   .map((b) => (
-                    <label key={b.id} className="inline-flex items-center gap-1.5 rounded-md border border-line px-2 py-1 text-[13px]">
+                    <label key={b.id} className="inline-flex items-center gap-1.5 rounded-md border border-line px-2 py-1 text-body">
                       <input type="checkbox" checked={f.scope.includes(b.id!)} onChange={(e) => set({ scope: e.target.checked ? [...f.scope, b.id!] : f.scope.filter((x) => x !== b.id) })} />
                       {b.name}
                     </label>
@@ -731,20 +731,20 @@ function AppEditor({ app }: { app?: CatalogApp }) {
                 }}
               />
             </label>
-            {icon && <p className="mt-2 text-[12.5px] text-ok">{t('config.iconChosen')}</p>}
-            <p className="mt-2 text-[12.5px] text-muted">{t('config.iconHelp')}</p>
+            {icon && <p className="mt-2 text-meta text-ok">{t('config.iconChosen')}</p>}
+            <p className="mt-2 text-meta text-muted">{t('config.iconHelp')}</p>
             {app?.has_icon && (
-              <label className="mt-2 flex items-center gap-2 text-[13px]">
+              <label className="mt-2 flex items-center gap-2 text-body">
                 <input type="checkbox" checked={removeIcon} onChange={(e) => setRemoveIcon(e.target.checked)} /> {t('config.removeIcon')}
               </label>
             )}
           </Card>
           <Card title={t('config.howTitle')}>
-            <p className="text-[12.5px] text-muted">{t('config.howBody')}</p>
+            <p className="text-meta text-muted">{t('config.howBody')}</p>
           </Card>
           {app && admin && (
             <Card title={t('config.removeApp')}>
-              <p className="mb-3 text-[12.5px] text-muted">{t('config.removeAppHint')}</p>
+              <p className="mb-3 text-meta text-muted">{t('config.removeAppHint')}</p>
               <button type="button" className="btn text-bad" onClick={() => setConfirm(true)}>
                 <Trash2 size={14} aria-hidden /> {t('config.remove')}
               </button>
@@ -753,14 +753,14 @@ function AppEditor({ app }: { app?: CatalogApp }) {
         </div>
       </fieldset>
       {err && (
-        <p role="alert" className="mt-[var(--gap)] rounded-lg bg-bad-soft p-3 text-[13px] text-bad">
+        <p role="alert" className="mt-[var(--gap)] rounded-lg bg-bad-soft p-3 text-body text-bad">
           {err}
         </p>
       )}
       {admin && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface/95 backdrop-blur lg:left-[var(--sb,244px)]">
           <div className="mx-auto flex max-w-[1600px] items-center justify-end gap-2 px-4 py-2.5 lg:px-6">
-            <span className="mr-auto text-[13px] text-muted">{t('config.appSaveHint')}</span>
+            <span className="mr-auto text-body text-muted">{t('config.appSaveHint')}</span>
             <button type="button" className="btn" onClick={() => setF(initial)}>
               {t('form.discard')}
             </button>

@@ -55,7 +55,7 @@ function Item({ item }: { item: ToastItem }) {
   const t = useT()
   const I = item.tone === 'ok' ? CheckCircle2 : CircleAlert
   return (
-    <div className={cx('fade-in pointer-events-auto flex max-w-sm items-center gap-2 rounded-lg px-3 py-2 text-[13px] shadow-pop', item.tone === 'ok' ? 'bg-fg text-bg' : 'bg-bad text-surface')}>
+    <div className={cx('fade-in pointer-events-auto flex max-w-sm items-center gap-2 rounded-lg px-3 py-2 text-body shadow-pop', item.tone === 'ok' ? 'bg-fg text-bg' : 'bg-bad text-surface')}>
       <I size={15} aria-hidden className="shrink-0" />
       <span className="flex-1">{item.text}</span>
       <button type="button" className="rounded p-0.5 opacity-80 hover:opacity-100" aria-label={t('toast.dismiss')} onClick={() => dismiss(item.id)}>
