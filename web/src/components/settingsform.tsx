@@ -1,25 +1,19 @@
 // Building blocks of the settings pattern: one form per section with
 // react-hook-form and zod, fields with label, help and error, a save bar
 // only while there are unsaved changes, and dialogs for confirmations and
-// secrets shown once. Generic enough for the shared components folder
-// later (SettingsForm, Toggle, TextField, ListField, SelectField, Confirm,
-// OnceSecret).
+// secrets shown once. Used by the settings area and other areas.
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Check, Copy, TriangleAlert } from 'lucide-react'
 import { useEffect, useId, useState, type ReactNode } from 'react'
+import type { z } from 'zod'
 import { Controller, useForm, type DefaultValues, type FieldValues, type Path, type UseFormReturn } from 'react-hook-form'
-import { z } from 'zod'
-import { ApiError } from '../../api/client'
-import { Field, SaveBar } from '../../components/form'
-import { errorText } from '../../components/states'
-import { toast } from '../../components/toast'
-import { Modal, Switch } from '../../components/ui'
-import { useT } from '../../i18n'
-import { cx } from '../../lib/cx'
-
-// zod 4 compiles parsers with new Function unless told not to; the CSP
-// forbids eval, so every form here runs jitless.
-z.config({ jitless: true })
+import { ApiError } from '../api/client'
+import { Field, SaveBar } from './form'
+import { errorText } from './states'
+import { toast } from './toast'
+import { Modal, Switch } from './ui'
+import { useT } from '../i18n'
+import { cx } from '../lib/cx'
 
 /** A section form: zod validation, server errors at the field (422 names it), save bar while dirty. */
 export function SettingsForm<T extends FieldValues>({

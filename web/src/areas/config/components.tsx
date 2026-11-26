@@ -1,7 +1,6 @@
 // Building blocks of the config area: the review of a change (devices,
 // expected effect, diff), the version history with rollback, the type
-// picker of new library items, the list of deleted objects and the
-// blueprint picker other areas use (enrollment tokens, device assignment).
+// picker of new library items and the list of deleted objects.
 import { Link } from '@tanstack/react-router'
 import { CheckCircle2, History, RotateCcw, Search, ShieldAlert, Trash2, Users } from 'lucide-react'
 import { useId, useMemo, useState } from 'react'
@@ -13,7 +12,7 @@ import { Badge, Card, Modal, StatusPill, type DeviceStatus } from '../../compone
 import { useT, type MessageKey } from '../../i18n'
 import { ago, dateTime, fmt } from '../../i18n/format'
 import { cx } from '../../lib/cx'
-import { useBlueprints, useRollback, useTypes, useVersions, type Kind, type Preview, type TypeInfo } from './api'
+import { useRollback, useTypes, useVersions, type Kind, type Preview, type TypeInfo } from './api'
 
 /** The effect of a change: devices online and offline, expected compliance effect, sample devices. */
 export function Impact({ preview, busy, error }: { preview?: Preview; busy?: boolean; error?: unknown }) {
@@ -253,27 +252,5 @@ export function TypePicker({ open, onClose, onPick }: { open: boolean; onClose: 
         ))}
       </ul>
     </Modal>
-  )
-}
-
-/**
- * Blueprint choice for other areas (enrollment tokens, device assignment):
- * value 0 means none (default or the directory group decides).
- */
-export function BlueprintSelect({ value, onChange, id, describedBy, noneLabel }: { value: number; onChange: (id: number) => void; id?: string; describedBy?: string; noneLabel?: string }) {
-  const t = useT()
-  const q = useBlueprints()
-  return (
-    <select id={id} aria-describedby={describedBy} className="field" value={value} onChange={(e) => onChange(Number(e.target.value))} disabled={!q.data}>
-      <option value={0}>{noneLabel ?? t('config.defaultOnly')}</option>
-      {(q.data?.items ?? [])
-        .filter((b) => b.name !== 'default' && !b.pilot_of)
-        .map((b) => (
-          <option key={b.id} value={b.id}>
-            {b.name}
-            {b.description ? ` (${b.description})` : ''}
-          </option>
-        ))}
-    </select>
   )
 }

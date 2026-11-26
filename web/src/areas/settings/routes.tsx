@@ -25,6 +25,8 @@ export const settingsArea: Area = {
       getParentRoute: () => shell,
       path: '/settings/$section',
       beforeLoad: ({ params }) => {
+        // enrollment tokens live in the devices area (add device)
+        if (params.section === 'enrollment') throw redirect({ to: '/devices/enroll' })
         throw redirect({ to: '/settings', search: { s: aliases[params.section] ?? params.section, sel: undefined } })
       },
     }),

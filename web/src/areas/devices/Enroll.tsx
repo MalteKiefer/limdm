@@ -4,13 +4,14 @@ import { Link } from '@tanstack/react-router'
 import { ArrowLeft, Copy, KeyRound, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useCan } from '../../api/me'
+import { BlueprintSelect } from '../../components/blueprintselect'
 import { Field } from '../../components/form'
 import { EmptyState, ErrorState, LoadingState, errorText } from '../../components/states'
 import { toast } from '../../components/toast'
 import { Card, Modal, PageHeader } from '../../components/ui'
 import { useT } from '../../i18n'
 import { dateTime, fmt } from '../../i18n/format'
-import { useBlueprintList, useEnrollment, useTokenCreate, useTokenRevoke } from './api'
+import { useEnrollment, useTokenCreate, useTokenRevoke } from './api'
 import { enrollConf, installCommand } from './enrolltext'
 
 function CopyBlock({ id, text, label }: { id: string; text: string; label: string }) {
@@ -33,7 +34,6 @@ export function EnrollPage() {
   const info = useEnrollment()
   const create = useTokenCreate()
   const revoke = useTokenRevoke()
-  const bps = useBlueprintList(admin)
   const [note, setNote] = useState('')
   const [bp, setBp] = useState('0')
   const [uses, setUses] = useState('1')
@@ -143,20 +143,7 @@ export function EnrollPage() {
                   </p>
                 )}
                 <Field label={t('devices.enroll.note')}>{({ id }) => <input id={id} className="field" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder={t('devices.enroll.notePlaceholder')} />}</Field>
-                <Field label={t('devices.edit.blueprint')}>
-                  {({ id }) => (
-                    <select id={id} className="field" value={bp} onChange={(e) => setBp(e.target.value)}>
-                      <option value="0">{t('devices.enroll.defaultOnly')}</option>
-                      {(bps.data ?? [])
-                        .filter((b) => b.name !== 'default')
-                        .map((b) => (
-                          <option key={b.id} value={b.id}>
-                            {b.name}
-                          </option>
-                        ))}
-                    </select>
-                  )}
-                </Field>
+                <Field label={t('devices.edit.blueprint')}>{({ id }) => <BlueprintSelect id={id} value={Number(bp)} onChange={(v) => setBp(String(v))} noneLabel={t('devices.enroll.defaultOnly')} />}</Field>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label={t('devices.enroll.uses')} error={badUses ? t('devices.enroll.usesRange') : undefined}>
                     {({ id, describedBy, invalid }) => <input id={id} type="number" min={1} max={10000} className="field" aria-describedby={describedBy} aria-invalid={invalid || undefined} value={uses} onChange={(e) => setUses(e.target.value)} />}

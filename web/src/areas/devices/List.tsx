@@ -7,6 +7,7 @@ import { Bot, Download, FileCode2, Layers, Lock, LockOpen, Monitor, MoreHorizont
 import { useCallback, useMemo, useState } from 'react'
 import { useCan } from '../../api/me'
 import { BulkActionBar, ColumnChooser, DataGrid, useColumnVisibility, type GridColumn, type RowSelectionState } from '../../components/datagrid'
+import { BlueprintSelect } from '../../components/blueprintselect'
 import { Field } from '../../components/form'
 import { SideSheet, SplitView } from '../../components/layout'
 import { Facets, QueryBar, type Facet } from '../../components/querybar'
@@ -18,7 +19,7 @@ import { useT, type MessageKey } from '../../i18n'
 import { ago, bytes, fmt } from '../../i18n/format'
 import { addToken } from '../../lib/query'
 import { ScriptFields, scriptParams, scriptValid, DeviceDialog, useDeviceMenu, type Dialog } from './actions'
-import { useBlueprintList, useBulk, useCatalogApps, useDetail, useDeviceList, useFacets, usePatch, useTimeline, type Device, type Params } from './api'
+import { useBulk, useCatalogApps, useDetail, useDeviceList, useFacets, usePatch, useTimeline, type Device, type Params } from './api'
 import { pkgValue, statusTone } from './logic'
 
 const facetKeys = ['status', 'os', 'agent', 'blueprint', 'tag'] as const
@@ -54,10 +55,10 @@ export function DevicesPage() {
         sub={facets.data ? t('devices.count', { count: facets.data.total }) : undefined}
         actions={
           <>
-            <a className="btn" href="/export/inventory.csv">
+            <a className="btn" href="/api/v1/exports/inventory.csv">
               <Download size={15} aria-hidden /> {t('devices.export.inventory')}
             </a>
-            <a className="btn" href="/export/packages.csv">
+            <a className="btn" href="/api/v1/exports/packages.csv">
               <Download size={15} aria-hidden /> {t('devices.export.packages')}
             </a>
             <Link to="/devices/enroll" className="btn btn-primary">
@@ -487,7 +488,6 @@ function BulkApps({ busy, onClose, onRun }: { busy: boolean; onClose: () => void
 /** Assigns a blueprint to every selected device (PATCH each, as the details dialog does). */
 function BulkBlueprint({ ids, onClose }: { ids: string[]; onClose: () => void }) {
   const t = useT()
-  const bps = useBlueprintList(true)
   const patch = usePatch()
   const [bp, setBp] = useState('0')
   const [busy, setBusy] = useState(false)
@@ -522,18 +522,7 @@ function BulkBlueprint({ ids, onClose }: { ids: string[]; onClose: () => void })
       }
     >
       <Field label={t('devices.edit.blueprint')}>
-        {({ id }) => (
-          <select id={id} className="field" value={bp} onChange={(e) => setBp(e.target.value)}>
-            <option value="0">{t('devices.bulk.defaultBlueprint')}</option>
-            {(bps.data ?? [])
-              .filter((b) => b.name !== 'default')
-              .map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-          </select>
-        )}
+        {({ id }) => <BlueprintSelect id={id} value={Number(bp)} onChange={(v) => setBp(String(v))} noneLabel={t('devices.bulk.defaultBlueprint')} />}
       </Field>
     </Modal>
   )

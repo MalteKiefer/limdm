@@ -14,7 +14,7 @@ import { Badge } from '../../components/ui'
 import { ago, dateTime, fmt } from '../../i18n/format'
 import { useT, type MessageKey } from '../../i18n'
 import { useAction, useAgents, useBlueprintNames, useDirectory, useDirectoryUsers, useNetwork } from './api'
-import { Confirm, Facts, ListField, OnceSecret, SectionHead, SettingsForm, TextField, Toggle } from './components'
+import { Confirm, Facts, ListField, OnceSecret, SectionHead, SettingsForm, TextField, Toggle } from '../../components/settingsform'
 
 // ---- directory ----
 

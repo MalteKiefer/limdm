@@ -17,7 +17,7 @@ import { Badge, Modal } from '../../components/ui'
 import { ago, dateTime, fmt } from '../../i18n/format'
 import { useT, type MessageKey } from '../../i18n'
 import { useAction, useShared, useTenant, useTenantList, useTokens, useUsers } from './api'
-import { Confirm, Facts, OnceSecret, SectionHead, SelectField, SettingsForm, TextField, Toggle } from './components'
+import { Confirm, Facts, OnceSecret, SectionHead, SelectField, SettingsForm, TextField, Toggle } from '../../components/settingsform'
 import { colorCheck, fileBase64, lines } from './logic'
 
 type Pending = { approval_id?: number }

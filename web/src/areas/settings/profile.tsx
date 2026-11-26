@@ -14,7 +14,7 @@ import { Badge, Card, PageHeader, Segmented, StatusPill, type DeviceStatus } fro
 import { currentLocale, useT, type MessageKey } from '../../i18n'
 import { setPrefs, usePrefs, type Density, type Theme } from '../../lib/prefs'
 import { useAction, useProfile } from './api'
-import { Facts, OnceSecret, SettingsForm, TextField } from './components'
+import { Facts, OnceSecret, SettingsForm, TextField } from '../../components/settingsform'
 
 export function ProfilePage() {
   const t = useT()

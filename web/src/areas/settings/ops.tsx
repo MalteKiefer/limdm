@@ -14,7 +14,7 @@ import { ActionMenu, Badge, Modal } from '../../components/ui'
 import { ago, bytes, dateTime, fmt } from '../../i18n/format'
 import { useT, type MessageKey } from '../../i18n'
 import { useAction, useBackup, useChannels, useKeys, useSettings } from './api'
-import { Confirm, Facts, ListField, SectionHead, SelectField, SettingsForm, TextField, Toggle } from './components'
+import { Confirm, Facts, ListField, SectionHead, SelectField, SettingsForm, TextField, Toggle } from '../../components/settingsform'
 import { badTime, cleanSchedule, keepEmpty, lines, parseTimes, unlines, weekOrder, type Keep, type Schedule } from './logic'
 import { Monitoring } from './server'
 

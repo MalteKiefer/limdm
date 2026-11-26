@@ -11,7 +11,7 @@ import { ErrorState, LoadingState } from '../../components/states'
 import { Badge } from '../../components/ui'
 import { useT, type MessageKey } from '../../i18n'
 import { useSaveSection, useSettings, type Section, type Settings, type SettingsInput } from './api'
-import { Facts, ListField, SectionHead, SelectField, SettingsForm, TextField, Toggle } from './components'
+import { Facts, ListField, SectionHead, SelectField, SettingsForm, TextField, Toggle } from '../../components/settingsform'
 import { badNet, fileBase64, isPEM, isSyslog, lines, parseRoleGroups, roleGroupsText, unlines } from './logic'
 
 
