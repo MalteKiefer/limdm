@@ -211,6 +211,22 @@ func rootActor(ctx context.Context, q querier, actor string) (string, bool) {
 	return "", false
 }
 
+// globalRequest reports whether approving a acts beyond one tenant: the
+// catalog, a global API token, a library item saved in the global view.
+func globalRequest(a approval) bool {
+	switch a.Action {
+	case "catalog.save":
+		return true
+	case "token.add":
+		var t tokenApproval
+		return json.Unmarshal(a.Payload, &t) != nil || t.Tenant == nil
+	case "library.save":
+		var c itemApproval
+		return json.Unmarshal(a.Payload, &c) != nil || c.Tenant == 0
+	}
+	return false
+}
+
 // decideApproval approves or rejects a pending request for the console and
 // the admin API. It returns new local credentials (shown once to the
 // approver) and notifications to send after the commit.
@@ -236,6 +252,10 @@ func (s *Server) decideApproval(ctx context.Context, sess session, id int64, op 
 			return errApproval("this request has expired")
 		case s.sameActor(ctx, tx, a.RequestedBy, sess.Email):
 			return errApproval("you cannot decide your own request")
+		case sess.Tenant != 0 && globalRequest(a):
+			// stored under tenant 1 (or the tenant its name matched), but
+			// approving it acts for every tenant
+			return errApproval("a global request is decided in the global view")
 		}
 		status, expires := "rejected", a.ExpiresAt
 		if op == "approve" {

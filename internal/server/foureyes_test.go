@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -157,4 +158,28 @@ func TestFourEyesArtifacts(t *testing.T) {
 	if !s.itemNeedsApproval(api.LibraryItem{Type: api.TypeArtifacts, Payload: []byte(`{"artifacts": []}`)}) {
 		t.Fatal("com.limdm.artifacts saved without approval")
 	}
+}
+
+func TestGlobalRequest(t *testing.T) {
+	two := int64(2)
+	for _, c := range []struct {
+		a    approval
+		want bool
+	}{
+		{approval{Action: "catalog.save"}, true},
+		{approval{Action: "token.add", Payload: []byte(`{"name":"ci","role":"admin"}`)}, true},
+		{approval{Action: "token.add", Payload: mustJSON(tokenApproval{Name: "ci", Tenant: &two})}, false},
+		{approval{Action: "library.save", Payload: []byte(`{"tenant":0}`)}, true},
+		{approval{Action: "library.save", Payload: []byte(`{"tenant":2}`)}, false},
+		{approval{Action: "command", Payload: []byte(`{}`)}, false},
+	} {
+		if got := globalRequest(c.a); got != c.want {
+			t.Fatalf("%s %s: %v", c.a.Action, c.a.Payload, got)
+		}
+	}
+}
+
+func mustJSON(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
 }
