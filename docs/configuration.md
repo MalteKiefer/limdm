@@ -9,7 +9,7 @@ the environment.
 | Variable | Default | Meaning |
 |---|---|---|
 | `LIMDM_DATABASE_URL` | required | PostgreSQL URL. Remote hosts need `sslmode=verify-full`. |
-| `LIMDM_SESSION_KEY` | required | At least 32 bytes as hex (`openssl rand -hex 32`). Signs sessions and derives the keys for stored secrets, recovery keys and webhook signatures. During a rotation a comma separated list, the new key first: the first seals and signs, all open and verify. Replacing it without a rotation invalidates sessions and makes stored secrets unreadable ([keys.md](keys.md#session-key)). |
+| `LIMDM_SESSION_KEY` | required | At least 32 bytes as hex (`openssl rand -hex 32`). Signs sessions and derives the keys for stored secrets and recovery keys. During a rotation a comma separated list, the new key first: the first seals and signs, all open and verify. Replacing it without a rotation invalidates sessions and makes stored secrets unreadable ([keys.md](keys.md#session-key)). |
 | `LIMDM_PUBLIC_URL` | required | Console URL as users see it, for example `https://mdm.example.com`. |
 | `LIMDM_AGENT_URL` | required | Agent API URL, `https://`. Its host goes into the server certificate agents verify. |
 | `LIMDM_AGENT_LISTEN` | `:8444` | Listener of the agent API (mTLS terminates here). |

@@ -65,6 +65,7 @@ func (s *Server) resealSettings(ctx context.Context, dry bool) (int, error) {
 	for _, f := range []struct{ key, json, field string }{
 		{"server", "oidc_client_secret_enc", "settings.oidc_client_secret"},
 		{"google", "key_enc", "settings.google_service_account_key"},
+		{"webhook", "secret_enc", webhookField},
 	} {
 		var raw []byte
 		err := s.db.QueryRow(ctx, `SELECT value FROM settings WHERE key=$1`, f.key).Scan(&raw)

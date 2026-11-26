@@ -11,7 +11,8 @@ each one without enrolling the fleet again.
 | Network CA (`network-ca`) | issues EAP-TLS device certificates and signs the network CRL ([network.md](network.md)) | ECDSA P-384, 15 years | as above | yes |
 | Command key (`command`) | signs commands and library items; the audit chain key is derived from it | Ed25519 | `LIMDM_CA_DIR/<name>.key` (0600), or the HSM | yes |
 | Audit chain keys | HMAC-SHA256 of the audit log ([security.md](security.md#audit-log)) | derived with HKDF from the command key | derived; earlier segments in `LIMDM_CA_DIR/audit-keys` (0600) | yes, `audit-keys` and `audit-keyed-from` |
-| Session key | signs console sessions and CSRF tokens, derives the AES-256-GCM keys for sealed values (OIDC client secret, Google service account key, notification channel secrets, LUKS recovery keys, desktop login client secret) and the compliance webhook key | 32+ random bytes | `LIMDM_SESSION_KEY` in `server.env` or `.env` | yes, apart from the database |
+| Session key | signs console sessions and CSRF tokens, derives the AES-256-GCM keys for sealed values (OIDC client secret, Google service account key, notification channel secrets, LUKS recovery keys, desktop login client secret, webhook signing secret) | 32+ random bytes | `LIMDM_SESSION_KEY` in `server.env` or `.env` | yes, apart from the database |
+| Webhook signing secret (`webhook`) | signs the compliance webhook and signed webhook channels (`X-LiMDM-Signature`) | HMAC-SHA256, 32 random bytes | settings row `webhook` in the database, sealed with the session key; shown in Settings, Notifications | yes, with the database |
 | Release key | signs `SHA256SUMS` of agent releases; its public half is compiled into the agent | Ed25519 | CI secret `RELEASE_SIGNING_KEY`, an offline file, or the HSM ([operations.md](operations.md#release-key)) | offline |
 | Console TLS key | HTTPS of the console | any | `LIMDM_TLS_KEY` or the reverse proxy | as usual |
 
@@ -110,6 +111,7 @@ limdm-server keys -env /etc/limdm-server/server.env status
 limdm-server keys -env /etc/limdm-server/server.env rotate ca            # or network-ca, command
 limdm-server keys -env /etc/limdm-server/server.env finish ca            # when status shows every device moved
 limdm-server keys -env /etc/limdm-server/server.env rotate session       # prints the new LIMDM_SESSION_KEY
+limdm-server keys -env /etc/limdm-server/server.env rotate webhook       # prints the new webhook signing secret
 ```
 
 Every step is written to the audit log (`keys.rotate`, `keys.finish`, `keys.reseal`,
@@ -183,8 +185,20 @@ still holds the old keys refuses to start. A step waits while an instance starts
 3. `finish session` confirms that nothing depends on an old key. Then keep only the first
    key in `LIMDM_SESSION_KEY` and restart.
 
-The compliance webhook signature key derives from the first session key: give webhook
-receivers the new secret (Settings, Notifications) after step 1.
+A session key rotation does not change the webhook signing secret.
+
+### Webhook signing secret
+
+The secret is stored in the database, sealed with the session key, and stays the same when
+the session key rotates. An installation upgraded from 0.15 keeps the value receivers
+already know (until 0.15 it was derived from the session key); a new installation gets a
+random secret at its first start.
+
+`rotate webhook` (console: Rotate in the Keys card) generates a new random secret, prints
+it once and records `keys.rotate` with a short fingerprint. Give the new secret to every
+receiver, then restart every server instance: instances sign with the secret they loaded at
+start. There is no overlap and no `finish` step. The Keys card shows a fingerprint of the
+stored secret, so receivers can be compared without showing it.
 
 ### Release key
 
@@ -214,7 +228,8 @@ Act on the key that leaked; the order matters when several did.
 * **Session key.** Someone can forge console sessions and open sealed values from a database
   copy. Rotate the session key, then also change what was sealed: OIDC client secret at the
   identity provider, Google service account key, notification channel secrets, desktop login
-  client secret, and rotate LUKS recovery keys from the device pages.
+  client secret, rotate the webhook signing secret (`rotate webhook`), and rotate LUKS
+  recovery keys from the device pages.
 * **CA directory or HSM PIN.** Treat all keys above as leaked.
 * **Release key.** Remove the CI secret, rotate as above, and publish a notice: agents with
   the old public key accept anything signed with it until updated.

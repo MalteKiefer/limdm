@@ -45,11 +45,12 @@ const (
 	kindNetCA   = "network-ca"
 	kindCommand = "command"
 	kindSession = "session"
+	kindWebhook = "webhook"
 	keysFile    = "keys.json"
 )
 
 // keyKinds is the order of the status table.
-var keyKinds = []string{kindCA, kindNetCA, kindCommand, kindSession}
+var keyKinds = []string{kindCA, kindNetCA, kindCommand, kindSession, kindWebhook}
 
 // KeyProvider says where private keys live: "file" (or empty) or "pkcs11".
 type KeyProvider struct {
@@ -403,7 +404,7 @@ type KeyStatus struct {
 
 // Label names the kind in the console.
 func (k KeyStatus) Label() string {
-	return map[string]string{kindCA: "Device CA", kindNetCA: "Network CA", kindCommand: "Command signing key", kindSession: "Session key"}[k.Kind]
+	return map[string]string{kindCA: "Device CA", kindNetCA: "Network CA", kindCommand: "Command signing key", kindSession: "Session key", kindWebhook: "Webhook signing secret"}[k.Kind]
 }
 
 // KeysStatus lists every key kind with the progress of running rotations.
@@ -418,6 +419,14 @@ func (s *Server) KeysStatus(ctx context.Context) ([]KeyStatus, error) {
 	}
 	var out []KeyStatus
 	for _, kind := range keyKinds {
+		if kind == kindWebhook {
+			ks, err := s.webhookStatus(ctx)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ks)
+			continue
+		}
 		if kind == kindSession {
 			ks := KeyStatus{Kind: kind, Active: fmt.Sprintf("%d key(s)", 1+len(s.cfg.OldSessionKeys)), Location: "LIMDM_SESSION_KEY"}
 			if len(s.cfg.OldSessionKeys) > 0 {
@@ -481,8 +490,11 @@ const restartNote = "Restart every server instance to apply the change."
 // (required with an HSM, where the key must exist with the label
 // limdm-<name>). For the session key it returns the new LIMDM_SESSION_KEY.
 func (s *Server) RotateKey(ctx context.Context, actor, kind, name string) (string, error) {
-	if kind == kindSession {
+	switch kind {
+	case kindSession:
 		return s.rotateSession(ctx, actor)
+	case kindWebhook:
+		return s.rotateWebhook(ctx, actor)
 	}
 	// not while an instance starts and checks its keys (checkSharedKeys)
 	unlock, err := clusterLock(ctx, s.db, lockStartup, 30*time.Second)
@@ -497,7 +509,7 @@ func (s *Server) RotateKey(ctx context.Context, actor, kind, name string) (strin
 	}
 	cur, ok := st[kind]
 	if !ok {
-		return "", fmt.Errorf("unknown key kind %q (ca, network-ca, command, session)", kind)
+		return "", fmt.Errorf("unknown key kind %q (ca, network-ca, command, session, webhook)", kind)
 	}
 	if cur.Previous != "" {
 		return "", errors.New("a rotation of this key is running: finish it first")
@@ -547,8 +559,11 @@ func (s *Server) RotateKey(ctx context.Context, actor, kind, name string) (strin
 // key file is deleted. It refuses while devices still depend on the old
 // key, unless force (those devices have to enroll again).
 func (s *Server) FinishKey(ctx context.Context, actor, kind string, force bool) (string, error) {
-	if kind == kindSession {
+	switch kind {
+	case kindSession:
 		return s.finishSession(ctx, actor)
+	case kindWebhook:
+		return "", errors.New("a webhook secret rotation takes effect at once: nothing to finish")
 	}
 	// not while an instance starts and checks its keys (checkSharedKeys)
 	unlock, err := clusterLock(ctx, s.db, lockStartup, 30*time.Second)
@@ -563,7 +578,7 @@ func (s *Server) FinishKey(ctx context.Context, actor, kind string, force bool) 
 	}
 	cur, ok := st[kind]
 	if !ok {
-		return "", fmt.Errorf("unknown key kind %q (ca, network-ca, command, session)", kind)
+		return "", fmt.Errorf("unknown key kind %q (ca, network-ca, command, session, webhook)", kind)
 	}
 	if cur.Previous == "" {
 		return "", errors.New("no rotation of this key is running")

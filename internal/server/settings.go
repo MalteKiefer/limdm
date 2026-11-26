@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -396,7 +397,7 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 	}
 	s.render(w, r, sess, "settings", map[string]any{"Set": set, "ClientIP": clientIP(r), "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
 		"Tab": tab, "Tabs": tabs, "Channels": data["Channels"], "NotifyEvents": data["NotifyEvents"], "Keys": data["Keys"], "TenantOnly": sess.TenantOnly(),
-		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": map[bool]string{false: s.webhookSecretHex()}[sess.TenantOnly()],
+		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": map[bool]string{false: hex.EncodeToString(s.whKey)}[sess.TenantOnly()],
 		"RoleGroupsText": roleGroupsText(set.RoleGroups)})
 }
 

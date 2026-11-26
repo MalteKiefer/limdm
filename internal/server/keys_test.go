@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/hkdf"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
@@ -442,23 +444,81 @@ func TestKeyRotationFlow(t *testing.T) {
 	if _, err := s.escrowKeysForTest(ctx); err != nil {
 		t.Fatal(err)
 	}
+	webhook := s.whKey
 	cfg.SessionKey, cfg.OldSessionKeys = bytes.Repeat([]byte{5}, 32), [][]byte{oldSession}
 	s = open(cfg)
-	if n, err := s.reseal(ctx, true); err != nil || n != 1 {
+	// the recovery key and the webhook secret
+	if n, err := s.reseal(ctx, true); err != nil || n != 2 {
 		t.Fatalf("to reseal: %d %v", n, err)
 	}
 	if _, err := s.FinishKey(ctx, "admin@x", kindSession, false); err == nil {
 		t.Fatal("finish with values on the old key")
 	}
-	if n, err := s.reseal(ctx, false); err != nil || n != 1 {
+	if n, err := s.reseal(ctx, false); err != nil || n != 2 {
 		t.Fatalf("resealed: %d %v", n, err)
 	}
 	if _, err := s.FinishKey(ctx, "admin@x", kindSession, false); err != nil {
 		t.Fatal(err)
 	}
 	cfg.OldSessionKeys = nil
-	if k, err := open(cfg).openRecovery("d1", "u1", s.mustSealed(ctx)); err != nil || k != "key" {
+	s = open(cfg)
+	if k, err := s.openRecovery("d1", "u1", s.mustSealed(ctx)); err != nil || k != "key" {
 		t.Fatalf("recovery key after the rotation: %v", err)
+	}
+	if !bytes.Equal(s.whKey, webhook) {
+		t.Fatal("the session key rotation changed the webhook secret")
+	}
+
+	// webhook secret: explicit rotation, used after the restart
+	msg, err := s.RotateKey(ctx, "admin@x", kindWebhook, "")
+	if err != nil || !strings.Contains(msg, "New webhook signing secret: ") {
+		t.Fatalf("webhook rotation: %q %v", msg, err)
+	}
+	if st, _ := s.webhookStatus(ctx); !st.Restart || !bytes.Equal(s.whKey, webhook) {
+		t.Fatalf("before the restart: %+v", st)
+	}
+	s = open(cfg)
+	if bytes.Equal(s.whKey, webhook) || !strings.Contains(msg, hex.EncodeToString(s.whKey)) {
+		t.Fatal("the restarted server does not use the new webhook secret")
+	}
+	if _, err := s.FinishKey(ctx, "admin@x", kindWebhook, false); err == nil {
+		t.Fatal("finish of a webhook rotation")
+	}
+}
+
+// An installation upgraded from 0.15 keeps the webhook secret its receivers
+// know (derived from the session key); a fresh one gets a random secret.
+func TestWebhookSecretMigration(t *testing.T) {
+	dsn := os.Getenv("LIMDM_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("LIMDM_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	sk := bytes.Repeat([]byte{7}, 32)
+	derived, _ := hkdf.Key(sha256.New, sk, nil, "limdm webhook signature v1", 32)
+	for _, upgraded := range []bool{false, true} {
+		if _, err := db.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
+			t.Fatal(err)
+		}
+		if err := migrate(ctx, db); err != nil {
+			t.Fatal(err)
+		}
+		if upgraded {
+			db.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('server', '{}')`)
+		}
+		s := &Server{cfg: Config{SessionKey: sk}, db: db}
+		key, err := s.loadWebhookSecret(ctx)
+		if err != nil || bytes.Equal(key, derived) != upgraded {
+			t.Fatalf("upgraded=%v: derived=%v %v", upgraded, bytes.Equal(key, derived), err)
+		}
+		if again, err := s.loadWebhookSecret(ctx); err != nil || !bytes.Equal(again, key) {
+			t.Fatal("the stored secret is not stable")
+		}
 	}
 }
 

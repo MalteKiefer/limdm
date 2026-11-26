@@ -959,7 +959,7 @@ func TestWebhookSignature(t *testing.T) {
 		bodies <- b
 	}))
 	defer ts.Close()
-	s := &Server{cfg: Config{SessionKey: bytes.Repeat([]byte{2}, 32)}, hooks: ts.Client(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s := &Server{cfg: Config{SessionKey: bytes.Repeat([]byte{2}, 32)}, whKey: bytes.Repeat([]byte{3}, 32), hooks: ts.Client(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	s.rt.Store(&runtimeState{set: Settings{WebhookURL: ts.URL}})
 	s.sendWebhook(&webhookEvent{Type: "device.noncompliant", DeviceID: "d1"})
 	select {

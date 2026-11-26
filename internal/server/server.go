@@ -218,6 +218,7 @@ type Server struct {
 	limit  limiter
 	rt     atomic.Pointer[runtimeState] // settings editable in the UI and the OIDC client built from them
 	hooks  *http.Client                 // webhook client; nil uses http.DefaultClient (tests inject one)
+	whKey  []byte                       // webhook signing secret, loaded at startup (webhooksecret.go)
 	geoSem chan struct{}                // one location lookup at a time
 
 	saveMu     sync.Mutex  // serializes settings saves in this instance (clusterLock across instances)
@@ -330,6 +331,9 @@ func openCore(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Poo
 	var err error
 	if itemSecrets, err = s.aead(infoItems); err != nil {
 		return nil, err
+	}
+	if s.whKey, err = s.loadWebhookSecret(ctx); err != nil {
+		return nil, fmt.Errorf("webhook secret: %w", err)
 	}
 	return s, nil
 }

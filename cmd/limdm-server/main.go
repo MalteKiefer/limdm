@@ -304,7 +304,7 @@ func keysCmd(log *slog.Logger, args []string) error {
 		sub.Parse(fs.Args()[2:])
 	}
 	if op != "status" && (kind == "" || (op != "rotate" && op != "finish")) {
-		return errors.New("usage: limdm-server keys [-env FILE] status | rotate ca|network-ca|command|session [-name NAME] | finish KIND [-force]")
+		return errors.New("usage: limdm-server keys [-env FILE] status | rotate ca|network-ca|command|session|webhook [-name NAME] | finish KIND [-force]")
 	}
 	cfg, err := server.ConfigFromEnv()
 	if err != nil {

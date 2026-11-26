@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"crypto/hkdf"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -109,17 +108,6 @@ func (s *Server) queuePolicyCommand(ctx context.Context, tx pgx.Tx, deviceID, ty
 	_, err := tx.Exec(ctx, `UPDATE devices SET auto_locked=$2 WHERE id=$1`, deviceID, locked)
 	return err
 }
-
-// webhookKey derives the HMAC key receivers use to verify X-LiMDM-Signature.
-func (s *Server) webhookKey() []byte {
-	k, err := hkdf.Key(sha256.New, s.cfg.SessionKey, nil, "limdm webhook signature v1", 32)
-	if err != nil {
-		panic(err) // fixed parameters, cannot fail
-	}
-	return k
-}
-
-func (s *Server) webhookSecretHex() string { return hex.EncodeToString(s.webhookKey()) }
 
 // sendWebhook posts the event with an HMAC-SHA256 signature; failures are logged.
 func (s *Server) sendWebhook(ev *webhookEvent) {

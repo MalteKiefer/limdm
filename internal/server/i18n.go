@@ -1385,4 +1385,7 @@ var deCatalog = map[string]string{
 	"Session key":                      "Sitzungsschlüssel",
 	"Key rotation started or finished": "Schlüsselwechsel begonnen oder abgeschlossen",
 	"Restart every server instance to apply the change.": "Starten Sie jede Serverinstanz neu, damit die Änderung wirkt.",
+	// v0.16.0 integration
+	"Webhook signing secret": "Webhook Signaturgeheimnis",
+	"Generate a new webhook signing secret? Every webhook receiver needs it.": "Neues Webhook Signaturgeheimnis erzeugen? Jeder Webhook Empfänger benötigt es.",
 }
