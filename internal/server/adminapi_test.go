@@ -212,6 +212,39 @@ func TestAdminAPI(t *testing.T) {
 	if resp, _ := call(helpdeskTok, "PATCH", "/api/v1/devices/d1", `{"tags":["x"]}`); resp.StatusCode != 403 {
 		t.Fatalf("helpdesk patch: %d", resp.StatusCode)
 	}
+
+	// four eyes: an API wipe becomes an approval request (202 with its ID)
+	set := s.settings()
+	set.FourEyes = true
+	s.rt.Store(&runtimeState{set: set, auth: &oidcAuth{}})
+	resp, body = call(adminTok, "POST", "/api/v1/devices/d1/commands", `{"type":"wipe","params":{"confirm":"pc1","reason":"stolen"}}`)
+	var pending, wipes int
+	db.QueryRow(ctx, `SELECT count(*) FROM approvals WHERE action='command' AND target='d1' AND status='pending'`).Scan(&pending)
+	db.QueryRow(ctx, `SELECT count(*) FROM commands WHERE type='wipe'`).Scan(&wipes)
+	if resp.StatusCode != 202 || !strings.Contains(body, `"approval_id"`) || pending != 1 || wipes != 0 {
+		t.Fatalf("wipe under four eyes: %d %s pending=%d wipes=%d", resp.StatusCode, body, pending, wipes)
+	}
+	set.FourEyes = false
+	s.rt.Store(&runtimeState{set: set, auth: &oidcAuth{}})
+
+	// scoped tokens see and act on their devices only and get no metrics
+	if code, _ := console("POST", "/settings/api", url.Values{"name": {"x"}, "role": {"admin"}, "days": {"30"}, "scope_tags": {"finance"}}); code != 400 {
+		t.Fatalf("scoped admin token: %d", code)
+	}
+	_, tbody := console("POST", "/settings/api", url.Values{"name": {"fin"}, "role": {"helpdesk"}, "days": {"30"}, "scope_tags": {"finance"}})
+	finTok := regexp.MustCompile(`lma_[A-Za-z0-9_-]+`).FindString(tbody)
+	if resp, body := call(finTok, "GET", "/api/v1/devices", ""); resp.StatusCode != 200 || !strings.Contains(body, "pc1") || strings.Contains(body, "pc3") {
+		t.Fatalf("scoped list: %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := call(finTok, "GET", "/api/v1/devices/d3", ""); resp.StatusCode != 404 {
+		t.Fatalf("scoped get: %d", resp.StatusCode)
+	}
+	if resp, _ := call(finTok, "POST", "/api/v1/devices/d3/commands", `{"type":"reboot","params":{"minutes":5}}`); resp.StatusCode != 404 {
+		t.Fatalf("scoped command: %d", resp.StatusCode)
+	}
+	if resp, _ := call(finTok, "GET", "/metrics", ""); resp.StatusCode != 403 {
+		t.Fatalf("scoped metrics: %d", resp.StatusCode)
+	}
 	if resp, body := call(adminTok, "PATCH", "/api/v1/devices/d1", `{"tags":["Finance","laptop"],"blueprint_id":null}`); resp.StatusCode != 200 || !strings.Contains(body, `"tags":["finance","laptop"]`) {
 		t.Fatalf("patch: %d %s", resp.StatusCode, body)
 	}
@@ -248,7 +281,7 @@ func TestAdminAPI(t *testing.T) {
 	if resp, body := call(adminTok, "GET", "/api/v1/tags", ""); resp.StatusCode != 401 || !strings.Contains(body, "revoked") {
 		t.Fatalf("revoked token: %d %s", resp.StatusCode, body)
 	}
-	if auditCount("api_token.create") != 3 {
+	if auditCount("api_token.create") != 4 {
 		t.Fatal("token creation not audited")
 	}
 }

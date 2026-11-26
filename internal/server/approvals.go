@@ -45,14 +45,14 @@ func (s *Server) needsApproval(typ string) bool {
 	return s.settings().FourEyes && (typ == "wipe" || typ == "lost" || typ == "script")
 }
 
-// requestApproval stores a request and audits and announces it.
-func (s *Server) requestApproval(ctx context.Context, sess session, action, target string, payload any, reason string) error {
+// requestApproval stores a request, audits and announces it, and returns its ID.
+func (s *Server) requestApproval(ctx context.Context, sess session, action, target string, payload any, reason string) (int64, error) {
 	if len(reason) > 500 {
-		return errors.New("reason: up to 500 characters")
+		return 0, errors.New("reason: up to 500 characters")
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	var id int64
 	err = s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
@@ -62,12 +62,12 @@ func (s *Server) requestApproval(ctx context.Context, sess session, action, targ
 		return sess.Email, "approval.request", target, fmt.Sprintf("#%d %s %s reason=%q", id, action, truncate(string(b), 2000), reason), err
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 	s.notify(notice{Type: "approval.request", Severity: "warning", Title: "Approval requested: " + action + " " + target,
 		Text: fmt.Sprintf("%s asks for %s on %s. Reason: %s. Another admin decides under Approvals within 24 hours.", sess.Email, action, target, firstNonEmpty(reason, "none given")),
 		URL:  s.cfg.PublicURL + "/approvals"})
-	return nil
+	return id, nil
 }
 
 func (s *Server) approvalsPage(w http.ResponseWriter, r *http.Request, sess session) {

@@ -54,13 +54,15 @@ type apiCaller struct {
 	Name     string
 	Role     string
 	ReadOnly bool
+	Tags     []string // device scope of a helpdesk or auditor token; empty: every device
 }
 
 // actor names the token in the audit log and as creator of commands.
 func (c apiCaller) actor() string { return fmt.Sprintf("api:%s#%d", c.Name, c.ID) }
 
 // sess is the session the shared console functions check roles against.
-func (c apiCaller) sess() session { return session{Email: c.actor(), Role: c.Role} }
+// It carries the token's device scope, so the W2 scope rules apply.
+func (c apiCaller) sess() session { return session{Email: c.actor(), Role: c.Role, Tags: c.Tags} }
 
 const apiCallerKey ctxKey = 2
 
@@ -90,8 +92,8 @@ func (s *Server) bearer(w http.ResponseWriter, r *http.Request) (apiCaller, bool
 	if ok && tok != "" {
 		var expires time.Time
 		var revoked *time.Time
-		err := s.db.QueryRow(ctx, `SELECT id, name, role, read_only, expires_at, revoked_at FROM api_tokens WHERE token_hash=$1`, sha(tok)).
-			Scan(&c.ID, &c.Name, &c.Role, &c.ReadOnly, &expires, &revoked)
+		err := s.db.QueryRow(ctx, `SELECT id, name, role, read_only, scope_tags, expires_at, revoked_at FROM api_tokens WHERE token_hash=$1`, sha(tok)).
+			Scan(&c.ID, &c.Name, &c.Role, &c.ReadOnly, &c.Tags, &expires, &revoked)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			reason = "unknown token"
@@ -244,6 +246,7 @@ type apiTokenRow struct {
 	Created, Expires    time.Time
 	LastUsed, RevokedAt *time.Time
 	State               string // active | expired | revoked
+	Scope               []string
 }
 
 func (s *Server) apiTokensPage(w http.ResponseWriter, r *http.Request, sess session) {
@@ -251,7 +254,7 @@ func (s *Server) apiTokensPage(w http.ResponseWriter, r *http.Request, sess sess
 }
 
 func (s *Server) renderAPITokens(w http.ResponseWriter, r *http.Request, sess session, created string) {
-	rows, err := s.db.Query(r.Context(), `SELECT id, name, prefix, role, read_only, created_by, created_at, expires_at, last_used_at, revoked_at, ''
+	rows, err := s.db.Query(r.Context(), `SELECT id, name, prefix, role, read_only, created_by, created_at, expires_at, last_used_at, revoked_at, '', scope_tags
 		FROM api_tokens ORDER BY revoked_at IS NOT NULL, expires_at < now(), created_at DESC`)
 	if err != nil {
 		s.fail(w, err)
@@ -284,11 +287,20 @@ func (s *Server) apiTokenCreate(w http.ResponseWriter, r *http.Request, sess ses
 		return
 	}
 	readOnly := r.FormValue("read_only") == "on" || role == "auditor" || role == "metrics"
+	scope, err := parseTags(r.FormValue("scope_tags"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(scope) > 0 && role != "helpdesk" && role != "auditor" {
+		http.Error(w, "a device scope applies to helpdesk and auditor tokens only", http.StatusBadRequest)
+		return
+	}
 	token := "lma_" + randToken(32)
 	prefix := token[:12]
-	err = s.auditAction(r.Context(), sess.Email, "api_token.create", name, fmt.Sprintf("role=%s read_only=%t days=%d prefix=%s", role, readOnly, days, prefix), func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO api_tokens(name, prefix, token_hash, role, read_only, created_by, expires_at)
-			VALUES ($1,$2,$3,$4,$5,$6, now() + make_interval(days => $7))`, name, prefix, sha(token), role, readOnly, sess.Email, days)
+	err = s.auditAction(r.Context(), sess.Email, "api_token.create", name, fmt.Sprintf("role=%s read_only=%t days=%d prefix=%s scope_tags=%s", role, readOnly, days, prefix, strings.Join(scope, ",")), func(tx pgx.Tx) error {
+		_, err := tx.Exec(r.Context(), `INSERT INTO api_tokens(name, prefix, token_hash, role, read_only, created_by, expires_at, scope_tags)
+			VALUES ($1,$2,$3,$4,$5,$6, now() + make_interval(days => $7), $8)`, name, prefix, sha(token), role, readOnly, sess.Email, days, scope)
 		return err
 	})
 	if err != nil {
@@ -425,7 +437,7 @@ func toAPIDevice(d deviceRow) apiDevice {
 		Status: d.Status, Failing: d.Failing, Checks: d.Checks, LastSeen: d.LastSeen, Retired: d.Retired}
 }
 
-func (s *Server) apiDevices(w http.ResponseWriter, r *http.Request, _ apiCaller) {
+func (s *Server) apiDevices(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	dq, err := parseDeviceQuery(r.URL.Query(), s.staleAfter())
 	if err != nil {
 		problem(w, http.StatusBadRequest, err.Error())
@@ -436,6 +448,8 @@ func (s *Server) apiDevices(w http.ResponseWriter, r *http.Request, _ apiCaller)
 		return
 	}
 	where := dq.where()
+	scope, sargs := scopeCond(c.sess(), 0)
+	where.add(scope, sargs...)
 	if cur != "" {
 		host, id, ok := strings.Cut(cur, "\x00")
 		if !ok {
@@ -478,9 +492,9 @@ func (s *Server) apiDevice(ctx context.Context, id string) (apiDevice, error) {
 	return d, err
 }
 
-func (s *Server) apiDeviceGet(w http.ResponseWriter, r *http.Request, _ apiCaller) {
+func (s *Server) apiDeviceGet(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	d, err := s.apiDevice(r.Context(), r.PathValue("id"))
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && !s.inScope(r.Context(), c.sess(), d.ID) {
 		problem(w, http.StatusNotFound, "device not found")
 		return
 	}
@@ -599,7 +613,7 @@ func (s *Server) apiCommandCreate(w http.ResponseWriter, r *http.Request, c apiC
 	}
 	var retired bool
 	err := s.db.QueryRow(ctx, `SELECT retired FROM devices WHERE id=$1`, id).Scan(&retired)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && !s.inScope(ctx, c.sess(), id) {
 		problem(w, http.StatusNotFound, "device not found")
 		return
 	}
@@ -623,11 +637,22 @@ func (s *Server) apiCommandCreate(w http.ResponseWriter, r *http.Request, c apiC
 		problem(w, http.StatusUnprocessableEntity, msg)
 		return
 	}
+	if s.needsApproval(body.Type) { // four eyes: an admin decides in the console
+		aid, err := s.requestApproval(ctx, c.sess(), "command", id, commandApproval{Type: body.Type, Payload: payload}, strings.TrimSpace(form.Get("reason")))
+		if err != nil {
+			problem(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		w.Header().Set("Location", "/approvals")
+		writeJSONStatus(w, http.StatusAccepted, map[string]any{"approval_id": aid, "status": "pending"})
+		return
+	}
 	cid, err := s.queueCommandID(ctx, c.actor(), id, body.Type, payload)
 	if err != nil {
 		s.apiFail(w, err)
 		return
 	}
+	s.notifyCommand(c.actor(), id, body.Type)
 	cmd, err := collectOne(ctx, s.db, pgx.RowToStructByPos[apiCommand], `SELECT `+apiCommandCols+` FROM commands WHERE id=$1`, cid)
 	if err != nil {
 		s.apiFail(w, err)
@@ -656,13 +681,13 @@ func collectOne[T any](ctx context.Context, db *pgxpool.Pool, fn pgx.RowToFunc[T
 	return pgx.CollectExactlyOneRow(rows, fn)
 }
 
-func (s *Server) apiCommandGet(w http.ResponseWriter, r *http.Request, _ apiCaller) {
+func (s *Server) apiCommandGet(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
 	cmd, err := collectOne(r.Context(), s.db, pgx.RowToStructByPos[apiCommand], `SELECT `+apiCommandCols+` FROM commands WHERE id=$1`, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && !s.inScope(r.Context(), c.sess(), cmd.DeviceID) {
 		problem(w, http.StatusNotFound, "command not found")
 		return
 	}
@@ -674,9 +699,13 @@ func (s *Server) apiCommandGet(w http.ResponseWriter, r *http.Request, _ apiCall
 }
 
 // apiDeviceCommands lists a device's commands, newest first.
-func (s *Server) apiDeviceCommands(w http.ResponseWriter, r *http.Request, _ apiCaller) {
+func (s *Server) apiDeviceCommands(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	limit, cur, ok := pageArgs(w, r)
 	if !ok {
+		return
+	}
+	if !s.inScope(r.Context(), c.sess(), r.PathValue("id")) {
+		problem(w, http.StatusNotFound, "device not found")
 		return
 	}
 	before, ok := idCursor(w, cur)
@@ -913,12 +942,13 @@ func (s *Server) apiBlueprintDelete(w http.ResponseWriter, r *http.Request, c ap
 
 // apiTags lists the tags of active devices with their device counts. The
 // list is short, so it is not paged.
-func (s *Server) apiTags(w http.ResponseWriter, r *http.Request, _ apiCaller) {
+func (s *Server) apiTags(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	type tag struct {
 		Name    string `json:"name"`
 		Devices int    `json:"devices"`
 	}
-	list, err := collect(r.Context(), s.db, pgx.RowToStructByPos[tag], `SELECT t, count(*)::int FROM devices, unnest(tags) t WHERE NOT retired GROUP BY t ORDER BY t`)
+	cond, args := scopeCond(c.sess(), 0)
+	list, err := collect(r.Context(), s.db, pgx.RowToStructByPos[tag], `SELECT t, count(*)::int FROM devices d, unnest(d.tags) t WHERE NOT d.retired AND `+cond+` GROUP BY t ORDER BY t`, args...)
 	if err != nil {
 		s.apiFail(w, err)
 		return

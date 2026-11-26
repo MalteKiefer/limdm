@@ -220,7 +220,7 @@ func (s *Server) userUpdate(w http.ResponseWriter, r *http.Request, sess session
 		return
 	}
 	if cur != c.Role && s.settings().FourEyes {
-		if err := s.requestApproval(ctx, sess, "user.update", login, c, strings.TrimSpace(r.FormValue("reason"))); err != nil {
+		if _, err := s.requestApproval(ctx, sess, "user.update", login, c, strings.TrimSpace(r.FormValue("reason"))); err != nil {
 			s.renderUsers(w, r, sess, "", err.Error())
 			return
 		}

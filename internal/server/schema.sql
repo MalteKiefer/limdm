@@ -580,3 +580,6 @@ CREATE TABLE IF NOT EXISTS network_certs (
     revoke_reason TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS network_certs_device ON network_certs(device_id);
+-- integration v0.16.0
+-- device scope of helpdesk and auditor API tokens (tags, as for console users)
+ALTER TABLE api_tokens ADD COLUMN IF NOT EXISTS scope_tags TEXT[] NOT NULL DEFAULT '{}';

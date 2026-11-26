@@ -16,7 +16,7 @@
       <thead><tr><th>{{t "Name"}}</th><th>{{t "Role"}}</th><th>{{t "Status"}}</th><th>{{t "Expires"}}</th><th>{{t "Last used"}}</th><th>{{t "Created by"}}</th>{{if eq $.Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
       <tbody>{{range .Tokens}}<tr>
         <td>{{.Name}}<span class="sub mono">{{.Prefix}}…</span></td>
-        <td>{{t .Role}}{{if and .ReadOnly (ne .Role "auditor") (ne .Role "metrics")}}<span class="sub">{{t "read only"}}</span>{{end}}</td>
+        <td>{{t .Role}}{{if and .ReadOnly (ne .Role "auditor") (ne .Role "metrics")}}<span class="sub">{{t "read only"}}</span>{{end}}{{if .Scope}}<span class="sub">{{t "Scope tags"}}: {{join .Scope ", "}}</span>{{end}}</td>
         <td><span class="pill {{if eq .State "active"}}ok{{else}}na{{end}}">{{t .State}}</span></td>
         <td>{{fmtTime .Expires}}</td>
         <td>{{ago .LastUsed}}</td>
@@ -33,6 +33,8 @@
     <label>{{t "Role"}}<select name="role">{{range .Roles}}<option value="{{.}}">{{t .}}</option>{{end}}</select></label>
     <label class="check"><input type="checkbox" name="read_only"> {{t "Read only"}}</label>
     <label>{{t "Valid for days"}}<input name="days" type="number" value="90" min="1" max="365"></label>
+    <label>{{t "Scope tags"}}<input name="scope_tags" maxlength="500" placeholder="{{t "Empty: every device"}}"></label>
+    <p class="muted">{{t "Helpdesk and auditor tokens with device tags see and act on those devices only; they get no metrics. Commands that need four eyes approval return 202 with the approval ID."}}</p>
     <p class="muted">{{t "Admin and helpdesk tokens can do what the role can do in the console. Auditor and metrics tokens only read; metrics tokens only read /metrics."}}</p>
     <button>{{t "Create token"}}</button>
   </form>

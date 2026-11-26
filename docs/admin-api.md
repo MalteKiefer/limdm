@@ -16,6 +16,11 @@ Admins create tokens under Administration, **API tokens** (`/settings/api`):
   [`/metrics`](operations.md#prometheus-metrics).
 * **Read only**: an admin or helpdesk token that may only read.
 * **Valid for days**: 1 to 365; every token expires.
+* **Scope tags**: optional device tags (comma separated) for a `helpdesk` or `auditor`
+  token, as for scoped console users ([security.md](security.md)). A scoped token lists,
+  reads and commands only devices with one of the tags (other devices answer `404`), sees
+  only their audit entries and tags, and gets no `/metrics`. Directory group scopes exist
+  for console users only. Admin and metrics tokens cannot be scoped.
 
 The token (`lma_...`) is shown once. The server stores only its SHA-256 hash, the first
 characters for recognition, the creator, the expiry and the last use (updated at most once a
@@ -110,6 +115,13 @@ app commands need the admin role; lost mode and wipe need the host name in `conf
 answer is `202` with the command and its `Location`. Poll `GET /api/v1/commands/{id}` until
 `status` is `ok`, `failed` or `expired`. The payload is never returned, since it can hold a
 password.
+
+With four eyes approval on (Settings, Security), wipe, lost mode and scripts do not run:
+the answer is `202` with `{"approval_id": 12, "status": "pending"}` and an admin decides
+under **Approvals** in the console (`params.reason` is shown there). The token can never
+approve its own request; once approved, the command is queued with the token as creator.
+Library item answers mask network secrets; a `PUT` that sends the mask back keeps them, and
+every save creates a version like a console save.
 
 ### Library items and blueprints
 

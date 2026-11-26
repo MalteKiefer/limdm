@@ -154,7 +154,7 @@ func (s *Server) recoveryView(w http.ResponseWriter, r *http.Request, sess sessi
 			case reason == "":
 				view["State"] = "reason"
 			default:
-				if err := s.requestApproval(ctx, sess, "recovery.view", id, map[string]string{"uuid": uuid, "device": path}, reason); err != nil {
+				if _, err := s.requestApproval(ctx, sess, "recovery.view", id, map[string]string{"uuid": uuid, "device": path}, reason); err != nil {
 					s.fail(w, err)
 					return
 				}

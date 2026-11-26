@@ -904,7 +904,7 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 		return
 	}
 	if s.needsApproval(typ) {
-		err := s.requestApproval(r.Context(), sess, "command", id, commandApproval{Type: typ, Payload: payload}, strings.TrimSpace(r.FormValue("reason")))
+		_, err := s.requestApproval(r.Context(), sess, "command", id, commandApproval{Type: typ, Payload: payload}, strings.TrimSpace(r.FormValue("reason")))
 		if err != nil {
 			s.fail(w, err)
 			return
