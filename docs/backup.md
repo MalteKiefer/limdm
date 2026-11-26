@@ -122,7 +122,8 @@ runs outside a schedule have none.
 
 After every successful run each target is pruned: archives of a schedule by that schedule's
 rule, archives outside a schedule (and of a deleted schedule) by the general rule set next to
-the recipients. A rule combines:
+the recipients. Only this server's archives (named after `LIMDM_PUBLIC_URL`) are pruned;
+archives of another server sharing the target are left to that server. A rule combines:
 
 | Part | Keeps |
 |---|---|

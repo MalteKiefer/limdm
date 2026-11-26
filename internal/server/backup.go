@@ -210,13 +210,28 @@ type backupResult struct {
 
 var hostToken = regexp.MustCompile(`[^a-z0-9.-]+`)
 
-// backupName is limdm-<public host>-<UTC time>[-<schedule>].lbk.
-func (s *Server) backupName(at time.Time, schedule string) string {
+// backupPrefix is limdm-<public host>-, the start of this server's
+// archive names.
+func (s *Server) backupPrefix() string {
 	host := "server"
 	if u, err := url.Parse(s.cfg.PublicURL); err == nil && u.Hostname() != "" {
 		host = hostToken.ReplaceAllString(strings.ToLower(u.Hostname()), "-")
 	}
-	name := "limdm-" + host + "-" + at.UTC().Format("20060102T150405Z")
+	return "limdm-" + host + "-"
+}
+
+// ownArchive tells this server's archives from those of another server
+// sharing the target (limdm-a- is also the start of limdm-a-b-).
+func (s *Server) ownArchive(name string) bool {
+	rest, ok := strings.CutPrefix(name, s.backupPrefix())
+	return ok && backupStampRe.MatchString(rest)
+}
+
+var backupStampRe = regexp.MustCompile(`^\d{8}T\d{6}Z(-|\.lbk$)`)
+
+// backupName is limdm-<public host>-<UTC time>[-<schedule>].lbk.
+func (s *Server) backupName(at time.Time, schedule string) string {
+	name := s.backupPrefix() + at.UTC().Format("20060102T150405Z")
 	if schedule != "" {
 		name += "-" + schedule
 	}
@@ -645,7 +660,8 @@ func (s *Server) pruneBackups(ctx context.Context, actor string) error {
 		}
 		groups := map[string][]arch{}
 		for _, o := range list {
-			if at, sched, ok := parseBackupName(o.Name); ok {
+			// archives of another server on a shared target follow its rules
+			if at, sched, ok := parseBackupName(o.Name); ok && s.ownArchive(o.Name) {
 				if _, known := rules[sched]; !known {
 					sched = ""
 				}

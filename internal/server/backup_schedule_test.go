@@ -140,5 +140,12 @@ func TestBackupNames(t *testing.T) {
 		if !ok || !got.Equal(at) || gs != sched {
 			t.Fatalf("%q: %v %q %v", sched, got, gs, ok)
 		}
+		if !s.ownArchive(s.backupName(at, sched)) {
+			t.Fatal("own archive not recognized")
+		}
+	}
+	other := &Server{cfg: Config{PublicURL: "https://mdm.example.com-staging"}}
+	if s.ownArchive(other.backupName(at, "")) || s.ownArchive("limdm-mdm.example.com-staging-20261126T020000Z.lbk") {
+		t.Fatal("archive of another server counted as own")
 	}
 }
