@@ -253,7 +253,7 @@ type apiTokenOut struct {
 	Token string `json:"token,omitempty"`
 }
 
-const apiTokenCols = `id, name, prefix, role, read_only, created_by, created_at, expires_at, last_used_at, revoked_at, scope_tags, scopes, ''`
+const apiTokenCols = `id, name, prefix, role, read_only, created_by, created_at, expires_at, last_used_at, revoked_at, scope_tags, scopes, ''` //nolint:gosec // column names, no credentials
 
 func (s *Server) apiTokens(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	cond, args := tenantCond(c.sess(), "tenant_id", 0)

@@ -68,7 +68,7 @@ func loadTestServer(db *pgxpool.Pool) *Server {
 	return s
 }
 
-func agentCall(s *Server, h http.HandlerFunc, id, path string, body any) *httptest.ResponseRecorder {
+func agentCall(h http.HandlerFunc, id, path string, body any) *httptest.ResponseRecorder {
 	b, _ := json.Marshal(body)
 	r := httptest.NewRequest("POST", path, bytes.NewReader(b))
 	// a request that waits for itself fails instead of hanging the test
@@ -90,7 +90,7 @@ func TestCheckinSingleConnection(t *testing.T) {
 		INSERT INTO commands(device_id, type, status, created_by) VALUES ('d1','shell','sent','a'), ('d1','lock','sent','a')`); err != nil {
 		t.Fatal(err)
 	}
-	w := agentCall(s, s.checkin, "d1", "/api/v1/checkin", api.CheckinRequest{AgentVersion: "1.0.0",
+	w := agentCall(s.checkin, "d1", "/api/v1/checkin", api.CheckinRequest{AgentVersion: "1.0.0",
 		Results: []api.CommandResult{{ID: 1, OK: false, Output: "refused"}, {ID: 2, OK: true}}})
 	if w.Code != http.StatusOK {
 		t.Fatalf("checkin waits for a second connection while its transaction holds the first: %d", w.Code)
@@ -99,7 +99,7 @@ func TestCheckinSingleConnection(t *testing.T) {
 	if err := db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action='command.result'`).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("audit entries: %d %v", n, err)
 	}
-	if w := agentCall(s, s.poll, "d1", "/api/v1/poll", nil); w.Code != http.StatusOK {
+	if w := agentCall(s.poll, "d1", "/api/v1/poll", nil); w.Code != http.StatusOK {
 		t.Fatalf("poll: %d", w.Code)
 	}
 }
@@ -122,7 +122,7 @@ func TestCheckinsConcurrent(t *testing.T) {
 	codes := make(chan int, n)
 	for i := 1; i <= n; i++ {
 		go func() {
-			codes <- agentCall(s, s.checkin, "d"+strconv.Itoa(i), "/api/v1/checkin", api.CheckinRequest{AgentVersion: "1.0.0",
+			codes <- agentCall(s.checkin, "d"+strconv.Itoa(i), "/api/v1/checkin", api.CheckinRequest{AgentVersion: "1.0.0",
 				Results: []api.CommandResult{{ID: int64(i), OK: true}}}).Code
 		}()
 	}
@@ -239,7 +239,7 @@ func TestTokenFailureLimits(t *testing.T) {
 
 func TestRolloutOffset(t *testing.T) {
 	spread := 24 * time.Hour
-	if rolloutOffset("d1", "1.0.0", spread) != rolloutOffset("d1", "1.0.0", spread) {
+	if a, b := rolloutOffset("d1", "1.0.0", spread), rolloutOffset("d1", "1.0.0", spread); a != b {
 		t.Fatal("offset not stable")
 	}
 	var early int
@@ -350,7 +350,7 @@ func TestCheckinBackpressure(t *testing.T) {
 	checkinWait = 10 * time.Millisecond
 	t.Cleanup(func() { checkinWait = prev })
 	s.checkins <- struct{}{}
-	w := agentCall(s, s.checkin, "d1", "/api/v1/checkin", api.CheckinRequest{})
+	w := agentCall(s.checkin, "d1", "/api/v1/checkin", api.CheckinRequest{})
 	if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") == "" {
 		t.Fatalf("check in over the limit: %d %q", w.Code, w.Header().Get("Retry-After"))
 	}

@@ -34,7 +34,11 @@ func TestAdminAPIManagement(t *testing.T) {
 		}
 		return tok
 	}
-	call := func(tok, method, path, body string, hdr ...string) (*http.Response, string) {
+	type answer struct {
+		StatusCode int
+		Header     http.Header
+	}
+	call := func(tok, method, path, body string, hdr ...string) (answer, string) {
 		t.Helper()
 		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+tok)
@@ -50,7 +54,7 @@ func TestAdminAPIManagement(t *testing.T) {
 		}
 		defer resp.Body.Close()
 		b, _ := io.ReadAll(resp.Body)
-		return resp, string(b)
+		return answer{resp.StatusCode, resp.Header}, string(b)
 	}
 	alice, bob := mkToken("alice", "admin"), mkToken("bob", "admin")
 
@@ -156,13 +160,13 @@ func TestAdminAPIManagement(t *testing.T) {
 	}
 
 	// the reference page needs no token and no script
-	resp, err := http.Get(srv.URL + "/api/v1/docs")
+	ref, err := http.Get(srv.URL + "/api/v1/docs")
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != 200 || !strings.Contains(string(page), "/api/v1/devices/{id}/commands") || strings.Contains(string(page), "<script") {
-		t.Fatalf("reference: %d", resp.StatusCode)
+	page, _ := io.ReadAll(ref.Body)
+	ref.Body.Close()
+	if ref.StatusCode != 200 || !strings.Contains(string(page), "/api/v1/devices/{id}/commands") || strings.Contains(string(page), "<script") {
+		t.Fatalf("reference: %d", ref.StatusCode)
 	}
 }

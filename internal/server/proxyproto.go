@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -31,7 +32,7 @@ type proxyListener struct {
 // AgentListener listens for the agent API, with PROXY protocol v2 when
 // LIMDM_AGENT_PROXY_PROTOCOL names the load balancers.
 func (s *Server) AgentListener(addr string) (net.Listener, error) {
-	ln, err := net.Listen("tcp", addr)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", addr)
 	if err != nil || len(s.cfg.AgentProxyFrom) == 0 {
 		return ln, err
 	}
@@ -70,11 +71,11 @@ type proxyConn struct {
 
 func (c *proxyConn) init() {
 	c.once.Do(func() {
-		_ = c.Conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
 		c.remote, c.err = readProxyHeader(c.Conn)
-		_ = c.Conn.SetReadDeadline(time.Time{})
+		_ = c.SetReadDeadline(time.Time{})
 		if c.err != nil {
-			_ = c.Conn.Close()
+			_ = c.Close()
 		}
 		if c.remote == nil { // LOCAL: the balancer's own health check
 			c.remote = c.Conn.RemoteAddr()
