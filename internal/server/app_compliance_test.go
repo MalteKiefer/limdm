@@ -113,7 +113,7 @@ func TestAppComplianceAPI(t *testing.T) {
 		t.Fatalf("export %d %s", code, body)
 	}
 	var detail string
-	if err := db.QueryRow(ctx, `SELECT detail FROM audit_log WHERE action='export.done' AND target='compliance.csv'`).Scan(&detail); err != nil || !strings.Contains(detail, "sha256=") {
+	if err := db.QueryRow(ctx, `SELECT detail FROM audit_log WHERE action='export.done' AND target='compliance.csv'`).Scan(&detail); err != nil || !strings.Contains(detail, "sha256=") || strings.Contains(detail, "incomplete") {
 		t.Fatalf("export audit %q %v", detail, err)
 	}
 	if code, _ := get(helpdesk, "/api/v1/exports/compliance.csv", nil); code != 403 {
