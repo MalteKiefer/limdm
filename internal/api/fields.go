@@ -5,9 +5,9 @@ import (
 	"strings"
 )
 
-// Field is one JSON field of a declaration payload, for the field reference
-// next to the library item editor. Path uses dots for nested objects and []
-// for list elements, e.g. "rules[].actions".
+// Field is one JSON field of a declaration payload; the tests check every
+// field against the decoder and the JSON schema (schema_test.go). Path uses
+// dots for nested objects and [] for list elements, e.g. "rules[].actions".
 type Field struct {
 	Path, Kind string
 }

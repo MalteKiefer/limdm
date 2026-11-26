@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"net/url"
 	"time"
 
@@ -92,40 +91,6 @@ type historyRow struct {
 type historyDevice struct {
 	ID, Hostname      string
 	Pass, Fail, Other int
-}
-
-// complianceHistory shows the state of all devices, or one device with its
-// changes, at the end of a chosen day.
-func (s *Server) complianceHistory(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	q := r.URL.Query()
-	cutoff, device, ok := historyParams(q)
-	if !ok {
-		s.errorPage(w, r, sess, http.StatusBadRequest, "at must be a date (YYYY-MM-DD)")
-		return
-	}
-	if device != "" && !s.inScope(ctx, sess, device) {
-		http.NotFound(w, r)
-		return
-	}
-	at := cutoff.AddDate(0, 0, -1).Format("2006-01-02")
-	devices, state, changes, err := s.historyState(ctx, sess, cutoff, device)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	cond, sargs := scopeCond(sess, 0)
-	all, err := s.listDevicesWhere(ctx, cond, sargs...)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	csv := url.Values{"at": {at}}
-	if device != "" {
-		csv.Set("device", device)
-	}
-	s.render(w, r, sess, "compliance_history", map[string]any{"At": at, "Device": device, "Devices": devices, "State": state,
-		"Changes": changes, "All": all, "CSV": "/export/compliance-history.csv?" + csv.Encode()})
 }
 
 // historyState is the state of the devices in the scope of sess at cutoff,

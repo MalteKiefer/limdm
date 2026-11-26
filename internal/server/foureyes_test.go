@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -46,20 +45,8 @@ func TestFourEyesDeclarations(t *testing.T) {
 
 	web := httptest.NewServer(s.AdminHandler())
 	t.Cleanup(web.Close)
-	second := session{Email: "second@firma.de", Role: "admin", IAT: time.Now(), Last: time.Now()}
-	approve := func(id string) (int, string) {
-		form := url.Values{"csrf": {s.csrfToken(second)}}
-		req, _ := http.NewRequest("POST", web.URL+"/approvals/"+id+"/approve", strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: s.seal(second)})
-		resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, string(b)
-	}
+	second := consoleAPI(t, s, web.URL, session{Email: "second@firma.de", Role: "admin", IAT: time.Now(), Last: time.Now()})
+	approve := func(id string) (int, string) { return second("POST", "/api/v1/approvals/"+id+"/approve", "") }
 	lastID := func(action string) string {
 		var id string
 		db.QueryRow(ctx, `SELECT id::text FROM approvals WHERE action=$1 AND status='pending' ORDER BY id DESC LIMIT 1`, action).Scan(&id)
@@ -67,11 +54,11 @@ func TestFourEyesDeclarations(t *testing.T) {
 	}
 
 	// a harmless item is saved at once, a script waits
-	if code, _ := ui("POST", "/library", url.Values{"name": {"motd"}, "type": {api.TypeBanner}, "payload": {`{"motd": "hi"}`}}); code != http.StatusSeeOther {
+	if code, _ := ui("POST", "/api/v1/library-items", `{"name":"motd","type":"`+api.TypeBanner+`","payload":{"motd": "hi"}}`); code != http.StatusCreated {
 		t.Fatalf("banner: %d", code)
 	}
 	script := `{"scripts": [{"name": "x", "interval_hours": 24, "body": "#!/bin/sh\ntrue"}]}`
-	if code, _ := ui("POST", "/library", url.Values{"name": {"root-script"}, "type": {api.TypeScripts}, "payload": {script}}); code != http.StatusSeeOther {
+	if code, _ := ui("POST", "/api/v1/library-items", `{"name":"root-script","type":"`+api.TypeScripts+`","payload":`+script+`}`); code != http.StatusAccepted {
 		t.Fatalf("script request: %d", code)
 	}
 	var n int
@@ -80,10 +67,10 @@ func TestFourEyesDeclarations(t *testing.T) {
 	if n != 1 || id == "" {
 		t.Fatalf("the script must wait for approval: items=%d request=%q", n, id)
 	}
-	if code, _ := ui("POST", "/approvals/"+id+"/approve", url.Values{}); code == http.StatusSeeOther {
+	if code, _ := ui("POST", "/api/v1/approvals/"+id+"/approve", ""); code == http.StatusOK {
 		t.Fatal("the requester approved their own request")
 	}
-	if code, _ := approve(id); code != http.StatusSeeOther {
+	if code, _ := approve(id); code != http.StatusOK {
 		t.Fatalf("approve: %d", code)
 	}
 	var name, typ, sig string
@@ -96,15 +83,15 @@ func TestFourEyesDeclarations(t *testing.T) {
 	}
 
 	// a required catalog app waits, an available one does not
-	app := url.Values{"new": {"1"}, "id": {"forced"}, "name": {"Forced"}, "mode": {"required"}, "enabled": {"on"}, "flatpak": {"org.example.Forced"}}
-	if code, _ := ui("POST", "/software/apps", app); code != http.StatusSeeOther {
+	app := `{"id":"forced","name":"Forced","mode":"required","enabled":true,"sources":[{"kind":"flatpak","flatpak":"org.example.Forced"}]}`
+	if code, _ := ui("POST", "/api/v1/software/apps", app); code != http.StatusAccepted {
 		t.Fatalf("app request: %d", code)
 	}
 	db.QueryRow(ctx, `SELECT count(*) FROM catalog_apps WHERE slug='forced'`).Scan(&n)
 	if id = lastID("catalog.save"); n != 0 || id == "" {
 		t.Fatalf("a required app must wait: %d %q", n, id)
 	}
-	if code, _ := approve(id); code != http.StatusSeeOther {
+	if code, _ := approve(id); code != http.StatusOK {
 		t.Fatalf("approve app: %d", code)
 	}
 	db.QueryRow(ctx, `SELECT count(*) FROM catalog_apps WHERE slug='forced' AND mode='required' AND signature <> ''`).Scan(&n)
@@ -113,7 +100,7 @@ func TestFourEyesDeclarations(t *testing.T) {
 	}
 
 	// admin API tokens wait; the approver sees the token once
-	if code, _ := ui("POST", "/settings/api", url.Values{"name": {"ci"}, "role": {"admin"}, "days": {"30"}}); code != http.StatusSeeOther {
+	if code, _ := ui("POST", "/api/v1/tokens", `{"name":"ci","role":"admin","days":30}`); code != http.StatusAccepted {
 		t.Fatalf("token request: %d", code)
 	}
 	db.QueryRow(ctx, `SELECT count(*) FROM api_tokens`).Scan(&n)

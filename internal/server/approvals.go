@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -74,73 +73,6 @@ func (s *Server) requestApproval(ctx context.Context, sess session, action, targ
 		Text: fmt.Sprintf("%s asks for %s on %s. Reason: %s. Another admin decides under Approvals within 24 hours.", sess.Email, action, target, firstNonEmpty(reason, "none given")),
 		URL:  s.cfg.PublicURL + "/approvals", Tenant: tenant}) // the tenant's channels and the global ones; 0 for global accounts
 	return id, nil
-}
-
-func (s *Server) approvalsPage(w http.ResponseWriter, r *http.Request, sess session) {
-	s.renderApprovals(w, r, sess, "")
-}
-
-func (s *Server) renderApprovals(w http.ResponseWriter, r *http.Request, sess session, errMsg string) {
-	s.renderApprovalsWith(w, r, sess, errMsg, "")
-}
-
-func (s *Server) renderApprovalsCreds(w http.ResponseWriter, r *http.Request, sess session, creds string) {
-	s.renderApprovalsWith(w, r, sess, "", creds)
-}
-
-func (s *Server) renderApprovalsWith(w http.ResponseWriter, r *http.Request, sess session, errMsg, creds string) {
-	tcond, targs := tenantCond(sess, "tenant_id", 1)
-	q := `SELECT id, action, target, payload, reason, requested_by, status, decided_by, decided_at, created_at, expires_at
-		FROM approvals WHERE ($1 = '' OR requested_by = $1) AND ` + tcond + ` ORDER BY status <> 'pending', id DESC LIMIT 200`
-	own := ""
-	if sess.Role == "helpdesk" { // sees the state of their own requests only
-		own = sess.Email
-	}
-	rows, err := s.db.Query(r.Context(), q, append([]any{own}, targs...)...)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[approval])
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.render(w, r, sess, "approvals", map[string]any{"Approvals": list, "FourEyes": s.settings().FourEyes, "Error": errMsg, "Creds": creds})
-}
-
-// approvalDecide approves or rejects a pending request (admins only, never
-// their own). An approved command or role change runs in the same
-// transaction; an approved recovery key view opens for the requester.
-func (s *Server) approvalDecide(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	op := r.PathValue("op")
-	if err != nil || (op != "approve" && op != "reject") {
-		http.NotFound(w, r)
-		return
-	}
-	creds, notices, err := s.decideApproval(ctx, sess, id, op, "")
-	var ae errApproval
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		http.NotFound(w, r)
-		return
-	case errors.As(err, &ae):
-		s.renderApprovals(w, r, sess, string(ae))
-		return
-	case err != nil:
-		s.fail(w, err)
-		return
-	}
-	for _, n := range notices {
-		n()
-	}
-	if creds != "" {
-		s.renderApprovalsCreds(w, r, sess, creds)
-		return
-	}
-	http.Redirect(w, r, "/approvals", http.StatusSeeOther)
 }
 
 // errApproval is a refusal shown to the deciding admin.

@@ -7,16 +7,13 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -532,186 +529,6 @@ func (s *Server) itemUsage(ctx context.Context) (map[int64][]string, error) {
 	return use, nil
 }
 
-func (s *Server) library(w http.ResponseWriter, r *http.Request, sess session) {
-	items, err := s.allItems(r.Context())
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	use, err := s.itemUsage(r.Context())
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	// items whose signature fails are not delivered; saving them again in
-	// the console signs them anew (items saved under 0.12.0 can be affected)
-	invalid := map[int64]bool{}
-	if rows, err := s.db.Query(r.Context(), `SELECT id, name, type, payload, signature FROM library_items`); err == nil {
-		for rows.Next() {
-			var id int64
-			var name, typ, sig string
-			var payload []byte
-			if rows.Scan(&id, &name, &typ, &payload, &sig) == nil && !itemSignatureOK(name, typ, payload, sig) {
-				invalid[id] = true
-			}
-		}
-		rows.Close()
-	}
-	type row struct {
-		api.LibraryItem
-		UsedBy  []string
-		Invalid bool
-	}
-	groups := map[string][]row{}
-	var types []string
-	for _, it := range items {
-		if _, ok := groups[it.Type]; !ok {
-			types = append(types, it.Type)
-		}
-		groups[it.Type] = append(groups[it.Type], row{it, use[it.ID], invalid[it.ID]})
-	}
-	label := func(t string) string {
-		if l, ok := typeLabels[t]; ok {
-			return strings.ToLower(l)
-		}
-		return t
-	}
-	sort.Slice(types, func(i, j int) bool { return label(types[i]) < label(types[j]) })
-	for _, g := range groups {
-		sort.Slice(g, func(i, j int) bool { return strings.ToLower(g[i].Name) < strings.ToLower(g[j].Name) })
-	}
-	deleted, err := s.deletedObjects(r.Context(), "library_item_versions", "item_id")
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.render(w, r, sess, "library", map[string]any{"Groups": groups, "Types": types, "AllTypes": sortedTypes(), "Deleted": deleted})
-}
-
-func sortedTypes() []string {
-	t := make([]string, 0, len(api.Types))
-	for k := range api.Types {
-		t = append(t, k)
-	}
-	sort.Strings(t)
-	return t
-}
-
-func (s *Server) libraryEdit(w http.ResponseWriter, r *http.Request, sess session) {
-	it := api.LibraryItem{Type: r.URL.Query().Get("type")}
-	if v := r.PathValue("id"); v != "new" {
-		id, err := strconv.ParseInt(v, 10, 64)
-		if err == nil && !s.tenantOwns(r.Context(), sess, "library_items", id, true) {
-			err = pgx.ErrNoRows
-		}
-		if err == nil {
-			rows, qerr := s.db.Query(r.Context(), `SELECT id, name, type, description, payload FROM library_items WHERE id=$1`, id)
-			if qerr == nil {
-				it, err = pgx.CollectExactlyOneRow(rows, scanItem)
-			} else {
-				err = qerr
-			}
-		}
-		if err != nil {
-			s.notFound(w, r, sess)
-			return
-		}
-	} else if q := r.URL.Query(); q.Get("from") != "" && q.Get("remote") != "" {
-		var err error
-		if it, err = s.flatpakTemplate(r.Context(), q.Get("from"), q.Get("remote"), q.Get("inst"), q.Get("mode")); err != nil {
-			s.notFound(w, r, sess)
-			return
-		}
-	} else if q.Get("from") != "" {
-		var err error
-		if it, err = s.sourceTemplate(r.Context(), q.Get("from"), q.Get("file"), q.Get("mode")); err != nil {
-			s.notFound(w, r, sess)
-			return
-		}
-	} else if ex, ok := api.Types[it.Type]; ok {
-		it.Payload = json.RawMessage(ex)
-	} else {
-		it.Type, it.Payload = api.TypePackages, json.RawMessage(api.Types[api.TypePackages])
-	}
-	if it.ID > 0 && it.Type == api.TypeNetwork { // secrets stay on the server
-		it.Payload = api.MaskNetworkSecrets(it.Payload)
-	}
-	var pretty bytes.Buffer
-	if err := json.Indent(&pretty, it.Payload, "", "  "); err != nil {
-		pretty.WriteString(string(it.Payload))
-	}
-	use, err := s.itemUsage(r.Context())
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.render(w, r, sess, "item", map[string]any{"It": it, "Payload": pretty.String(), "AllTypes": sortedTypes(),
-		"Example": prettyJSON(api.Types[it.Type]), "Examples": itemExamples(), "UsedBy": use[it.ID]})
-}
-
-func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess session) {
-	id, _ := strconv.ParseInt(r.FormValue("id"), 10, 64)
-	it := api.LibraryItem{ID: id, Name: strings.TrimSpace(r.FormValue("name")), Type: r.FormValue("type"),
-		Description: strings.TrimSpace(r.FormValue("description")), Payload: json.RawMessage(r.FormValue("payload"))}
-	render := func(payload string, extra map[string]any) {
-		data := map[string]any{"It": it, "Payload": payload, "AllTypes": sortedTypes(),
-			"Example": prettyJSON(api.Types[it.Type]), "Examples": itemExamples()}
-		for k, v := range extra {
-			data[k] = v
-		}
-		s.render(w, r, sess, "item", data)
-	}
-	fail := func(err error) { render(r.FormValue("payload"), map[string]any{"Error": err.Error()}) }
-	if it.Type == api.TypeCertificates {
-		p, err := addUploadedCerts(r, it.Payload)
-		if err != nil {
-			fail(err)
-			return
-		}
-		it.Payload = p
-	}
-	if it.Type == api.TypeBootloader { // hash a plain password before it is validated and stored
-		p, err := api.PrepareBootloader(it.Payload)
-		if err != nil {
-			fail(err)
-			return
-		}
-		it.Payload = p
-	}
-	if r.FormValue("preview") != "" {
-		if err := s.restoreNetworkSecrets(r.Context(), &it); err != nil {
-			fail(err)
-			return
-		}
-		if err := it.Validate(); err != nil {
-			fail(err)
-			return
-		}
-		p, err := s.itemPreview(r.Context(), it)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		// the form goes back with the processed settings (uploaded
-		// certificates added, a boot loader password hashed), network
-		// secrets masked again
-		if it.Type == api.TypeNetwork {
-			it.Payload = api.MaskNetworkSecrets(it.Payload)
-		}
-		render(prettyJSON(string(it.Payload)), map[string]any{"Preview": p})
-		return
-	}
-	if err := s.saveLibraryItem(r.Context(), sess.Email, &it); err != nil {
-		if _, ok := pendingApproval(err); ok {
-			http.Redirect(w, r, "/approvals", http.StatusSeeOther)
-			return
-		}
-		fail(err)
-		return
-	}
-	http.Redirect(w, r, "/library", http.StatusSeeOther)
-}
-
 // restoreNetworkSecrets puts the stored secrets of a network item back where
 // the edited payload (console editor, admin API, a masked version) still
 // holds the mask; masks with nothing stored stay and fail validation.
@@ -845,19 +662,6 @@ func writeItem(ctx context.Context, tx pgx.Tx, actor, note string, it *api.Libra
 	return recordItemVersion(ctx, tx, id, actor, note, false)
 }
 
-func (s *Server) libraryDelete(w http.ResponseWriter, r *http.Request, sess session) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		s.notFound(w, r, sess)
-		return
-	}
-	if err := s.deleteLibraryItem(r.Context(), sess.Email, id); err != nil {
-		s.failUser(w, r, sess, err)
-		return
-	}
-	http.Redirect(w, r, "/library", http.StatusSeeOther)
-}
-
 // deleteLibraryItem removes an item no blueprint uses, with its audit entry
 // and a deleted version that keeps the last payload.
 func (s *Server) deleteLibraryItem(ctx context.Context, actor string, id int64) error {
@@ -916,107 +720,6 @@ func (s *Server) allBlueprints(ctx context.Context, deviceID string) ([]blueprin
 		}
 		return b, json.Unmarshal(raw, &b.Tree)
 	})
-}
-
-func (s *Server) blueprints(w http.ResponseWriter, r *http.Request, sess session) {
-	bps, err := s.allBlueprints(r.Context(), "")
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	names := map[int64]string{}
-	for _, b := range bps {
-		names[b.ID] = b.Name
-	}
-	deleted, err := s.deletedObjects(r.Context(), "blueprint_versions", "blueprint_id")
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	assign, err := s.blueprintAssignments(r.Context())
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.render(w, r, sess, "blueprints", map[string]any{"Blueprints": bps, "Names": names, "Deleted": deleted, "Assign": assign})
-}
-
-func (s *Server) blueprintEdit(w http.ResponseWriter, r *http.Request, sess session) {
-	bp := blueprintRec{Tree: []api.Node{}}
-	if v := r.PathValue("id"); v != "new" {
-		id, err := strconv.ParseInt(v, 10, 64)
-		if err == nil && !s.tenantOwns(r.Context(), sess, "blueprints", id, true) {
-			err = pgx.ErrNoRows
-		}
-		if err == nil {
-			bp, err = scanBlueprint(s.db.QueryRow(r.Context(), `SELECT `+blueprintCols+` FROM blueprints WHERE id=$1`, id))
-		}
-		if err != nil {
-			s.notFound(w, r, sess)
-			return
-		}
-	} else {
-		var def int64
-		if err := s.db.QueryRow(r.Context(), `SELECT id FROM blueprints WHERE name='default' AND tenant_id=1`).Scan(&def); err == nil {
-			bp.Parent = &def
-		}
-	}
-	tree, _ := json.MarshalIndent(bp.Tree, "", "  ")
-	s.renderBlueprint(w, r, sess, bp, string(tree), "")
-}
-
-func (s *Server) renderBlueprint(w http.ResponseWriter, r *http.Request, sess session, bp blueprintRec, tree, errMsg string) {
-	s.renderBlueprintWith(w, r, sess, bp, tree, errMsg, nil)
-}
-
-// renderBlueprintWith shows the editor, with the preview of a change when p is set.
-func (s *Server) renderBlueprintWith(w http.ResponseWriter, r *http.Request, sess session, bp blueprintRec, tree, errMsg string, p *preview) {
-	items, err := s.allItems(r.Context())
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	bps, err := s.allBlueprints(r.Context(), "")
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	var parent int64
-	if bp.Parent != nil {
-		parent = *bp.Parent
-	}
-	s.render(w, r, sess, "blueprint", map[string]any{"BP": bp, "Tree": tree, "Error": errMsg, "Items": items, "Blueprints": bps,
-		"ParentID": parent, "ItemsJSON": items, "FieldsJSON": api.RuleFields, "Preview": p})
-}
-
-func (s *Server) blueprintSave(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	id, _ := strconv.ParseInt(r.FormValue("id"), 10, 64)
-	bp := blueprintRec{ID: id, Name: strings.TrimSpace(r.FormValue("name")), Desc: strings.TrimSpace(r.FormValue("description"))}
-	if p, err := strconv.ParseInt(r.FormValue("parent_id"), 10, 64); err == nil && p > 0 {
-		bp.Parent = &p
-	}
-	err := json.Unmarshal([]byte(r.FormValue("tree")), &bp.Tree)
-	if err == nil {
-		err = s.validateBlueprint(ctx, bp)
-	}
-	if err == nil && r.FormValue("preview") != "" {
-		p, perr := s.blueprintPreview(ctx, bp)
-		if perr != nil {
-			s.fail(w, perr)
-			return
-		}
-		s.renderBlueprintWith(w, r, sess, bp, r.FormValue("tree"), "", p)
-		return
-	}
-	if err == nil {
-		err = s.saveBlueprint(ctx, sess.Email, &bp)
-	}
-	if err != nil {
-		s.renderBlueprint(w, r, sess, bp, r.FormValue("tree"), err.Error())
-		return
-	}
-	http.Redirect(w, r, "/blueprints", http.StatusSeeOther)
 }
 
 // saveBlueprint validates and stores a blueprint with its new version and
@@ -1153,19 +856,6 @@ func (s *Server) checkNoCycle(ctx context.Context, id, parent int64) error {
 	return nil
 }
 
-func (s *Server) blueprintDelete(w http.ResponseWriter, r *http.Request, sess session) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		s.notFound(w, r, sess)
-		return
-	}
-	if err := s.deleteBlueprint(r.Context(), sess.Email, id); err != nil {
-		s.failUser(w, r, sess, err)
-		return
-	}
-	http.Redirect(w, r, "/blueprints", http.StatusSeeOther)
-}
-
 // deleteBlueprint removes a blueprint other than default, with its audit
 // entry; its devices fall back to default.
 func (s *Server) deleteBlueprint(ctx context.Context, actor string, id int64) error {
@@ -1190,75 +880,6 @@ func (s *Server) deleteBlueprint(ctx context.Context, actor string, id int64) er
 		}
 		return err
 	})
-}
-
-// prettyJSON indents an example payload for display.
-func prettyJSON(s string) string {
-	var b bytes.Buffer
-	if json.Indent(&b, []byte(s), "", "  ") != nil {
-		return s
-	}
-	return b.String()
-}
-
-// addUploadedCerts appends the certificates of an uploaded PEM file (one or
-// a bundle) to a certificates payload, named after the file.
-func addUploadedCerts(r *http.Request, payload json.RawMessage) (json.RawMessage, error) {
-	f, hdr, err := r.FormFile("pem_file")
-	if err != nil {
-		return payload, nil // no upload
-	}
-	defer f.Close()
-	raw, err := io.ReadAll(io.LimitReader(f, 512<<10))
-	if err != nil {
-		return nil, err
-	}
-	var v struct {
-		Certificates []api.Certificate `json:"certificates"`
-	}
-	if len(bytes.TrimSpace(payload)) > 0 {
-		if err := json.Unmarshal(payload, &v); err != nil {
-			return nil, fmt.Errorf("settings: %w", err)
-		}
-	}
-	// the editor's example entry is no certificate: an upload replaces it
-	v.Certificates = slices.DeleteFunc(v.Certificates, func(c api.Certificate) bool { return strings.HasSuffix(strings.TrimSpace(c.PEM), "-----...") })
-	base := strings.ToLower(nonName.ReplaceAllString(strings.TrimSuffix(filepath.Base(hdr.Filename), filepath.Ext(hdr.Filename)), "-"))
-	base = strings.Trim(base, "-._")
-	if base == "" {
-		base = "certificate"
-	}
-	n := 0
-	for rest := raw; ; {
-		var b *pem.Block
-		b, rest = pem.Decode(rest)
-		if b == nil {
-			break
-		}
-		if b.Type != "CERTIFICATE" {
-			continue
-		}
-		name := base
-		if n > 0 {
-			name = fmt.Sprintf("%s-%d", base, n+1)
-		}
-		v.Certificates = append(v.Certificates, api.Certificate{Name: name, PEM: string(pem.EncodeToMemory(b))})
-		n++
-	}
-	if n == 0 {
-		return nil, errors.New("the uploaded file contains no PEM certificate")
-	}
-	return json.Marshal(v)
-}
-
-// itemExamples are the example settings per type, for the item editor to
-// swap when the type changes.
-func itemExamples() map[string]string {
-	m := make(map[string]string, len(api.Types))
-	for t, ex := range api.Types {
-		m[t] = prettyJSON(ex)
-	}
-	return m
 }
 
 // itemKey signs library items; it is the command key, set when the server

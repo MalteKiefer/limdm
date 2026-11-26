@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -52,47 +51,41 @@ func TestRemoteShellIntegration(t *testing.T) {
 		return session{Email: email, Role: role, IAT: time.Now(), Last: time.Now()}
 	}
 	admin, help, audit := sessFor("admin@firma.de", "admin"), sessFor("help@firma.de", "helpdesk"), sessFor("audit@firma.de", "auditor")
-	ui := func(method, path string, form url.Values, sess session) (int, string, string) {
+	ui := func(method, path, body string, sess session) (int, string) {
 		t.Helper()
-		if form != nil {
-			form.Set("csrf", s.csrfToken(sess))
-		}
-		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: s.seal(sess)})
-		resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, resp.Header.Get("Location"), string(b)
+		return consoleAPI(t, s, srv.URL, sess)(method, path, body)
+	}
+	start := func(body string, sess session) (int, string) {
+		t.Helper()
+		code, out := ui("POST", "/api/v1/devices/d1/shell", body, sess)
+		var started struct{ ID string }
+		json.Unmarshal([]byte(out), &started)
+		return code, started.ID
 	}
 
 	// off by default, for every role
-	if code, _, _ := ui("POST", "/devices/d1/shell", url.Values{}, admin); code != http.StatusForbidden {
+	if code, _ := start(`{}`, admin); code != http.StatusForbidden {
 		t.Fatalf("disabled setting: %d", code)
 	}
-	// the generic command form cannot queue a shell
-	if code, _, _ := ui("POST", "/devices/d1/command", url.Values{"type": {"shell"}}, admin); code != http.StatusBadRequest {
-		t.Fatalf("shell through /command: %d", code)
+	// the generic command route cannot queue a shell
+	if code, _ := ui("POST", "/api/v1/devices/d1/commands", `{"type":"shell"}`, admin); code != http.StatusUnprocessableEntity {
+		t.Fatalf("shell through commands: %d", code)
 	}
 	set.RemoteShell = RemoteShellSettings{Enabled: true}
 	s.rt.Store(&runtimeState{set: set, auth: &oidcAuth{}})
-	if code, _, _ := ui("POST", "/devices/d1/shell", url.Values{}, help); code != http.StatusForbidden {
+	if code, _ := start(`{}`, help); code != http.StatusForbidden {
 		t.Fatalf("helpdesk without the setting: %d", code)
 	}
-	if code, _, _ := ui("POST", "/devices/d1/shell", url.Values{}, audit); code != http.StatusForbidden {
+	if code, _ := start(`{}`, audit); code != http.StatusForbidden {
 		t.Fatalf("auditor: %d", code)
 	}
-	if code, loc, _ := ui("POST", "/devices/d1/shell", url.Values{"user": {"root"}}, admin); code != http.StatusSeeOther || !strings.Contains(loc, "err=root") {
-		t.Fatalf("root without the setting: %d %s", code, loc)
+	if code, _ := start(`{"user":"root"}`, admin); code != http.StatusUnprocessableEntity {
+		t.Fatalf("root without the setting: %d", code)
 	}
-	code, loc, _ := ui("POST", "/devices/d1/shell", url.Values{"user": {"alice"}}, admin)
-	if code != http.StatusSeeOther || !strings.HasPrefix(loc, "/shell/") {
-		t.Fatalf("start: %d %s", code, loc)
+	code, sid := start(`{"user":"alice"}`, admin)
+	if code != http.StatusCreated || sid == "" {
+		t.Fatalf("start: %d", code)
 	}
-	sid := strings.TrimPrefix(loc, "/shell/")
 
 	// a signed command with the session for the device
 	var c api.Command
@@ -114,13 +107,13 @@ func TestRemoteShellIntegration(t *testing.T) {
 		t.Fatal("start not audited")
 	}
 	// the live terminal belongs to the user who started it; others get the transcript view (admins, auditors)
-	if code, _, body := ui("GET", "/shell/"+sid, nil, admin); code != 200 || !strings.Contains(body, "static/vendor/xterm") && !strings.Contains(body, "scripts/vendor-xterm.sh") {
-		t.Fatalf("owner view: %d", code)
+	if code, body := ui("GET", "/api/v1/shell-sessions/"+sid, "", admin); code != 200 || !strings.Contains(body, `"live":true`) {
+		t.Fatalf("owner view: %d %s", code, body)
 	}
-	if code, _, body := ui("GET", "/shell/"+sid, nil, audit); code != 200 || !strings.Contains(body, "transcript is available once it ends") {
-		t.Fatalf("auditor view of a running session: %d", code)
+	if code, body := ui("GET", "/api/v1/shell-sessions/"+sid, "", audit); code != 200 || !strings.Contains(body, `"live":false`) || strings.Contains(body, "transcript") {
+		t.Fatalf("auditor view of a running session: %d %s", code, body)
 	}
-	if code, _, _ := ui("GET", "/shell/"+sid, nil, help); code != http.StatusForbidden {
+	if code, _ := ui("GET", "/api/v1/shell-sessions/"+sid, "", help); code != http.StatusForbidden {
 		t.Fatalf("helpdesk view of another user's session: %d", code)
 	}
 	// the WebSocket refuses foreign origins and missing CSRF tokens
@@ -161,28 +154,27 @@ func TestRemoteShellIntegration(t *testing.T) {
 	if audited != 1 {
 		t.Fatal("end not audited")
 	}
-	if code, _, body := ui("GET", "/shell/"+sid, nil, audit); code != 200 || !strings.Contains(body, "hello") || strings.Contains(body, "\x1b") {
-		t.Fatalf("transcript: %d", code)
+	if code, body := ui("GET", "/api/v1/shell-sessions/"+sid, "", audit); code != 200 || !strings.Contains(body, "hello") || strings.Contains(body, `\u001b`) {
+		t.Fatalf("transcript: %d %s", code, body)
 	}
-	if code, _, body := ui("GET", "/devices/d1/shell", nil, help); code != 200 || strings.Contains(body, sid) {
+	if code, body := ui("GET", "/api/v1/devices/d1/shell-sessions", "", help); code != 200 || strings.Contains(body, sid) {
 		t.Fatalf("helpdesk sees other users' sessions: %d", code)
 	}
-	if code, _, body := ui("GET", "/devices/d1/shell", nil, audit); code != 200 || !strings.Contains(body, sid) {
+	if code, body := ui("GET", "/api/v1/devices/d1/shell-sessions", "", audit); code != 200 || !strings.Contains(body, sid) {
 		t.Fatalf("auditor list: %d", code)
 	}
 
 	// helpdesk with the setting; ending from the console
 	set.RemoteShell.Helpdesk = true
 	s.rt.Store(&runtimeState{set: set, auth: &oidcAuth{}})
-	code, loc, _ = ui("POST", "/devices/d1/shell", url.Values{}, help)
-	if code != http.StatusSeeOther {
+	code, sid2 := start(`{}`, help)
+	if code != http.StatusCreated {
 		t.Fatalf("helpdesk start: %d", code)
 	}
-	sid2 := strings.TrimPrefix(loc, "/shell/")
-	if code, _, _ := ui("POST", "/shell/"+sid2+"/end", url.Values{}, audit); code != http.StatusForbidden {
+	if code, _ := ui("POST", "/api/v1/shell-sessions/"+sid2+"/end", "", audit); code != http.StatusForbidden {
 		t.Fatalf("auditor ended a session: %d", code)
 	}
-	if code, _, _ := ui("POST", "/shell/"+sid2+"/end", url.Values{}, help); code != http.StatusSeeOther {
+	if code, _ := ui("POST", "/api/v1/shell-sessions/"+sid2+"/end", "", help); code != http.StatusNoContent {
 		t.Fatalf("end: %d", code)
 	}
 	db.QueryRow(ctx, `SELECT end_reason, local_user FROM shell_sessions WHERE id=$1`, sid2).Scan(&reason, &cmdStatus)

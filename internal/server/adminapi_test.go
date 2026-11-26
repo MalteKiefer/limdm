@@ -75,27 +75,18 @@ func TestAdminAPI(t *testing.T) {
 	}
 
 	adminSess := session{Email: "admin@firma.de", Role: "admin", IAT: time.Now(), Last: time.Now()}
-	console := func(method, path string, form url.Values) (int, string) {
-		t.Helper()
-		if form != nil {
-			form.Set("csrf", s.csrfToken(adminSess))
+	console := consoleAPI(t, s, srv.URL, adminSess)
+	tokenOf := func(body string) string { // the token, not its prefix
+		if m := regexp.MustCompile(`"token":"(lma_[A-Za-z0-9_-]+)"`).FindStringSubmatch(body); m != nil {
+			return m[1]
 		}
-		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: s.seal(adminSess)})
-		resp, err := noRedirect.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, string(b)
+		return ""
 	}
 	newToken := func(name, role string) string {
 		t.Helper()
-		code, body := console("POST", "/settings/api", url.Values{"name": {name}, "role": {role}, "days": {"30"}})
-		tok := regexp.MustCompile(`lma_[A-Za-z0-9_-]+`).FindString(body)
-		if code != 200 || tok == "" {
+		code, body := console("POST", "/api/v1/tokens", `{"name":"`+name+`","role":"`+role+`","days":30}`)
+		tok := tokenOf(body)
+		if code != http.StatusCreated || tok == "" {
 			t.Fatalf("create %s token: %d", role, code)
 		}
 		return tok
@@ -163,10 +154,10 @@ func TestAdminAPI(t *testing.T) {
 	if json.Unmarshal([]byte(body), &page); len(page.Items) != 1 || page.Items[0].Hostname != "pc2" || page.Next != "" {
 		t.Fatalf("second page: %s", body)
 	}
-	if code, html := console("GET", "/devices?tag=finance&pkg="+url.QueryEscape("openssl>=3.0.13"), nil); code != 200 || !strings.Contains(html, "pc2") || strings.Contains(html, ">pc1<") {
-		t.Fatalf("console search: %d", code)
+	if code, out := console("GET", "/api/v1/devices?tag=finance&pkg="+url.QueryEscape("openssl>=3.0.13"), ""); code != 200 || !strings.Contains(out, `"pc2"`) || strings.Contains(out, `"pc1"`) {
+		t.Fatalf("console search: %d %s", code, out)
 	}
-	if code, csv := console("GET", "/export/packages.csv", nil); code != 200 || !strings.Contains(csv, "d2,pc2,openssl,1:3.0.13-1~deb12u1") {
+	if code, csv := console("GET", "/api/v1/exports/packages.csv", ""); code != 200 || !strings.Contains(csv, "d2,pc2,openssl,1:3.0.13-1~deb12u1") {
 		t.Fatalf("packages export: %d %s", code, csv)
 	}
 
@@ -237,11 +228,11 @@ func TestAdminAPI(t *testing.T) {
 	s.rt.Store(&runtimeState{set: set, auth: &oidcAuth{}})
 
 	// scoped tokens see and act on their devices only and get no metrics
-	if code, _ := console("POST", "/settings/api", url.Values{"name": {"x"}, "role": {"admin"}, "days": {"30"}, "scope_tags": {"finance"}}); code != 400 {
+	if code, _ := console("POST", "/api/v1/tokens", `{"name":"x","role":"admin","days":30,"scope_tags":["finance"]}`); code != 400 {
 		t.Fatalf("scoped admin token: %d", code)
 	}
-	_, tbody := console("POST", "/settings/api", url.Values{"name": {"fin"}, "role": {"helpdesk"}, "days": {"30"}, "scope_tags": {"finance"}})
-	finTok := regexp.MustCompile(`lma_[A-Za-z0-9_-]+`).FindString(tbody)
+	_, tbody := console("POST", "/api/v1/tokens", `{"name":"fin","role":"helpdesk","days":30,"scope_tags":["finance"]}`)
+	finTok := tokenOf(tbody)
 	if resp, body := call(finTok, "GET", "/api/v1/devices", ""); resp.StatusCode != 200 || !strings.Contains(body, "pc1") || strings.Contains(body, "pc3") {
 		t.Fatalf("scoped list: %d %s", resp.StatusCode, body)
 	}
@@ -284,7 +275,7 @@ func TestAdminAPI(t *testing.T) {
 	// revoked tokens stop working
 	var id string
 	db.QueryRow(ctx, `SELECT id::text FROM api_tokens WHERE name='ci'`).Scan(&id)
-	if code, _ := console("POST", "/settings/api/"+id+"/revoke", url.Values{}); code != http.StatusSeeOther || auditCount("api_token.revoke") != 1 {
+	if code, _ := console("DELETE", "/api/v1/tokens/"+id, ""); code != http.StatusNoContent || auditCount("api_token.revoke") != 1 {
 		t.Fatalf("revoke: %d", code)
 	}
 	if resp, body := call(adminTok, "GET", "/api/v1/tags", ""); resp.StatusCode != 401 || !strings.Contains(body, "revoked") {

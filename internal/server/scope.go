@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"slices"
 	"strings"
 
@@ -265,17 +264,6 @@ func (s *Server) inScope(ctx context.Context, sess session, id string) bool {
 	var ok bool
 	err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND `+cond+`)`, append([]any{id}, args...)...).Scan(&ok)
 	return err == nil && ok
-}
-
-// unscoped refuses pages with fleet wide device data to scoped accounts.
-func (s *Server) unscoped(h handler) handler {
-	return func(w http.ResponseWriter, r *http.Request, sess session) {
-		if sess.scoped() {
-			s.errorPage(w, r, sess, http.StatusForbidden, "not available for accounts limited to a device scope")
-			return
-		}
-		h(w, r, sess)
-	}
 }
 
 // activeAdmins counts enabled admin accounts (OIDC and local); accounts from

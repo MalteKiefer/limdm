@@ -443,11 +443,11 @@ func VerifyAuditExport(r io.Reader, keys AuditKeys) (n int, first, last, broken 
 	return n, first, last, 0, sc.Err()
 }
 
-// auditFilter turns the audit page query into a condition on audit_log,
-// limited to the device scope of sess. Every value is a bind parameter; f
-// holds the cleaned values for the form. Page, CSV and JSON Lines export use it.
-func auditFilter(q url.Values, sess session) (f map[string]string, where string, args []any) {
-	f = map[string]string{"q": strings.TrimSpace(q.Get("q")), "actor": strings.TrimSpace(q.Get("actor")), "action": strings.TrimSpace(q.Get("action")),
+// auditFilter turns the audit query into a condition on audit_log, limited
+// to the device scope of sess. Every value is a bind parameter. The API
+// list, CSV and JSON Lines export use it.
+func auditFilter(q url.Values, sess session) (where string, args []any) {
+	f := map[string]string{"q": strings.TrimSpace(q.Get("q")), "actor": strings.TrimSpace(q.Get("actor")), "action": strings.TrimSpace(q.Get("action")),
 		"target": strings.TrimSpace(q.Get("target")), "from": q.Get("from"), "to": q.Get("to")}
 	conds := []string{"true"}
 	add := func(cond string, v any) {
@@ -479,7 +479,7 @@ func auditFilter(q url.Values, sess session) (f map[string]string, where string,
 	}
 	cond, sargs := auditScope(sess, len(args))
 	conds, args = append(conds, cond), append(args, sargs...)
-	return f, strings.Join(conds, " AND "), args
+	return strings.Join(conds, " AND "), args
 }
 
 // auditExportJSONL streams the (filtered) audit log as JSON Lines with the
@@ -487,7 +487,7 @@ func auditFilter(q url.Values, sess session) (f map[string]string, where string,
 // the SHA-256 of the file.
 func (s *Server) auditExportJSONL(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
-	_, where, args := auditFilter(r.URL.Query(), sess)
+	where, args := auditFilter(r.URL.Query(), sess)
 	s.streamExport(w, r, sess, "audit.jsonl", "application/x-ndjson", func(tx pgx.Tx, out io.Writer) (int, error) {
 		rows, err := tx.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash, tenant_id FROM audit_log WHERE `+where+` ORDER BY id`, args...)
 		if err != nil {
@@ -509,15 +509,6 @@ func (s *Server) auditExportJSONL(w http.ResponseWriter, r *http.Request, sess s
 		}
 		return n, rows.Err()
 	})
-}
-
-// auditVerify runs the full chain verification on demand (admins and auditors).
-func (s *Server) auditVerify(w http.ResponseWriter, r *http.Request, sess session) {
-	if err := s.verifyAuditChain(r.Context(), sess.Email); err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/audit", http.StatusSeeOther)
 }
 
 // verifyAuditChain verifies the whole chain, stores and audits the result

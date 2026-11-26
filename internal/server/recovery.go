@@ -101,27 +101,6 @@ func (s *Server) recoveryKeys(ctx context.Context, deviceID string) ([]recoveryR
 	})
 }
 
-// recoveryView reveals one key to admins and helpdesk (POST with CSRF) and audits it.
-func (s *Server) recoveryView(w http.ResponseWriter, r *http.Request, sess session) {
-	id := r.PathValue("id")
-	res, err := s.viewRecoveryKey(r.Context(), sess, id, r.FormValue("uuid"), r.FormValue("reason"))
-	var ue *userError
-	switch {
-	case errors.Is(err, errNotFound):
-		http.NotFound(w, r)
-		return
-	case errors.As(err, &ue):
-		s.errorPage(w, r, sess, ue.Status, ue.Msg)
-		return
-	case err != nil:
-		s.fail(w, err)
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	s.render(w, r, sess, "recovery", map[string]any{"ID": id, "Host": res.Host, "Path": res.Path, "UUID": res.UUID,
-		"State": res.State, "Key": res.Key, "Rotate": res.Rotate})
-}
-
 // recoveryResult is the outcome of a recovery key view: the key (State
 // empty), or with four eyes on "reason" (a reason is needed to ask),
 // "pending" (asked before) or "requested" (asked now).

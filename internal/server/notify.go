@@ -668,27 +668,6 @@ func (s *Server) channelViews(ctx context.Context) ([]channelView, error) {
 	return out, nil
 }
 
-// channelSave adds a channel from the settings form.
-func (s *Server) channelSave(w http.ResponseWriter, r *http.Request, sess session) {
-	port, _ := strconv.Atoi(r.FormValue("smtp_port"))
-	c := channel{Name: r.FormValue("name"), Kind: r.FormValue("kind"), Events: r.Form["events"],
-		Config: channelConfig{Host: r.FormValue("smtp_host"), Port: port, TLS: r.FormValue("smtp_tls"),
-			User: r.FormValue("smtp_user"), From: r.FormValue("smtp_from"), To: strings.Fields(strings.ReplaceAll(r.FormValue("smtp_to"), ",", " "))}}
-	c.Secret = strings.TrimSpace(r.FormValue("url"))
-	if c.Kind == "email" {
-		c.Secret = r.FormValue("smtp_password")
-	}
-	if _, err := s.addChannel(r.Context(), sess, c); err != nil {
-		if ue := (*userError)(nil); errors.As(err, &ue) {
-			s.renderSettings(w, r, sess, s.settings(), "", ue.Msg)
-			return
-		}
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/settings?tab=notifications", http.StatusSeeOther)
-}
-
 // addChannel stores a new enabled channel of the tenant the request acts
 // for (global in the global view). The console form and the admin API both
 // call it.
@@ -721,32 +700,6 @@ func (s *Server) addChannel(ctx context.Context, sess session, c channel) (int64
 		return 0, &userError{http.StatusConflict, "A channel with this name exists already."}
 	}
 	return id, err
-}
-
-// channelOp tests, switches on or off, or deletes a channel.
-func (s *Server) channelOp(w http.ResponseWriter, r *http.Request, sess session) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	op := r.PathValue("op")
-	if err != nil || !slices.Contains([]string{"test", "enable", "disable", "delete"}, op) {
-		http.NotFound(w, r)
-		return
-	}
-	if op == "test" {
-		err = s.testChannel(r.Context(), sess, id)
-	} else {
-		err = s.setChannel(r.Context(), sess, id, op)
-	}
-	var ue *userError
-	switch {
-	case errors.As(err, &ue) && ue.Status == http.StatusNotFound:
-		http.NotFound(w, r)
-	case ue != nil:
-		s.renderSettings(w, r, sess, s.settings(), "", ue.Msg)
-	case err != nil:
-		s.fail(w, err)
-	default:
-		http.Redirect(w, r, "/settings?tab=notifications", http.StatusSeeOther)
-	}
 }
 
 var errNoChannel = &userError{http.StatusNotFound, "notification channel not found"}

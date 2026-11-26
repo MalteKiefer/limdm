@@ -402,11 +402,6 @@ type KeyStatus struct {
 	Location               string
 }
 
-// Label names the kind in the console.
-func (k KeyStatus) Label() string {
-	return map[string]string{kindCA: "Device CA", kindNetCA: "Network CA", kindCommand: "Command signing key", kindSession: "Session key", kindWebhook: "Webhook signing secret"}[k.Kind]
-}
-
 // KeysStatus lists every key kind with the progress of running rotations.
 func (s *Server) KeysStatus(ctx context.Context) ([]KeyStatus, error) {
 	disk, err := readKeyStates(s.cfg.CADir)
@@ -686,33 +681,6 @@ func (s *Server) keyNotice(n notice) {
 // tenant still manages the keys of the whole installation).
 func keysAllowed(sess session) bool {
 	return sess.Role == "admin" && len(sess.Tags) == 0 && len(sess.Groups) == 0 && !sess.TenantOnly()
-}
-
-// keysAction runs a rotation step from the Settings, Security, Keys card.
-func (s *Server) keysAction(w http.ResponseWriter, r *http.Request, sess session) {
-	if !keysAllowed(sess) { // checked here too, not only by the route wrappers
-		s.errorPage(w, r, sess, http.StatusForbidden, "only administrators of the whole installation manage keys")
-		return
-	}
-	kind, op := r.PathValue("kind"), r.PathValue("op")
-	var msg string
-	var err error
-	switch {
-	case kind == kindSession && op == "rotate":
-		err = errors.New("a new session key is generated on the server: limdm-server keys rotate session")
-	case op == "rotate":
-		msg, err = s.RotateKey(r.Context(), sess.Email, kind, strings.TrimSpace(r.FormValue("name")))
-	case op == "finish":
-		msg, err = s.FinishKey(r.Context(), sess.Email, kind, r.FormValue("force") == "on")
-	default:
-		s.errorPage(w, r, sess, http.StatusNotFound, "not found")
-		return
-	}
-	if err != nil {
-		s.renderSettings(w, r, sess, s.settings(), "", err.Error())
-		return
-	}
-	s.renderSettings(w, r, sess, s.settings(), msg, "")
 }
 
 // ---- session keys ----

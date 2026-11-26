@@ -93,19 +93,20 @@ func TestIntegration(t *testing.T) {
 	// OIDC "configured" without network discovery: sessions of OIDC users stay valid
 	s.rt.Store(&runtimeState{set: Settings{LocalLogin: true, StaleHours: 24, OIDCIssuer: "https://idp.test", OIDCClientID: "x"}, auth: &oidcAuth{}})
 
-	// ---- admin UI with a forged, validly signed session ----
+	// ---- console API with a forged, validly signed session ----
 	admin := httptest.NewServer(s.AdminHandler())
 	defer admin.Close()
 	adminSess := session{Email: "admin@firma.de", Role: "admin", IAT: time.Now(), Last: time.Now()}
-	ui := func(method, path string, form url.Values, sess session) (int, string) {
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	// ui calls the admin API as the console app does: session cookie, CSRF header, own origin
+	ui := func(method, path, body string, sess session) (int, string) {
 		t.Helper()
-		if form != nil {
-			form.Set("csrf", s.csrfToken(sess))
-		}
-		req, _ := http.NewRequest(method, admin.URL+path, strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req, _ := http.NewRequest(method, admin.URL+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(csrfHeader, s.csrfToken(sess))
+		req.Header.Set("Origin", s.cfg.PublicURL)
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: s.seal(sess)})
-		resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+		resp, err := noRedirect.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,56 +114,45 @@ func TestIntegration(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(b)
 	}
+	// signedIn reports whether the session is still accepted
+	signedIn := func(sess session) bool {
+		t.Helper()
+		code, _ := ui("GET", "/api/v1/me", "", sess)
+		return code == http.StatusOK
+	}
 
-	if code, _ := ui("GET", "/classic", nil, session{}); code != http.StatusFound {
+	if code, _ := ui("GET", "/app/", "", session{}); code != http.StatusFound {
 		t.Fatalf("anonymous must be redirected to login, got %d", code)
 	}
-	if req, _ := http.NewRequest("GET", admin.URL+"/", nil); true {
-		resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
-		if err != nil || resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/app/" {
-			t.Fatalf("/ must lead to the console app: %v %v", resp, err)
+	for from, to := range map[string]string{"/": "/app/", "/devices/d1": "/app/devices/d1", "/library/7": "/app/config/library/7", "/settings/api": "/app/settings?s=tokens"} {
+		resp, err := noRedirect.Get(admin.URL + from)
+		if err != nil || resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != to {
+			t.Fatalf("%s must lead to %s: %v %v", from, to, resp, err)
 		}
 		resp.Body.Close()
 	}
-	code, body := ui("POST", "/tokens", url.Values{"note": {"test"}, "uses": {"2"}, "days": {"1"}, "blueprint_id": {"0"}}, adminSess)
+	code, body := ui("POST", "/api/v1/enrollment-tokens", `{"note":"test","uses":2,"days":1}`, adminSess)
 	token := regexp.MustCompile(`lmt_[A-Za-z0-9_-]+`).FindString(body)
-	if code != 200 || token == "" || !strings.Contains(body, ca.Fingerprint()) {
-		t.Fatalf("token page: %d", code)
+	if code != http.StatusCreated || token == "" {
+		t.Fatalf("enrollment token: %d %s", code, body)
 	}
-	_, body2 := ui("POST", "/tokens", url.Values{"note": {"revoke-me"}, "uses": {"1"}, "days": {"1"}, "blueprint_id": {"0"}}, adminSess)
+	_, body2 := ui("POST", "/api/v1/enrollment-tokens", `{"note":"revoke-me","uses":1,"days":1}`, adminSess)
 	revID := hex.EncodeToString(sha(regexp.MustCompile(`lmt_[A-Za-z0-9_-]+`).FindString(body2)))
-	if code, _ := ui("POST", "/tokens/"+revID+"/revoke", url.Values{}, adminSess); code != http.StatusSeeOther && code != 200 {
+	if code, _ := ui("DELETE", "/api/v1/enrollment-tokens/"+revID, "", adminSess); code != http.StatusNoContent {
 		t.Fatalf("revoke: %d", code)
 	}
-	if code, _ := ui("POST", "/tokens/"+revID+"/revoke", url.Values{}, adminSess); code != http.StatusNotFound {
+	if code, _ := ui("DELETE", "/api/v1/enrollment-tokens/"+revID, "", adminSess); code != http.StatusNotFound {
 		t.Fatalf("revoked token still present: %d", code)
 	}
 	auditor := session{Email: "audit@firma.de", Role: "auditor", IAT: time.Now(), Last: time.Now()}
-	if code, _ := ui("POST", "/tokens", url.Values{"uses": {"1"}, "days": {"1"}}, auditor); code != http.StatusForbidden {
+	if code, _ := ui("POST", "/api/v1/enrollment-tokens", `{"uses":1,"days":1}`, auditor); code != http.StatusForbidden {
 		t.Fatalf("auditor must be read only, got %d", code)
 	}
-	for _, path := range []string{"/software/import", "/software/apps", "/software/settings", "/software/requests/1/approve", "/software/apps/firefox/delete"} {
-		if code, _ := ui("POST", path, url.Values{"flatpak": {"org.example.App"}}, auditor); code != http.StatusForbidden {
-			t.Fatalf("auditor must not change the catalog: %s %d", path, code)
+	for _, mp := range []string{"POST /api/v1/software/import", "POST /api/v1/software/apps", "PUT /api/v1/software/settings", "POST /api/v1/software/requests/1/approve", "DELETE /api/v1/software/apps/firefox"} {
+		method, path, _ := strings.Cut(mp, " ")
+		if code, _ := ui(method, path, `{"flatpaks":["org.example.App"]}`, auditor); code != http.StatusForbidden {
+			t.Fatalf("auditor must not change the catalog: %s %d", mp, code)
 		}
-	}
-	bad := url.Values{"uses": {"1"}, "days": {"1"}}
-	if code, _ := ui("POST", "/tokens", bad, adminSess); code != 200 {
-		t.Fatal("sanity")
-	}
-	// a browser form post carries the real Origin; it must pass
-	okReq := url.Values{"uses": {"1"}, "days": {"1"}, "csrf": {s.csrfToken(adminSess)}}
-	req0, _ := http.NewRequest("POST", admin.URL+"/tokens", strings.NewReader(okReq.Encode()))
-	req0.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req0.Header.Set("Origin", s.cfg.PublicURL)
-	req0.AddCookie(&http.Cookie{Name: sessionCookie, Value: s.seal(adminSess)})
-	resp0, err := http.DefaultClient.Do(req0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp0.Body.Close()
-	if resp0.StatusCode != 200 {
-		t.Fatalf("form post with matching Origin rejected: %d", resp0.StatusCode)
 	}
 	hr, err := http.Get(admin.URL + "/login")
 	if err != nil {
@@ -172,17 +162,21 @@ func TestIntegration(t *testing.T) {
 	if hr.Header.Get("Referrer-Policy") == "no-referrer" {
 		t.Fatal("no-referrer makes browsers send Origin: null and breaks every form")
 	}
-	bad.Set("csrf", "wrong")
-	req, _ := http.NewRequest("POST", admin.URL+"/tokens", strings.NewReader(bad.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: s.seal(adminSess)})
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("csrf not enforced: %d", resp.StatusCode)
+	// a change needs the CSRF header and the own origin
+	for name, h := range map[string][2]string{"csrf": {csrfHeader, "wrong"}, "origin": {"Origin", "https://evil.test"}} {
+		req, _ := http.NewRequest("POST", admin.URL+"/api/v1/enrollment-tokens", strings.NewReader(`{"uses":1,"days":1}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(csrfHeader, s.csrfToken(adminSess))
+		req.Header.Set(h[0], h[1])
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: s.seal(adminSess)})
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("%s not enforced: %d", name, resp.StatusCode)
+		}
 	}
 
 	// ---- agent API over mTLS ----
@@ -281,52 +275,57 @@ func TestIntegration(t *testing.T) {
 		return id
 	}
 	saveItem := func(name, typ, payload string) (int, string) {
-		return ui("POST", "/library", url.Values{"name": {name}, "type": {typ}, "payload": {payload}}, adminSess)
+		b, _ := json.Marshal(api.LibraryItem{Name: name, Type: typ, Payload: json.RawMessage(payload)})
+		return ui("POST", "/api/v1/library-items", string(b), adminSess)
 	}
-	if code, body := saveItem("CIS Level 2", api.TypeCompliance, `{"level":2,"remediate":true,"exclude":[]}`); code != http.StatusSeeOther {
+	if code, body := saveItem("CIS Level 2", api.TypeCompliance, `{"level":2,"remediate":true,"exclude":[]}`); code != http.StatusCreated {
 		t.Fatalf("library save: %d %s", code, body)
 	}
-	if code, _ := saveItem("Debian tools", api.TypePackages, `{"install":["htop"],"remove":[]}`); code != http.StatusSeeOther {
+	if code, _ := saveItem("Debian tools", api.TypePackages, `{"install":["htop"],"remove":[]}`); code != http.StatusCreated {
 		t.Fatal("library save packages")
 	}
-	if code, body := saveItem("evil", api.TypePackages, `{"install":["--evil"]}`); code != 200 || !strings.Contains(body, "invalid package") {
-		t.Fatal("invalid library item must be rejected")
+	if code, body := saveItem("evil", api.TypePackages, `{"install":["--evil"]}`); code != http.StatusUnprocessableEntity || !strings.Contains(body, "invalid package") {
+		t.Fatalf("invalid library item must be rejected: %d %s", code, body)
 	}
 	var defID string
 	db.QueryRow(ctx, `SELECT id::text FROM blueprints WHERE name='default'`).Scan(&defID)
 	tree := `[{"kind":"assign","items":[` + itemID("CIS Level 2") + `]},
 		{"kind":"if","branches":[{"match":"all","rules":[{"field":"os.id","op":"eq","value":"debian"},{"field":"tag","op":"has","value":"lab"}],
 		"nodes":[{"kind":"assign","items":[` + itemID("Debian tools") + `]}]}],"else":[]}]`
-	if code, body := ui("POST", "/blueprints", url.Values{"name": {"strict"}, "parent_id": {defID}, "tree": {tree}}, adminSess); code != http.StatusSeeOther {
+	if code, body := ui("POST", "/api/v1/blueprints", `{"name":"strict","parent_id":`+defID+`,"tree":`+tree+`}`, adminSess); code != http.StatusCreated {
 		t.Fatalf("blueprint save: %d %s", code, body)
 	}
-	if code, body := ui("POST", "/blueprints", url.Values{"name": {"bad"}, "tree": {`[{"kind":"assign","items":[99999]}]`}}, adminSess); code != 200 || !strings.Contains(body, "does not exist") {
-		t.Fatal("blueprint with unknown item must be rejected")
+	if code, body := ui("POST", "/api/v1/blueprints", `{"name":"bad","tree":[{"kind":"assign","items":[99999]}]}`, adminSess); code != http.StatusUnprocessableEntity || !strings.Contains(body, "does not exist") {
+		t.Fatalf("blueprint with unknown item must be rejected: %d %s", code, body)
 	}
-	if code, body := ui("POST", "/blueprints", url.Values{"id": {defID}, "name": {"renamed"}, "tree": {"[]"}}, adminSess); code != 200 || !strings.Contains(body, "cannot be renamed") {
-		t.Fatalf("renaming default must be refused: %d", code)
+	if code, body := ui("PUT", "/api/v1/blueprints/"+defID, `{"name":"renamed","tree":[]}`, adminSess); code != http.StatusNotFound || !strings.Contains(body, "cannot be renamed") {
+		t.Fatalf("renaming default must be refused: %d %s", code, body)
 	}
 	var bpID string
 	db.QueryRow(ctx, `SELECT id::text FROM blueprints WHERE name='strict'`).Scan(&bpID)
-	ui("POST", "/blueprints", url.Values{"name": {"child"}, "parent_id": {bpID}, "tree": {"[]"}}, adminSess)
+	ui("POST", "/api/v1/blueprints", `{"name":"child","parent_id":`+bpID+`,"tree":[]}`, adminSess)
 	var childID string
 	db.QueryRow(ctx, `SELECT id::text FROM blueprints WHERE name='child'`).Scan(&childID)
-	if code, body := ui("POST", "/blueprints", url.Values{"id": {bpID}, "name": {"strict"}, "parent_id": {childID}, "tree": {tree}}, adminSess); code != 200 || !strings.Contains(body, "cycle") {
-		t.Fatal("inheritance cycle must be refused")
+	if code, body := ui("PUT", "/api/v1/blueprints/"+bpID, `{"name":"strict","parent_id":`+childID+`,"tree":`+tree+`}`, adminSess); code != http.StatusUnprocessableEntity || !strings.Contains(body, "cycle") {
+		t.Fatalf("inheritance cycle must be refused: %d %s", code, body)
 	}
-	if code, _ := ui("POST", "/library/"+itemID("Debian tools")+"/delete", url.Values{}, adminSess); code != http.StatusConflict {
-		t.Fatal("deleting an item in use must be refused")
+	if code, _ := ui("DELETE", "/api/v1/library-items/"+itemID("Debian tools"), "", adminSess); code != http.StatusConflict {
+		t.Fatalf("deleting an item in use must be refused: %d", code)
 	}
-	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/assign", url.Values{"blueprint_id": {bpID}, "tags": {"Lab, berlin"}, "users": {"mm max@firma.de admin"}}, adminSess); code != http.StatusSeeOther {
-		t.Fatalf("assign: %d", code)
+	if code, body := ui("PATCH", "/api/v1/devices/"+er.DeviceID, `{"blueprint_id":`+bpID+`,"tags":["Lab","berlin"],"users":[{"username":"mm","email":"max@firma.de","admin":true}]}`, adminSess); code != http.StatusOK {
+		t.Fatalf("assign: %d %s", code, body)
 	}
-	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/assign", url.Values{"tags": {"no spaces allowed"}}, adminSess); code != http.StatusBadRequest {
-		t.Fatal("invalid tag accepted")
+	if code, _ := ui("PATCH", "/api/v1/devices/"+er.DeviceID, `{"tags":["no spaces allowed"]}`, adminSess); code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid tag accepted: %d", code)
 	}
-	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"rm -rf"}}, adminSess); code != http.StatusBadRequest {
+	command := func(typ, params string, sess session) (int, string) {
+		t.Helper()
+		return ui("POST", "/api/v1/devices/"+er.DeviceID+"/commands", `{"type":"`+typ+`","params":{`+params+`}}`, sess)
+	}
+	if code, _ := command("rm -rf", "", adminSess); code != http.StatusUnprocessableEntity {
 		t.Fatalf("unknown command type accepted: %d", code)
 	}
-	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"sync"}}, adminSess); code != http.StatusSeeOther {
+	if code, _ := command("sync", "", adminSess); code != http.StatusAccepted {
 		t.Fatalf("command: %d", code)
 	}
 	cr = api.CheckinResponse{}
@@ -342,8 +341,8 @@ func TestIntegration(t *testing.T) {
 		Results: []api.CommandResult{{ID: cr.Commands[0].ID, OK: true, Output: "ok"}}, Events: []string{"remediated kernel.aslr"}}, nil)
 
 	// script results and diagnostics bundles are stored per device; bundles download for admins
-	ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"diagnostics"}}, adminSess)
-	if code, body := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"script"}, "payload": {"echo $A"}, "params": {"A=1"}}, adminSess); code != http.StatusSeeOther {
+	command("diagnostics", "", adminSess)
+	if code, body := command("script", `"payload":"echo $A","params":"A=1"`, adminSess); code != http.StatusAccepted {
 		t.Fatalf("script with parameters: %d %s", code, body)
 	}
 	cr = api.CheckinResponse{}
@@ -370,44 +369,41 @@ func TestIntegration(t *testing.T) {
 	if nScripts != 2 || nDiag != 1 {
 		t.Fatalf("stored %d script results, %d bundles", nScripts, nDiag)
 	}
-	diagPath := "/devices/" + er.DeviceID + "/diagnostics/" + fmt.Sprint(res[0].ID)
+	diagPath := "/api/v1/devices/" + er.DeviceID + "/diagnostics/" + fmt.Sprint(res[0].ID)
 	if res[0].Diagnostics == "" {
-		diagPath = "/devices/" + er.DeviceID + "/diagnostics/" + fmt.Sprint(res[1].ID)
+		diagPath = "/api/v1/devices/" + er.DeviceID + "/diagnostics/" + fmt.Sprint(res[1].ID)
 	}
-	if code, body := ui("GET", diagPath, nil, adminSess); code != 200 || !strings.Contains(body, "journal line one") {
+	if code, body := ui("GET", diagPath, "", adminSess); code != 200 || !strings.Contains(body, "journal line one") {
 		t.Fatalf("diagnostics download: %d %q", code, body)
 	}
-	if code, _ := ui("GET", diagPath, nil, auditor); code != http.StatusForbidden {
+	if code, _ := ui("GET", diagPath, "", auditor); code != http.StatusForbidden {
 		t.Fatalf("auditor downloaded diagnostics: %d", code)
 	}
-	if code, body := ui("GET", "/devices/"+er.DeviceID+"?tab=commands", nil, adminSess); code != 200 || !strings.Contains(body, "cleanup") {
-		t.Fatalf("commands tab: %d", code)
+	if code, body := ui("GET", "/api/v1/devices/"+er.DeviceID+"/timeline", "", adminSess); code != 200 || !strings.Contains(body, "cleanup") {
+		t.Fatalf("device timeline: %d", code)
 	}
 
-	// every admin page renders
-	pages := []string{"/classic", "/devices", "/devices?status=non-compliant&q=laptop", "/compliance", "/compliance?state=failing&level=1&framework=iso&sort=fail&q=luks", "/blueprints", "/blueprints/" + bpID, "/blueprints/new", "/library", "/library/new?type=com.limdm.packages", "/library/" + itemID("Debian tools"), "/tokens", "/audit"}
-	for _, tab := range []string{"overview", "hardware", "network", "software", "software&sub=sources", "accounts", "accounts&sub=groups&system=1", "compliance", "declarations", "commands&type=reboot"} {
-		pages = append(pages, "/devices/"+er.DeviceID+"?tab="+tab+"&q=open&page=2")
-	}
-	pages = append(pages, "/profile", "/profile?tab=password", "/profile?tab=recovery")
-	for _, p := range pages {
-		if code, body := ui("GET", p, nil, auditor); code != 200 {
+	// what the console app reads answers for an auditor
+	for _, p := range []string{"/api/v1/devices", "/api/v1/devices?q=laptop", "/api/v1/devices/" + er.DeviceID, "/api/v1/devices/" + er.DeviceID + "/detail",
+		"/api/v1/devices/" + er.DeviceID + "/packages", "/api/v1/compliance", "/api/v1/blueprints", "/api/v1/blueprints/" + bpID, "/api/v1/library-items",
+		"/api/v1/library-items/" + itemID("Debian tools"), "/api/v1/enrollment-tokens", "/api/v1/audit", "/api/v1/profile", "/api/v1/onboarding"} {
+		if code, body := ui("GET", p, "", auditor); code != 200 {
 			t.Fatalf("GET %s: %d %s", p, code, body)
 		}
 	}
-	if _, body := ui("GET", "/audit", nil, auditor); !strings.Contains(body, "intact") {
-		t.Fatal("audit chain must verify")
+	if code, body := ui("POST", "/api/v1/audit/verify", "", auditor); code != 200 || !strings.Contains(body, `"broken_at":0`) {
+		t.Fatalf("audit chain must verify: %d %s", code, body)
 	}
-	_, body = ui("GET", "/export/compliance.csv", nil, auditor)
+	_, body = ui("GET", "/api/v1/exports/compliance.csv", "", auditor)
 	if !strings.Contains(body, "disk.encryption") || !strings.Contains(body, "'=evil") || !strings.Contains(body, "A.8.24") {
 		t.Fatalf("compliance export:\n%s", body)
 	}
-	if _, body := ui("GET", "/devices/"+er.DeviceID+"?tab=declarations", nil, auditor); !strings.Contains(body, "com.limdm.compliance") {
-		t.Fatal("device page must list declarations")
+	if _, body := ui("GET", "/api/v1/devices/"+er.DeviceID+"/detail", "", auditor); !strings.Contains(body, "com.limdm.compliance") {
+		t.Fatal("device detail must list declarations")
 	}
 
 	// ---- directory: SCIM provisioning and group based blueprint assignment ----
-	_, body = ui("POST", "/directory/scim-token", url.Values{}, adminSess)
+	_, body = ui("POST", "/api/v1/directory/scim-token", "", adminSess)
 	scimTok := regexp.MustCompile(`lms_[A-Za-z0-9_-]+`).FindString(body)
 	if scimTok == "" {
 		t.Fatal("no SCIM token shown")
@@ -459,9 +455,11 @@ func TestIntegration(t *testing.T) {
 	}
 	var gid string
 	db.QueryRow(ctx, `SELECT id::text FROM dir_groups WHERE name='finance-laptops'`).Scan(&gid)
-	ui("POST", "/directory/groups", url.Values{"group_id": {gid}, "blueprint_id": {childID}, "priority": {"5"}}, adminSess)
+	if code, body := ui("PUT", "/api/v1/directory/groups/"+gid, `{"blueprint_id":`+childID+`,"priority":5}`, adminSess); code != http.StatusNoContent {
+		t.Fatalf("group assignment: %d %s", code, body)
+	}
 	// clear the explicit blueprint, set the primary user: the group's blueprint must win over default
-	if code, body := ui("POST", "/devices/"+er.DeviceID+"/assign", url.Values{"blueprint_id": {"0"}, "primary_user": {"max@firma.de"}, "tags": {"lab"}}, adminSess); code != http.StatusSeeOther {
+	if code, body := ui("PATCH", "/api/v1/devices/"+er.DeviceID, `{"blueprint_id":null,"primary_user":"max@firma.de","tags":["lab"]}`, adminSess); code != http.StatusOK {
 		t.Fatalf("assign primary user: %d %s", code, body)
 	}
 	tx0, _ := db.Begin(ctx)
@@ -486,8 +484,8 @@ func TestIntegration(t *testing.T) {
 	if resGroup.Chain[len(resGroup.Chain)-1].Name != "default" {
 		t.Fatalf("inactive user must not bring a group blueprint: %+v", resGroup.Chain)
 	}
-	if code, _ := ui("GET", "/directory", nil, auditor); code != 200 {
-		t.Fatal("directory page")
+	if code, _ := ui("GET", "/api/v1/directory", "", auditor); code != 200 {
+		t.Fatal("directory")
 	}
 
 	// tamper events mark the device and are audited separately
@@ -593,7 +591,7 @@ func TestIntegration(t *testing.T) {
 	if code := call(dev2, "/api/v1/checkin", api.CheckinRequest{}, nil); code != 200 {
 		t.Fatalf("fresh certificate rejected: %d", code)
 	}
-	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/retire", url.Values{}, adminSess); code != http.StatusSeeOther {
+	if code, _ := ui("POST", "/api/v1/devices/"+er.DeviceID+"/retire", "", adminSess); code != http.StatusOK {
 		t.Fatalf("retire: %d", code)
 	}
 	if code := call(dev2, "/api/v1/checkin", api.CheckinRequest{}, nil); code != http.StatusForbidden {
@@ -656,9 +654,9 @@ func TestIntegration(t *testing.T) {
 		t.Fatal("replayed TOTP code accepted")
 	}
 	getWith := func(c *http.Cookie) int {
-		req, _ := http.NewRequest("GET", admin.URL+"/classic", nil)
+		req, _ := http.NewRequest("GET", admin.URL+"/api/v1/me", nil)
 		req.AddCookie(c)
-		resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+		resp, err := noRedirect.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -671,7 +669,7 @@ func TestIntegration(t *testing.T) {
 	if _, err := LocalAdmin(ctx, dsn, "disable", "breakglass", "admin"); err != nil {
 		t.Fatal(err)
 	}
-	if getWith(sessCookie) != http.StatusFound {
+	if getWith(sessCookie) != http.StatusUnauthorized {
 		t.Fatal("session of a disabled local admin still valid")
 	}
 	if _, err := LocalAdmin(ctx, dsn, "enable", "breakglass", "admin"); err != nil {
@@ -691,41 +689,41 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// ---- roles: helpdesk may send commands but no scripts and no configuration ----
+	db.Exec(ctx, `UPDATE devices SET retired=false WHERE id=$1`, er.DeviceID) // commands need an active device
 	db.Exec(ctx, `INSERT INTO console_users(email, role) VALUES ('help@firma.de', 'helpdesk')`)
 	help := session{Email: "help@firma.de", Role: "helpdesk", IAT: time.Now(), Last: time.Now()}
-	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"reboot"}}, help); code != http.StatusSeeOther {
-		t.Fatalf("helpdesk command: %d", code)
+	if code, body := command("reboot", "", help); code != http.StatusAccepted {
+		t.Fatalf("helpdesk command: %d %s", code, body)
 	}
-	if code, body := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"shutdown"}, "minutes": {"5000"}}, help); code != http.StatusBadRequest ||
-		!strings.Contains(body, `class="notice error"`) || !strings.Contains(body, "delay must be 0..1440 minutes") {
-		t.Fatalf("delay out of range accepted or not shown in the console layout: %d", code)
+	if code, body := command("shutdown", `"minutes":"5000"`, help); code != http.StatusUnprocessableEntity || !strings.Contains(body, "delay must be 0..1440 minutes") {
+		t.Fatalf("delay out of range accepted: %d %s", code, body)
 	}
 	// lost mode and wipe: admins only, confirmed with the host name
 	var host string
 	db.QueryRow(ctx, `SELECT hostname FROM devices WHERE id=$1`, er.DeviceID).Scan(&host)
-	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"wipe"}, "confirm": {host}}, help); code != http.StatusForbidden {
+	if code, _ := command("wipe", `"confirm":"`+host+`"`, help); code != http.StatusForbidden {
 		t.Fatalf("helpdesk wipe: %d", code)
 	}
-	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"wipe"}, "confirm": {"wrong"}}, adminSess); code != http.StatusBadRequest {
+	if code, _ := command("wipe", `"confirm":"wrong"`, adminSess); code != http.StatusUnprocessableEntity {
 		t.Fatalf("wipe without confirmation: %d", code)
 	}
-	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"lost"}, "confirm": {host}, "message": {"call IT"}}, adminSess); code != http.StatusSeeOther {
-		t.Fatalf("lost mode: %d", code)
+	if code, body := command("lost", `"confirm":"`+host+`","message":"call IT"`, adminSess); code != http.StatusAccepted {
+		t.Fatalf("lost mode: %d %s", code, body)
 	}
 	var pl string
-	ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"reboot"}, "minutes": {"0"}}, help)
+	command("reboot", `"minutes":0`, help)
 	db.QueryRow(ctx, `SELECT payload FROM commands WHERE type='reboot' ORDER BY id DESC LIMIT 1`).Scan(&pl)
 	if pl != "0" {
 		t.Fatalf("reboot now payload %q", pl)
 	}
-	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"script"}, "payload": {"id"}}, help); code != http.StatusForbidden {
+	if code, _ := command("script", `"payload":"id"`, help); code != http.StatusForbidden {
 		t.Fatalf("helpdesk script must be refused: %d", code)
 	}
 	// the helpdesk role description: lock, message and local password resets yes, account removal and software no
-	for typ, want := range map[string]int{"lock": http.StatusSeeOther, "user_lock": http.StatusSeeOther, "user_delete": http.StatusForbidden,
+	for typ, want := range map[string]int{"lock": http.StatusAccepted, "user_lock": http.StatusAccepted, "user_delete": http.StatusForbidden,
 		"app_install": http.StatusForbidden, "allow_uninstall": http.StatusForbidden} {
-		if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {typ}, "username": {"jdoe"}, "app": {"x"}}, help); code != want {
-			t.Fatalf("helpdesk %s: %d, want %d", typ, code, want)
+		if code, body := command(typ, `"username":"jdoe","app":"x"`, help); code != want {
+			t.Fatalf("helpdesk %s: %d, want %d: %s", typ, code, want, body)
 		}
 	}
 	// helpdesk commands carry no_admin, and accounts the inventory lists with admin rights are refused
@@ -736,115 +734,103 @@ func TestIntegration(t *testing.T) {
 	db.Exec(ctx, `UPDATE devices SET inventory = jsonb_set(coalesce(inventory, '{}'::jsonb), '{accounts}',
 		'[{"name":"opsadm","uid":1001,"admin":true},{"name":"toor","uid":0,"admin":false}]') WHERE id=$1`, er.DeviceID)
 	for _, name := range []string{"opsadm", "toor"} {
-		if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"user_unlock"}, "username": {name}}, help); code != http.StatusForbidden {
+		if code, _ := command("user_unlock", `"username":"`+name+`"`, help); code != http.StatusForbidden {
 			t.Fatalf("helpdesk user_unlock of admin account %s: %d", name, code)
 		}
 	}
-	// the device page (retired by now) says where the blueprint comes from and hides admin dialogs
-	if code, body := ui("GET", "/devices/"+er.DeviceID, nil, help); code != 200 || strings.Contains(body, "dlg-wipe") || !strings.Contains(body, "/help#blueprint-source") {
-		t.Fatalf("helpdesk device page: %d", code)
+	if code, _ := ui("GET", "/api/v1/devices/"+er.DeviceID+"/detail", "", help); code != 200 {
+		t.Fatalf("helpdesk device detail: %d", code)
 	}
-	for _, p := range []string{"/help", "/blueprints", "/library/new?type=com.limdm.screenlock"} {
-		if code, body := ui("GET", p, nil, adminSess); code != 200 || !strings.Contains(body, `class="doclink"`) && !strings.Contains(body, "Field reference") && !strings.Contains(body, "Glossary") {
-			t.Fatalf("GET %s: %d", p, code)
-		}
+	if code, body := ui("GET", "/api/v1/onboarding", "", adminSess); code != 200 || !strings.Contains(body, `{"id":"branding","done":false}`) {
+		t.Fatalf("first steps without company settings: %d %s", code, body)
 	}
-	if code, body := ui("GET", "/classic", nil, adminSess); code != 200 || !strings.Contains(body, "First steps") {
-		t.Fatalf("overview without company settings must show the first steps: %d", code)
-	}
-	if code, _ := ui("POST", "/onboarding/dismiss", url.Values{}, adminSess); code != http.StatusSeeOther {
-		t.Fatalf("dismiss first steps: %d", code)
-	}
-	var cmdsBefore, cmdsAfter int
-	db.QueryRow(ctx, `SELECT count(*) FROM commands`).Scan(&cmdsBefore)
-	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"user_password"}, "username": {"jdoe"},
-		"password": {"Correct-horse-99x"}, "password2": {"other"}}, help); code != http.StatusSeeOther {
-		t.Fatalf("password mismatch must return to the form: %d", code)
-	}
-	if db.QueryRow(ctx, `SELECT count(*) FROM commands`).Scan(&cmdsAfter); cmdsAfter != cmdsBefore {
-		t.Fatal("a password reset with a different repeat field was queued")
-	}
-	if code, _ := ui("POST", "/tokens", url.Values{"uses": {"1"}, "days": {"1"}}, help); code != http.StatusForbidden {
+	if code, _ := ui("POST", "/api/v1/enrollment-tokens", `{"uses":1,"days":1}`, help); code != http.StatusForbidden {
 		t.Fatalf("helpdesk configuration must be refused: %d", code)
 	}
-	if code, _ := ui("GET", "/settings", nil, help); code != http.StatusForbidden {
+	if code, _ := ui("GET", "/api/v1/settings", "", help); code != http.StatusForbidden {
 		t.Fatal("settings must be hidden from helpdesk")
 	}
 
 	// ---- user management ----
-	if code, body := ui("POST", "/users", url.Values{"kind": {"oidc"}, "login": {"Neu@Firma.de"}, "role": {"auditor"}}, adminSess); code != 200 || !strings.Contains(body, "neu@firma.de") {
-		t.Fatalf("add oidc user: %d", code)
+	if code, body := ui("POST", "/api/v1/users", `{"kind":"oidc","login":"Neu@Firma.de","role":"auditor"}`, adminSess); code != http.StatusCreated {
+		t.Fatalf("add oidc user: %d %s", code, body)
 	}
-	if code, body := ui("POST", "/users", url.Values{"kind": {"local"}, "login": {"ops"}, "role": {"helpdesk"}}, adminSess); code != 200 || !strings.Contains(body, "otpauth://totp/") {
+	if _, body := ui("GET", "/api/v1/users", "", adminSess); !strings.Contains(body, "neu@firma.de") {
+		t.Fatal("new user not listed")
+	}
+	if code, body := ui("POST", "/api/v1/users", `{"kind":"local","login":"ops","role":"helpdesk"}`, adminSess); code != http.StatusCreated || !strings.Contains(body, "otpauth://totp/") {
 		t.Fatalf("add local user must show credentials once: %d", code)
 	}
-	if _, body := ui("POST", "/users/update", url.Values{"login": {"admin@firma.de"}, "role": {"auditor"}}, adminSess); !strings.Contains(body, "your own account") {
+	if _, body := ui("PATCH", "/api/v1/users/admin@firma.de", `{"role":"auditor"}`, adminSess); !strings.Contains(body, "your own account") {
 		t.Fatal("self demotion must be refused")
 	}
 	other := session{Email: "neu@firma.de", Role: "admin", IAT: time.Now(), Last: time.Now()}
 	db.Exec(ctx, `UPDATE console_users SET role='admin' WHERE email='neu@firma.de'`)
 	db.Exec(ctx, `UPDATE local_admins SET disabled=true`)
-	if _, body := ui("POST", "/users/update", url.Values{"login": {"admin@firma.de"}, "role": {"admin"}, "disabled": {"on"}}, other); strings.Contains(body, "must remain") {
-		t.Fatal("disabling one of two admins must be allowed")
+	if code, body := ui("PATCH", "/api/v1/users/admin@firma.de", `{"role":"admin","disabled":true}`, other); code != http.StatusNoContent {
+		t.Fatalf("disabling one of two admins must be allowed: %d %s", code, body)
 	}
-	if code, _ := ui("GET", "/classic", nil, adminSess); code != http.StatusFound {
-		t.Fatalf("session of a disabled OIDC admin must end: %d", code)
+	if signedIn(adminSess) {
+		t.Fatal("session of a disabled OIDC admin must end")
 	}
-	if _, body := ui("POST", "/users/update", url.Values{"login": {"neu@firma.de"}, "role": {"auditor"}}, other); !strings.Contains(body, "your own account") {
+	if _, body := ui("PATCH", "/api/v1/users/neu@firma.de", `{"role":"auditor"}`, other); !strings.Contains(body, "your own account") {
 		t.Fatal("the last admin demoting themselves must be refused")
 	}
 	db.Exec(ctx, `UPDATE console_users SET disabled=false, role='admin' WHERE email='admin@firma.de'`)
-	if code, _ := ui("GET", "/classic", nil, adminSess); code != http.StatusFound {
-		t.Fatalf("a session revoked by disabling must stay invalid after re-enabling: %d", code)
+	if signedIn(adminSess) {
+		t.Fatal("a session revoked by disabling must stay invalid after re-enabling")
 	}
 	db.QueryRow(ctx, `SELECT session_gen FROM console_users WHERE email='admin@firma.de'`).Scan(&adminSess.Gen) // signs in again
 
 	// ---- settings ----
-	if _, body := ui("POST", "/settings", url.Values{"section": {"general"}, "stale_hours": {"24"}}, adminSess); !strings.Contains(body, "Settings saved") {
-		t.Fatal("an OIDC admin may switch off local login while OIDC works")
+	settings := func(section, body string) (int, string) {
+		t.Helper()
+		return ui("PATCH", "/api/v1/settings/"+section, body, adminSess)
 	}
-	if _, body := ui("POST", "/settings", url.Values{"section": {"sso"}}, adminSess); !strings.Contains(body, "can only be disabled") {
+	clearSSO := `{"oidc_issuer":"","oidc_client_id":"","clear_secret":true}`
+	if code, body := settings("general", `{"stale_hours":24,"local_login":false}`); code != 200 {
+		t.Fatalf("an OIDC admin may switch off local login while OIDC works: %d %s", code, body)
+	}
+	if _, body := settings("sso", clearSSO); !strings.Contains(body, "can only be disabled") {
 		t.Fatal("removing OIDC while local login is off must be refused")
 	}
-	if _, body := ui("POST", "/settings", url.Values{"section": {"monitoring"}, "webhook_url": {"http://plain"}}, adminSess); !strings.Contains(body, "must be https") {
+	if _, body := settings("monitoring", `{"webhook_url":"http://plain"}`); !strings.Contains(body, "must be https") {
 		t.Fatal("plain http webhook accepted")
 	}
-	if code, _ := ui("POST", "/settings", url.Values{"section": {"bogus"}}, adminSess); code != http.StatusBadRequest {
+	if code, _ := settings("bogus", `{}`); code != http.StatusBadRequest {
 		t.Fatalf("unknown section: %d", code)
 	}
-	// B: backup schedules, retention and packages in the console
+	// backup schedules, retention and packages
 	backupTargetDir := t.TempDir()
-	if code, body := ui("POST", "/settings/backup/targets", url.Values{"name": {"local"}, "kind": {"local"}, "dir": {backupTargetDir}}, adminSess); code != http.StatusSeeOther {
+	if code, body := ui("PUT", "/api/v1/backup/targets/local", `{"kind":"local","dir":"`+backupTargetDir+`"}`, adminSess); code != http.StatusNoContent {
 		t.Fatalf("backup target: %d %s", code, body)
 	}
-	if code, body := ui("POST", "/settings/backup/schedules", url.Values{"name": {"nightly"}, "kind": {"cron"}, "cron": {"0 2 * * 1-5"},
-		"targets": {"local"}, "keep_last": {"5"}, "keep_daily": {"7"}, "paused": {"on"}}, adminSess); code != http.StatusSeeOther {
+	if code, body := ui("PUT", "/api/v1/backup/schedules/nightly", `{"kind":"cron","cron":"0 2 * * 1-5","targets":["local"],"keep":{"last":5,"daily":7},"paused":true}`, adminSess); code != http.StatusNoContent {
 		t.Fatalf("backup schedule: %d %s", code, body)
 	}
-	if _, body := ui("POST", "/settings/backup/schedules", url.Values{"name": {"bad"}, "kind": {"cron"}, "cron": {"61 * * * *"}, "targets": {"local"}, "keep_last": {"1"}}, adminSess); !strings.Contains(body, "outside 0 to 59") {
+	if _, body := ui("PUT", "/api/v1/backup/schedules/bad", `{"kind":"cron","cron":"61 * * * *","targets":["local"],"keep":{"last":1}}`, adminSess); !strings.Contains(body, "outside 0 to 59") {
 		t.Fatal("invalid cron accepted")
 	}
-	if code, body := ui("GET", "/settings/backup?edit=nightly", nil, adminSess); code != 200 || !strings.Contains(body, "0 2 * * 1-5") || !strings.Contains(body, "nightly") {
-		t.Fatalf("backup page: %d", code)
+	if code, body := ui("GET", "/api/v1/backup", "", adminSess); code != 200 || !strings.Contains(body, "0 2 * * 1-5") || !strings.Contains(body, "nightly") {
+		t.Fatalf("backup: %d", code)
 	}
-	if _, body := ui("POST", "/settings/backup/schedules/nightly/resume", url.Values{}, adminSess); !strings.Contains(body, "need at least one recipient") {
+	if _, body := ui("POST", "/api/v1/backup/schedules/nightly/resume", "", adminSess); !strings.Contains(body, "need at least one recipient") {
 		t.Fatal("schedule resumed without an age recipient")
 	}
-	if code, _ := ui("GET", "/settings/backup", nil, auditor); code != http.StatusForbidden {
+	if code, _ := ui("GET", "/api/v1/backup", "", auditor); code != http.StatusForbidden {
 		t.Fatalf("auditor sees backups: %d", code)
 	}
-	if _, body := ui("POST", "/settings", url.Values{"section": {"retention"}, "retention_audit": {"730"}, "retention_device_events": {"365"}, "retention_compliance": {"1095"},
-		"retention_commands": {"180"}, "retention_script_results": {"90"}, "retention_diagnostics": {"30"}, "retention_shell_transcripts": {"90"},
-		"retention_metrics": {"30"}, "retention_notification_log": {"30"}}, adminSess); !strings.Contains(body, "Settings saved") || s.settings().retentionDays("audit") != 730 {
-		t.Fatal("retention not saved")
+	if code, body := settings("retention", `{"retention":{"audit":730,"device_events":365,"compliance":1095,"commands":180,"script_results":90,
+		"diagnostics":30,"shell_transcripts":90,"metrics":30,"notification_log":30}}`); code != 200 || s.settings().retentionDays("audit") != 730 {
+		t.Fatalf("retention not saved: %d %s", code, body)
 	}
 	// operations settings apply without a restart
 	if s.checkins == nil { // a test server without limits
 		s.downloads, s.checkins, s.bigCheckins = newSlots(1), newSlots(1), newSlots(1)
 	}
-	if _, body := ui("POST", "/settings", url.Values{"section": {"operations"}, "log_level": {"debug"}, "audit_api_reads": {"all"}, "access_log": {"on"},
-		"update_downloads": {"7"}, "max_checkins": {"16"}, "agent_proxy_protocol": {"10.0.0.5"}, "syslog": {""}}, adminSess); !strings.Contains(body, "Settings saved") {
-		t.Fatal("operations not saved")
+	if code, body := settings("operations", `{"ops":{"log_level":"debug","audit_api_reads":"all","access_log":true,"update_downloads":7,"max_checkins":16,
+		"agent_proxy_protocol":["10.0.0.5"],"syslog":""}}`); code != 200 {
+		t.Fatalf("operations not saved: %d %s", code, body)
 	}
 	if o := s.ops(); LogLevel.Level().String() != "DEBUG" || !o.AccessLog || o.AuditAPIReads != "all" || cap(s.checkins.get()) != 16 || cap(s.bigCheckins.get()) != 2 ||
 		cap(s.downloads.get()) != 7 || len(s.proxySources()) != 1 {
@@ -854,39 +840,40 @@ func TestIntegration(t *testing.T) {
 	if err := db.QueryRow(ctx, `SELECT detail FROM audit_log WHERE action='settings.save' ORDER BY id DESC LIMIT 1`).Scan(&detail); err != nil || !strings.Contains(detail, "max_checkins=16") {
 		t.Fatalf("operations change not audited: %q %v", detail, err)
 	}
-	if _, body := ui("POST", "/settings", url.Values{"section": {"operations"}, "log_level": {"info"}, "audit_api_reads": {"sensitive"},
-		"update_downloads": {"20"}, "max_checkins": {"64"}, "syslog": {"http://x"}}, adminSess); !strings.Contains(body, "syslog target") {
+	if _, body := settings("operations", `{"ops":{"log_level":"info","audit_api_reads":"sensitive","update_downloads":20,"max_checkins":64,"syslog":"http://x"}}`); !strings.Contains(body, "syslog target") {
 		t.Fatal("invalid syslog target accepted")
 	}
 	LogLevel.Set(0)
-	if code, body := ui("GET", "/software/packages", nil, adminSess); code != 200 || !strings.Contains(body, "Upload") {
-		t.Fatalf("packages page: %d", code)
+	if code, _ := ui("GET", "/api/v1/packages", "", adminSess); code != 200 {
+		t.Fatalf("packages: %d", code)
 	}
-	// the handlers check the role themselves, not only the route wrappers
-	for _, who := range []session{{Email: "hd@firma.de", Role: "helpdesk"}, {Email: "au@firma.de", Role: "auditor"}, {Email: "ta@firma.de", Role: "admin", Tenant: 2}} {
-		for name, h := range map[string]handler{"store": s.packagesSettings, "settings": s.settingsSave, "backup": s.backupSave, "schedule": s.backupScheduleSave,
-			"upload": s.packageUpload, "delete": s.packageDelete, "run": s.backupRunNow, "target": s.backupTargetSave} {
-			if (name == "upload" || name == "delete") && who.Role == "admin" {
+	// helpdesk, auditor and tenant admins change no installation wide settings
+	var tid int64
+	db.QueryRow(ctx, `INSERT INTO tenants(name) VALUES ('acme') RETURNING id`).Scan(&tid)
+	db.Exec(ctx, `INSERT INTO console_users(email, role, tenant_id) VALUES ('ta@firma.de', 'admin', $1)`, tid)
+	tenantAdmin := session{Email: "ta@firma.de", Role: "admin", IAT: time.Now(), Last: time.Now()}
+	for _, who := range []session{help, auditor, tenantAdmin} {
+		for _, mp := range []string{"PUT /api/v1/packages/settings", "PATCH /api/v1/settings/retention", "PUT /api/v1/backup", "PUT /api/v1/backup/schedules/x",
+			"POST /api/v1/packages", "DELETE /api/v1/packages/1", "POST /api/v1/backup/run", "PUT /api/v1/backup/targets/x"} {
+			if who.Email == tenantAdmin.Email && strings.Contains(mp, "/api/v1/packages/1") || mp == "POST /api/v1/packages" && who.Email == tenantAdmin.Email {
 				continue // tenant admins manage their own packages
 			}
-			w := httptest.NewRecorder()
-			r := httptest.NewRequest("POST", "/x", strings.NewReader("store=s3&section=retention"))
-			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			if h(w, r, who); w.Code != http.StatusForbidden {
-				t.Errorf("%s by %s (tenant %d): %d", name, who.Role, who.Tenant, w.Code)
+			method, path, _ := strings.Cut(mp, " ")
+			if code, _ := ui(method, path, `{}`, who); code != http.StatusForbidden {
+				t.Errorf("%s by %s: %d", mp, who.Email, code)
 			}
 		}
 	}
-	if _, body := ui("POST", "/settings", url.Values{"section": {"general"}, "stale_hours": {"48"}, "local_login": {"on"}}, adminSess); !strings.Contains(body, "Settings saved") {
+	if code, body := settings("general", `{"stale_hours":48,"local_login":true}`); code != 200 {
 		t.Fatalf("general settings not saved: %s", body)
 	}
-	if _, body := ui("POST", "/settings", url.Values{"section": {"sso"}}, adminSess); !strings.Contains(body, "Settings saved") {
+	if code, body := settings("sso", clearSSO); code != 200 {
 		t.Fatalf("clearing OIDC: %s", body)
 	}
 	if s.settings().StaleHours != 48 || s.oidc() != nil {
 		t.Fatalf("settings not active: %+v", s.settings())
 	}
-	if code, _ := ui("GET", "/classic", nil, adminSess); code != http.StatusFound {
+	if signedIn(adminSess) {
 		t.Fatal("OIDC sessions must end once OIDC is removed")
 	}
 	s.rt.Store(&runtimeState{set: Settings{LocalLogin: true, StaleHours: 24, OIDCIssuer: "https://idp.test", OIDCClientID: "x"}, auth: &oidcAuth{}})
@@ -1101,17 +1088,17 @@ func TestHistory(t *testing.T) {
 	db.Exec(ctx, `UPDATE device_metrics SET at = at - interval '1 hour'`)
 	rec(&api.Metrics{MemUsedMB: 2000, MemTotalMB: 4000, RootUsedPct: 41, Load1: 0.7})
 	s := &Server{db: db, cmdKey: testCmdKey, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	charts, err := s.deviceCharts(ctx, "d1")
-	if err != nil || len(charts) != 3 || !strings.Contains(string(charts[0]), "<polyline") {
-		t.Fatalf("device charts: %v %d", err, len(charts))
+	db.QueryRow(ctx, `SELECT count(*) FROM device_metrics WHERE device_id='d1'`).Scan(&n)
+	if n != 2 {
+		t.Fatalf("want 2 samples an hour apart, got %d", n)
 	}
 	if err := s.snapshotFleet(ctx); err != nil {
 		t.Fatal(err)
 	}
 	db.Exec(ctx, `INSERT INTO fleet_history VALUES (current_date - 1, 3, 1, 0, 0, 0)`)
-	chart, err := s.fleetChart(ctx)
-	if err != nil || !strings.Contains(string(chart), `class="line bad"`) {
-		t.Fatalf("fleet chart: %v", err)
+	days, err := s.fleetHistory(ctx, 30)
+	if err != nil || len(days) != 2 || days[0].NonCompliant != 1 || days[0].Score != 75 {
+		t.Fatalf("fleet history: %v %+v", err, days)
 	}
 }
 
@@ -1583,15 +1570,11 @@ func TestAgentUpdates(t *testing.T) {
 	if err != nil || len(fleet) != 1 || fleet[0].ID != "com.github.wwmm.easyeffects" {
 		t.Fatalf("fleet flatpaks outside the catalog: %v %+v", err, fleet)
 	}
-	form := url.Values{"flatpak": {"com.github.wwmm.easyeffects", "org.unknown.App"}}
-	ireq := httptest.NewRequest("POST", "/software/import", strings.NewReader(form.Encode()))
-	ireq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	ireq.ParseForm()
-	rec = httptest.NewRecorder()
-	s.appImport(rec, ireq, session{Email: "admin@firma.de", Role: "admin"})
+	admin := apiCaller{Name: "admin@firma.de", Role: "admin"}
+	rec = apiServe(s.apiCatalogImport, "POST /api/v1/software/import", "/api/v1/software/import", `{"flatpaks":["com.github.wwmm.easyeffects","org.unknown.App"]}`, admin)
 	var imported string
 	db.QueryRow(ctx, `SELECT slug FROM catalog_apps WHERE sources @> '[{"flatpak":"com.github.wwmm.easyeffects"}]'`).Scan(&imported)
-	if rec.Code != http.StatusSeeOther || imported != "easy-effects" {
+	if rec.Code != http.StatusOK || imported != "easy-effects" {
 		t.Fatalf("import: %d %q", rec.Code, imported)
 	}
 	if fleet, _ := s.fleetFlatpaks(ctx); len(fleet) != 0 {
@@ -1600,27 +1583,11 @@ func TestAgentUpdates(t *testing.T) {
 
 	// remotes: Flathub managed from the start, take over a found one as blocked, only managed per policy
 	db.Exec(ctx, `UPDATE devices SET inventory='{"flatpak_remotes":[{"name":"flathub","url":"https://dl.flathub.org/repo/","installation":"system"},{"name":"flatpark","url":"https://dl.flatpark.org/","installation":"bob"}]}' WHERE id='d3'`)
-	post := func(path string, form url.Values) int {
-		t.Helper()
-		rq := httptest.NewRequest("POST", path, strings.NewReader(form.Encode()))
-		rq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		rq.ParseForm()
-		rc := httptest.NewRecorder()
-		mux := http.NewServeMux()
-		mux.HandleFunc("POST /software/remotes", func(w http.ResponseWriter, r *http.Request) {
-			s.remoteSave(w, r, session{Email: "admin@firma.de", Role: "admin"})
-		})
-		mux.HandleFunc("POST /software/remotes/{name}/{op}", func(w http.ResponseWriter, r *http.Request) {
-			s.remoteOp(w, r, session{Email: "admin@firma.de", Role: "admin"})
-		})
-		mux.ServeHTTP(rc, rq)
-		return rc.Code
+	if rc := apiServe(s.apiRemoteSave, "PUT /api/v1/software/remotes/{name}", "/api/v1/software/remotes/flatpark", `{"url":"https://dl.flatpark.org/","state":"blocked"}`, admin); rc.Code != http.StatusOK {
+		t.Fatalf("take over: %d %s", rc.Code, rc.Body)
 	}
-	if code := post("/software/remotes", url.Values{"name": {"flatpark"}, "url": {"https://dl.flatpark.org/"}, "state": {"blocked"}}); code != http.StatusSeeOther {
-		t.Fatalf("take over: %d", code)
-	}
-	if code := post("/software/remotes/flatpark/allow", nil); code != http.StatusSeeOther {
-		t.Fatalf("allow: %d", code)
+	if rc := apiServe(s.apiRemoteOp, "POST /api/v1/software/remotes/{name}/{op}", "/api/v1/software/remotes/flatpark/allow", "", admin); rc.Code != http.StatusOK {
+		t.Fatalf("allow: %d %s", rc.Code, rc.Body)
 	}
 	tx4, _ := db.Begin(ctx)
 	cat, _ = s.deviceCatalog(ctx, tx4, "d3", nil, &api.SoftwareStore{OnlyManagedRemotes: true})
@@ -1647,32 +1614,19 @@ func TestAgentUpdates(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("one request for the unknown Flatpak expected, got %d", n)
 	}
-	mux = http.NewServeMux()
-	mux.HandleFunc("POST /software/requests/{id}/{op}", func(w http.ResponseWriter, r *http.Request) {
-		s.requestDecide(w, r, session{Email: "admin@firma.de", Role: "admin"})
-	})
-	rq := httptest.NewRequest("POST", fmt.Sprintf("/software/requests/%d/approve-all", reqID), nil)
-	rc := httptest.NewRecorder()
-	mux.ServeHTTP(rc, rq)
+	rc := apiServe(s.apiAppRequestDecide, "POST /api/v1/software/requests/{id}/{op}", fmt.Sprintf("/api/v1/software/requests/%d/approve-all", reqID), "", admin)
 	var mode, linked string
 	db.QueryRow(ctx, `SELECT a.mode, q.app FROM catalog_requests q JOIN catalog_apps a ON a.slug=q.app WHERE q.id=$1`, reqID).Scan(&mode, &linked)
-	if rc.Code != http.StatusSeeOther || mode != "available" || linked != "notes" {
+	if rc.Code != http.StatusOK || mode != "available" || linked != "notes" {
 		t.Fatalf("approve for everyone: %d mode=%q app=%q", rc.Code, mode, linked)
 	}
 
 	// an app from a vendor repository keeps its repository through the editor
-	save := func(form url.Values) (int, string) {
-		rq := httptest.NewRequest("POST", "/software/apps", strings.NewReader(form.Encode()))
-		rq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		rq.ParseForm()
-		rc := httptest.NewRecorder()
-		s.appSave(rc, rq, session{Email: "admin@firma.de", Role: "admin"})
-		return rc.Code, rc.Body.String()
-	}
-	if code, body := save(url.Values{"new": {"1"}, "id": {"vendor-vpn"}, "name": {"Vendor VPN"}, "mode": {"available"}, "enabled": {"on"},
-		"debian": {"vendor-vpn"}, "deb_repo_url": {"https://repo.example.com/apt"}, "deb_repo_suite": {"stable"}, "deb_repo_components": {"main"},
-		"deb_repo_key": {"-----BEGIN PGP PUBLIC KEY BLOCK-----\nx\n-----END PGP PUBLIC KEY BLOCK-----"}}); code != http.StatusSeeOther {
-		t.Fatalf("save app with repository: %d %s", code, body)
+	vpn := `{"id":"vendor-vpn","name":"Vendor VPN","mode":"available","enabled":true,"sources":[{"kind":"package","debian":"vendor-vpn",
+		"repos":[{"name":"vendor-vpn","family":"debian","url":"https://repo.example.com/apt","suites":"stable","components":"main",
+		"key":"-----BEGIN PGP PUBLIC KEY BLOCK-----\\nx\\n-----END PGP PUBLIC KEY BLOCK-----"}]}]}`
+	if rc := apiServe(s.apiCatalogAppSave, "POST /api/v1/software/apps", "/api/v1/software/apps", vpn, admin); rc.Code/100 != 2 {
+		t.Fatalf("save app with repository: %d %s", rc.Code, rc.Body)
 	}
 	var srcJSON string
 	db.QueryRow(ctx, `SELECT sources::text FROM catalog_apps WHERE slug='vendor-vpn'`).Scan(&srcJSON)
@@ -1686,26 +1640,22 @@ func TestAgentUpdates(t *testing.T) {
 	}
 
 	// bulk actions on the device list: tag two devices, install an app, filter by tag
-	bulk := func(form url.Values, role string) int {
-		rq := httptest.NewRequest("POST", "/devices/bulk", strings.NewReader(form.Encode()))
-		rq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		rc := httptest.NewRecorder()
-		s.devicesBulk(rc, rq, session{Email: "admin@firma.de", Role: role})
-		return rc.Code
+	bulk := func(body, role string) int {
+		return apiServe(s.apiDevicesBulk, "POST /api/v1/devices/bulk", "/api/v1/devices/bulk", body, apiCaller{Name: "admin@firma.de", Role: role}).Code
 	}
-	if code := bulk(url.Values{"id": {"d3", "d5"}, "action": {"tag-add"}, "tag": {"Finance"}}, "admin"); code != http.StatusSeeOther {
+	if code := bulk(`{"ids":["d3","d5"],"action":"tag-add","params":{"tag":"Finance"}}`, "admin"); code != http.StatusAccepted {
 		t.Fatalf("bulk tag: %d", code)
 	}
-	if code := bulk(url.Values{"id": {"d3"}, "action": {"tag-add"}, "tag": {"finance"}}, "helpdesk"); code != http.StatusForbidden {
+	if code := bulk(`{"ids":["d3"],"action":"tag-add","params":{"tag":"finance"}}`, "helpdesk"); code != http.StatusForbidden {
 		t.Fatalf("helpdesk must not tag: %d", code)
 	}
-	if code := bulk(url.Values{"id": {"d3", "d5"}, "action": {"command:app_install"}, "app": {"firefox"}}, "admin"); code != http.StatusSeeOther {
+	if code := bulk(`{"ids":["d3","d5"],"action":"command:app_install","params":{"app":"firefox"}}`, "admin"); code != http.StatusAccepted {
 		t.Fatalf("bulk install: %d", code)
 	}
-	if code := bulk(url.Values{"id": {"d3"}, "action": {"command:wipe"}, "confirm": {"x"}}, "admin"); code != http.StatusBadRequest {
+	if code := bulk(`{"ids":["d3"],"action":"command:wipe","params":{"confirm":"x"}}`, "admin"); code != http.StatusUnprocessableEntity {
 		t.Fatalf("wipe must not run in bulk: %d", code)
 	}
-	if code := bulk(url.Values{"id": {"d3", "nope"}, "action": {"command:sync"}}, "admin"); code != http.StatusBadRequest {
+	if code := bulk(`{"ids":["d3","nope"],"action":"command:sync"}`, "admin"); code != http.StatusUnprocessableEntity {
 		t.Fatalf("unknown device accepted: %d", code)
 	}
 	db.QueryRow(ctx, `SELECT count(*) FROM commands WHERE type='app_install' AND payload='firefox' AND device_id IN ('d3','d5')`).Scan(&n)
@@ -1736,15 +1686,11 @@ func TestAgentUpdates(t *testing.T) {
 	}))
 	defer hook.Close()
 	s.cfg.SessionKey, s.hooks = bytes.Repeat([]byte{3}, 32), hook.Client()
-	form = url.Values{"name": {"siem"}, "kind": {"webhook"}, "url": {hook.URL}, "events": {"device.tamper"}}
-	rq = httptest.NewRequest("POST", "/settings/notifications", strings.NewReader(form.Encode()))
-	rq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rq.ParseForm()
-	rc = httptest.NewRecorder()
-	s.channelSave(rc, rq, session{Email: "admin@firma.de", Role: "admin"})
+	rc = apiServe(s.apiChannelAdd, "POST /api/v1/notification-channels", "/api/v1/notification-channels",
+		`{"name":"siem","kind":"webhook","url":"`+hook.URL+`","events":["device.tamper"]}`, admin)
 	var sealedURL string
 	db.QueryRow(ctx, `SELECT secret FROM notification_channels WHERE name='siem'`).Scan(&sealedURL)
-	if rc.Code != http.StatusSeeOther || sealedURL == "" || strings.Contains(sealedURL, "127.0.0.1") {
+	if rc.Code != http.StatusCreated || sealedURL == "" || strings.Contains(sealedURL, "127.0.0.1") {
 		t.Fatalf("channel save: %d, secret stored in clear: %q", rc.Code, sealedURL)
 	}
 	var chID int64
@@ -1782,6 +1728,39 @@ func TestAgentUpdates(t *testing.T) {
 			t.Fatalf("filter %s: %v", f.Key, err)
 		}
 	}
+}
+
+// consoleAPI calls the admin API as the console app does for sess: session
+// cookie, CSRF header and the own origin; redirects are returned as they are.
+func consoleAPI(t *testing.T, s *Server, base string, sess session) func(method, path, body string) (int, string) {
+	return func(method, path, body string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(method, base+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(csrfHeader, s.csrfToken(sess))
+		req.Header.Set("Origin", s.cfg.PublicURL)
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: s.seal(sess)})
+		resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+}
+
+// apiServe runs one admin API handler as the route pattern would, for a
+// caller that passed the role check (need).
+func apiServe(h apiHandlerFunc, pattern, path, body string, c apiCaller) *httptest.ResponseRecorder {
+	method, _, _ := strings.Cut(pattern, " ")
+	mux := http.NewServeMux()
+	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) { h(w, r, c) })
+	r := httptest.NewRequest(method, path, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	rc := httptest.NewRecorder()
+	mux.ServeHTTP(rc, r)
+	return rc
 }
 
 var testCmdKey = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{9}, ed25519.SeedSize))

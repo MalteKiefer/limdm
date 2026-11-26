@@ -328,12 +328,9 @@ func (p *problemWriter) Write(b []byte) (int, error) {
 
 func (p *problemWriter) Unwrap() http.ResponseWriter { return p.ResponseWriter }
 
-// apiRoutes adds the token page, the admin API and the metrics endpoint
+// apiRoutes adds the admin API and the metrics endpoint
 // to the console mux.
 func (s *Server) apiRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /settings/api", s.page(s.adminOrAuditor(s.apiTokensPage)))
-	mux.HandleFunc("POST /settings/api", s.page(s.apiTokenCreate))
-	mux.HandleFunc("POST /settings/api/{id}/revoke", s.page(s.apiTokenRevoke))
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /api/v1/openapi.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -383,69 +380,6 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 }
 
 // ---- console page ----
-
-type apiTokenRow struct {
-	ID                  int64
-	Name, Prefix, Role  string
-	ReadOnly            bool
-	CreatedBy           string
-	Created, Expires    time.Time
-	LastUsed, RevokedAt *time.Time
-	State               string // active | expired | revoked
-	Scope               []string
-	Scopes              []string
-}
-
-func (s *Server) apiTokensPage(w http.ResponseWriter, r *http.Request, sess session) {
-	s.renderAPITokens(w, r, sess, "")
-}
-
-func (s *Server) renderAPITokens(w http.ResponseWriter, r *http.Request, sess session, created string) {
-	tcond, targs := tenantCond(sess, "tenant_id", 0)
-	rows, err := s.db.Query(r.Context(), `SELECT id, name, prefix, role, read_only, created_by, created_at, expires_at, last_used_at, revoked_at, '', scope_tags, scopes
-		FROM api_tokens WHERE `+tcond+` ORDER BY revoked_at IS NOT NULL, expires_at < now(), created_at DESC`, targs...)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[apiTokenRow])
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	for i, t := range list {
-		switch {
-		case t.RevokedAt != nil:
-			list[i].State = "revoked"
-		case time.Now().After(t.Expires):
-			list[i].State = "expired"
-		default:
-			list[i].State = "active"
-		}
-	}
-	s.render(w, r, sess, "apitokens", map[string]any{"Tokens": list, "Created": created, "Roles": apiRoles, "Scopes": tokenScopes, "PublicURL": s.cfg.PublicURL})
-}
-
-func (s *Server) apiTokenCreate(w http.ResponseWriter, r *http.Request, sess session) {
-	days, _ := strconv.Atoi(r.FormValue("days")) // 0 is refused
-	scope, err := parseTags(r.FormValue("scope_tags"))
-	if err != nil {
-		s.errorPage(w, r, sess, http.StatusBadRequest, err.Error())
-		return
-	}
-	token, _, err := s.createAPIToken(r.Context(), sess, tokenSpec{Name: r.FormValue("name"), Role: r.FormValue("role"), Days: days,
-		ReadOnly: r.FormValue("read_only") == "on", ScopeTags: scope, Scopes: r.Form["scopes"]})
-	var pending approvalPending
-	if errors.As(err, &pending) {
-		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
-		return
-	}
-	if err != nil {
-		s.failUser(w, r, sess, err)
-		return
-	}
-	s.renderAPITokens(w, r, sess, token)
-}
 
 // tokenScopes are what a token may be limited to; no scopes is all its role
 // allows. read: devices, commands, library items, blueprints and tags;
@@ -514,24 +448,6 @@ func (s *Server) createAPIToken(ctx context.Context, sess session, t tokenSpec) 
 			t.Role, readOnly, t.Days, prefix, strings.Join(t.ScopeTags, ","), strings.Join(t.Scopes, ",")), err
 	})
 	return token, id, err
-}
-
-func (s *Server) apiTokenRevoke(w http.ResponseWriter, r *http.Request, sess session) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	err = s.revokeAPIToken(r.Context(), sess, id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/settings/api", http.StatusSeeOther)
 }
 
 // revokeAPIToken revokes an active token of the session's tenant;
@@ -1272,7 +1188,7 @@ func (s *Server) apiAudit(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	if !ok {
 		return
 	}
-	_, where, args := auditFilter(r.URL.Query(), c.sess())
+	where, args := auditFilter(r.URL.Query(), c.sess())
 	if before > 0 {
 		args = append(args, before)
 		where += " AND id < $" + strconv.Itoa(len(args))

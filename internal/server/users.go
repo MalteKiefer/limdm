@@ -127,44 +127,12 @@ func (s *Server) consoleUsers(ctx context.Context, sess session) ([]consoleUser,
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[consoleUser])
 }
 
-func (s *Server) usersPage(w http.ResponseWriter, r *http.Request, sess session) {
-	s.renderUsers(w, r, sess, "", "")
-}
-
-func (s *Server) renderUsers(w http.ResponseWriter, r *http.Request, sess session, creds, errMsg string) {
-	users, err := s.consoleUsers(r.Context(), sess)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.render(w, r, sess, "users", map[string]any{"Users": users, "Roles": roles, "Creds": creds, "Error": errMsg,
-		"LocalLogin": s.settings().LocalLogin, "OIDC": s.oidc() != nil, "FourEyes": s.settings().FourEyes})
-}
-
 // enabledAdminsExcept counts active admins other than login.
 func enabledAdminsExcept(ctx context.Context, tx pgx.Tx, login string) (int, error) {
 	var n int
 	err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM console_users WHERE role='admin' AND NOT disabled AND email<>$1)
 		+ (SELECT count(*) FROM local_admins WHERE role='admin' AND NOT disabled AND 'local:' || name <> $1)`, login).Scan(&n)
 	return n, err
-}
-
-func (s *Server) userAdd(w http.ResponseWriter, r *http.Request, sess session) {
-	creds, approval, err := s.addUser(r.Context(), sess, userAddition{Kind: r.FormValue("kind"), Login: r.FormValue("login"), Role: r.FormValue("role")}, r.FormValue("reason"))
-	s.userDone(w, r, sess, creds, approval, err)
-}
-
-// userDone answers a console form of the users page: the error, the way
-// to the approval, or the page with new credentials.
-func (s *Server) userDone(w http.ResponseWriter, r *http.Request, sess session, creds string, approval int64, err error) {
-	switch {
-	case err != nil:
-		s.renderUsers(w, r, sess, "", err.Error())
-	case approval != 0:
-		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
-	default:
-		s.renderUsers(w, r, sess, creds, "")
-	}
 }
 
 // addUser creates a console account in the tenant of sess and returns
@@ -196,22 +164,6 @@ func (s *Server) addUser(ctx context.Context, sess session, add userAddition, re
 		return err
 	})
 	return creds, 0, err
-}
-
-// userUpdate changes role or enabled state; self lockout and losing the last admin are refused.
-func (s *Server) userUpdate(w http.ResponseWriter, r *http.Request, sess session) {
-	c := userChange{Role: r.FormValue("role"), Disabled: r.FormValue("disabled") == "on"}
-	var err error
-	if c.Tags, err = parseTags(r.FormValue("scope_tags")); err != nil {
-		s.renderUsers(w, r, sess, "", err.Error())
-		return
-	}
-	if c.Groups, err = parseScopeGroups(r.FormValue("scope_groups")); err != nil {
-		s.renderUsers(w, r, sess, "", err.Error())
-		return
-	}
-	approval, err := s.updateUser(r.Context(), sess, r.FormValue("login"), c, r.FormValue("reason"))
-	s.userDone(w, r, sess, "", approval, err)
 }
 
 // updateUser stores the role, state and scope of an account, or asks for
@@ -324,11 +276,6 @@ func (s *Server) applyUserChange(ctx context.Context, tx pgx.Tx, login string, c
 		err = &userError{http.StatusNotFound, "user not found"}
 	}
 	return err
-}
-
-func (s *Server) userReset(w http.ResponseWriter, r *http.Request, sess session) {
-	creds, approval, err := s.resetUser(r.Context(), sess, r.FormValue("login"), r.FormValue("reason"))
-	s.userDone(w, r, sess, creds, approval, err)
 }
 
 // resetUser replaces password and TOTP of a local account and returns the

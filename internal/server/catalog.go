@@ -400,26 +400,6 @@ func (s *Server) catalogIcon(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(png)
 }
 
-func appSourcesText(src []api.AppSource) string {
-	var parts []string
-	for _, s := range src {
-		switch s.Kind {
-		case "flatpak":
-			parts = append(parts, "Flatpak "+s.Flatpak)
-		case "package":
-			var p []string
-			if s.Debian != "" {
-				p = append(p, "deb "+s.Debian)
-			}
-			if s.Fedora != "" {
-				p = append(p, "rpm "+s.Fedora)
-			}
-			parts = append(parts, strings.Join(p, ", "))
-		}
-	}
-	return strings.Join(parts, " · ")
-}
-
 func (s *Server) catalogRemotes(ctx context.Context, q querier) ([]api.CatalogRemote, error) {
 	rows, err := q.Query(ctx, `SELECT name, url, title, state, catalog_only, signature, seq FROM catalog_remotes ORDER BY name`)
 	if err != nil {

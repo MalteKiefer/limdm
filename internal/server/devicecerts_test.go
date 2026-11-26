@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -180,17 +179,9 @@ func TestNetworkCertsIssueRevokeCRL(t *testing.T) {
 	if code := get("lmc_right"); code != http.StatusOK {
 		t.Fatalf("CRL with the token: %d", code)
 	}
-	// the console page renders the issued certificate
-	pw := httptest.NewRecorder()
+	// the list the network API shows
 	certs, err := s.networkCerts(ctx, "")
 	if err != nil || len(certs) != 1 || certs[0].State() != "revoked" || certs[0].Hostname != "pc1" {
 		t.Fatalf("list: %v %+v", err, certs)
-	}
-	if err := pages["en/iso"]["network"].Execute(pw, map[string]any{"Certs": certs, "Sess": session{Role: "admin"}, "TokenSet": true,
-		"CRLURL": "https://mdm.test/network/crl.pem", "CANotAfter": time.Now(), "Brand": map[string]any{}}); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(pw.Body.String(), certs[0].Serial) {
-		t.Fatal("certificate missing on the page")
 	}
 }
