@@ -410,3 +410,17 @@ CREATE OR REPLACE FUNCTION limdm_version_key(v text) RETURNS numeric[] LANGUAGE 
     SELECT coalesce(array_agg(m.x[1]::numeric ORDER BY m.n), '{}')
     FROM regexp_matches(regexp_replace(coalesce(v, ''), '^[0-9]+:', ''), '[0-9]+', 'g') WITH ORDINALITY AS m(x, n)
 $$;
+-- tokens for the admin REST API and the metrics endpoint; only the hash is stored
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id           BIGSERIAL PRIMARY KEY,
+    name         TEXT NOT NULL,
+    prefix       TEXT NOT NULL,
+    token_hash   BYTEA NOT NULL UNIQUE,
+    role         TEXT NOT NULL CHECK (role IN ('admin', 'helpdesk', 'auditor', 'metrics')),
+    read_only    BOOLEAN NOT NULL DEFAULT false,
+    created_by   TEXT NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at   TIMESTAMPTZ NOT NULL,
+    last_used_at TIMESTAMPTZ,
+    revoked_at   TIMESTAMPTZ
+);

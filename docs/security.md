@@ -48,6 +48,10 @@
   rate limit (client IPs from `X-Forwarded-For` are only trusted from a loopback proxy).
 * Sessions: sealed cookies, 30 minutes idle and 8 hours absolute timeout, CSRF tokens on
   every form, `SameSite=Lax`, `Secure`, `HttpOnly`; the sign in form uses a separate `SameSite=Strict` token.
+* Admin API and metrics: bearer tokens only, no cookies. Tokens carry a role, always expire,
+  are stored as SHA-256 hashes, are shown once and can be revoked; creation, revocation,
+  failed authentication and role denials are audited, and requests are rate limited per
+  token and failures per client address. See [admin-api.md](admin-api.md).
 * Headers: strict Content Security Policy (`default-src 'self'`, no inline script or
   style), HSTS, `Referrer-Policy: same-origin`, no framing. The console works without
   JavaScript except the visual blueprint editor.

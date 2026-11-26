@@ -332,6 +332,7 @@ func (s *Server) AdminHandler() http.Handler {
 	mux.HandleFunc("POST /logout", s.logout)
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	s.webRoutes(mux)
+	s.apiRoutes(mux)
 	return securityHeaders(s.consoleFilter(mux))
 }
 

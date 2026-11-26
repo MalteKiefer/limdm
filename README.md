@@ -82,6 +82,7 @@ Host installation with deb, rpm, Arch or Alpine packages behind Caddy, OIDC and 
 | [Notifications](docs/notifications.md) | Email, Slack, Discord and webhook channels, events, delivery log |
 | [Security](docs/security.md) | Architecture, mTLS, signed commands, sessions, audit log, privacy |
 | [Agent API](docs/api.md) | Endpoints, problem details, integrity of commands and items |
+| [Admin API](docs/admin-api.md) | REST API for scripts and integrations, API tokens, OpenAPI |
 | [Operations](docs/operations.md) | Backup, restore, releases, troubleshooting |
 | [Development](docs/development.md) | Building, tests, release process |
 
