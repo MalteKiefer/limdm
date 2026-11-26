@@ -166,7 +166,7 @@ func (s *Server) pageFor(h handler, postRole string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := s.session(w, r)
 		if !ok {
-			http.Redirect(w, r, "/login", http.StatusFound)
+			toLogin(w, r)
 			return
 		}
 		if !tenantAllowed(sess, r.Pattern) { // deny by default (tenant.go)

@@ -26,6 +26,7 @@ func (s *Server) appAPIRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/stats/fleet", s.need("read", s.apiStatsFleet))
 	m.HandleFunc("GET /api/v1/stats/compliance", s.need("read", s.apiStatsCompliance))
 	m.HandleFunc("GET /api/v1/stats/attention", s.need("read", s.apiStatsAttention))
+	s.appSettingsRoutes(m) // app_settings.go
 }
 
 // csrfHeader carries the session's CSRF token on every state changing

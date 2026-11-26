@@ -321,7 +321,8 @@ func (s *Server) renderLogin(w http.ResponseWriter, r *http.Request, msg string)
 	// double submit token against login CSRF
 	http.SetCookie(w, &http.Cookie{Name: loginCookie, Value: tok, Path: "/login", HttpOnly: true, Secure: true,
 		SameSite: http.SameSiteStrictMode, MaxAge: 600})
-	s.render(w, r, session{}, "login", map[string]any{"OIDC": s.oidc() != nil, "Local": s.localAllowed(), "LoginCSRF": tok, "Error": msg})
+	s.render(w, r, session{}, "login", map[string]any{"OIDC": s.oidc() != nil, "Local": s.localAllowed(), "LoginCSRF": tok, "Error": msg,
+		"Next": safeNext(r.FormValue("next"))})
 }
 
 func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
@@ -353,7 +354,7 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	_, gen := s.account(r.Context(), localPrefix+name)
 	s.setCookie(w, sessionCookie, s.seal(session{Email: localPrefix + name, Role: role, IAT: now, Last: now, Gen: gen}), maxSession)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, safeNext(r.FormValue("next")), http.StatusSeeOther)
 }
 
 var errLoginFailed = errors.New("invalid credentials")

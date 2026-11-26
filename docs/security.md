@@ -116,6 +116,10 @@
 * Sessions: sealed cookies, 30 minutes idle and 8 hours absolute timeout, CSRF tokens on
   every form, `SameSite=Lax`, `Secure`, `HttpOnly`; the sign in form uses a separate
   `SameSite=Strict` token. Signing out ends the sessions of the account everywhere.
+  A page opened without a session sends the browser to the sign in with its own path as
+  `next`; after the sign in it returns there. Only a path of the console origin is
+  accepted (no other host, no `//`, no backslash or control characters, not the sign in
+  pages or the API); anything else lands on the start page, so `next` is no open redirect.
 * Console app (`/app/`): its HTML is served to signed in sessions only, its hashed scripts,
   styles and fonts are the public build and are cached for a year. It calls the admin API
   with the session cookie; the API then requires a same origin request (`Sec-Fetch-Site`,
