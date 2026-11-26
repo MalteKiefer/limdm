@@ -15,6 +15,8 @@ func (s *Server) appHomeRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/stats/tenants", s.need("admin", s.superAPI(s.apiStatsTenants)))
 	m.HandleFunc("GET /api/v1/stats/commands", s.need("read", s.apiStatsCommands))
 	m.HandleFunc("GET /api/v1/onboarding", s.need("read", s.apiOnboarding))
+	m.HandleFunc("GET /api/v1/stats/updates", s.need("read", s.apiStatsUpdates))
+	m.HandleFunc("GET /api/v1/stats/annotations", s.need("audit", s.apiStatsAnnotations))
 }
 
 type statsTenant struct {

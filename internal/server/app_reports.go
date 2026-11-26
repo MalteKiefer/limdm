@@ -13,6 +13,7 @@ import (
 func (s *Server) appReportsRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/compliance/history", s.need("read", s.apiComplianceHistory))
 	m.HandleFunc("GET /api/v1/exports/{kind}", s.need("audit", s.apiExport))
+	s.appReportScheduleRoutes(m)
 }
 
 // exportKinds are the files export writes.

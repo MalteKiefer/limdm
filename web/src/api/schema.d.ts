@@ -848,6 +848,129 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/stats/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pending security updates and devices on the newest approved agent release, devices in scope; daily history in the global view */
+        get: operations["statsUpdates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stats/annotations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Events the history charts mark: key rotations, approved agent releases, blueprint changes, failed backups (audit log, admins and auditors) */
+        get: operations["statsAnnotations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/report-schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Own report schedules (admins: all of the tenant view) and the channels a schedule may use */
+        get: operations["listReportSchedules"];
+        put?: never;
+        /**
+         * Schedule a saved report preset (create or replace the caller's schedule of it)
+         * @description People with the admin or auditor role, not tokens. The report runs as its owner with the role and scope the owner has at run time, in the tenant view it was scheduled in; recipients get a link, never the file. Audited as report.schedule, each run as report.run.
+         */
+        post: operations["saveReportSchedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/report-schedules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a schedule (owner or admin of the tenant view); audited as report.unschedule */
+        delete: operations["deleteReportSchedule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/report-schedules/{id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a schedule now and send it */
+        post: operations["runReportSchedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/report-schedules/{id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The kept runs of a schedule (last 10) */
+        get: operations["listReportRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/report-runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The file of a run: its owner, or admins and auditors without a device scope in the same or the all tenants view; audited as report.download */
+        get: operations["downloadReportRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1395,6 +1518,96 @@ export interface components {
             }[];
             state: components["schemas"]["HistoryRow"][];
             changes: components["schemas"]["HistoryRow"][];
+        };
+        StatsUpdatesDay: {
+            /** Format: date */
+            day: string;
+            security_devices: number | null;
+            security_old: number | null;
+            agent_current: number | null;
+            agent_total: number | null;
+        };
+        StatsUpdates: {
+            /** @description Devices with pending security updates */
+            security_devices: number;
+            /** @description Pending security updates in total */
+            security_updates: number;
+            /** @description Devices failing updates.security for more than 14 days */
+            security_old: number;
+            /** @description Newest approved agent release, else the newest version reported */
+            agent_newest: string;
+            agent_approved: boolean;
+            agent_current: number;
+            agent_total: number;
+            /** @description Global view only, oldest first */
+            history: components["schemas"]["StatsUpdatesDay"][];
+        };
+        StatsAnnotation: {
+            /** Format: date */
+            day: string;
+            action: string;
+            label: string;
+            target: string;
+            count: number;
+        };
+        StatsAnnotationList: {
+            items: components["schemas"]["StatsAnnotation"][];
+            next_cursor?: string;
+        };
+        ReportSchedule: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            view_id: number;
+            name: string;
+            query: string;
+            owner: string;
+            tenant_id: number | null;
+            /** @enum {string} */
+            cadence: "daily" | "weekly" | "monthly";
+            channels: number[];
+            emails: string[];
+            /** Format: date-time */
+            next_run: string;
+            /** Format: date-time */
+            last_run: string | null;
+            last_error: string;
+        };
+        ReportScheduleList: {
+            items: components["schemas"]["ReportSchedule"][];
+            channels: {
+                /** Format: int64 */
+                id: number;
+                name: string;
+                kind: string;
+            }[];
+        };
+        ReportScheduleInput: {
+            /**
+             * Format: int64
+             * @description A saved view of the list reports
+             */
+            view_id: number;
+            /** @enum {string} */
+            cadence: "daily" | "weekly" | "monthly";
+            channels?: number[];
+            emails?: string[];
+        };
+        ReportRun: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            schedule_id: number;
+            /** Format: date-time */
+            at: string;
+            kind: string;
+            rows: number;
+            sha256: string;
+            error: string;
+        };
+        ReportRunList: {
+            items: components["schemas"]["ReportRun"][];
+            next_cursor?: string;
         };
     };
     responses: {
@@ -3090,6 +3303,221 @@ export interface operations {
                 };
             };
             400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    statsUpdates: {
+        parameters: {
+            query?: {
+                /** @description 1..400, default 30 */
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatsUpdates"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    statsAnnotations: {
+        parameters: {
+            query?: {
+                /** @description 1..400, default 30 */
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatsAnnotationList"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listReportSchedules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportScheduleList"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    saveReportSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportScheduleInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportSchedule"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deleteReportSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    runReportSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportRun"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listReportRuns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportRunList"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    downloadReportRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
