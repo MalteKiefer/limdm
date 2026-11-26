@@ -500,42 +500,45 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		}
 		it.Payload = p
 	}
-	if it.Type == api.TypeBootloader { // hash a plain password before it is validated and stored
-		p, err := api.PrepareBootloader(it.Payload)
-		if err != nil {
-			fail(err)
-			return
-		}
-		it.Payload = p
-	}
-	if err := it.Validate(); err != nil {
-		fail(err)
-		return
-	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, it.Payload); err != nil {
-		fail(err)
-		return
-	}
-	sig := signItem(it.Name, it.Type, compact.Bytes())
-	err := s.auditAction(r.Context(), sess.Email, "library.save", it.Name, it.Type+" "+compact.String(), func(tx pgx.Tx) error {
-		if id > 0 {
-			tag, err := tx.Exec(r.Context(), `UPDATE library_items SET name=$2, type=$3, description=$4, payload=$5, signature=$6, updated_at=now() WHERE id=$1`,
-				id, it.Name, it.Type, it.Description, compact.String(), sig)
-			if err == nil && tag.RowsAffected() == 0 {
-				err = errors.New("library item not found")
-			}
-			return err
-		}
-		_, err := tx.Exec(r.Context(), `INSERT INTO library_items(name, type, description, payload, signature) VALUES ($1,$2,$3,$4,$5)`,
-			it.Name, it.Type, it.Description, compact.String(), sig)
-		return err
-	})
-	if err != nil {
+	if err := s.saveLibraryItem(r.Context(), sess.Email, &it); err != nil {
 		fail(err)
 		return
 	}
 	http.Redirect(w, r, "/library", http.StatusSeeOther)
+}
+
+// saveLibraryItem validates, signs and stores a library item with its audit
+// entry; ID 0 creates one and sets it.ID. The console and the admin API both
+// save through here.
+func (s *Server) saveLibraryItem(ctx context.Context, actor string, it *api.LibraryItem) error {
+	if it.Type == api.TypeBootloader { // hash a plain password before it is validated and stored
+		p, err := api.PrepareBootloader(it.Payload)
+		if err != nil {
+			return invalid(err)
+		}
+		it.Payload = p
+	}
+	if err := it.Validate(); err != nil {
+		return invalid(err)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, it.Payload); err != nil {
+		return invalid(err)
+	}
+	it.Payload = compact.Bytes()
+	sig := signItem(it.Name, it.Type, compact.Bytes())
+	return s.auditAction(ctx, actor, "library.save", it.Name, it.Type+" "+compact.String(), func(tx pgx.Tx) error {
+		if it.ID > 0 {
+			tag, err := tx.Exec(ctx, `UPDATE library_items SET name=$2, type=$3, description=$4, payload=$5, signature=$6, updated_at=now() WHERE id=$1`,
+				it.ID, it.Name, it.Type, it.Description, compact.String(), sig)
+			if err == nil && tag.RowsAffected() == 0 {
+				err = &userError{http.StatusNotFound, "library item not found"}
+			}
+			return err
+		}
+		return tx.QueryRow(ctx, `INSERT INTO library_items(name, type, description, payload, signature) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+			it.Name, it.Type, it.Description, compact.String(), sig).Scan(&it.ID)
+	})
 }
 
 func (s *Server) libraryDelete(w http.ResponseWriter, r *http.Request, sess session) {
@@ -544,24 +547,29 @@ func (s *Server) libraryDelete(w http.ResponseWriter, r *http.Request, sess sess
 		http.NotFound(w, r)
 		return
 	}
-	use, err := s.itemUsage(r.Context())
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if len(use[id]) > 0 {
-		http.Error(w, "item is used by blueprints: "+strings.Join(use[id], ", "), http.StatusConflict)
-		return
-	}
-	err = s.auditAction(r.Context(), sess.Email, "library.delete", strconv.FormatInt(id, 10), "", func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `DELETE FROM library_items WHERE id=$1`, id)
-		return err
-	})
-	if err != nil {
-		s.fail(w, err)
+	if err := s.deleteLibraryItem(r.Context(), sess.Email, id); err != nil {
+		s.failUser(w, err)
 		return
 	}
 	http.Redirect(w, r, "/library", http.StatusSeeOther)
+}
+
+// deleteLibraryItem removes an item no blueprint uses, with its audit entry.
+func (s *Server) deleteLibraryItem(ctx context.Context, actor string, id int64) error {
+	use, err := s.itemUsage(ctx)
+	if err != nil {
+		return err
+	}
+	if len(use[id]) > 0 {
+		return &userError{http.StatusConflict, "item is used by blueprints: " + strings.Join(use[id], ", ")}
+	}
+	return s.auditAction(ctx, actor, "library.delete", strconv.FormatInt(id, 10), "", func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `DELETE FROM library_items WHERE id=$1`, id)
+		if err == nil && tag.RowsAffected() == 0 {
+			err = &userError{http.StatusNotFound, "library item not found"}
+		}
+		return err
+	})
 }
 
 // ---- web: blueprints ----
@@ -653,47 +661,55 @@ func (s *Server) blueprintSave(w http.ResponseWriter, r *http.Request, sess sess
 		bp.Parent = &p
 	}
 	err := json.Unmarshal([]byte(r.FormValue("tree")), &bp.Tree)
-	if err == nil && !identOK(bp.Name) {
-		err = errors.New("name must be 1..64 characters: letters, digits, dot, dash, underscore")
-	}
 	if err == nil {
-		items, ierr := s.allItems(ctx)
-		if ierr != nil {
-			s.fail(w, ierr)
-			return
-		}
-		ids := map[int64]bool{}
-		for _, it := range items {
-			ids[it.ID] = true
-		}
-		err = api.ValidateTree(bp.Tree, func(i int64) bool { return ids[i] })
+		err = s.saveBlueprint(ctx, sess.Email, &bp)
 	}
-	if err == nil && bp.Parent != nil && id > 0 {
-		err = s.checkNoCycle(ctx, id, *bp.Parent)
-	}
-	if err != nil {
-		s.renderBlueprint(w, r, sess, bp, r.FormValue("tree"), err.Error())
-		return
-	}
-	tree, _ := json.Marshal(bp.Tree)
-	err = s.auditAction(ctx, sess.Email, "blueprint.save", bp.Name, string(tree), func(tx pgx.Tx) error {
-		if id > 0 {
-			// the default blueprint applies by name and cannot inherit
-			tag, err := tx.Exec(ctx, `UPDATE blueprints SET name=$2, description=$3, parent_id=CASE WHEN name='default' THEN NULL ELSE $4::bigint END, tree=$5, updated_at=now()
-				WHERE id=$1 AND (name <> 'default' OR $2 = 'default')`, id, bp.Name, bp.Desc, bp.Parent, string(tree))
-			if err == nil && tag.RowsAffected() == 0 {
-				err = errors.New("blueprint not found, or default cannot be renamed")
-			}
-			return err
-		}
-		_, err := tx.Exec(ctx, `INSERT INTO blueprints(name, description, parent_id, tree) VALUES ($1,$2,$3,$4)`, bp.Name, bp.Desc, bp.Parent, string(tree))
-		return err
-	})
 	if err != nil {
 		s.renderBlueprint(w, r, sess, bp, r.FormValue("tree"), err.Error())
 		return
 	}
 	http.Redirect(w, r, "/blueprints", http.StatusSeeOther)
+}
+
+// saveBlueprint validates and stores a blueprint with its audit entry; ID 0
+// creates one and sets bp.ID. The console and the admin API both save
+// through here.
+func (s *Server) saveBlueprint(ctx context.Context, actor string, bp *blueprintRec) error {
+	if bp.Tree == nil {
+		bp.Tree = []api.Node{}
+	}
+	if !identOK(bp.Name) {
+		return &userError{http.StatusUnprocessableEntity, "name must be 1..64 characters: letters, digits, dot, dash, underscore"}
+	}
+	items, err := s.allItems(ctx)
+	if err != nil {
+		return err
+	}
+	ids := map[int64]bool{}
+	for _, it := range items {
+		ids[it.ID] = true
+	}
+	if err := api.ValidateTree(bp.Tree, func(i int64) bool { return ids[i] }); err != nil {
+		return invalid(err)
+	}
+	if bp.Parent != nil && bp.ID > 0 {
+		if err := s.checkNoCycle(ctx, bp.ID, *bp.Parent); err != nil {
+			return invalid(err)
+		}
+	}
+	tree, _ := json.Marshal(bp.Tree)
+	return s.auditAction(ctx, actor, "blueprint.save", bp.Name, string(tree), func(tx pgx.Tx) error {
+		if bp.ID > 0 {
+			// the default blueprint applies by name and cannot inherit
+			tag, err := tx.Exec(ctx, `UPDATE blueprints SET name=$2, description=$3, parent_id=CASE WHEN name='default' THEN NULL ELSE $4::bigint END, tree=$5, updated_at=now()
+				WHERE id=$1 AND (name <> 'default' OR $2 = 'default')`, bp.ID, bp.Name, bp.Desc, bp.Parent, string(tree))
+			if err == nil && tag.RowsAffected() == 0 {
+				err = &userError{http.StatusNotFound, "blueprint not found, or default cannot be renamed"}
+			}
+			return err
+		}
+		return tx.QueryRow(ctx, `INSERT INTO blueprints(name, description, parent_id, tree) VALUES ($1,$2,$3,$4) RETURNING id`, bp.Name, bp.Desc, bp.Parent, string(tree)).Scan(&bp.ID)
+	})
 }
 
 func identOK(s string) bool {
@@ -730,18 +746,27 @@ func (s *Server) blueprintDelete(w http.ResponseWriter, r *http.Request, sess se
 		http.NotFound(w, r)
 		return
 	}
-	err = s.auditAction(r.Context(), sess.Email, "blueprint.delete", strconv.FormatInt(id, 10), "devices fall back to default", func(tx pgx.Tx) error {
-		tag, err := tx.Exec(r.Context(), `DELETE FROM blueprints WHERE id=$1 AND name <> 'default'`, id)
-		if err == nil && tag.RowsAffected() == 0 {
-			err = errors.New("blueprint not found or is the default")
-		}
-		return err
-	})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+	if err := s.deleteBlueprint(r.Context(), sess.Email, id); err != nil {
+		s.failUser(w, err)
 		return
 	}
 	http.Redirect(w, r, "/blueprints", http.StatusSeeOther)
+}
+
+// deleteBlueprint removes a blueprint other than default, with its audit
+// entry; its devices fall back to default.
+func (s *Server) deleteBlueprint(ctx context.Context, actor string, id int64) error {
+	return s.auditAction(ctx, actor, "blueprint.delete", strconv.FormatInt(id, 10), "devices fall back to default", func(tx pgx.Tx) error {
+		var name string
+		err := tx.QueryRow(ctx, `DELETE FROM blueprints WHERE id=$1 RETURNING name`, id).Scan(&name)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return &userError{http.StatusNotFound, "blueprint not found"}
+		case err == nil && name == "default":
+			return &userError{http.StatusConflict, "the default blueprint cannot be deleted"} // rolls the delete back
+		}
+		return err
+	})
 }
 
 // prettyJSON indents an example payload for display.

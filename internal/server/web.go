@@ -882,6 +882,13 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 
 // queueCommand stores a command for a device and audits it.
 func (s *Server) queueCommand(ctx context.Context, actor, id, typ, payload string) error {
+	_, err := s.queueCommandID(ctx, actor, id, typ, payload)
+	return err
+}
+
+// queueCommandID is queueCommand returning the new command's id.
+func (s *Server) queueCommandID(ctx context.Context, actor, id, typ, payload string) (int64, error) {
+	var cid int64
 	detail := payload
 	var u api.UserCommand
 	if strings.HasPrefix(typ, "user_") && json.Unmarshal([]byte(payload), &u) == nil {
@@ -889,8 +896,12 @@ func (s *Server) queueCommand(ctx context.Context, actor, id, typ, payload strin
 		b, _ := json.Marshal(u) //nolint:gosec // the password was cleared just above
 		detail = string(b)
 	}
-	return s.auditAction(ctx, actor, "command."+typ, id, truncate(detail, 2000), func(tx pgx.Tx) error {
+	err := s.auditAction(ctx, actor, "command."+typ, id, truncate(detail, 2000), func(tx pgx.Tx) error {
 		if err := s.insertCommand(ctx, tx, id, typ, payload, actor); err != nil {
+			return err
+		}
+		// the id this connection's insert just took
+		if err := tx.QueryRow(ctx, `SELECT currval(pg_get_serial_sequence('commands', 'id'))`).Scan(&cid); err != nil {
 			return err
 		}
 		if typ == "unlock" || typ == "lock" { // a manual action takes over from the compliance policy
@@ -899,6 +910,7 @@ func (s *Server) queueCommand(ctx context.Context, actor, id, typ, payload strin
 		}
 		return nil
 	})
+	return cid, err
 }
 
 // commandPayload checks a command from the form and builds its payload; a
@@ -1361,7 +1373,35 @@ type auditRow struct {
 }
 
 func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session) {
-	q := r.URL.Query()
+	where, args, f := auditFilter(r.URL.Query())
+	rows, err := s.db.Query(r.Context(), `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE `+strings.Join(where, " AND ")+` ORDER BY id DESC LIMIT 300`, args...)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[auditRow])
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	brokenAt, err := s.verifyAudit(r.Context())
+	if full := s.auditBroken.Load(); err == nil && brokenAt == 0 && full != 0 {
+		brokenAt = full
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	var actions []string
+	if rows, err := s.db.Query(r.Context(), `SELECT DISTINCT action FROM audit_log ORDER BY 1`); err == nil {
+		actions, _ = pgx.CollectRows(rows, pgx.RowTo[string])
+	}
+	s.render(w, r, sess, "audit", map[string]any{"Entries": list, "BrokenAt": brokenAt, "F": f, "Actions": actions})
+}
+
+// auditFilter turns the audit log filters of a query string into SQL
+// conditions; the console page and the admin API share it.
+func auditFilter(q url.Values) ([]string, []any, map[string]string) {
 	f := map[string]string{"q": strings.TrimSpace(q.Get("q")), "actor": strings.TrimSpace(q.Get("actor")), "action": strings.TrimSpace(q.Get("action")),
 		"target": strings.TrimSpace(q.Get("target")), "from": q.Get("from"), "to": q.Get("to")}
 	where, args := []string{"true"}, []any{}
@@ -1388,29 +1428,7 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session)
 			f[k] = ""
 		}
 	}
-	rows, err := s.db.Query(r.Context(), `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE `+strings.Join(where, " AND ")+` ORDER BY id DESC LIMIT 300`, args...)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[auditRow])
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	brokenAt, err := s.verifyAudit(r.Context())
-	if full := s.auditBroken.Load(); err == nil && brokenAt == 0 && full != 0 {
-		brokenAt = full
-	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	var actions []string
-	if rows, err := s.db.Query(r.Context(), `SELECT DISTINCT action FROM audit_log ORDER BY 1`); err == nil {
-		actions, _ = pgx.CollectRows(rows, pgx.RowTo[string])
-	}
-	s.render(w, r, sess, "audit", map[string]any{"Entries": list, "BrokenAt": brokenAt, "F": f, "Actions": actions})
+	return where, args, f
 }
 
 // verifyAudit recomputes the hash chain. Returns the first broken id or 0.
