@@ -880,3 +880,7 @@ CREATE INDEX IF NOT EXISTS saved_views_owner ON saved_views(owner, list);
 CREATE INDEX IF NOT EXISTS saved_views_shared ON saved_views(tenant_id, list) WHERE shared;
 -- the console app counts failed commands of the last day (appstats.go)
 CREATE INDEX IF NOT EXISTS commands_updated ON commands(updated_at);
+
+-- UI-D
+-- why an approval was approved or rejected (app inbox, approvals.go)
+ALTER TABLE approvals ADD COLUMN IF NOT EXISTS decision_reason TEXT NOT NULL DEFAULT '';

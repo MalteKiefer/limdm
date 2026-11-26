@@ -84,14 +84,61 @@ func historyParams(q url.Values) (cutoff time.Time, device string, ok bool) {
 }
 
 type historyRow struct {
-	DeviceID, Hostname, CheckID, Status, Detail string
-	Since                                       time.Time
-	Catalog                                     string
+	DeviceID string    `json:"device_id"`
+	Hostname string    `json:"hostname"`
+	CheckID  string    `json:"check_id"`
+	Status   string    `json:"status"`
+	Detail   string    `json:"detail"`
+	Since    time.Time `json:"since"`
+	Catalog  string    `json:"catalog_version"`
 }
 
 type historyDevice struct {
-	ID, Hostname      string
-	Pass, Fail, Other int
+	ID       string `json:"id"`
+	Hostname string `json:"hostname"`
+	Pass     int    `json:"pass"`
+	Fail     int    `json:"fail"`
+	Other    int    `json:"other"`
+}
+
+// historyAt is the state of the fleet in the scope of sess before cutoff:
+// per check of one device (state) or per device (devices), and the changes
+// of that one device up to cutoff. Console page and app API share it.
+func (s *Server) historyAt(ctx context.Context, sess session, cutoff time.Time, device string) (state []historyRow, devices []*historyDevice, changes []historyRow, err error) {
+	cond, sargs := scopeCond(sess, 2)
+	rows, err := s.db.Query(ctx, `SELECT h.device_id, d.hostname, h.check_id, h.status, h.detail, h.at, h.catalog_version
+		FROM (`+historyStateSQL+`) h JOIN devices d ON d.id = h.device_id WHERE `+cond+` ORDER BY d.hostname, h.device_id, h.check_id`, append([]any{cutoff, device}, sargs...)...)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if state, err = pgx.CollectRows(rows, pgx.RowToStructByPos[historyRow]); err != nil {
+		return nil, nil, nil, err
+	}
+	for _, h := range state {
+		if len(devices) == 0 || devices[len(devices)-1].ID != h.DeviceID {
+			devices = append(devices, &historyDevice{ID: h.DeviceID, Hostname: h.Hostname})
+		}
+		d := devices[len(devices)-1]
+		switch h.Status {
+		case "pass":
+			d.Pass++
+		case "fail":
+			d.Fail++
+		default:
+			d.Other++
+		}
+	}
+	if device != "" {
+		rows, err := s.db.Query(ctx, `SELECT c.device_id, d.hostname, c.check_id, c.status, c.detail, c.at, c.catalog_version
+			FROM compliance_changes c JOIN devices d ON d.id = c.device_id WHERE c.device_id = $1 AND c.at < $2 ORDER BY c.id DESC LIMIT 500`, device, cutoff)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if changes, err = pgx.CollectRows(rows, pgx.RowToStructByPos[historyRow]); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	return state, devices, changes, nil
 }
 
 // complianceHistory shows the state of all devices, or one device with its
@@ -109,47 +156,12 @@ func (s *Server) complianceHistory(w http.ResponseWriter, r *http.Request, sess 
 		return
 	}
 	at := cutoff.AddDate(0, 0, -1).Format("2006-01-02")
-	cond, sargs := scopeCond(sess, 2)
-	rows, err := s.db.Query(ctx, `SELECT h.device_id, d.hostname, h.check_id, h.status, h.detail, h.at, h.catalog_version
-		FROM (`+historyStateSQL+`) h JOIN devices d ON d.id = h.device_id WHERE `+cond+` ORDER BY d.hostname, h.device_id, h.check_id`, append([]any{cutoff, device}, sargs...)...)
+	state, devices, changes, err := s.historyAt(ctx, sess, cutoff, device)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	state, err := pgx.CollectRows(rows, pgx.RowToStructByPos[historyRow])
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	var devices []*historyDevice
-	for _, h := range state {
-		if len(devices) == 0 || devices[len(devices)-1].ID != h.DeviceID {
-			devices = append(devices, &historyDevice{ID: h.DeviceID, Hostname: h.Hostname})
-		}
-		d := devices[len(devices)-1]
-		switch h.Status {
-		case "pass":
-			d.Pass++
-		case "fail":
-			d.Fail++
-		default:
-			d.Other++
-		}
-	}
-	var changes []historyRow
-	if device != "" {
-		rows, err := s.db.Query(ctx, `SELECT c.device_id, d.hostname, c.check_id, c.status, c.detail, c.at, c.catalog_version
-			FROM compliance_changes c JOIN devices d ON d.id = c.device_id WHERE c.device_id = $1 AND c.at < $2 ORDER BY c.id DESC LIMIT 500`, device, cutoff)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		if changes, err = pgx.CollectRows(rows, pgx.RowToStructByPos[historyRow]); err != nil {
-			s.fail(w, err)
-			return
-		}
-	}
-	cond, sargs = scopeCond(sess, 0)
+	cond, sargs := scopeCond(sess, 0)
 	all, err := s.listDevicesWhere(ctx, cond, sargs...)
 	if err != nil {
 		s.fail(w, err)

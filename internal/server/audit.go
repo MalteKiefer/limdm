@@ -513,25 +513,28 @@ func (s *Server) auditExportJSONL(w http.ResponseWriter, r *http.Request, sess s
 
 // auditVerify runs the full chain verification on demand (admins and auditors).
 func (s *Server) auditVerify(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	broken, err := s.verifyAuditFrom(ctx, false)
-	if err != nil {
+	if _, err := s.verifyAuditChain(r.Context(), sess.Email); err != nil {
 		s.fail(w, err)
 		return
 	}
+	http.Redirect(w, r, "/audit", http.StatusSeeOther)
+}
+
+// verifyAuditChain verifies the whole chain, stores and audits the result
+// and returns the first broken entry (0 = intact). Console and app share it.
+func (s *Server) verifyAuditChain(ctx context.Context, actor string) (int64, error) {
+	broken, err := s.verifyAuditFrom(ctx, false)
+	if err != nil {
+		return 0, err
+	}
 	if _, err := s.storeAuditVerification(ctx, broken); err != nil {
-		s.fail(w, err)
-		return
+		return 0, err
 	}
 	result := "chain intact"
 	if broken != 0 {
 		result = fmt.Sprintf("chain broken at entry %d", broken)
 	}
-	if err := s.auditAction(ctx, sess.Email, "audit.verify", "", result, nil); err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/audit", http.StatusSeeOther)
+	return broken, s.auditAction(ctx, actor, "audit.verify", "", result, nil)
 }
 
 // auditBudget limits audit entries of failed sign ins: anyone can cause

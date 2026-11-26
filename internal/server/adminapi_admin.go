@@ -55,12 +55,14 @@ type apiApproval struct {
 	DecidedAt   *time.Time      `json:"decided_at"`
 	CreatedAt   time.Time       `json:"created_at"`
 	ExpiresAt   time.Time       `json:"expires_at"`
+	// DecisionReason is why the deciding admin approved or rejected.
+	DecisionReason string `json:"decision_reason"`
 	// Credentials are new local credentials an approved user.add or
 	// user.reset created; only in the answer of the decision.
 	Credentials string `json:"credentials,omitempty"`
 }
 
-const apiApprovalCols = `id, action, target, payload, reason, requested_by, status, decided_by, decided_at, created_at, expires_at, ''`
+const apiApprovalCols = `id, action, target, payload, reason, requested_by, status, decided_by, decided_at, created_at, expires_at, decision_reason, ''`
 
 // approvalCond limits approvals to the caller's tenant; helpdesk tokens see
 // their own requests only, as in the console.
@@ -129,7 +131,8 @@ func (s *Server) apiApprovalGet(w http.ResponseWriter, r *http.Request, c apiCal
 }
 
 // apiApprovalDecide approves or rejects a request like the console: never
-// one the token (or the person who created it) requested.
+// one the token (or the person who created it) requested. An optional JSON
+// body {"reason": "..."} records why; the console app must give one to reject.
 func (s *Server) apiApprovalDecide(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -139,7 +142,18 @@ func (s *Server) apiApprovalDecide(w http.ResponseWriter, r *http.Request, c api
 	if strings.HasSuffix(r.URL.Path, "/reject") {
 		op = "reject"
 	}
-	creds, notices, err := s.decideApproval(r.Context(), c.sess(), id, op)
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	if r.ContentLength != 0 && !decodeJSON(w, r, &in) {
+		return
+	}
+	in.Reason = strings.TrimSpace(in.Reason)
+	if op == "reject" && in.Reason == "" && c.Sess != nil {
+		problemField(w, http.StatusUnprocessableEntity, "reason", "reason: say why the request is rejected")
+		return
+	}
+	creds, notices, err := s.decideApproval(r.Context(), c.sess(), id, op, in.Reason)
 	var ae errApproval
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):

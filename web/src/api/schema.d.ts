@@ -351,7 +351,7 @@ export interface paths {
         put?: never;
         /**
          * Reject an approval request
-         * @description Admin tokens, not read only. Never a request of the same token or of the person who created it (409); an approved command is queued at once. Audited as approval.reject.
+         * @description Admin tokens, not read only. Never a request of the same token or of the person who created it (409); an approved command is queued at once. Audited as approval.reject. A console session must give a reason (422 otherwise); it is stored as decision_reason and audited.
          */
         post: operations["rejectApproval"];
         delete?: never;
@@ -669,6 +669,185 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/stats/tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Tenant comparison: devices, score, non compliant, stale, pending approvals per tenant
+         * @description Super admins in the all tenants view only; 404 without multi tenancy.
+         */
+        get: operations["statsTenants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stats/commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Commands per day by their last change: failed and all, devices in scope */
+        get: operations["statsCommands"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** First steps of a new installation (admins in the global view until done or hidden); empty else */
+        get: operations["onboarding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Commands of every device in scope, newest first; never the payload */
+        get: operations["listCommands"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Audit log and device events as one stream, newest first
+         * @description The audit log only for admins and auditors (and audit scoped tokens), audited as a read like /api/v1/audit; device events in the device scope.
+         */
+        get: operations["listActivity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/activity/histogram": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The filtered stream counted per day and category (default the last 30 days, at most 400) */
+        get: operations["activityHistogram"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** State of the audit hash chain (checked from the last checkpoint), last full verification, known actions */
+        get: operations["auditStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Verify the whole audit chain now (admins and auditors); audited as audit.verify */
+        post: operations["auditVerify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/compliance/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Compliance state at the end of a day: per device, or per check of one device with its changes */
+        get: operations["complianceHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/exports/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Evidence exports as in the console: CSV or JSON Lines, audited twice with row count and SHA-256
+         * @description Admins and auditors. compliance-history.csv takes at and device, audit.csv and audit.jsonl the filters of /api/v1/audit.
+         */
+        get: operations["export"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -862,6 +1041,8 @@ export interface components {
             expires_at?: string;
             /** @description new local credentials of an approved user.add or user.reset, only in the decision's answer */
             credentials?: string;
+            /** @description Why the deciding admin approved or rejected */
+            decision_reason?: string;
         };
         ApprovalPage: {
             items?: components["schemas"]["Approval"][];
@@ -1082,6 +1263,135 @@ export interface components {
                 size: number;
                 error: string;
             };
+        };
+        DecisionInput: {
+            /** @description Why; required to reject from the console app */
+            reason?: string;
+        };
+        StatsTenant: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            devices: number;
+            compliant: number;
+            noncompliant: number;
+            stale: number;
+            pending: number;
+            /** @description Compliant share of reporting devices, percent */
+            score: number;
+            approvals_pending: number;
+        };
+        StatsTenantList: {
+            items: components["schemas"]["StatsTenant"][];
+            next_cursor?: string;
+        };
+        StatsCommandDay: {
+            /** Format: date */
+            day: string;
+            failed: number;
+            total: number;
+        };
+        StatsCommandDays: {
+            items: components["schemas"]["StatsCommandDay"][];
+            next_cursor?: string;
+        };
+        OnboardingStep: {
+            /** @enum {string} */
+            id: "branding" | "sso" | "token" | "blueprint" | "device";
+            done: boolean;
+        };
+        OnboardingList: {
+            items: components["schemas"]["OnboardingStep"][];
+            next_cursor?: string;
+        };
+        FleetCommand: {
+            /** Format: int64 */
+            id: number;
+            device_id: string;
+            hostname: string;
+            type: string;
+            /** @enum {string} */
+            status: "pending" | "sent" | "ok" | "failed" | "expired";
+            output: string;
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        FleetCommandPage: {
+            items: components["schemas"]["FleetCommand"][];
+            next_cursor?: string;
+        };
+        ActivityItem: {
+            /** @description a<audit id> or e<device event id> */
+            id: string;
+            /** @enum {string} */
+            kind: "audit" | "device";
+            /** @enum {string} */
+            category: "commands" | "changes" | "approvals" | "access" | "devices" | "audit" | "events";
+            /** Format: date-time */
+            at: string;
+            actor: string;
+            action: string;
+            /** @description Readable action in the request language */
+            label: string;
+            target: string;
+            hostname?: string;
+            detail: string;
+        };
+        ActivityPage: {
+            items: components["schemas"]["ActivityItem"][];
+            next_cursor?: string;
+        };
+        ActivityHistogram: {
+            days: {
+                /** Format: date */
+                day: string;
+                counts: {
+                    [key: string]: number;
+                };
+            }[];
+            categories: ("commands" | "changes" | "approvals" | "access" | "devices" | "audit" | "events")[];
+        };
+        AuditStatus: {
+            /**
+             * Format: int64
+             * @description First broken entry, 0 = intact
+             */
+            broken_at: number;
+            /**
+             * Format: date-time
+             * @description Last full verification
+             */
+            verified_at: string | null;
+            /** Format: int64 */
+            keyed_from: number;
+            actions: string[];
+        };
+        HistoryRow: {
+            device_id: string;
+            hostname: string;
+            check_id: string;
+            status: string;
+            detail: string;
+            /** Format: date-time */
+            since: string;
+            catalog_version: string;
+        };
+        ComplianceHistory: {
+            /** Format: date */
+            at: string;
+            device: string;
+            devices: {
+                id: string;
+                hostname: string;
+                pass: number;
+                fail: number;
+                other: number;
+            }[];
+            state: components["schemas"]["HistoryRow"][];
+            changes: components["schemas"]["HistoryRow"][];
         };
     };
     responses: {
@@ -1814,7 +2124,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DecisionInput"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -1829,6 +2143,7 @@ export interface operations {
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
         };
@@ -1842,7 +2157,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DecisionInput"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -1857,6 +2176,7 @@ export interface operations {
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
         };
@@ -2448,6 +2768,328 @@ export interface operations {
             };
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    statsTenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatsTenantList"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    statsCommands: {
+        parameters: {
+            query?: {
+                /** @description 1..90, default 14 */
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatsCommandDays"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    onboarding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingList"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listCommands: {
+        parameters: {
+            query?: {
+                /** @description One status */
+                status?: "pending" | "sent" | "ok" | "failed" | "expired";
+                /** @description Changed within 1..90 days, default 7 */
+                days?: number;
+                limit?: components["parameters"]["limit"];
+                /** @description next_cursor of the previous page */
+                cursor?: components["parameters"]["cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetCommandPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listActivity: {
+        parameters: {
+            query?: {
+                /** @description audit or device */
+                kind?: "audit" | "device";
+                /** @description One category */
+                category?: "commands" | "changes" | "approvals" | "access" | "devices" | "audit" | "events";
+                /** @description Text in any field */
+                q?: string;
+                /** @description Actor contains */
+                actor?: string;
+                /** @description Action starts with */
+                action?: string;
+                /** @description Target or device id */
+                target?: string;
+                /** @description First day */
+                from?: string;
+                /** @description Last day */
+                to?: string;
+                limit?: components["parameters"]["limit"];
+                /** @description next_cursor of the previous page */
+                cursor?: components["parameters"]["cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    activityHistogram: {
+        parameters: {
+            query?: {
+                /** @description audit or device */
+                kind?: "audit" | "device";
+                /** @description One category */
+                category?: "commands" | "changes" | "approvals" | "access" | "devices" | "audit" | "events";
+                /** @description Text in any field */
+                q?: string;
+                /** @description Actor contains */
+                actor?: string;
+                /** @description Action starts with */
+                action?: string;
+                /** @description Target or device id */
+                target?: string;
+                /** @description First day */
+                from?: string;
+                /** @description Last day */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityHistogram"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    auditStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditStatus"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    auditVerify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditStatus"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    complianceHistory: {
+        parameters: {
+            query?: {
+                /** @description Day, default today */
+                at?: string;
+                /** @description One device id */
+                device?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComplianceHistory"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    export: {
+        parameters: {
+            query?: {
+                /** @description Day (compliance-history.csv) */
+                at?: string;
+                /** @description Device (compliance-history.csv) */
+                device?: string;
+                /** @description Text in any field */
+                q?: string;
+                /** @description Actor contains */
+                actor?: string;
+                /** @description Action starts with */
+                action?: string;
+                /** @description Target or device id */
+                target?: string;
+                /** @description First day */
+                from?: string;
+                /** @description Last day */
+                to?: string;
+            };
+            header?: never;
+            path: {
+                kind: "compliance.csv" | "compliance-history.csv" | "inventory.csv" | "packages.csv" | "audit.csv" | "audit.jsonl" | "exceptions.csv";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                    "application/x-ndjson": string;
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
         };

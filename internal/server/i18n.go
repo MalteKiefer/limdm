@@ -1598,4 +1598,6 @@ var deCatalog = map[string]string{
 	"parallel downloads and check ins: 1 to 10000":                           "Gleichzeitige Downloads und Check ins: 1 bis 10000",
 	"syslog target: udp://host:port, tcp://host:port or tcp+tls://host:port": "Syslog Ziel: udp://host:port, tcp://host:port oder tcp+tls://host:port",
 	"syslog CA: no PEM certificate found":                                    "Syslog CA: kein PEM Zertifikat gefunden",
+	// UI-D
+	"Device event": "Geräteereignis",
 }
