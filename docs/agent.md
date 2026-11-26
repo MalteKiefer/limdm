@@ -143,6 +143,11 @@ Lines starting with `#` are comments. Both `allow_*` values are stored in
 `/etc/limdm/agent.json` and cannot be switched on from the server later; enroll again to
 change them.
 
+`allow_scripts` is no protection against administrators: whoever can deploy declarations
+(repositories, packages, sudo rules, local users, artifacts) can run code as root on the
+device without it. Four eyes approval, signed commands and declarations, and the audit log
+are the controls for that ([security.md](security.md#known-limitations-of-the-agent)).
+
 Then install the package by any means (your own apt or dnf mirror, the release files, or the
 install script without `LIMDM_TOKEN`). The agent enrolls
 

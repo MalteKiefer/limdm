@@ -396,6 +396,17 @@ removes them; the deletion is one of them (`device.delete`).
 
 ### Known limitations of the agent
 
+* **`allow_scripts` does not protect devices against administrators.** It is a switch the
+  device owner sets at enrollment, not a boundary against the console. An administrator who
+  can deploy declarations can run code as root on every device in scope without it: packages
+  from added repositories run maintainer scripts, `com.limdm.artifacts` installs uploaded
+  packages, and `com.limdm.sudo`, `com.limdm.localusers`, `com.limdm.ssh`, `com.limdm.login`
+  and `com.limdm.polkit` grant root access. `allow_scripts` only keeps `com.limdm.scripts`,
+  the `script` command and file targets outside the plain text allowlist off a device. The
+  controls against a single administrator are elsewhere: [four eyes approval](#four-eyes-approval)
+  for these declaration types and for `script`, `wipe` and `lost`, signed commands and
+  declarations the agent verifies against pinned keys, device scopes per role, and the hash
+  chained [audit log](#audit-log) of every save, approval and command.
 * **SSH sessions of a user who is also logged in locally.** The desktop socket refuses app
   changes, key escrow, SSO confirmation, reboot deferral, ending remote support and journal
   lines from processes in an SSH or
