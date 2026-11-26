@@ -19,8 +19,10 @@ path traversal, shell and config metacharacters).
 ## Library
 
 The **Library** holds reusable items, each one validated payload of one type, for example
-"CIS Level 1 baseline", "Proxy Berlin" or "Developers may restart nginx". The console shows
-an example payload for every type. Reference: [declarations.md](declarations.md).
+"CIS Level 1 baseline", "Proxy Berlin" or "Developers may restart nginx". The item editor
+describes every type, shows an example payload and a field reference generated from the
+payload types, checks the JSON while you type (**Format** indents it) and links the type's
+section in [declarations.md](declarations.md).
 
 ## Blueprints
 
@@ -58,9 +60,13 @@ inherited single value items.
 
 Every device has exactly one blueprint:
 
-1. the blueprint set explicitly on the device page, otherwise
+1. the blueprint set explicitly on the device (device page, or the enrollment token's
+   blueprint at enrollment), otherwise
 2. the blueprint of the primary user's directory group (lowest priority number wins), otherwise
 3. `default`.
+
+The device page names the source next to the blueprint, and the blueprint list shows per
+blueprint how many devices have it set directly and which groups assign it.
 
 ### Merging
 
@@ -120,3 +126,14 @@ only), and for lost devices `lost`, `found` and `wipe` (admins only, confirmed w
 name, see [disk-encryption.md](disk-encryption.md#lost-or-stolen-devices)). Commands are
 delivered until the device reports a result; the agent runs each one once. Unanswered
 commands expire after 7 days. Results show on the device page and in the audit log.
+The helpdesk role may send `sync`, `update`, `reboot`, `shutdown`, `lock`, `unlock` and
+messages, and reset the password of or lock a local account; everything else is for admins.
+Reboot and shut down now, lock and account lock ask for confirmation first.
+
+## Help in the console
+
+**Help** in the sidebar explains the terms the console uses, the device states, the roles
+and the device actions by impact (lock, lost mode, retire, wipe). Page headers link the
+matching documentation, status labels explain themselves on hover, and the overview shows
+admins a first steps checklist until company settings, sign in, an enrollment token, a
+blueprint and a device exist.
