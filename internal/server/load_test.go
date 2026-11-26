@@ -313,3 +313,34 @@ func TestCheckinBackpressure(t *testing.T) {
 		t.Fatalf("lock timeout: %d", w.Code)
 	}
 }
+
+// A directory group assigned to a blueprint of tenant 2 does not hand that
+// blueprint to devices of tenant 1 whose primary user is in the group.
+func TestGroupBlueprintTenant(t *testing.T) {
+	db := loadTestDB(t, 4)
+	ctx := context.Background()
+	for _, q := range []string{
+		`INSERT INTO tenants(id, name) VALUES (2, 'Two')`,
+		`INSERT INTO blueprints(id, name, tenant_id) VALUES (900, 'two only', 2)`,
+		`INSERT INTO dir_users(id, source, user_name, email) VALUES (900, 'scim', 'u', 'u@x.test')`,
+		`INSERT INTO dir_groups(id, external_id, source, name) VALUES (900, 'g', 'scim', 'g')`,
+		`INSERT INTO dir_members(group_id, user_id) VALUES (900, 900)`,
+		`INSERT INTO blueprint_group_assignments(group_id, blueprint_id) VALUES (900, 900)`,
+		`INSERT INTO devices(id, cert_serial, cert_not_after, hostname, primary_user_id, tenant_id) VALUES ('t1', 's', now(), 'a', 900, 1), ('t2', 's', now(), 'b', 900, 2)`,
+	} {
+		if _, err := db.Exec(ctx, q); err != nil {
+			t.Fatal(q, err)
+		}
+	}
+	tx := mustBegin(t, db)
+	for dev, want := range map[string]bool{"t1": false, "t2": true} {
+		bp, err := groupBlueprint(ctx, tx, dev)
+		if err != nil || (bp != nil) != want {
+			t.Errorf("%s: %v %v", dev, bp, err)
+		}
+		var name string
+		if err := tx.QueryRow(ctx, `SELECT coalesce(b.name, '')`+deviceFrom+` WHERE d.id=$1`, dev).Scan(&name); err != nil || (name == "two only") != want {
+			t.Errorf("%s list: %q %v", dev, name, err)
+		}
+	}
+}

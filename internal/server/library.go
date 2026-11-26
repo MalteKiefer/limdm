@@ -848,6 +848,7 @@ func (s *Server) deleteLibraryItem(ctx context.Context, actor string, id int64) 
 // it: the explicit one, else the primary user's group, else default.
 const effectiveBlueprintSQL = `coalesce(d.blueprint_id,
 	(SELECT a.blueprint_id FROM dir_users u JOIN dir_members m ON m.user_id=u.id JOIN blueprint_group_assignments a ON a.group_id=m.group_id
+	 JOIN blueprints gb ON gb.id=a.blueprint_id AND (gb.tenant_id=d.tenant_id OR gb.tenant_id=1 AND gb.shared)
 	 WHERE u.id=d.primary_user_id AND u.active ORDER BY a.priority, a.group_id LIMIT 1),
 	(SELECT id FROM blueprints WHERE name='default'))`
 
