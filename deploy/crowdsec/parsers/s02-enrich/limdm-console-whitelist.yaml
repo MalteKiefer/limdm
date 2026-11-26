@@ -1,0 +1,20 @@
+# /etc/crowdsec/parsers/s02-enrich/limdm-console-whitelist.yaml
+# The console loads many images and API responses at once (software icons,
+# tenant logos, branding, /api/v1). Their paths have no file extension, so the
+# generic http-crawl-non_statics scenario counts them as crawling and bans the
+# admin. Successful (200) responses on these paths are never an attack signal:
+# images are served only to signed in users, and /api/v1 answers 200 only to
+# an authenticated session or token. Failed requests (401, 403, 404) still count.
+name: limdm/console-whitelist
+description: "Ignore successful LiMDM console image and API requests in HTTP scenarios"
+whitelist:
+  reason: "LiMDM console assets and API (successful responses only)"
+  expression:
+    - >-
+      evt.Meta.service == 'http' && evt.Meta.http_status == '200' && (
+        evt.Meta.http_path startsWith '/software/icons/' ||
+        evt.Meta.http_path startsWith '/software/flathub/icon' ||
+        evt.Meta.http_path startsWith '/branding/' ||
+        (evt.Meta.http_path startsWith '/tenants/' && evt.Meta.http_path contains '/logo.png') ||
+        evt.Meta.http_path startsWith '/api/v1/'
+      )

@@ -328,6 +328,7 @@ sudo cscli collections install crowdsecurity/linux crowdsecurity/sshd crowdsecur
 sudo cp deploy/crowdsec/acquis.d/limdm.yaml /etc/crowdsec/acquis.d/
 sudo cp deploy/crowdsec/parsers/s01-parse/limdm-logs.yaml /etc/crowdsec/parsers/s01-parse/
 sudo cp deploy/crowdsec/scenarios/limdm-bf.yaml /etc/crowdsec/scenarios/
+sudo cp deploy/crowdsec/parsers/s02-enrich/limdm-console-whitelist.yaml /etc/crowdsec/parsers/s02-enrich/
 sudo systemctl reload crowdsec
 sudo cscli explain --type syslog --log 'Nov 25 08:00:00 mdm limdm-server[1]: {"level":"WARN","msg":"local login failed","user":"x","remote":"203.0.113.7"}'
 sudo cscli decisions list
@@ -335,6 +336,9 @@ sudo cscli decisions list
 
 * `limdm/limdm-bf`: more than 5 failed sign ins or enrollments within a few minutes.
 * `limdm/limdm-tls-scan`: bursts of failed TLS handshakes on the agent port.
+* `limdm/console-whitelist`: the console loads many icons and API responses at once; without it
+  `crowdsecurity/http-crawl-non_statics` bans admins. Only successful (200) responses on console
+  image paths and `/api/v1/` are ignored, failed requests still count.
 * For Caddy access logs add an acquisition for `/var/log/caddy/limdm-access.log` with
   `type: caddy`; `crowdsecurity/caddy` then detects scanners and known exploits.
 * Whitelist your office and VPN egress addresses with a postoverflow whitelist
