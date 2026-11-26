@@ -55,7 +55,7 @@ for c in curl sha256sum awk; do command -v "$c" >/dev/null 2>&1 || { echo "$c is
 # "limdm SHA256SUMS v1\n" and the sums file, with the hex public KEY.
 hex2bin() { tr -d ' \n\r' | awk '{ h = "0123456789abcdef"; s = tolower($0); for (i = 1; i < length(s); i += 2) printf "\\%03o", (index(h, substr(s, i, 1)) - 1) * 16 + index(h, substr(s, i + 1, 1)) - 1 }'; }
 verify_sums() {
-    d=$(mktemp -d)
+    d=$(mktemp -d) || return 1
     printf "$(printf '302a300506032b6570032100%s' "$1" | hex2bin)" > "$d/key.der"
     printf "$(hex2bin < "$3")" > "$d/sig"
     { printf 'limdm SHA256SUMS v1\n'; cat "$2"; } > "$d/msg"
