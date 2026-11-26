@@ -43,6 +43,7 @@ so in the commit message.
 * Every view state lives in the URL: filter (`q`), sort, selected row (`sel`), tab, open sheet. Read it with `useSearch({ strict: false })`, write it with `useNavigate()({ search })`.
 * The nav entry (`nav`) sets order and icon; `permission` hides it from roles without it; `views: '<list>'` lists saved views under it.
 * Paths are relative to `/app` (the router's basepath). Links into the classic console are plain `<a href>`.
+* Deep links other areas rely on: settings sections are `/settings/<section>` with the section names of the settings API (`branding`, `sso`, `security`, `enrollment`, ...); the configuration tabs are `/config?tab=<tab>` (`blueprints`, `library`, `software`); the inbox selects with `/inbox?item=a<approval id>` or `?group=approvals|warnings|commands`; activity filters with `/activity?q=&cat=&actor=&action=&target=&from=&to=`.
 
 ## API
 

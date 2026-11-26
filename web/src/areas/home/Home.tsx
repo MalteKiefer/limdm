@@ -9,6 +9,7 @@ import { api, unwrap, type Schemas } from '../../api/client'
 import { useLiveActivity } from '../../api/live'
 import { useCan, useMe } from '../../api/me'
 import { actionLabel, risk } from '../inbox/risk'
+import { agentShare, marksByDay, type Mark } from './marks'
 import { axisX, axisY, baseOption, Bullet, ChartFrame, EChart, FleetGrid, StackBar, type Colors } from '../../components/charts'
 import { KpiCard } from '../../components/kpi'
 import { EmptyState, ErrorState } from '../../components/states'
@@ -43,6 +44,12 @@ export function Home() {
     queryFn: () => unwrap(api.GET('/api/v1/stats/commands', { params: { query: { days: 14 } } })).then((p) => p.items),
   })
   const canAudit = useCan('audit')
+  const upd = useQuery({ queryKey: ['stats', 'updates', days], queryFn: () => unwrap(api.GET('/api/v1/stats/updates', { params: { query: { days: Number(days) } } })) })
+  const marks = useQuery({
+    queryKey: ['stats', 'annotations', days],
+    enabled: canAudit,
+    queryFn: () => unwrap(api.GET('/api/v1/stats/annotations', { params: { query: { days: Number(days) } } })).then((p) => p.items),
+  })
   const err = fleet.error ?? attention.error ?? comp.error
   if (err) return <ErrorState error={err} onRetry={() => void Promise.all([fleet.refetch(), attention.refetch(), comp.refetch()])} />
   if (!fleet.data || !attention.data || !comp.data) return <HomeSkeleton />
@@ -67,7 +74,7 @@ export function Home() {
                 <Delta value={c.score - week} label={t('home.in7')} />
               </>
             )}
-            . {waiting > 0 ? <strong className="text-fg">{t('home.waiting', { count: waiting })}</strong> : t('home.nothingWaiting')}
+            . {waiting > 0 ? <Link to="/inbox" search={{ group: 'approvals' }} className="font-semibold text-fg underline decoration-line-strong underline-offset-2 hover:text-accent">{t('home.waiting', { count: waiting })}</Link> : t('home.nothingWaiting')}
           </>
         }
         actions={
@@ -89,8 +96,8 @@ export function Home() {
             <KpiCard to="/compliance" label={t('home.kpi.score')} value={pct(c.score)} delta={week !== undefined ? <Delta value={c.score - week} label={t('home.d7')} /> : undefined} spark={hist.map((h) => h.score)} sparkLabel={t('home.kpi.scoreSpark')} tone="accent" />
             <KpiCard to="/devices" label={t('home.kpi.online')} value={fmt(f.online)} unit={t('home.kpi.ofTotal', { total: f.total })} delta={<span className="text-[12px] text-muted">{t('home.kpi.offline', { count: f.total - f.online })}</span>} spark={hist.map((h) => h.compliant + h.noncompliant + h.in_grace)} tone="muted" />
             <KpiCard to="/devices" search={{ q: 'status:non-compliant' }} label={t('home.kpi.noncompliant')} value={fmt(a.noncompliant)} delta={week !== undefined ? <Delta value={a.noncompliant - hist[hist.length - 8].noncompliant} unit="" goodUp={false} label={t('home.d7')} /> : undefined} spark={hist.map((h) => h.noncompliant)} tone="bad" />
-            <KpiCard to="/devices" search={{ q: 'status:stale' }} label={t('home.kpi.stale')} value={fmt(a.stale)} delta={<span className="text-[12px] text-muted">{t('home.kpi.staleHint', { hours: me.stale_hours })}</span>} spark={hist.map((h) => h.stale)} tone="muted" />
-            <KpiCard to="/inbox" search={{ group: 'approvals' }} label={t('home.kpi.approvals')} value={fmt(a.approvals_pending)} delta={<span className={cx('text-[12px]', a.exceptions_expiring_7d ? 'font-medium text-warn' : 'text-muted')}>{t('home.kpi.exceptions', { count: a.exceptions_expiring_7d })}</span>} />
+            <SecurityKpi u={upd.data} />
+            <AgentKpi u={upd.data} />
             <KpiCard to="/inbox" search={{ group: 'commands' }} label={t('home.kpi.failed')} value={fmt(a.commands_failed_24h)} unit={t('home.kpi.h24')} delta={<span className="text-[12px] text-muted">{t('home.kpi.sent', { count: a.commands_sent_24h })}</span>} spark={cmdDays.data?.map((d) => d.failed)} sparkLabel={t('home.kpi.failedSpark')} tone="bad" />
           </div>
 
@@ -108,7 +115,7 @@ export function Home() {
 
           <div className="grid gap-[var(--gap)] xl:grid-cols-12">
             <Card className="xl:col-span-8" title={t('home.trend')} sub={t('home.trendSub', { days: Number(days), target: TARGET })} id="h-trend" action={<Segmented label={t('home.range')} value={days} onChange={setDays} options={[{ value: '30', label: t('home.d30') }, { value: '90', label: t('home.d90') }]} />}>
-              {hist.length > 1 ? <TrendChart hist={hist} /> : <p className="text-muted">{t('home.trendEmpty')}</p>}
+              {hist.length > 1 ? <TrendChart hist={hist} marks={marks.data ?? []} /> : <p className="text-muted">{t('home.trendEmpty')}</p>}
             </Card>
             <Card className="xl:col-span-4" title={t('home.frameworks')} sub={t('home.frameworksSub')} id="h-fw" action={<Link to="/compliance" className="btn btn-ghost text-accent">{t('home.details')} <ArrowRight size={14} aria-hidden /></Link>}>
               <Frameworks list={c.frameworks} />
@@ -236,8 +243,12 @@ function TopFailing({ items }: { items: Schemas['StatsCompliance']['top_failing'
   )
 }
 
-function TrendChart({ hist }: { hist: Schemas['StatsCompliance']['history'] }) {
+function TrendChart({ hist, marks }: { hist: Schemas['StatsCompliance']['history']; marks: Mark[] }) {
   const t = useT()
+  const byDay = marksByDay(
+    marks,
+    hist.map((h) => h.day),
+  )
   const build = useCallback(
     (c: Colors) => ({
       ...baseOption(c),
@@ -254,17 +265,89 @@ function TrendChart({ hist }: { hist: Schemas['StatsCompliance']['history'] }) {
           lineStyle: { color: c.accent, width: 2 },
           itemStyle: { color: c.accent },
           areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: c.accent + '33' }, { offset: 1, color: c.accent + '00' }] } },
-          markLine: { silent: true, symbol: 'none', lineStyle: { color: c.fg2, type: 'dashed', width: 1 }, label: { formatter: t('home.target', { target: TARGET }), color: c.fg2, position: 'insideEndTop' }, data: [{ yAxis: TARGET }] },
+          markLine: {
+            symbol: 'none',
+            lineStyle: { color: c.fg2, type: 'dashed', width: 1 },
+            label: { color: c.fg2 },
+            data: [
+              { yAxis: TARGET, label: { formatter: t('home.target', { target: TARGET }), position: 'insideEndTop' } },
+              // events: a dotted line per day, the text on hover and in the table
+              ...[...byDay].map(([day, text]) => ({
+                xAxis: dateShort(day),
+                lineStyle: { color: c.info, type: 'dotted', width: 1.5 },
+                label: { show: false, formatter: text, color: c.fg, position: 'insideEndTop' },
+                emphasis: { label: { show: true } },
+              })),
+            ],
+          },
         },
       ],
     }),
-    [hist, t],
+    [hist, t, byDay],
   )
   return (
+    <>
     <ChartFrame
       caption={t('home.trend')}
       chart={<EChart build={build} height={240} label={t('home.trendLabel', { score: pct(hist[hist.length - 1].score) })} />}
-      table={{ head: [t('home.day'), t('home.score'), t('home.compliantCol'), t('home.noncompliantCol')], rows: [...hist].reverse().map((h) => [dateShort(h.day), pct(h.score), h.compliant, h.noncompliant]) }}
+      table={{ head: [t('home.day'), t('home.score'), t('home.compliantCol'), t('home.noncompliantCol'), t('home.events')], rows: [...hist].reverse().map((h) => [dateShort(h.day), pct(h.score), h.compliant, h.noncompliant, byDay.get(h.day) ?? '']) }}
+    />
+    {byDay.size > 0 && (
+      <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-muted" aria-label={t('home.events')}>
+        {[...byDay].slice(-5).map(([day, text]) => (
+          <li key={day}>
+            <span className="mr-1 inline-block h-3 border-l-2 border-dotted border-info align-middle" aria-hidden />
+            {dateShort(day)}: {text}
+          </li>
+        ))}
+      </ul>
+    )}
+    </>
+  )
+}
+
+function SecurityKpi({ u }: { u?: Schemas['StatsUpdates'] }) {
+  const t = useT()
+  if (!u) return <Skeleton className="h-[118px]" />
+  const spark = u.history.flatMap((h) => (h.security_devices == null ? [] : [h.security_devices]))
+  return (
+    <KpiCard
+      to="/devices"
+      search={{ q: 'check:updates.security' }}
+      label={t('home.kpi.security')}
+      value={fmt(u.security_devices)}
+      unit={t('home.kpi.devices')}
+      delta={
+        <span className={cx('text-[12px]', u.security_old ? 'font-medium text-bad' : 'text-muted')}>
+          {u.security_old ? t('home.kpi.securityOld', { count: u.security_old }) : t('home.kpi.securityTotal', { count: u.security_updates })}
+        </span>
+      }
+      spark={spark.length > 1 ? spark : undefined}
+      sparkLabel={t('home.kpi.securitySpark')}
+      tone={u.security_old ? 'bad' : 'warn'}
+    />
+  )
+}
+
+function AgentKpi({ u }: { u?: Schemas['StatsUpdates'] }) {
+  const t = useT()
+  if (!u) return <Skeleton className="h-[118px]" />
+  const share = agentShare(u.agent_current, u.agent_total)
+  const spark = u.history.flatMap((h) => (h.agent_current == null || !h.agent_total ? [] : [agentShare(h.agent_current, h.agent_total)!]))
+  return (
+    <KpiCard
+      to="/devices"
+      search={u.agent_newest ? { q: `agent:${u.agent_newest}` } : undefined}
+      label={t('home.kpi.agent')}
+      value={share === undefined ? '–' : pct(share)}
+      delta={
+        <span className="text-[12px] text-muted">
+          {u.agent_newest ? t(u.agent_approved ? 'home.kpi.agentOn' : 'home.kpi.agentNewest', { version: u.agent_newest }) : t('home.kpi.agentNone')}
+        </span>
+      }
+      spark={spark.length > 1 ? spark : undefined}
+      sparkLabel={t('home.kpi.agentSpark')}
+      tone="accent"
     />
   )
 }
@@ -357,12 +440,13 @@ function LiveFeed() {
 // The first steps of a new installation (admins, global view) until all are
 // done; hiding them is remembered in this browser.
 const ONBOARDING_KEY = 'limdm.home.onboarding'
+// Deep links into the settings sections of the admin area (web/CONVENTIONS.md).
 const onboardingLinks: Record<string, { to: string; search?: Record<string, string> }> = {
-  branding: { to: '/settings' },
-  sso: { to: '/settings' },
-  token: { to: '/devices' },
-  blueprint: { to: '/config' },
-  device: { to: '/devices' },
+  branding: { to: '/settings/branding' },
+  sso: { to: '/settings/sso' },
+  token: { to: '/settings/enrollment' },
+  blueprint: { to: '/config', search: { tab: 'blueprints' } },
+  device: { to: '/settings/enrollment' },
 }
 
 function Onboarding() {
@@ -398,7 +482,7 @@ function Onboarding() {
       <ol className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
         {steps.data.map((s) => (
           <li key={s.id}>
-            <Link to={onboardingLinks[s.id].to} className={cx('flex h-full items-start gap-2 rounded-lg border border-line p-3 hover:border-line-strong', s.done && 'opacity-70')}>
+            <Link to={onboardingLinks[s.id].to} search={onboardingLinks[s.id].search} className={cx('flex h-full items-start gap-2 rounded-lg border border-line p-3 hover:border-line-strong', s.done && 'opacity-70')}>
               {s.done ? <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-ok" aria-hidden /> : <Circle size={18} className="mt-0.5 shrink-0 text-muted" aria-hidden />}
               <span>
                 <span className="block font-medium">
