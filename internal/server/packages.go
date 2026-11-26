@@ -180,8 +180,9 @@ func (s *Server) packagesPage(w http.ResponseWriter, r *http.Request, sess sessi
 func (s *Server) renderPackages(w http.ResponseWriter, r *http.Request, sess session, msg, errMsg string) {
 	ctx := r.Context()
 	tcond, targs := tenantCond(sess, "a.tenant_id", 0)
+	icond, _ := tenantCond(sess, "i.tenant_id", 0) // same $1: only items the viewer may see
 	rows, err := s.db.Query(ctx, `SELECT a.id, a.tenant_id, a.sha256, a.name, a.version, a.kind, a.filename, a.store, a.size, a.uploaded_by, a.approved_by, a.created_at,
-		coalesce((SELECT array_agg(i.name ORDER BY i.name) FROM library_items i WHERE i.type = '`+api.TypeArtifacts+`'
+		coalesce((SELECT array_agg(i.name ORDER BY i.name) FROM library_items i WHERE i.type = '`+api.TypeArtifacts+`' AND `+icond+`
 			AND i.payload->'artifacts' @> jsonb_build_array(jsonb_build_object('sha256', a.sha256))), '{}')
 		FROM artifacts a WHERE `+tcond+` ORDER BY a.name, a.created_at DESC`, targs...)
 	if err != nil {
