@@ -2,7 +2,7 @@
 
 All notable changes, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
-## Unreleased
+## 0.15.0
 
 ### Added
 - `limdm` command line for users on the device: `info` shows everything about the device and the agent; `software list|install|remove|request|search|request-new|requests`, `checks`, `profiles`, `certificates`, `log`, `sync`, `sso` and `recovery-key` do what the LiMDM app does. Packaged with the agent.
