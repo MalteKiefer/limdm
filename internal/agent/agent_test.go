@@ -818,9 +818,6 @@ func TestRemoteLockTrust(t *testing.T) {
 			t.Errorf("logindLocks(%q) = %v", d, !want)
 		}
 	}
-	if verifiedLocker(graphicalSession{uid: "1000", kind: "x11"}) {
-		t.Error("a session without display has no verified locker")
-	}
 	if trustedExe("self", map[string]bool{"i3lock": true}) {
 		t.Error("the test binary is no trusted locker")
 	}

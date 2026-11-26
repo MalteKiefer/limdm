@@ -360,9 +360,6 @@ var graphicalExe = map[string]bool{"sway": true, "Hyprland": true, "Xorg": true,
 	"weston": true, "labwc": true, "river": true, "wayfire": true, "niri": true, "cage": true, "gnome-shell": true,
 	"kwin_wayland": true, "dwl": true, "Xwayland": true}
 
-// lockerExe are screen lockers the agent accepts as already locking a session.
-var lockerExe = map[string]bool{"swaylock": true, "i3lock": true, "hyprlock": true, "gtklock": true, "waylock": true, "slock": true, "xsecurelock": true}
-
 // logindLocks: desktops whose shell locks itself on loginctl lock-sessions,
 // by logind's Desktop property, which the display manager sets at login and
 // the user cannot change. LockedHint is not used: the session owner sets it.
@@ -376,42 +373,15 @@ func logindLocks(desktop string) bool {
 	return false
 }
 
-// verifiedLocker: a trusted locker binary (lockerExe) of the session's user
-// runs on the session's display. A process merely named i3lock, or a real
-// locker on another (nested or virtual) display, does not count.
-func verifiedLocker(s graphicalSession) bool {
-	key := "DISPLAY="
-	if s.kind == "wayland" {
-		key = "WAYLAND_DISPLAY="
-	}
-	want := ""
-	for _, kv := range s.env {
-		if strings.HasPrefix(kv, key) {
-			want = kv
-		}
-	}
-	if want == "" {
-		return false
-	}
-	dirs, _ := filepath.Glob("/proc/[0-9]*")
-	for _, d := range dirs {
-		var st syscall.Stat_t
-		if syscall.Stat(d, &st) != nil || strconv.FormatUint(uint64(st.Uid), 10) != s.uid || !trustedExe(filepath.Base(d), lockerExe) {
-			continue
-		}
-		if slices.Contains(strings.Split(readFile(d+"/environ"), "\x00"), want) {
-			return true
-		}
-	}
-	return false
-}
-
 // lockSessions locks every graphical session: through logind first (the
 // desktop's own locker), then, unless the session's desktop locks itself on
-// logind's request or a verified locker already covers its display
+// logind's request, with swaylock or i3lock started in the session
 // (compositors and window managers without a logind aware locker, LXQt,
-// LXDE …), with swaylock or i3lock started in the session. Returns the
-// sessions locked that way.
+// LXDE …). A locker that seems to run already is not trusted: its name,
+// environment and display are the user's to choose. Starting a second
+// locker on a locked session fails harmlessly (swaylock finds the session
+// lock taken, i3lock cannot grab the keyboard). Returns the sessions
+// locked that way.
 func (a *Agent) lockSessions() int {
 	sessions := graphicalSessions()
 	if len(sessions) == 0 {
@@ -427,7 +397,7 @@ func (a *Agent) lockSessions() int {
 	}
 	n := 0
 	for _, s := range sessions {
-		if logindLocks(desktops[s.id]) || verifiedLocker(s) {
+		if logindLocks(desktops[s.id]) {
 			continue
 		}
 		var argv []string
