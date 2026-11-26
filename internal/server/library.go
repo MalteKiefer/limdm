@@ -69,10 +69,87 @@ func migrate(ctx context.Context, db *pgxpool.Pool) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO schema_applied(hash, version) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING`, schemaHash(), Version); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	built, err := buildIndexes(ctx, db)
+	if err != nil {
+		return fmt.Errorf("build indexes: %w", err)
+	}
+	if !built { // another instance builds them and records the schema after
+		return nil
+	}
+	// recorded last: a start that failed to build an index tries again
+	_, err = db.Exec(ctx, `INSERT INTO schema_applied(hash, version) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING`, schemaHash(), Version)
+	return err
+}
+
+// concurrentIndexes are indexes on tables that grow with the fleet. They are
+// built with CREATE INDEX CONCURRENTLY outside the schema transaction, so a
+// first build on a big installation does not block writes to the table.
+// Each entry is "name ON table ...".
+var concurrentIndexes = []string{
+	// poll and check in: device users disabled, renamed or deleted in the directory
+	`dir_users_lower_email ON dir_users (lower(email))`,
+	`dir_users_previous_emails ON dir_users USING gin (previous_emails) WHERE NOT active`,
+	// enrollment: earlier records of the same machine
+	`devices_machine_id ON devices (machine_id) WHERE NOT retired`,
+	// device list and API pages: sorted by host name
+	`devices_hostname ON devices (hostname, id)`,
+	`devices_retired_hostname ON devices (retired, hostname, id)`,
+	// device filters (deviceFilters, pkgCond)
+	`devices_tags ON devices USING gin (tags)`,
+	`devices_apps ON devices USING gin ((inventory->'apps') jsonb_path_ops)`,
+	`devices_flatpaks ON devices USING gin ((inventory->'flatpaks') jsonb_path_ops)`,
+	`devices_flatpak_remotes ON devices USING gin ((inventory->'flatpak_remotes') jsonb_path_ops)`,
+	`devices_checks ON devices USING gin (checks jsonb_path_ops)`,
+	`devices_packages ON devices USING gin (packages jsonb_path_ops)`,
+	// retention of finished commands
+	`commands_finished ON commands (updated_at) WHERE status IN ('ok', 'failed', 'expired')`,
+}
+
+// buildIndexes creates the concurrentIndexes that are missing. One instance
+// builds, others starting at the same time go on without (built false): the
+// indexes only speed up queries. An invalid index left by an interrupted
+// build is built again.
+func buildIndexes(ctx context.Context, db *pgxpool.Pool) (built bool, err error) {
+	conn, err := db.Acquire(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer conn.Release()
+	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, lockIndexes).Scan(&built); err != nil || !built {
+		return false, err
+	}
+	defer func() {
+		// the session keeps the lock and the setting otherwise; at worst the
+		// connection is closed with them
+		if _, uerr := conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, lockIndexes); uerr != nil {
+			conn.Conn().Close(context.WithoutCancel(ctx)) //nolint:errcheck // already failing
+		} else {
+			_, _ = conn.Exec(context.WithoutCancel(ctx), `RESET statement_timeout`)
+		}
+	}()
+	if _, err := conn.Exec(ctx, `SET statement_timeout = 0`); err != nil {
+		return false, err
+	}
+	for _, ix := range concurrentIndexes {
+		name, _, _ := strings.Cut(ix, " ")
+		var invalid bool
+		if err := conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+			WHERE c.relname = $1 AND c.relnamespace = current_schema()::regnamespace AND NOT i.indisvalid)`, name).Scan(&invalid); err != nil {
+			return false, err
+		}
+		if invalid {
+			if _, err := conn.Exec(ctx, `DROP INDEX CONCURRENTLY IF EXISTS `+name); err != nil {
+				return false, err
+			}
+		}
+		if _, err := conn.Exec(ctx, `CREATE INDEX CONCURRENTLY IF NOT EXISTS `+ix); err != nil {
+			return false, fmt.Errorf("%s: %w", name, err)
+		}
+	}
+	return true, nil
 }
 
 // schemaCurrent tells whether this exact schema and set of migrations was

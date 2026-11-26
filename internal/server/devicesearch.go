@@ -75,11 +75,14 @@ func pkgCond(v string) (string, []any, error) {
 	if m == nil {
 		return "", nil, errors.New("package filter: a name, or name operator version, for example openssl < 3.0.13")
 	}
-	elems := `jsonb_array_elements(CASE WHEN jsonb_typeof(d.packages) = 'array' THEN d.packages ELSE '[]'::jsonb END)`
+	// containment finds the devices with the package through the GIN index;
+	// only those expand their list for the version comparison
+	has := `d.packages @> jsonb_build_array(jsonb_build_object('n', $1::text))`
 	if m[2] == "" {
-		return `EXISTS (SELECT 1 FROM ` + elems + ` p WHERE p->>'n' = $1)`, []any{m[1]}, nil
+		return has, []any{m[1]}, nil
 	}
-	return `EXISTS (SELECT 1 FROM ` + elems + ` p WHERE p->>'n' = $1 AND limdm_version_key(p->>'v') ` + pkgOps[m[2]] + ` limdm_version_key($2))`, []any{m[1], m[3]}, nil
+	elems := `jsonb_array_elements(CASE WHEN jsonb_typeof(d.packages) = 'array' THEN d.packages ELSE '[]'::jsonb END)`
+	return has + ` AND EXISTS (SELECT 1 FROM ` + elems + ` p WHERE p->>'n' = $1 AND limdm_version_key(p->>'v') ` + pkgOps[m[2]] + ` limdm_version_key($2))`, []any{m[1], m[3]}, nil
 }
 
 type deviceChip struct {

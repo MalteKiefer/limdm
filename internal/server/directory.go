@@ -518,7 +518,8 @@ func activeUsers(ctx context.Context, tx pgx.Tx, users []api.User) ([]api.User, 
 	// or deleted user had it before (renamed, then the address reused)
 	rows, err := tx.Query(ctx, `SELECT e FROM unnest($1::text[]) e WHERE
 		NOT EXISTS (SELECT 1 FROM dir_users WHERE active AND lower(email) = e)
-		AND (EXISTS (SELECT 1 FROM dir_users WHERE NOT active AND (lower(email) = e OR e = ANY(previous_emails)))
+		AND (EXISTS (SELECT 1 FROM dir_users WHERE NOT active AND lower(email) = e)
+		OR EXISTS (SELECT 1 FROM dir_users WHERE NOT active AND previous_emails @> ARRAY[e])
 		OR EXISTS (SELECT 1 FROM dir_tombstones WHERE email = e))`, emails)
 	if err != nil {
 		return nil, err

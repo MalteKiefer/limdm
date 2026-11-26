@@ -29,6 +29,7 @@ import (
 
 // advisory lock keys besides the audit (7363) and schema (7364) locks
 const (
+	lockIndexes  = 7365 // index builds after a schema change (library.go)
 	lockStartup  = 7366 // key material and data initialization at startup
 	lockSettings = 7367 // console settings saves
 	lockSCIM     = 7368 // SCIM read, modify and write
@@ -199,6 +200,9 @@ func schemaHash() string {
 	h.Write([]byte(schema))
 	for _, m := range migrations {
 		fmt.Fprintf(h, "|%d", m.version)
+	}
+	for _, ix := range concurrentIndexes {
+		h.Write([]byte("|" + ix))
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

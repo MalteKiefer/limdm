@@ -785,8 +785,8 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 			SELECT 1 FROM devices d, jsonb_array_elements(d.users) u
 			WHERE d.id=$1 AND d.last_seen IS NOT NULL
 			AND NOT EXISTS (SELECT 1 FROM dir_users a WHERE a.active AND lower(a.email)=lower(u->>'email')) AND (
-				EXISTS (SELECT 1 FROM dir_users du WHERE (lower(du.email)=lower(u->>'email') OR lower(u->>'email') = ANY(du.previous_emails))
-					AND NOT du.active AND du.updated_at > d.last_seen)
+				EXISTS (SELECT 1 FROM dir_users du WHERE lower(du.email)=lower(u->>'email') AND NOT du.active AND du.updated_at > d.last_seen)
+				OR EXISTS (SELECT 1 FROM dir_users du WHERE du.previous_emails @> ARRAY[lower(u->>'email')] AND NOT du.active AND du.updated_at > d.last_seen)
 				OR EXISTS (SELECT 1 FROM dir_tombstones t WHERE t.email=lower(u->>'email') AND t.removed_at > d.last_seen)))`, id).Scan(&pending); err != nil {
 			s.failAPI(w, err)
 			return
