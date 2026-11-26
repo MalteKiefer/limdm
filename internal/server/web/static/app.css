@@ -632,3 +632,5 @@ a.lvl { color: inherit; text-decoration: underline dotted var(--line-strong); te
   .brand { padding: 12px 16px; }
   .wide-only { display: none; }
 }
+.grid.side-right > div .glossary { grid-template-columns: 1fr; gap: 2px; }
+.grid.side-right > div .glossary dd { margin-bottom: 10px; }

@@ -283,12 +283,13 @@
     out.append(frag);
   };
 
-  // action menus: arrow keys move between the entries, Home and End jump,
-  // Escape closes the menu and returns to its button
-  const menuItems = (menu) => [...menu.querySelectorAll('[role=menuitem], .sub-head')].filter((i) => i.offsetParent !== null);
+  // action menus: arrow keys move between the entries of one level, Right
+  // opens a submenu, Left returns from it, Home and End jump, Escape closes
+  // the menu and returns to its button
+  const levelItems = (list) => [...list.querySelectorAll(':scope > [role=menuitem], :scope > form > [role=menuitem], :scope > .sub > .sub-head')];
   document.addEventListener('keydown', (e) => {
     const menu = e.target.closest && e.target.closest('details.menu');
-    if (!menu || !['ArrowDown', 'ArrowUp', 'Home', 'End', 'Escape'].includes(e.key)) return;
+    if (!menu || !['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Escape'].includes(e.key)) return;
     if (e.target.matches('input, textarea, select')) return;
     const summary = menu.querySelector('summary');
     if (e.key === 'Escape') {
@@ -297,9 +298,14 @@
     }
     e.preventDefault();
     if (!menu.open) menu.setAttribute('open', '');
-    const items = menuItems(menu);
+    const cur = document.activeElement;
+    if (e.key === 'ArrowRight' && cur.matches('.sub-head')) { levelItems(cur.nextElementSibling)[0]?.focus(); return; }
+    if (e.key === 'ArrowLeft') { cur.closest('.sub')?.querySelector('.sub-head')?.focus(); return; }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') return;
+    const list = (cur !== summary && cur.closest('.sub-list, .menu-list')) || menu.querySelector('.menu-list');
+    const items = levelItems(list);
     if (!items.length) return;
-    const i = items.indexOf(document.activeElement);
+    const i = items.indexOf(cur);
     let n = 0;
     if (e.key === 'End') n = items.length - 1;
     else if (e.key === 'ArrowDown') n = i < 0 ? 0 : (i + 1) % items.length;
