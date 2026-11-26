@@ -30,6 +30,7 @@
       <span class="group">{{t "Administration"}}</span>
       <a href="/users" {{if eq .Page "users"}}class="on" aria-current="page"{{end}}>{{t "Users"}}</a>
       <a href="/settings" {{if eq .Page "settings"}}class="on" aria-current="page"{{end}}>{{t "Settings"}}</a>
+      <a href="/settings/api" {{if eq .Page "apitokens"}}class="on" aria-current="page"{{end}}>{{t "API tokens"}}</a>
       {{end}}
     </nav>
     <div class="who">

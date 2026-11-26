@@ -318,7 +318,7 @@ func (s *Server) blueprintPreview(ctx context.Context, bp blueprintRec) (*previe
 
 // ---- web: history and rollback ----
 
-func pathID(r *http.Request) (int64, bool) {
+func versionID(r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	return id, err == nil && id > 0
 }
@@ -368,7 +368,7 @@ func (s *Server) renderVersions(w http.ResponseWriter, r *http.Request, sess ses
 }
 
 func (s *Server) libraryHistory(w http.ResponseWriter, r *http.Request, sess session) {
-	id, ok := pathID(r)
+	id, ok := versionID(r)
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -384,7 +384,7 @@ func (s *Server) libraryHistory(w http.ResponseWriter, r *http.Request, sess ses
 }
 
 func (s *Server) blueprintHistory(w http.ResponseWriter, r *http.Request, sess session) {
-	id, ok := pathID(r)
+	id, ok := versionID(r)
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -411,7 +411,7 @@ func versionByNumber(vs []version, n int) (version, error) {
 
 func (s *Server) libraryRollback(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
-	id, ok := pathID(r)
+	id, ok := versionID(r)
 	n, err := strconv.Atoi(r.FormValue("version"))
 	if !ok || err != nil {
 		http.NotFound(w, r)
@@ -424,7 +424,7 @@ func (s *Server) libraryRollback(w http.ResponseWriter, r *http.Request, sess se
 	}
 	v, err := versionByNumber(vs, n)
 	if err == nil {
-		err = s.storeItem(ctx, sess.Email, "library.rollback", fmt.Sprintf("rollback to version %d", n), v.Item, true)
+		err = s.storeItem(ctx, sess.Email, "library.rollback", fmt.Sprintf("rollback to version %d", n), &v.Item, true)
 	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
@@ -435,7 +435,7 @@ func (s *Server) libraryRollback(w http.ResponseWriter, r *http.Request, sess se
 
 func (s *Server) blueprintRollback(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
-	id, ok := pathID(r)
+	id, ok := versionID(r)
 	n, err := strconv.Atoi(r.FormValue("version"))
 	if !ok || err != nil {
 		http.NotFound(w, r)
@@ -451,7 +451,7 @@ func (s *Server) blueprintRollback(w http.ResponseWriter, r *http.Request, sess 
 		err = s.validateBlueprint(ctx, v.BP)
 	}
 	if err == nil {
-		err = s.storeBlueprint(ctx, sess.Email, "blueprint.rollback", fmt.Sprintf("rollback to version %d", n), v.BP, true)
+		err = s.storeBlueprint(ctx, sess.Email, "blueprint.rollback", fmt.Sprintf("rollback to version %d", n), &v.BP, true)
 	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)

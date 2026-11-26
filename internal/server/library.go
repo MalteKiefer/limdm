@@ -540,29 +540,43 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		render(prettyJSON(string(it.Payload)), map[string]any{"Preview": p})
 		return
 	}
-	if err := s.storeItem(r.Context(), sess.Email, "library.save", "save", it, false); err != nil {
+	if err := s.saveLibraryItem(r.Context(), sess.Email, &it); err != nil {
 		fail(err)
 		return
 	}
 	http.Redirect(w, r, "/library", http.StatusSeeOther)
 }
 
+// saveLibraryItem prepares, validates, signs and stores a library item with
+// its new version and audit entry; ID 0 creates one and sets it.ID. The
+// console and the admin API both save through here.
+func (s *Server) saveLibraryItem(ctx context.Context, actor string, it *api.LibraryItem) error {
+	if it.Type == api.TypeBootloader { // hash a plain password before it is validated and stored
+		p, err := api.PrepareBootloader(it.Payload)
+		if err != nil {
+			return invalid(err)
+		}
+		it.Payload = p
+	}
+	return s.storeItem(ctx, actor, "library.save", "save", it, false)
+}
+
 // storeItem validates, signs and saves an item with its new version and
-// audit entry in one transaction. restore lets a rollback recreate a
-// deleted item under its old ID.
-func (s *Server) storeItem(ctx context.Context, actor, action, note string, it api.LibraryItem, restore bool) error {
+// audit entry in one transaction and sets it.ID. restore lets a rollback
+// recreate a deleted item under its old ID.
+func (s *Server) storeItem(ctx context.Context, actor, action, note string, it *api.LibraryItem, restore bool) error {
 	if err := it.Validate(); err != nil {
-		return err
+		return invalid(err)
 	}
 	sealed, _, err := sealItemSecrets(it.Type, it.Payload) // never stored, signed, versioned or audited in clear
 	if err != nil {
 		return err
 	}
-	it.Payload = sealed
 	var compact bytes.Buffer
-	if err := json.Compact(&compact, it.Payload); err != nil {
-		return err
+	if err := json.Compact(&compact, sealed); err != nil {
+		return invalid(err)
 	}
+	it.Payload = compact.Bytes()
 	sig := signItem(it.Name, it.Type, compact.Bytes())
 	detail := it.Type + " " + compact.String()
 	if note != "save" {
@@ -581,7 +595,7 @@ func (s *Server) storeItem(ctx context.Context, actor, action, note string, it a
 			}
 			if tag.RowsAffected() == 0 {
 				if !restore {
-					return errors.New("library item not found")
+					return &userError{http.StatusNotFound, "library item not found"}
 				}
 				if _, err := tx.Exec(ctx, `INSERT INTO library_items(id, name, type, description, payload, signature) VALUES ($1,$2,$3,$4,$5,$6)`,
 					id, it.Name, it.Type, it.Description, compact.String(), sig); err != nil {
@@ -592,6 +606,7 @@ func (s *Server) storeItem(ctx context.Context, actor, action, note string, it a
 			it.Name, it.Type, it.Description, compact.String(), sig).Scan(&id); err != nil {
 			return err
 		}
+		it.ID = id
 		return recordItemVersion(ctx, tx, id, actor, note, false)
 	})
 }
@@ -602,31 +617,37 @@ func (s *Server) libraryDelete(w http.ResponseWriter, r *http.Request, sess sess
 		http.NotFound(w, r)
 		return
 	}
-	use, err := s.itemUsage(r.Context())
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if len(use[id]) > 0 {
-		http.Error(w, "item is used by blueprints: "+strings.Join(use[id], ", "), http.StatusConflict)
-		return
-	}
-	err = s.auditAction(r.Context(), sess.Email, "library.delete", strconv.FormatInt(id, 10), "", func(tx pgx.Tx) error {
-		// the last payload stays in the version history
-		if err := ensureItemBaseline(r.Context(), tx, id); err != nil {
-			return err
-		}
-		if err := recordItemVersion(r.Context(), tx, id, sess.Email, "delete", true); err != nil {
-			return err
-		}
-		_, err := tx.Exec(r.Context(), `DELETE FROM library_items WHERE id=$1`, id)
-		return err
-	})
-	if err != nil {
-		s.fail(w, err)
+	if err := s.deleteLibraryItem(r.Context(), sess.Email, id); err != nil {
+		s.failUser(w, err)
 		return
 	}
 	http.Redirect(w, r, "/library", http.StatusSeeOther)
+}
+
+// deleteLibraryItem removes an item no blueprint uses, with its audit entry
+// and a deleted version that keeps the last payload.
+func (s *Server) deleteLibraryItem(ctx context.Context, actor string, id int64) error {
+	use, err := s.itemUsage(ctx)
+	if err != nil {
+		return err
+	}
+	if len(use[id]) > 0 {
+		return &userError{http.StatusConflict, "item is used by blueprints: " + strings.Join(use[id], ", ")}
+	}
+	return s.auditAction(ctx, actor, "library.delete", strconv.FormatInt(id, 10), "", func(tx pgx.Tx) error {
+		// the last payload stays in the version history
+		if err := ensureItemBaseline(ctx, tx, id); err != nil {
+			return err
+		}
+		if err := recordItemVersion(ctx, tx, id, actor, "delete", true); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `DELETE FROM library_items WHERE id=$1`, id)
+		if err == nil && tag.RowsAffected() == 0 {
+			err = &userError{http.StatusNotFound, "library item not found"}
+		}
+		return err
+	})
 }
 
 // ---- web: blueprints ----
@@ -741,7 +762,7 @@ func (s *Server) blueprintSave(w http.ResponseWriter, r *http.Request, sess sess
 		return
 	}
 	if err == nil {
-		err = s.storeBlueprint(ctx, sess.Email, "blueprint.save", "save", bp, false)
+		err = s.saveBlueprint(ctx, sess.Email, &bp)
 	}
 	if err != nil {
 		s.renderBlueprint(w, r, sess, bp, r.FormValue("tree"), err.Error())
@@ -750,10 +771,23 @@ func (s *Server) blueprintSave(w http.ResponseWriter, r *http.Request, sess sess
 	http.Redirect(w, r, "/blueprints", http.StatusSeeOther)
 }
 
+// saveBlueprint validates and stores a blueprint with its new version and
+// audit entry; ID 0 creates one and sets bp.ID. The console and the admin
+// API both save through here.
+func (s *Server) saveBlueprint(ctx context.Context, actor string, bp *blueprintRec) error {
+	if bp.Tree == nil {
+		bp.Tree = []api.Node{}
+	}
+	if err := s.validateBlueprint(ctx, *bp); err != nil {
+		return err
+	}
+	return s.storeBlueprint(ctx, actor, "blueprint.save", "save", bp, false)
+}
+
 // validateBlueprint checks name, items and inheritance before a save.
 func (s *Server) validateBlueprint(ctx context.Context, bp blueprintRec) error {
 	if !identOK(bp.Name) {
-		return errors.New("name must be 1..64 characters: letters, digits, dot, dash, underscore")
+		return invalid(errors.New("name must be 1..64 characters: letters, digits, dot, dash, underscore"))
 	}
 	items, err := s.allItems(ctx)
 	if err != nil {
@@ -764,7 +798,7 @@ func (s *Server) validateBlueprint(ctx context.Context, bp blueprintRec) error {
 		ids[it.ID] = true
 	}
 	if err := api.ValidateTree(bp.Tree, func(i int64) bool { return ids[i] }); err != nil {
-		return err
+		return invalid(err)
 	}
 	if bp.Parent == nil {
 		return nil
@@ -774,17 +808,20 @@ func (s *Server) validateBlueprint(ctx context.Context, bp blueprintRec) error {
 		return err
 	}
 	if !ok {
-		return errors.New("the parent blueprint does not exist")
+		return invalid(errors.New("the parent blueprint does not exist"))
 	}
 	if bp.ID > 0 {
-		return s.checkNoCycle(ctx, bp.ID, *bp.Parent)
+		if err := s.checkNoCycle(ctx, bp.ID, *bp.Parent); err != nil {
+			return invalid(err)
+		}
 	}
 	return nil
 }
 
 // storeBlueprint saves a validated blueprint with its new version and audit
-// entry in one transaction; restore lets a rollback recreate a deleted one.
-func (s *Server) storeBlueprint(ctx context.Context, actor, action, note string, bp blueprintRec, restore bool) error {
+// entry in one transaction and sets bp.ID; restore lets a rollback recreate
+// a deleted one.
+func (s *Server) storeBlueprint(ctx context.Context, actor, action, note string, bp *blueprintRec, restore bool) error {
 	tree, _ := json.Marshal(bp.Tree)
 	detail := string(tree)
 	if note != "save" {
@@ -807,7 +844,7 @@ func (s *Server) storeBlueprint(ctx context.Context, actor, action, note string,
 			tag, err := tx.Exec(ctx, `UPDATE blueprints SET name=$2, description=$3, parent_id=CASE WHEN name='default' THEN NULL ELSE $4::bigint END, tree=$5, updated_at=now()
 				WHERE id=$1 AND (name <> 'default' OR $2 = 'default')`, id, bp.Name, bp.Desc, bp.Parent, string(tree))
 			if err == nil && tag.RowsAffected() == 0 {
-				err = errors.New("blueprint not found, or default cannot be renamed")
+				err = &userError{http.StatusNotFound, "blueprint not found, or default cannot be renamed"}
 			}
 			if err != nil {
 				return err
@@ -818,13 +855,14 @@ func (s *Server) storeBlueprint(ctx context.Context, actor, action, note string,
 				return err
 			}
 		case id > 0:
-			return errors.New("blueprint not found, or default cannot be renamed")
+			return &userError{http.StatusNotFound, "blueprint not found, or default cannot be renamed"}
 		default:
 			if err := tx.QueryRow(ctx, `INSERT INTO blueprints(name, description, parent_id, tree) VALUES ($1,$2,$3,$4) RETURNING id`,
 				bp.Name, bp.Desc, bp.Parent, string(tree)).Scan(&id); err != nil {
 				return err
 			}
 		}
+		bp.ID = id
 		return recordBlueprintVersion(ctx, tx, id, actor, note, false)
 	})
 }
@@ -863,25 +901,34 @@ func (s *Server) blueprintDelete(w http.ResponseWriter, r *http.Request, sess se
 		http.NotFound(w, r)
 		return
 	}
-	err = s.auditAction(r.Context(), sess.Email, "blueprint.delete", strconv.FormatInt(id, 10), "devices fall back to default", func(tx pgx.Tx) error {
-		// the last version stays in the history (not for default, which is refused below)
-		if err := ensureBlueprintBaseline(r.Context(), tx, id); err != nil {
-			return err
-		}
-		if err := recordBlueprintVersion(r.Context(), tx, id, sess.Email, "delete", true); err != nil {
-			return err
-		}
-		tag, err := tx.Exec(r.Context(), `DELETE FROM blueprints WHERE id=$1 AND name <> 'default'`, id)
-		if err == nil && tag.RowsAffected() == 0 {
-			err = errors.New("blueprint not found or is the default")
-		}
-		return err
-	})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+	if err := s.deleteBlueprint(r.Context(), sess.Email, id); err != nil {
+		s.failUser(w, err)
 		return
 	}
 	http.Redirect(w, r, "/blueprints", http.StatusSeeOther)
+}
+
+// deleteBlueprint removes a blueprint other than default, with its audit
+// entry; its devices fall back to default.
+func (s *Server) deleteBlueprint(ctx context.Context, actor string, id int64) error {
+	return s.auditAction(ctx, actor, "blueprint.delete", strconv.FormatInt(id, 10), "devices fall back to default", func(tx pgx.Tx) error {
+		// the last version stays in the history (rolled back for default below)
+		if err := ensureBlueprintBaseline(ctx, tx, id); err != nil {
+			return err
+		}
+		if err := recordBlueprintVersion(ctx, tx, id, actor, "delete", true); err != nil {
+			return err
+		}
+		var name string
+		err := tx.QueryRow(ctx, `DELETE FROM blueprints WHERE id=$1 RETURNING name`, id).Scan(&name)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return &userError{http.StatusNotFound, "blueprint not found"}
+		case err == nil && name == "default":
+			return &userError{http.StatusConflict, "the default blueprint cannot be deleted"} // rolls the delete back
+		}
+		return err
+	})
 }
 
 // prettyJSON indents an example payload for display.

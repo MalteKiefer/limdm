@@ -1,5 +1,8 @@
 # Agent API
 
+This page covers the agent API. The REST API for administrators and integrations is in
+[admin-api.md](admin-api.md).
+
 The agent talks to the server over its own listener (`LIMDM_AGENT_LISTEN`), TLS 1.3 only.
 Every endpoint except `GET /api/v1/ca` and `POST /api/v1/enroll` needs the device's client
 certificate from the device CA; the server accepts only the serial currently registered

@@ -322,10 +322,16 @@ func (s *Server) listDevices(ctx context.Context) ([]deviceRow, error) {
 
 // listDevicesWhere lists devices matching a condition on d (devices).
 func (s *Server) listDevicesWhere(ctx context.Context, where string, args ...any) ([]deviceRow, error) {
+	return s.listDevicesQuery(ctx, where, ` ORDER BY d.retired, d.hostname`, args...)
+}
+
+// listDevicesQuery lists devices matching a condition on d; tail orders
+// and pages the result.
+func (s *Server) listDevicesQuery(ctx context.Context, where, tail string, args ...any) ([]deviceRow, error) {
 	rows, err := s.db.Query(ctx, `SELECT d.id, d.hostname, d.os_name, d.agent_version,
 		coalesce(b.name, 'default'), d.tags,
-		d.desktop, d.memory_mb, d.failing, d.checks_count, d.last_seen, d.retired, d.grace_until, d.auto_locked
-		FROM devices d LEFT JOIN blueprints b ON b.id = `+effectiveBlueprintSQL+` WHERE `+where+` ORDER BY d.retired, d.hostname`, args...)
+		d.desktop, d.memory_mb, d.failing, d.checks_count, d.last_seen, d.retired, d.grace_until, d.auto_locked`+
+		deviceFrom+` WHERE `+where+tail, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -349,35 +355,35 @@ var deviceFilters = []struct{ Key, Label, Where string }{
 	{"failing", "Failing check", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.checks, '[]'::jsonb)) c WHERE c->>'id' = $1 AND c->>'status' = 'fail')`},
 }
 
+// devicesPageSize is the number of devices per page of the device list.
+const devicesPageSize = 200
+
 func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
-	where, args := "TRUE", []any{}
-	var filter, filterKey, filterVal string
-	for _, f := range deviceFilters {
-		if v := strings.TrimSpace(r.URL.Query().Get(f.Key)); v != "" && len(v) <= 200 {
-			where, args, filter, filterKey, filterVal = f.Where, []any{v}, f.Label, f.Key, v
-			break
-		}
+	dq, err := parseDeviceQuery(r.URL.Query(), s.staleAfter())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-	cond, sargs := scopeCond(sess, len(args))
-	where, args = "("+where+") AND "+cond, append(args, sargs...)
-	list, err := s.listDevicesWhere(ctx, where, args...)
+	cond, sargs := scopeCond(sess, 0)
+	dq.filters.add(cond, sargs...)
+	counts, total, err := s.deviceCounts(ctx, dq)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	q, status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q"))), r.URL.Query().Get("status")
-	counts := map[string]int{}
-	var shown []deviceRow
-	for _, d := range list {
-		counts[d.Status]++
-		if status != "" && d.Status != status {
-			continue
-		}
-		if q != "" && !strings.Contains(strings.ToLower(d.Hostname+" "+d.OS+" "+d.ID+" "+d.Blueprints+" "+strings.Join(d.Tags, " ")), q) {
-			continue
-		}
-		shown = append(shown, d)
+	matching := total
+	if dq.Status != "" {
+		matching = counts[dq.Status]
+	}
+	pages := max(1, (matching+devicesPageSize-1)/devicesPageSize)
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	page = min(max(page, 1), pages)
+	where := dq.where()
+	shown, err := s.listDevicesQuery(ctx, where.sql(), fmt.Sprintf(" ORDER BY d.retired, d.hostname, d.id LIMIT %d OFFSET %d", devicesPageSize, (page-1)*devicesPageSize), where.args...)
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
 	var tags []string
 	cond, sargs = scopeCond(sess, 0)
@@ -390,17 +396,14 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 		s.fail(w, err)
 		return
 	}
-	keep := url.Values{}
-	if filterKey != "" {
-		keep.Set(filterKey, filterVal)
+	keepURL := template.URL(dq.Keep.Encode()) //nolint:gosec // url.Values.Encode escapes every key and value
+	pageKeep := dq.Keep.Encode()
+	if dq.Status != "" {
+		pageKeep = url.Values{"status": {dq.Status}}.Encode() + "&" + pageKeep
 	}
-	if q != "" {
-		keep.Set("q", q)
-	}
-	keepURL := template.URL(keep.Encode()) //nolint:gosec // url.Values.Encode escapes every key and value
-	s.render(w, r, sess, "devices", map[string]any{"Devices": shown, "Total": len(list), "Counts": counts, "Q": q, "Status": status,
-		"Statuses": []string{"compliant", "in grace", "non-compliant", "stale", "pending", "retired"},
-		"Filter":   filter, "FilterKey": filterKey, "FilterVal": filterVal, "Keep": keepURL, "Tags": tags, "Apps": apps,
+	s.render(w, r, sess, "devices", map[string]any{"Devices": shown, "Total": total, "Counts": counts, "Q": dq.Q, "Status": dq.Status,
+		"Statuses": deviceStatuses, "Chips": dq.Chips, "Tag": dq.Keep.Get("tag"), "Pkg": dq.Keep.Get("pkg"), "Keep": keepURL, "Tags": tags, "Apps": apps,
+		"Page": page, "Pages": pages, "PageKeep": template.URL(pageKeep), //nolint:gosec // url.Values.Encode escapes every key and value
 		"Back": r.URL.RequestURI()})
 }
 
@@ -920,6 +923,12 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 // queueCommand stores a command for a device and audits it. The entry names
 // the command ID, like the command.result entry of the device later does.
 func (s *Server) queueCommand(ctx context.Context, actor, id, typ, payload string) error {
+	_, err := s.queueCommandID(ctx, actor, id, typ, payload)
+	return err
+}
+
+// queueCommandID is queueCommand returning the new command's id.
+func (s *Server) queueCommandID(ctx context.Context, actor, id, typ, payload string) (int64, error) {
 	detail := payload
 	var u api.UserCommand
 	if strings.HasPrefix(typ, "user_") && json.Unmarshal([]byte(payload), &u) == nil {
@@ -929,22 +938,22 @@ func (s *Server) queueCommand(ctx context.Context, actor, id, typ, payload strin
 	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer tx.Rollback(ctx)
 	cmdID, err := s.insertCommand(ctx, tx, id, typ, payload, actor)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if typ == "unlock" || typ == "lock" { // a manual action takes over from the compliance policy
 		if _, err := tx.Exec(ctx, `UPDATE devices SET auto_locked=false WHERE id=$1`, id); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	if err := audit(ctx, tx, actor, "command."+typ, id, truncate(fmt.Sprintf("command %d %s", cmdID, detail), 2000)); err != nil {
-		return err
+		return 0, err
 	}
-	return tx.Commit(ctx)
+	return cmdID, tx.Commit(ctx)
 }
 
 // commandPayload checks a command from the form and builds its payload; a
@@ -1581,6 +1590,11 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 			coalesce(inventory->>'serial',''), coalesce(inventory->>'vendor',''), coalesce(inventory->>'model',''), coalesce(inventory->>'cpu',''),
 			coalesce(inventory->>'memory_mb',''), coalesce(inventory->>'disk_gb',''), coalesce(last_seen::text,''), enrolled_at::text, retired::text
 			FROM devices d WHERE ` + cond + ` ORDER BY hostname`
+	case "packages.csv":
+		header = []string{"device_id", "hostname", "package", "version", "arch"}
+		q = `SELECT d.id, d.hostname, coalesce(p->>'n',''), coalesce(p->>'v',''), coalesce(p->>'a','')
+			FROM devices d, jsonb_array_elements(CASE WHEN jsonb_typeof(d.packages) = 'array' THEN d.packages ELSE '[]'::jsonb END) p
+			WHERE NOT d.retired AND ` + cond + ` ORDER BY d.hostname, d.id, p->>'n'`
 	case "audit.csv":
 		var where string
 		_, where, args = auditFilter(r.URL.Query(), sess)
