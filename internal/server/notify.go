@@ -532,7 +532,7 @@ func (s *Server) channelSave(w http.ResponseWriter, r *http.Request, sess sessio
 		s.fail(w, err)
 		return
 	}
-	http.Redirect(w, r, "/settings?tab=integrations", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings?tab=notifications", http.StatusSeeOther)
 }
 
 // channelOp tests, switches on or off, or deletes a channel.
@@ -556,7 +556,7 @@ func (s *Server) channelOp(w http.ResponseWriter, r *http.Request, sess session)
 			return
 		}
 		n := notice{Type: "test", Severity: "info", Title: "Test notification", At: time.Now().UTC(),
-			Text: "LiMDM can reach this channel. Sent by " + sess.Email + ".", URL: s.cfg.PublicURL + "/settings?tab=integrations"}
+			Text: "LiMDM can reach this channel. Sent by " + sess.Email + ".", URL: s.cfg.PublicURL + "/settings?tab=notifications"}
 		tctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		err = s.deliver(tctx, chans[i], n)
 		cancel()
@@ -569,7 +569,7 @@ func (s *Server) channelOp(w http.ResponseWriter, r *http.Request, sess session)
 			s.renderSettings(w, r, sess, s.settings(), "", "Test failed: "+msg)
 			return
 		}
-		http.Redirect(w, r, "/settings?tab=integrations", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings?tab=notifications", http.StatusSeeOther)
 		return
 	}
 	err = s.auditAction(ctx, sess.Email, "notification.channel_"+op, strconv.FormatInt(id, 10), "", func(tx pgx.Tx) error {
@@ -585,5 +585,5 @@ func (s *Server) channelOp(w http.ResponseWriter, r *http.Request, sess session)
 		s.fail(w, err)
 		return
 	}
-	http.Redirect(w, r, "/settings?tab=integrations", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings?tab=notifications", http.StatusSeeOther)
 }

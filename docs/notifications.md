@@ -1,6 +1,6 @@
 # Notifications
 
-**Settings**, **Integrations** sends events to channels: email, Slack, Discord or a signed
+**Settings**, **Notifications** sends events to channels: email, Slack, Discord or a signed
 webhook. Each channel subscribes to event types (none selected: all). Delivery runs in the
 background with three attempts (at once, after 10 seconds, after a minute); every outcome
 is in the channel's last delivery and kept for 30 days. **Send test** checks a channel.
@@ -26,4 +26,5 @@ is in the channel's last delivery and kept for 30 days. **Send test** checks a c
 
 Webhook URLs and the SMTP password are credentials: they are stored encrypted (AES-GCM,
 bound to the channel) and never shown again; the list shows only the host. Redirects are
-not followed. The compliance webhook under **Monitoring** keeps working alongside.
+not followed. The compliance webhook on the same tab keeps working alongside. The console shows events
+by name (for example "Device non-compliant"); the codes in the table are what webhooks receive.

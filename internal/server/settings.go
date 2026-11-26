@@ -331,11 +331,14 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 	if tab == "" {
 		tab = r.URL.Query().Get("tab")
 	}
+	if tab == "monitoring" || tab == "integrations" { // both forms live on the notifications tab
+		tab = "notifications"
+	}
 	if !slices.Contains(settingsTabs, tab) {
 		tab = "general"
 	}
 	data := map[string]any{}
-	if tab == "integrations" {
+	if tab == "notifications" {
 		views, err := s.channelViews(r.Context())
 		if err != nil {
 			s.fail(w, err)
@@ -350,10 +353,10 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 
 // settingsTabs are the sections of the settings page; each tab saves only
 // its own fields.
-var settingsTabs = []string{"general", "security", "sso", "monitoring", "branding", "integrations"}
+var settingsTabs = []string{"general", "security", "sso", "notifications", "branding"}
 
 var settingsTabLabels = []struct{ Key, Label string }{
-	{"general", "General"}, {"security", "Security"}, {"sso", "SSO"}, {"monitoring", "Monitoring"}, {"branding", "Branding"}, {"integrations", "Integrations"},
+	{"general", "General"}, {"security", "Security"}, {"sso", "SSO"}, {"notifications", "Notifications"}, {"branding", "Branding"},
 }
 
 func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess session) {

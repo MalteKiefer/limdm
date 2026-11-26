@@ -31,15 +31,17 @@ an administrator, or when the console would listen publicly without a certificat
 
 ## Console settings
 
-**Settings** (admins edit, auditors read) has the tabs General, SSO, Monitoring, Branding
-and Integrations; each tab saves only its own fields:
+**Settings** (admins edit, auditors read) has the tabs General, Security, SSO, Notifications
+and Branding; each form saves only its own fields:
 
 * **Single sign on (OIDC).** Issuer, client ID, client secret (stored AES-256-GCM encrypted)
   and allowed domain. Changes are checked against the provider's discovery document before
   they take effect, no restart needed. Redirect URI: `<LIMDM_PUBLIC_URL>/auth/callback`.
 * **Local accounts.** Can only be disabled while an OIDC administrator exists and you are
   signed in with OIDC, so nobody locks everyone out.
-* **Stale threshold** and **compliance webhook** ([compliance.md](compliance.md#webhook)).
+* **Stale threshold** (General).
+* **Notifications.** Notification channels ([notifications.md](notifications.md)) and the
+  compliance webhook ([compliance.md](compliance.md#webhook)) on one tab.
 * **Branding.** Company name (up to 80 characters) and a PNG logo (16 to 1024 pixels, up to
   256 KiB, square works best). Shown in the console, on the sign in page and in the desktop
   helper's dialogs and notifications on devices. Only PNG is accepted because an SVG served

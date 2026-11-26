@@ -305,8 +305,8 @@ func (s *Server) onboarding(ctx context.Context, r *http.Request, sess session) 
 	}
 	set := s.settings()
 	steps := []onboardingStep{
-		{"Company settings", "Name and logo shown in the console and on devices", "/settings", set.CompanyName != ""},
-		{"Sign in method", "Connect the identity provider (OIDC) so admins sign in with their company account", "/settings", set.OIDCIssuer != "" && set.OIDCClientID != ""},
+		{"Company settings", "Name and logo shown in the console and on devices", "/settings?tab=branding", set.CompanyName != ""},
+		{"Sign in method", "Connect the identity provider (OIDC) so admins sign in with their company account", "/settings?tab=sso", set.OIDCIssuer != "" && set.OIDCClientID != ""},
 		{"First enrollment token", "A one time token lets the first device join", "/tokens", tokens || devices},
 		{"First blueprint", "Decide which library items devices get", "/blueprints/new", blueprints},
 		{"First device", "Install the agent with the token", "/tokens", devices},
