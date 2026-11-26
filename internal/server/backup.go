@@ -282,6 +282,13 @@ func (s *Server) runBackup(ctx context.Context, actor, reason, schedule string) 
 		backupFailures.Add(1)
 		s.notify(notice{Type: "backup.failed", Severity: "critical", Title: "Backup failed",
 			Text: "The backup run (" + reason + ") failed: " + truncate(err.Error(), 500), URL: s.cfg.PublicURL + "/settings/backup"})
+		// targets that took the new archive are still pruned, or they fill
+		// up while another target is down
+		if len(res.Targets) > 0 {
+			if pErr := s.pruneBackups(ctx, actor); pErr != nil {
+				s.log.Error("prune backups", "err", pErr)
+			}
+		}
 		return res, err
 	}
 	if pErr := s.pruneBackups(ctx, actor); pErr != nil {
