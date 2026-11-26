@@ -309,7 +309,7 @@ func PAMAuth() int {
 		return 1
 	}
 	pw := readAuthtok()
-	if !localService(os.Getenv("PAM_SERVICE"), os.Getenv("PAM_RHOST")) {
+	if !localService(os.Getenv("PAM_SERVICE"), os.Getenv("PAM_RHOST"), os.Getenv("PAM_TTY"), readFile("/proc/self/cgroup")) {
 		return 1 // remote or unknown service: never start a device flow, pam_unix decides
 	}
 	username := os.Getenv("PAM_USER")
@@ -444,25 +444,39 @@ func recordAuthEvent(username, email string, err error) {
 	}
 }
 
-// pamServices run the SSO device flow: display managers, screen lockers, the
-// text console and privilege prompts at the device. sshd and other remote
-// services are excluded, so an unauthenticated network client can neither
-// start a device flow (code phishing, a root process waiting on the IdP) nor
-// learn which accounts are managed.
+// pamServices run the SSO device flow: display managers, the text console
+// and screen lockers at the device. sshd and other remote services are
+// excluded, so an unauthenticated network client can neither start a device
+// flow (code phishing, a root process waiting on the IdP) nor learn which
+// accounts are managed. su, sudo and their variants are excluded too: any
+// local or SSH user could make the device show another user's code and
+// phish its confirmation. The value is true for polkit, which may
+// authenticate as another (admin) user: it runs the flow only inside a
+// local logind session with a seat.
 var pamServices = map[string]bool{
-	"login": true, "gdm-password": true, "gdm-fingerprint": false, "lightdm": true, "sddm": true, "lxdm": true, "slim": true,
-	"kde": true, "gnome-screensaver": true, "xscreensaver": true, "cinnamon-screensaver": true, "mate-screensaver": true,
-	"xfce4-screensaver": true, "sudo": true, "sudo-i": true, "su": true, "su-l": true, "polkit-1": true,
+	"login": false, "gdm-password": false, "lightdm": false, "sddm": false, "lxdm": false, "slim": false,
+	"kde": false, "gnome-screensaver": false, "xscreensaver": false, "cinnamon-screensaver": false, "mate-screensaver": false,
+	"xfce4-screensaver": false, "polkit-1": true,
 	// greeters and lockers of compositors and window managers
-	"greetd": true, "cosmic-greeter": true, "swaylock": true, "hyprlock": true, "gtklock": true, "waylock": true,
-	"i3lock": true, "xsecurelock": true, "kscreensaver": true, "plasma-login": true, "lxqt-lockscreen": true,
+	"greetd": false, "cosmic-greeter": false, "swaylock": false, "hyprlock": false, "gtklock": false, "waylock": false,
+	"i3lock": false, "xsecurelock": false, "kscreensaver": false, "plasma-login": false, "lxqt-lockscreen": false,
 }
 
-func localService(service, rhost string) bool {
-	if rhost != "" && rhost != "localhost" && rhost != "127.0.0.1" && rhost != "::1" {
+// localService decides whether a PAM request may start a device flow:
+// a listed service, no remote host (PAM_RHOST, any value), no pseudo
+// terminal (PAM_TTY), and a calling process (its cgroup) that is neither in
+// a remote logind session nor below the SSH daemon.
+func localService(service, rhost, tty, cgroup string) bool {
+	seat, ok := pamServices[service]
+	if !ok || rhost != "" || strings.Contains(tty, "pts/") || remoteCgroup(cgroup) {
 		return false
 	}
-	return pamServices[service]
+	if s := logindSession(cgroup); s != nil {
+		return s["SEAT"] != ""
+	}
+	// outside a session: login and display managers authenticate before it
+	// exists, a locker only ever unlocks its own user
+	return !seat
 }
 
 // pamStackFile is the shared auth stack edited directly on families without
