@@ -636,6 +636,9 @@ type apiDevice struct {
 	Checks       int             `json:"checks"`
 	LastSeen     *time.Time      `json:"last_seen"`
 	Retired      bool            `json:"retired"`
+	Desktop      string          `json:"desktop"`
+	MemoryMB     uint64          `json:"memory_mb"`
+	Locked       bool            `json:"auto_locked"`
 	BlueprintID  *int64          `json:"blueprint_id,omitempty"`
 	EnrolledAt   *time.Time      `json:"enrolled_at,omitempty"`
 	Inventory    json.RawMessage `json:"inventory,omitempty"`
@@ -646,7 +649,8 @@ func toAPIDevice(d deviceRow) apiDevice {
 		d.Tags = []string{}
 	}
 	return apiDevice{ID: d.ID, Hostname: d.Hostname, OS: d.OS, AgentVersion: d.AgentVersion, Blueprint: d.Blueprints, Tags: d.Tags,
-		Status: d.Status, Failing: d.Failing, Checks: d.Checks, LastSeen: d.LastSeen, Retired: d.Retired}
+		Status: d.Status, Failing: d.Failing, Checks: d.Checks, LastSeen: d.LastSeen, Retired: d.Retired,
+		Desktop: d.Desktop, MemoryMB: d.MemoryMB, Locked: d.AutoLocked}
 }
 
 func (s *Server) apiDevices(w http.ResponseWriter, r *http.Request, c apiCaller) {
@@ -743,8 +747,8 @@ func (s *Server) apiDevicePatch(w http.ResponseWriter, r *http.Request, c apiCal
 	var primary *int64
 	if body.PrimaryUser != nil {
 		if email := strings.ToLower(strings.TrimSpace(*body.PrimaryUser)); email != "" {
-			var uid int64
-			if err := s.db.QueryRow(ctx, `SELECT id FROM dir_users WHERE email=$1`, email).Scan(&uid); err != nil {
+			uid, err := s.dirPersonID(ctx, c.sess(), email)
+			if err != nil {
 				problemField(w, http.StatusUnprocessableEntity, "primary_user", "primary user not found in the directory")
 				return
 			}

@@ -3421,6 +3421,17 @@
           "inventory": {
             "type": "object",
             "description": "Inventory as reported by the agent (single device only)"
+          },
+          "desktop": {
+            "type": "string",
+            "description": "Desktop environment, empty on servers"
+          },
+          "memory_mb": {
+            "type": "integer"
+          },
+          "auto_locked": {
+            "type": "boolean",
+            "description": "Locked by the compliance policy"
           }
         }
       },

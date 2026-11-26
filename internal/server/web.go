@@ -825,7 +825,8 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		s.fail(w, err)
 		return
 	}
-	rowsP, err := tx.Query(ctx, `SELECT email FROM dir_users WHERE active ORDER BY email LIMIT 2000`)
+	pcond, pargs := dirPeopleCond(sess, 0)
+	rowsP, err := tx.Query(ctx, `SELECT u.email FROM dir_users u WHERE u.active AND `+pcond+` ORDER BY u.email LIMIT 2000`, pargs...)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -1239,8 +1240,8 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 	}
 	var primary *int64
 	if email := strings.ToLower(strings.TrimSpace(r.FormValue("primary_user"))); email != "" {
-		var uid int64
-		if err := s.db.QueryRow(r.Context(), `SELECT id FROM dir_users WHERE email=$1`, email).Scan(&uid); err != nil {
+		uid, err := s.dirPersonID(r.Context(), sess, email)
+		if err != nil {
 			s.errorPage(w, r, sess, http.StatusBadRequest, "primary user not found in the directory")
 			return
 		}

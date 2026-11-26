@@ -228,4 +228,30 @@ func TestAppDevicesAPI(t *testing.T) {
 	if err := db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action IN ('device.assign','device.tag-add','agent_update.request','device.retire','device.delete','token.create','token.revoke')`).Scan(&audits); err != nil || audits < 8 {
 		t.Fatalf("audit entries: %d %v", audits, err)
 	}
+
+	// a tenant admin sees only the directory people of its own devices and
+	// cannot make someone else's person the primary user
+	if _, err := db.Exec(ctx, `INSERT INTO tenants(id, name) VALUES (2, 'b');
+		INSERT INTO dir_users(source, user_name, email) VALUES ('scim', 'bob', 'bob@b.de'), ('scim', 'eve', 'eve@firma.de');
+		INSERT INTO devices(id, cert_serial, cert_not_after, hostname, inventory, tenant_id, primary_user_id)
+			VALUES ('d3', 's', now(), 'delta', '{}', 2, (SELECT id FROM dir_users WHERE email='bob@b.de'));
+		INSERT INTO console_users(email, role, tenant_id) VALUES ('tadmin@b.de', 'admin', 2)`); err != nil {
+		t.Fatal(err)
+	}
+	tadmin := session{Email: "tadmin@b.de", Role: "admin", IAT: time.Now(), Last: time.Now()}
+	if code, p := call(tadmin, "GET", "/api/v1/devices/primary-users?q=", ""); code != 200 || len(p["items"].([]any)) != 1 || p["items"].([]any)[0] != "bob@b.de" {
+		t.Fatalf("tenant people: %d %v", code, p)
+	}
+	if code, p := call(admin, "GET", "/api/v1/devices/primary-users?q=", ""); code != 200 || len(p["items"].([]any)) != 3 {
+		t.Fatalf("global people: %d %v", code, p)
+	}
+	if code, _ := call(tadmin, "PATCH", "/api/v1/devices/d3", `{"primary_user":"jane@firma.de"}`); code != 422 {
+		t.Fatalf("tenant sets a foreign person: %d", code)
+	}
+	if code, _ := call(tadmin, "PATCH", "/api/v1/devices/d3", `{"primary_user":"bob@b.de"}`); code != 200 {
+		t.Fatalf("tenant keeps its person: %d", code)
+	}
+	if code, _ := call(tadmin, "GET", "/api/v1/devices/d1/detail", ""); code != 404 {
+		t.Fatalf("tenant sees a foreign device: %d", code)
+	}
 }

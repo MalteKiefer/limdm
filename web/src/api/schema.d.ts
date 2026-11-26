@@ -1013,6 +1013,11 @@ export interface components {
             enrolled_at?: string;
             /** @description Inventory as reported by the agent (single device only) */
             inventory?: Record<string, never>;
+            /** @description Desktop environment, empty on servers */
+            desktop?: string;
+            memory_mb?: number;
+            /** @description Locked by the compliance policy */
+            auto_locked?: boolean;
         };
         DevicePage: {
             items: components["schemas"]["Device"][];

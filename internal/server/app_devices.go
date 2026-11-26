@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -827,13 +828,42 @@ func paramsForm(w http.ResponseWriter, params map[string]any) (url.Values, bool)
 
 // apiPrimaryUsers suggests directory people for the primary user field.
 func (s *Server) apiPrimaryUsers(w http.ResponseWriter, r *http.Request, c apiCaller) {
+	if !s.limit.allow("people:"+c.actor(), 120, time.Minute) {
+		w.Header().Set("Retry-After", "60")
+		problem(w, http.StatusTooManyRequests, "rate limit: 120 searches per minute")
+		return
+	}
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-	list, err := collect(r.Context(), s.db, pgx.RowTo[string], `SELECT email FROM dir_users WHERE active AND strpos(lower(email), $1) > 0 ORDER BY email LIMIT 20`, q)
+	cond, args := dirPeopleCond(c.sess(), 1)
+	list, err := collect(r.Context(), s.db, pgx.RowTo[string], `SELECT u.email FROM dir_users u WHERE u.active AND strpos(lower(u.email), $1) > 0 AND `+cond+`
+		ORDER BY u.email LIMIT 20`, append([]any{q}, args...)...)
 	if err != nil {
 		s.apiFail(w, err)
 		return
 	}
 	writeJSON(w, listPage{Items: list})
+}
+
+// dirPeopleCond limits directory people (alias u) to those the caller may
+// see. The directory is installation wide (SCIM and Google sync have no
+// tenant), so the global view of an unscoped account sees all of it; an
+// account bound to a tenant or a device scope sees only the people who are
+// already the primary user of a device in its tenant and scope.
+func dirPeopleCond(sess session, n int) (string, []any) {
+	if sess.Tenant == 0 && !sess.scoped() {
+		return "TRUE", nil
+	}
+	cond, args := scopeCond(sess, n)
+	return `EXISTS (SELECT 1 FROM devices d WHERE d.primary_user_id = u.id AND ` + cond + `)`, args
+}
+
+// dirPersonID finds a directory person by email among those the caller may
+// see (dirPeopleCond).
+func (s *Server) dirPersonID(ctx context.Context, sess session, email string) (int64, error) {
+	cond, args := dirPeopleCond(sess, 1)
+	var id int64
+	err := s.db.QueryRow(ctx, `SELECT u.id FROM dir_users u WHERE u.email=$1 AND `+cond, append([]any{email}, args...)...).Scan(&id)
+	return id, err
 }
 
 type apiEnrollToken struct {
