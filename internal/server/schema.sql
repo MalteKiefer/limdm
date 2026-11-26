@@ -402,3 +402,19 @@ END $$;
 DROP TRIGGER IF EXISTS dir_users_tombstone ON dir_users;
 CREATE TRIGGER dir_users_tombstone AFTER INSERT OR UPDATE OF email OR DELETE ON dir_users
     FOR EACH ROW EXECUTE FUNCTION dir_users_tombstone();
+-- E3
+-- remote shell sessions: who opened which shell on which device, and its output
+CREATE TABLE IF NOT EXISTS shell_sessions (
+    id           TEXT PRIMARY KEY,
+    device_id    TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    command_id   BIGINT,
+    requested_by TEXT NOT NULL,
+    local_user   TEXT NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    connected_at TIMESTAMPTZ,
+    ended_at     TIMESTAMPTZ,
+    end_reason   TEXT NOT NULL DEFAULT '',
+    transcript   BYTEA NOT NULL DEFAULT '',
+    truncated    BOOLEAN NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS shell_sessions_device ON shell_sessions(device_id, created_at DESC);

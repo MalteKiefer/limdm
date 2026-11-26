@@ -102,7 +102,7 @@ func parsePages(lang, layout string) map[string]*template.Template {
 				"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour", "message": "Message",
 				"app_install": "Install app", "app_remove": "Remove app",
 				"user_create": "Create user", "user_admin": "Change admin rights", "user_lock": "Lock user", "user_unlock": "Unlock user",
-				"user_password": "Reset password", "user_delete": "Delete user", "software_remove": "Remove software"}[a])
+				"user_password": "Reset password", "user_delete": "Delete user", "software_remove": "Remove software", "shell": "Remote shell"}[a])
 		},
 		"join":      strings.Join,
 		"hasPrefix": strings.HasPrefix,
@@ -207,6 +207,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, na
 }
 
 func (s *Server) webRoutes(mux *http.ServeMux) {
+	s.shellRoutes(mux)
 	mux.HandleFunc("GET /{$}", s.page(s.overview))
 	mux.HandleFunc("GET /devices", s.page(s.devices))
 	mux.HandleFunc("GET /devices/{id}", s.page(s.device))

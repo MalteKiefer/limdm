@@ -59,6 +59,8 @@ type Config struct {
 	Server       string `json:"server"`
 	DeviceID     string `json:"device_id"`
 	AllowScripts bool   `json:"allow_scripts"` // remote scripts are opt in per device
+	// AllowRemoteShell lets IT open an interactive support shell (opt in per device).
+	AllowRemoteShell bool `json:"allow_remote_shell,omitempty"`
 	// NoFallbackDNS turns off asking Cloudflare and Google (DNS over HTTPS)
 	// when the system resolver cannot reach the server.
 	NoFallbackDNS bool `json:"no_fallback_dns,omitempty"`
@@ -121,6 +123,7 @@ type Agent struct {
 	lastChecks   []api.CheckResult
 	lastFlatpaks []api.FlatpakApp // from the last inventory, for the desktop catalog
 	lastSystem   DesktopSystem    // from the last inventory, for limdm info
+	shell        atomic.Pointer[runningShell]
 }
 
 func validServerURL(s string) error {
@@ -239,7 +242,7 @@ func verifyByFingerprint(fingerprint string) *tls.Config {
 
 // Enroll registers the device: the key is created locally and never leaves
 // the device, the server signs a CSR after checking the one time token.
-func Enroll(server, token, fingerprint string, allowScripts bool) error {
+func Enroll(server, token, fingerprint string, allowScripts, allowShell bool) error {
 	server = strings.TrimRight(server, "/")
 	if err := validServerURL(server); err != nil {
 		return err
@@ -290,7 +293,7 @@ func Enroll(server, token, fingerprint string, allowScripts bool) error {
 	if _, err := writeIfChanged(identityFile, string(keyPEM)+er.Cert, 0o600); err != nil {
 		return err
 	}
-	cfg, _ := json.MarshalIndent(Config{Server: server, DeviceID: er.DeviceID, AllowScripts: allowScripts}, "", "  ")
+	cfg, _ := json.MarshalIndent(Config{Server: server, DeviceID: er.DeviceID, AllowScripts: allowScripts, AllowRemoteShell: allowShell}, "", "  ")
 	if _, err = writeIfChanged(configFile, string(cfg)+"\n", 0o600); err != nil {
 		return err
 	}
@@ -808,6 +811,8 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = a.userCommand(c.Type, c.Payload)
 	case "app_install", "app_remove":
 		out, err = a.appCommand(strings.TrimPrefix(c.Type, "app_"), c.Payload)
+	case "shell":
+		out, err = a.startShell(c)
 	case "script":
 		if !a.cfg.AllowScripts {
 			err = errors.New("remote scripts are disabled on this device (allow_scripts)")
@@ -1036,7 +1041,8 @@ func Enrolled() bool {
 }
 
 // EnrollFromConfig enrolls with a key = value file (server, fingerprint, token,
-// allow_scripts) and removes it afterwards: the token must not stay on disk.
+// allow_scripts, allow_remote_shell) and removes it afterwards: the token must
+// not stay on disk.
 func EnrollFromConfig(path string) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -1059,7 +1065,7 @@ func EnrollFromConfig(path string) error {
 			return fmt.Errorf("%s: %s is missing", path, k)
 		}
 	}
-	if err := Enroll(kv["server"], kv["token"], kv["fingerprint"], kv["allow_scripts"] == "true"); err != nil {
+	if err := Enroll(kv["server"], kv["token"], kv["fingerprint"], kv["allow_scripts"] == "true", kv["allow_remote_shell"] == "true"); err != nil {
 		return err
 	}
 	return os.Remove(path)

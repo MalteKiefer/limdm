@@ -580,3 +580,6 @@ td.row-actions .menu-list form { display: block; }
 td.row-actions .menu-list { text-align: left; }
 .inline:has(.field-hint) { align-items: flex-start; }
 legend .hint, summary .hint { display: block; margin-top: 2px; font-size: 12px; font-weight: 400; color: var(--text-3); }
+/* E3: remote shell */
+.terminal-card .terminal { height: 60vh; min-height: 320px; background: #111; border-radius: var(--radius); padding: 6px; }
+pre.transcript { max-height: 70vh; overflow: auto; white-space: pre-wrap; font-family: var(--mono); font-size: 12px; }

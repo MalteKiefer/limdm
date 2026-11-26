@@ -203,6 +203,7 @@ type Server struct {
 	fleet  atomic.Pointer[fleetCache]
 	// first broken audit entry found by the last full verification, 0 = intact
 	auditBroken atomic.Int64
+	shells      shellHub // running remote shell sessions
 }
 
 func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
@@ -351,6 +352,7 @@ func (s *Server) AgentHandler() http.Handler {
 	mux.HandleFunc("GET /api/v1/catalog/icons/{id}", s.deviceAuth(s.catalogIcon, false))
 	mux.HandleFunc("GET /api/v1/catalog/search", s.deviceAuth(s.deviceLimit(30, s.flathubSearchJSON), false))
 	mux.HandleFunc("GET /api/v1/catalog/flathub-icon", s.deviceAuth(s.deviceLimit(300, s.flathubIcon), false))
+	s.shellAgentRoutes(mux)
 	return securityHeaders(mux)
 }
 
@@ -723,6 +725,9 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			s.failAPI(w, err)
 			return
+		}
+		if typ == "shell" && !res.OK {
+			s.shells.refused(res.ID, res.Output)
 		}
 		if !res.OK && slices.Contains([]string{"lock", "unlock", "lost", "found", "wipe", "script"}, typ) {
 			notices = append(notices, notice{Type: "command.failed", Severity: "critical", Title: "Command failed: " + typ,

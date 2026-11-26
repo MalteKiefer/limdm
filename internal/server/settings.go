@@ -41,7 +41,8 @@ type Settings struct {
 	ConsoleBlock []string `json:"console_block,omitempty"`
 	// Password rules for passwords chosen in the console: local accounts on
 	// devices (create, reset) and local console accounts.
-	Rules PasswordPolicy `json:"password_policy"` // password rules
+	Rules       PasswordPolicy      `json:"password_policy"` // password rules
+	RemoteShell RemoteShellSettings `json:"remote_shell,omitzero"`
 }
 
 // PasswordPolicy: the minimum length (12..128, 12 when unset) and the
@@ -231,6 +232,9 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 	if err := validLogo(set.Logo); err != nil {
 		return nil, err
 	}
+	if err := set.RemoteShell.validate(); err != nil {
+		return nil, err
+	}
 	allow, err := parseNets(set.ConsoleAllow)
 	if err != nil {
 		return nil, fmt.Errorf("allowed networks: %w", err)
@@ -379,6 +383,8 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		n, _ := strconv.Atoi(r.FormValue("min_length"))
 		set.Rules = PasswordPolicy{MinLength: n, Upper: r.FormValue("upper") == "on", Lower: r.FormValue("lower") == "on",
 			Digit: r.FormValue("digit") == "on", Symbol: r.FormValue("symbol") == "on", NoName: r.FormValue("no_name") == "on"}
+	case "remote_shell":
+		set.RemoteShell = remoteShellForm(r)
 	default:
 		http.Error(w, "unknown settings section", http.StatusBadRequest)
 		return
@@ -435,7 +441,7 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 	doc, _ := json.Marshal(storedSettings{Settings: set, SecretEnc: enc})
 	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d allow=%q block=%q rules=%+v",
 		set.OIDCIssuer, set.AllowedDomain, set.LocalLogin, set.StaleHours, set.WebhookURL != "", set.OIDCClientSecret != cur.OIDCClientSecret,
-		set.CompanyName, len(set.Logo), set.ConsoleAllow, set.ConsoleBlock, set.Rules)
+		set.CompanyName, len(set.Logo), set.ConsoleAllow, set.ConsoleBlock, set.Rules) + fmt.Sprintf(" remote_shell=%+v", set.RemoteShell)
 	err = s.auditAction(ctx, sess.Email, "settings.save", "server", detail, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
 		return err

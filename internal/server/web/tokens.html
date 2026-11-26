@@ -17,7 +17,8 @@
   <pre>server = "{{.AgentURL}}"
 fingerprint = "{{.Fingerprint}}"
 token = "{{if .Created}}{{.Created}}{{else}}&lt;token&gt;{{end}}"
-allow_scripts = false</pre>
+allow_scripts = false
+allow_remote_shell = false</pre>
   <pre>curl -fsSL {{.PublicURL}}/install.sh | sudo sh</pre>
   <p class="muted">{{t "Other systems: use the tar.gz release and"}} <code>limdm-agent enroll --config /etc/limdm/enroll.conf</code>.</p>
 </section>

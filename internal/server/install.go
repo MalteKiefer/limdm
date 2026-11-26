@@ -49,6 +49,8 @@ fi
 install -d -m 0700 /etc/limdm
 allow=false
 [ "${LIMDM_ALLOW_SCRIPTS:-}" = true ] && allow=true
+shell=false
+[ "${LIMDM_ALLOW_REMOTE_SHELL:-}" = true ] && shell=true
 if [ -n "${LIMDM_TOKEN:-}" ]; then
     case "$LIMDM_TOKEN" in *[!A-Za-z0-9_-]*) echo "invalid token" >&2; exit 1 ;; esac
     umask 077
@@ -57,6 +59,7 @@ server = "$SERVER"
 fingerprint = "$FINGERPRINT"
 token = "$LIMDM_TOKEN"
 allow_scripts = $allow
+allow_remote_shell = $shell
 CONF
 elif [ ! -f /etc/limdm/enroll.conf ] && [ ! -f /etc/limdm/device.pem ]; then
     echo "set LIMDM_TOKEN or place /etc/limdm/enroll.conf" >&2; exit 1

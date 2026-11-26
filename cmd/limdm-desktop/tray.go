@@ -186,6 +186,8 @@ func (t *tray) refresh() {
 	t.about.SetTitle(fmt.Sprintf(tr("LiMDM agent %s", "LiMDM Agent %s"), st.Version))
 	icon, line := iconOK, tr("Device is compliant", "Gerät ist konform")
 	switch {
+	case st.RemoteShell != "":
+		icon, line = iconWarn, tr("IT remote support session running", "Fernwartung durch die IT läuft")
 	case st.Locked:
 		icon, line = iconBad, tr("Device is locked", "Gerät ist gesperrt")
 	case st.LastError != "":
