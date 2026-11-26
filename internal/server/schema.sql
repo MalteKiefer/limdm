@@ -622,3 +622,33 @@ CREATE TABLE IF NOT EXISTS shell_sessions (
     truncated    BOOLEAN NOT NULL DEFAULT false
 );
 CREATE INDEX IF NOT EXISTS shell_sessions_device ON shell_sessions(device_id, created_at DESC);
+-- E4c
+-- running server instances (high availability): heartbeat every 10 s; a
+-- remote shell runs on the instance that started it
+CREATE TABLE IF NOT EXISTS server_instances (
+    id         TEXT PRIMARY KEY,
+    hostname   TEXT NOT NULL DEFAULT '',
+    version    TEXT NOT NULL DEFAULT '',
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    seen_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE shell_sessions ADD COLUMN IF NOT EXISTS instance TEXT NOT NULL DEFAULT '';
+-- every instance reloads the console settings when one of them saves them
+CREATE OR REPLACE FUNCTION settings_notify() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM pg_notify('limdm_settings', NEW.key);
+    RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS settings_notify ON settings;
+CREATE TRIGGER settings_notify AFTER INSERT OR UPDATE ON settings FOR EACH ROW EXECUTE FUNCTION settings_notify();
+-- syslog forwarding position, so a new leader continues where the last one stopped
+CREATE TABLE IF NOT EXISTS syslog_cursor (
+    stream  TEXT PRIMARY KEY,
+    last_id BIGINT NOT NULL
+);
+-- schema versions applied to this database, checked by /readyz
+CREATE TABLE IF NOT EXISTS schema_applied (
+    hash       TEXT PRIMARY KEY,
+    version    TEXT NOT NULL,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

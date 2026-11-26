@@ -273,8 +273,10 @@ func (s *Server) auditVerify(w http.ResponseWriter, r *http.Request, sess sessio
 		s.fail(w, err)
 		return
 	}
-	s.auditBroken.Store(broken)
-	s.auditVerifiedAt.Store(time.Now().Unix())
+	if _, err := s.storeAuditVerification(ctx, broken); err != nil {
+		s.fail(w, err)
+		return
+	}
 	result := "chain intact"
 	if broken != 0 {
 		result = fmt.Sprintf("chain broken at entry %d", broken)

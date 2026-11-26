@@ -25,6 +25,8 @@ the environment.
 | `LIMDM_RELEASE_DIR` | `/var/lib/limdm-server/agent-releases` | Cache of verified agent packages for updates ([agent.md](agent.md#updates)). |
 | `LIMDM_RELEASE_REPO` | `MalteKiefer/limdm` | GitHub repository for agent updates and `/install.sh`. |
 | `LIMDM_GEOIP_URL` | `https://ipwho.is/` | Location lookup for device public addresses, the IP is appended. Used only when **Settings, Security, Privacy** turns geolocation on (default off); `off` disables it for good ([security.md](security.md#privacy)). |
+| `LIMDM_TRUSTED_PROXIES` | | Load balancers whose `X-Forwarded-For` names the client, comma separated addresses or networks (`10.0.0.5,10.0.1.0/24`). A proxy on loopback is always trusted ([high-availability.md](high-availability.md#load-balancer)). |
+| `LIMDM_DRAIN_SECONDS` | `5` | On SIGTERM, how long `/readyz` fails before connections close, so load balancers stop sending requests (0 to 300). |
 | `LIMDM_SYSLOG` | | Forward audit entries and device events as RFC 5424 syslog, `udp://host:514` or `tcp://host:514` ([security.md](security.md#audit-log)). |
 
 The server refuses to start when OIDC and local login are both off, when OIDC is set without

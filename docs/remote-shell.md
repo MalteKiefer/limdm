@@ -102,9 +102,12 @@ command.
 
 ## Limits
 
-* The relay runs inside one server process. With several server instances the console and
-  the agent must reach the same instance, otherwise the session times out.
-* A server restart ends running sessions; they are listed as `interrupted` and have no
-  `shell.end` entry.
+* With several server instances a session lives on the instance that started it. Console
+  and device may reach any instance; the others relay to it over PostgreSQL notifications
+  ([high-availability.md](high-availability.md#remote-shell)). Keystrokes and output then
+  pass through PostgreSQL's notification queue (not written to tables or the WAL).
+* Stopping an instance cleanly (SIGTERM) ends the sessions it holds or relays and stores
+  their transcripts. A crash ends running sessions; they are listed as `interrupted` and
+  have no `shell.end` entry.
 * Accounts are looked up in `/etc/passwd` (the agent is built without cgo); directory
   accounts that exist only through NSS cannot be chosen.

@@ -179,7 +179,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	intact := 1.0
-	if brokenAt != 0 || s.auditBroken.Load() != 0 {
+	if full, _ := s.auditVerification(ctx); brokenAt != 0 || full != 0 {
 		intact = 0
 	}
 	p.family("limdm_audit_chain_intact", "gauge", "1 while the audit log hash chain verifies, 0 when an entry was changed.")

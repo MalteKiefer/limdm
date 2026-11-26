@@ -16,6 +16,8 @@ docker compose exec db pg_dump -U limdm -Fc limdm > limdm-$(date +%F).dump   # D
 ```
 
 Store the CA key and the session key apart from the database dump, encrypted.
+For point in time recovery, RPO and RTO guidance and a restore test procedure see
+[high-availability.md](high-availability.md#backup).
 
 ## Restore
 
@@ -28,6 +30,16 @@ Store the CA key and the session key apart from the database dump, encrypted.
 
 See [installation.md](installation.md#upgrades). Read the release notes; migrations run
 automatically and are not reversible, so keep the backup until the new version runs.
+With several instances upgrade one at a time, unless the release notes ask for a full stop
+([high-availability.md](high-availability.md#upgrades)).
+
+## Several instances
+
+Run several server instances behind a load balancer for availability:
+[high-availability.md](high-availability.md). Health checks: `/healthz` (liveness, no
+database check) and `/readyz` (database, schema, keys, notifications). On SIGTERM an
+instance fails `/readyz` for `LIMDM_DRAIN_SECONDS`, ends its remote shells and hands its
+background jobs to the other instances.
 
 ## Releases and agent updates
 
@@ -63,6 +75,8 @@ Manual signing: `limdm-server sign -key release.key limdm_<version>_SHA256SUMS`.
 ## Monitoring
 
 * `journalctl -u limdm-server` / `docker compose logs limdm`: JSON logs.
+* `GET /readyz` for load balancers and uptime checks: 503 with the reasons when the
+  database is unreachable, the schema does not match or the instance shuts down.
 * Prometheus metrics at `<LIMDM_PUBLIC_URL>/metrics` (see below).
 * The overview shows stale devices (no check in within the stale threshold).
 * The compliance webhook reports non-compliant devices to your ticket or chat system.
@@ -94,7 +108,7 @@ scrape_configs:
 | `limdm_notifications_24h` | `result` | Notification deliveries in the last 24 hours, `ok` or `failed` |
 | `limdm_audit_chain_intact` | | 1 while the audit hash chain verifies, 0 after an entry was changed |
 | `limdm_audit_verified_timestamp_seconds` | | Last audit chain verification |
-| `limdm_http_requests_total` | `listener`, `method`, `code` | Requests since the process started, console and agent listener |
+| `limdm_http_requests_total` | `listener`, `method`, `code` | Requests since the process started, console and agent listener; per instance, scrape every instance |
 
 Useful alerts: `limdm_audit_chain_intact == 0`, `increase(limdm_notifications_24h{result="failed"}[1h]) > 0`,
 `limdm_devices{status="stale"} > 0`. Each scrape verifies the audit entries written since the
@@ -111,6 +125,8 @@ last verification.
 | `/install.sh` reports "no release found" | no release in `LIMDM_RELEASE_REPO` yet, or GitHub not reachable |
 | Desktop helper does not ask | `limdm-desktop --now` in the session; zenity or kdialog installed; `/run/limdm/agent.sock` exists. Compositors without XDG autostart (sway, Hyprland) get the dialog from the agent together with the daily notification |
 | Device locked unexpectedly | `/etc/nologin` text: manual lock, compliance lock or offline lock; check in from the device unlocks the offline lock |
-| Console sign in loops | clock skew (TOTP), cookies blocked, `LIMDM_PUBLIC_URL` differs from the URL in the browser |
+| Console sign in loops | clock skew (TOTP), cookies blocked, `LIMDM_PUBLIC_URL` differs from the URL in the browser; with several instances: different `LIMDM_SESSION_KEY` |
+| Instance does not start: "differs from the one the other server instances use" | its `LIMDM_CA_DIR` is not the one of the other instances ([high-availability.md](high-availability.md#requirements)) |
+| `/readyz` answers 503 | the reasons are in the body: database, schema of another version, notifications interrupted (reconnects within seconds), shutting down |
 
 Root can always log in at the console of a locked device.

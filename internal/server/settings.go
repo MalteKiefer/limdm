@@ -155,12 +155,14 @@ func envSettings(c Config) Settings {
 func (s *Server) loadSettings(ctx context.Context) error {
 	set := envSettings(s.cfg)
 	var raw []byte
-	err := s.db.QueryRow(ctx, `SELECT value FROM settings WHERE key='server'`).Scan(&raw)
+	var at time.Time
+	err := s.db.QueryRow(ctx, `SELECT value, updated_at FROM settings WHERE key='server'`).Scan(&raw, &at)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 	case err != nil:
 		return err
 	default:
+		s.ha.settingsAt.Store(at.UnixMicro())
 		var st storedSettings
 		if err := json.Unmarshal(raw, &st); err != nil {
 			return err
@@ -400,6 +402,21 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 	// at once must not overwrite each other, nor leave runtime and database apart
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
+	// and across instances; a change another instance saved a moment ago
+	// is loaded first, so this save does not undo it
+	unlock, err := clusterLock(ctx, s.db, lockSettings, 30*time.Second)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer unlock()
+	var at time.Time
+	if err := s.db.QueryRow(ctx, `SELECT updated_at FROM settings WHERE key='server'`).Scan(&at); err == nil && at.UnixMicro() != s.ha.settingsAt.Load() {
+		if err := s.loadSettings(ctx); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
 	cur := s.settings()
 	set := cur
 	switch r.FormValue("section") {
@@ -505,14 +522,15 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		set.CompanyName, len(set.Logo), set.ConsoleAllow, set.ConsoleBlock, set.Rules,
 		set.FourEyes, set.FourEyesRecovery, set.FourEyesShell, set.RequireMFA, set.MFAACR, set.AuditRetentionDays, set.RoleGroups, set.Geolocation, set.FallbackDNS) + fmt.Sprintf(" remote_shell=%+v", set.RemoteShell)
 	err = s.auditAction(ctx, sess.Email, "settings.save", "server", detail, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
-		return err
+		return tx.QueryRow(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()
+			RETURNING updated_at`, string(doc)).Scan(&at)
 	})
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	s.rt.Store(rt) // only what is stored and audited becomes active
+	s.ha.settingsAt.Store(at.UnixMicro())
 	s.renderSettings(w, r, sess, set, "Settings saved and active.", "")
 }
 

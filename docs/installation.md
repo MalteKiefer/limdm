@@ -39,6 +39,9 @@ admin network), run the server as an unprivileged sandboxed service, keep the ho
   (the server refuses remote connections without certificate verification).
 * Outbound HTTPS for the OIDC provider and, if used, the Google Directory API.
 
+One instance is enough for most fleets. For several instances behind a load balancer see
+[high-availability.md](high-availability.md).
+
 ## Option A: Docker Compose
 
 [`deploy/docker/compose.yaml`](../deploy/docker/compose.yaml) runs PostgreSQL (unix socket
@@ -302,6 +305,7 @@ restore regularly.
 - [ ] fail2ban or CrowdSec active, `ignoreip` or whitelist set
 - [ ] unattended security updates on the server
 - [ ] backups of database, CA and session key, restore tested
+      ([restore test](high-availability.md#restore-test))
 - [ ] audit log exported or monitored, compliance webhook set
 
 ## After the first sign in
@@ -321,7 +325,11 @@ local account disabled but present as break glass access.
 
 * **Docker:** set `LIMDM_VERSION` to the new tag, `docker compose pull && docker compose up -d`.
 * **Packages:** install the new package. The service restarts, database migrations run
-  automatically at start (versioned, guarded by an advisory lock).
+  automatically at start (versioned, guarded by an advisory lock, so instances starting
+  at once wait for each other).
+* **Several instances:** one after the other, waiting for `/readyz` on each; some releases
+  need a full stop, among them 0.15 to 0.16
+  ([high-availability.md](high-availability.md#upgrades)).
 
 Back up the database before upgrading ([operations.md](operations.md)). Agents are updated from the console
 ([agent.md](agent.md#updates)).

@@ -93,6 +93,9 @@ func serve(log *slog.Logger) error {
 	}()
 	select {
 	case <-ctx.Done():
+		// background loops stopped with ctx and released their locks to the
+		// other instances; now leave the load balancer, then close connections
+		srv.Drain(cfg.DrainDelay)
 	case err = <-errc:
 	}
 	sctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

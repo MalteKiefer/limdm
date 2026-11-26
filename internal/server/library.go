@@ -59,6 +59,9 @@ func migrate(ctx context.Context, db *pgxpool.Pool) error {
 			return err
 		}
 	}
+	if _, err := tx.Exec(ctx, `INSERT INTO schema_applied(hash, version) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING`, schemaHash(), Version); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
