@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/argon2"
 )
 
@@ -525,6 +526,30 @@ func (r rowsOne) RowsAffected() int64 {
 
 // ---- CLI ----
 
+// cliAuditKey loads the key of the current audit segment for a command
+// line tool that writes audit entries without a running server. Once a
+// server has keyed the chain, an entry without the key would break it.
+func cliAuditKey(ctx context.Context, db *pgxpool.Pool, caDir string) error {
+	var dbKey string
+	err := db.QueryRow(ctx, `SELECT key_id FROM audit_key`).Scan(&dbKey)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // not keyed yet: the first server start keys it
+	}
+	if err != nil {
+		return err
+	}
+	keys, err := AuditKeysFromDir(caDir, KeyProviderFromEnv())
+	if err != nil {
+		return fmt.Errorf("the audit chain is keyed: read the key from the CA directory (LIMDM_CA_DIR, -env): %w", err)
+	}
+	key := keys[len(keys)-1].Key
+	if auditKeyID(key) != dbKey {
+		return errAuditKeyStale
+	}
+	auditKey, auditKeyCur, auditKeys, auditKeyedFrom = key, dbKey, keys, keys[0].From
+	return nil
+}
+
 // LocalAdmin manages local admin accounts: add, reset, disable, enable, list.
 // add and reset return a generated password and TOTP URI.
 func LocalAdmin(ctx context.Context, databaseURL, op, name, role string) (string, error) {
@@ -545,6 +570,11 @@ func LocalAdmin(ctx context.Context, databaseURL, op, name, role string) (string
 	}
 	if !slices.Contains(roles, role) {
 		return "", errors.New("role must be admin, helpdesk or auditor")
+	}
+	if op != "list" {
+		if err := cliAuditKey(ctx, db, envOr("LIMDM_CA_DIR", "/var/lib/limdm-server/ca")); err != nil {
+			return "", err
+		}
 	}
 	tx, err := db.Begin(ctx)
 	if err != nil {

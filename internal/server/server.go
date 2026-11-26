@@ -1222,8 +1222,8 @@ func audit(ctx context.Context, tx pgx.Tx, actor, action, target, detail string)
 	}
 	// another instance started with a new command key: entries keyed with
 	// the old one would break the chain
-	if auditKey != nil && keyID != nil && *keyID != auditKeyCur {
-		return errAuditKeyStale
+	if keyID != nil && (auditKey == nil || *keyID != auditKeyCur) {
+		return errAuditKeyStale // without the current key an entry breaks the chain
 	}
 	tenant, err := auditTenant(ctx, tx, target)
 	if err != nil {
