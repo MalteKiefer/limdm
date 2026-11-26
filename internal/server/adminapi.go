@@ -188,11 +188,13 @@ func (p *problemWriter) Write(b []byte) (int, error) {
 
 func (p *problemWriter) Unwrap() http.ResponseWriter { return p.ResponseWriter }
 
-// apiRoutes adds the token page and the admin API to the console mux.
+// apiRoutes adds the token page, the admin API and the metrics endpoint
+// to the console mux.
 func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /settings/api", s.page(s.adminOrAuditor(s.apiTokensPage)))
 	mux.HandleFunc("POST /settings/api", s.page(s.apiTokenCreate))
 	mux.HandleFunc("POST /settings/api/{id}/revoke", s.page(s.apiTokenRevoke))
+	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /api/v1/openapi.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(openAPIDoc)

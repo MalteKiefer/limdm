@@ -333,7 +333,7 @@ func (s *Server) AdminHandler() http.Handler {
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	s.webRoutes(mux)
 	s.apiRoutes(mux)
-	return securityHeaders(s.consoleFilter(mux))
+	return countRequests("console", securityHeaders(s.consoleFilter(mux)))
 }
 
 // AgentHandler serves the agent API. Everything except fetching the CA and
@@ -352,7 +352,7 @@ func (s *Server) AgentHandler() http.Handler {
 	mux.HandleFunc("GET /api/v1/catalog/icons/{id}", s.deviceAuth(s.catalogIcon, false))
 	mux.HandleFunc("GET /api/v1/catalog/search", s.deviceAuth(s.deviceLimit(30, s.flathubSearchJSON), false))
 	mux.HandleFunc("GET /api/v1/catalog/flathub-icon", s.deviceAuth(s.deviceLimit(300, s.flathubIcon), false))
-	return securityHeaders(mux)
+	return countRequests("agent", securityHeaders(mux))
 }
 
 // AgentTLSConfig: TLS 1.3 only, server certificate from the device CA. The

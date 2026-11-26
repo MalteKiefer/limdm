@@ -83,7 +83,7 @@ Host installation with deb, rpm, Arch or Alpine packages behind Caddy, OIDC and 
 | [Security](docs/security.md) | Architecture, mTLS, signed commands, sessions, audit log, privacy |
 | [Agent API](docs/api.md) | Endpoints, problem details, integrity of commands and items |
 | [Admin API](docs/admin-api.md) | REST API for scripts and integrations, API tokens, OpenAPI |
-| [Operations](docs/operations.md) | Backup, restore, releases, troubleshooting |
+| [Operations](docs/operations.md) | Backup, restore, releases, Prometheus metrics, troubleshooting |
 | [Development](docs/development.md) | Building, tests, release process |
 
 ## Limitations

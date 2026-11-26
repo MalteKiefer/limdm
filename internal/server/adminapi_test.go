@@ -19,7 +19,7 @@ import (
 )
 
 // TestAdminAPI covers the API tokens, the admin REST API, the device search
-// against a real PostgreSQL (see TestIntegration).
+// and the metrics endpoint against a real PostgreSQL (see TestIntegration).
 func TestAdminAPI(t *testing.T) {
 	dsn := os.Getenv("LIMDM_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -225,6 +225,18 @@ func TestAdminAPI(t *testing.T) {
 	}
 	if resp, body := call("", "GET", "/api/v1/openapi.json", ""); resp.StatusCode != 200 || !json.Valid([]byte(body)) || !strings.Contains(body, `"openapi": "3.1`) {
 		t.Fatalf("openapi: %d", resp.StatusCode)
+	}
+
+	// metrics
+	resp, body = call(auditorTok, "GET", "/metrics", "")
+	for _, want := range []string{`limdm_devices{status="stale"} 1`, `limdm_agent_versions{version="0.15.0"} 3`, `limdm_audit_chain_intact 1`,
+		`limdm_compliance_failing_devices{check="c1"} 2`, `limdm_commands_open{status="pending"} 1`, `limdm_http_requests_total{listener="console",method="GET",code="200"}`} {
+		if resp.StatusCode != 200 || !strings.Contains(body, want) {
+			t.Fatalf("metrics lack %q: %d\n%s", want, resp.StatusCode, body)
+		}
+	}
+	if resp, _ := call(helpdeskTok, "GET", "/metrics", ""); resp.StatusCode != 403 {
+		t.Fatalf("helpdesk metrics: %d", resp.StatusCode)
 	}
 
 	// revoked tokens stop working

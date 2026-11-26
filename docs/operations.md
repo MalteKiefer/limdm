@@ -56,8 +56,42 @@ Manual signing: `limdm-server sign -key release.key limdm_<version>_SHA256SUMS`.
 ## Monitoring
 
 * `journalctl -u limdm-server` / `docker compose logs limdm`: JSON logs.
+* Prometheus metrics at `<LIMDM_PUBLIC_URL>/metrics` (see below).
 * The overview shows stale devices (no check in within the stale threshold).
 * The compliance webhook reports non-compliant devices to your ticket or chat system.
+
+### Prometheus metrics
+
+`GET /metrics` on the console listener answers in the Prometheus text format. It needs an API
+token (Administration, **API tokens**) of the role `metrics`, `admin` or `auditor`; create a
+`metrics` token for the scraper, it can read nothing else. The console's network allow and
+block lists apply, as for every console path.
+
+```yaml
+scrape_configs:
+  - job_name: limdm
+    scheme: https
+    authorization:
+      credentials_file: /etc/prometheus/limdm.token
+    static_configs:
+      - targets: ["mdm.example.com"]
+```
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `limdm_devices` | `status` | Devices by status (compliant, in grace, non-compliant, stale, pending, retired) |
+| `limdm_devices_last_checkin` | `age` | Active devices by time since the last check in: `lt_1h`, `lt_24h`, `lt_7d`, `lt_30d`, `ge_30d`, `never` |
+| `limdm_compliance_failing_devices` | `check` | Active devices failing a compliance check |
+| `limdm_commands_open` | `status` | Commands waiting for the device (`pending`) or sent but not answered (`sent`) |
+| `limdm_agent_versions` | `version` | Active devices by agent version |
+| `limdm_notifications_24h` | `result` | Notification deliveries in the last 24 hours, `ok` or `failed` |
+| `limdm_audit_chain_intact` | | 1 while the audit hash chain verifies, 0 after an entry was changed |
+| `limdm_audit_verified_timestamp_seconds` | | Last audit chain verification |
+| `limdm_http_requests_total` | `listener`, `method`, `code` | Requests since the process started, console and agent listener |
+
+Useful alerts: `limdm_audit_chain_intact == 0`, `increase(limdm_notifications_24h{result="failed"}[1h]) > 0`,
+`limdm_devices{status="stale"} > 0`. Each scrape verifies the audit entries written since the
+last verification.
 
 ## Troubleshooting
 
