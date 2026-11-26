@@ -669,6 +669,117 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/compliance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Device states, every reported check with its counts and the framework controls
+         * @description Check titles are translated to the caller's language. Follows the device scope and tenant.
+         */
+        get: operations["complianceOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/compliance/checks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One check with the result of every device that reports it
+         * @description Failing devices first, at most 500 devices (truncated); the counts cover all.
+         */
+        get: operations["complianceCheck"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/compliance/heatmap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Passed and failed results per check area and blueprint or tenant */
+        get: operations["complianceHeatmap"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/compliance/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Compliance state at the end of a day, of every device or one device with its changes */
+        get: operations["complianceHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/compliance/policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Compliance policies and custom checks of the library with the blueprints using them */
+        get: operations["compliancePolicies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/exports/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Evidence and data exports
+         * @description Admins and auditors (scope audit). Streams the same file as the console export and writes two audit entries: export before, export.done after with the row count and the SHA-256 of the bytes sent. Audit exports take the filters of /api/v1/audit.
+         */
+        get: operations["export"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1082,6 +1193,119 @@ export interface components {
                 size: number;
                 error: string;
             };
+        };
+        CheckRefs: {
+            bsi?: string[];
+            cis?: string[];
+            cis_benchmark?: string;
+            iso?: string[];
+        };
+        ComplianceCheck: {
+            id: string;
+            title: string;
+            level: number;
+            severity?: string;
+            refs: components["schemas"]["CheckRefs"];
+            pass: number;
+            fail: number;
+            na: number;
+            excepted: number;
+            failing_hosts: string[];
+        };
+        ComplianceControl: {
+            /** @enum {string} */
+            framework: "bsi" | "cis" | "iso";
+            control: string;
+            checks: string[];
+            pass: number;
+            fail: number;
+        };
+        Compliance: {
+            total: number;
+            compliant: number;
+            noncompliant: number;
+            stale: number;
+            pending: number;
+            stale_hours: number;
+            checks: components["schemas"]["ComplianceCheck"][];
+            controls: components["schemas"]["ComplianceControl"][];
+        };
+        ComplianceCheckDetail: components["schemas"]["ComplianceCheck"] & {
+            devices: {
+                id: string;
+                hostname: string;
+                blueprint: string;
+                status: string;
+                detail: string;
+                remediated: boolean;
+                /** Format: date-time */
+                last_seen: string | null;
+            }[];
+            truncated: boolean;
+        };
+        ComplianceHeatmap: {
+            /** @enum {string} */
+            group: "blueprint" | "tenant";
+            cells: {
+                column: string;
+                area: string;
+                pass: number;
+                fail: number;
+            }[];
+        };
+        ComplianceHistory: {
+            /** Format: date */
+            at: string;
+            device: string;
+            devices: {
+                id: string;
+                hostname: string;
+                pass: number;
+                fail: number;
+                other: number;
+            }[];
+            state: {
+                check_id: string;
+                status: string;
+                detail: string;
+                /** Format: date-time */
+                since: string;
+                catalog_version: string;
+            }[];
+            changes: {
+                check_id: string;
+                status: string;
+                detail: string;
+                /** Format: date-time */
+                since: string;
+                catalog_version: string;
+            }[];
+        };
+        CompliancePolicies: {
+            policies: {
+                id: number;
+                name: string;
+                blueprints: string[];
+                level: number;
+                remediate: boolean;
+                exclude: string[] | null;
+                advisory?: string[];
+                grace_hours?: number;
+                notify?: boolean;
+                lock_after_hours?: number;
+                unlock_when_compliant?: boolean;
+            }[];
+            custom_checks: {
+                item_id: number;
+                item_name: string;
+                blueprints: string[];
+                id: string;
+                title: string;
+                severity: string;
+                level: number;
+                refs: components["schemas"]["CheckRefs"];
+                test: string;
+            }[];
         };
     };
     responses: {
@@ -2448,6 +2672,175 @@ export interface operations {
             };
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    complianceOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Compliance"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    complianceCheck: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComplianceCheckDetail"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    complianceHeatmap: {
+        parameters: {
+            query?: {
+                /** @description tenant only in the global view of several tenants */
+                group?: "blueprint" | "tenant";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComplianceHeatmap"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    complianceHistory: {
+        parameters: {
+            query?: {
+                /** @description day, default today */
+                at?: string;
+                /** @description device ID */
+                device?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComplianceHistory"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    compliancePolicies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompliancePolicies"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    export: {
+        parameters: {
+            query?: {
+                /** @description compliance-history.csv: day */
+                at?: string;
+                /** @description compliance-history.csv: device ID */
+                device?: string;
+            };
+            header?: never;
+            path: {
+                kind: "compliance.csv" | "compliance-history.csv" | "exceptions.csv" | "inventory.csv" | "packages.csv" | "audit.csv" | "audit.jsonl";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
         };
