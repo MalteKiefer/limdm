@@ -285,6 +285,12 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	if err := s.resignItems(ctx); err != nil {
 		return nil, fmt.Errorf("signing library items with the new command key: %w", err)
 	}
+	if err := s.signExistingData(ctx); err != nil {
+		return nil, fmt.Errorf("signing catalog and device users: %w", err)
+	}
+	if err := s.resignData(ctx); err != nil {
+		return nil, fmt.Errorf("signing catalog and device users with the new command key: %w", err)
+	}
 	if err := s.sealLoginSecrets(ctx); err != nil {
 		return nil, fmt.Errorf("sealing login client secrets: %w", err)
 	}
@@ -691,8 +697,8 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid certificate signing request")
 		return
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, machine_id, blueprint_id, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		id, serial, notAfter, truncate(req.Hostname, 255), truncate(req.MachineID, 64), blueprintID, tenantID); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, machine_id, blueprint_id, tenant_id, users_sig) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		id, serial, notAfter, truncate(req.Hostname, 255), truncate(req.MachineID, 64), blueprintID, tenantID, signData(api.UsersSigned(id, nil))); err != nil {
 		s.failAPI(w, err)
 		return
 	}
@@ -829,12 +835,12 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var users []byte
-	var statusHash, pkgHash string
+	var statusHash, pkgHash, usersSig string
 	var relocate bool
 	ip := remoteIP(r)
 	err = tx.QueryRow(ctx, `UPDATE devices SET agent_version=$2, last_seen=now(), external_ip=$3 WHERE id=$1
-		RETURNING users, status_hash, packages_hash, $3 <> '' AND geo->>'ip' IS DISTINCT FROM $3 AND (geo_at IS NULL OR geo_at < now() - interval '1 hour')`,
-		id, truncate(req.AgentVersion, 32), ip).Scan(&users, &statusHash, &pkgHash, &relocate)
+		RETURNING users, users_sig, status_hash, packages_hash, $3 <> '' AND geo->>'ip' IS DISTINCT FROM $3 AND (geo_at IS NULL OR geo_at < now() - interval '1 hour')`,
+		id, truncate(req.AgentVersion, 32), ip).Scan(&users, &usersSig, &statusHash, &pkgHash, &relocate)
 	if err != nil {
 		s.failAPI(w, err)
 		return
@@ -966,6 +972,15 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(users, &resp.Users); err != nil {
 		s.failAPI(w, err)
 		return
+	}
+	resp.SignedData = itemKey != nil
+	if dataSigOK(api.UsersSigned(id, resp.Users), usersSig) {
+		resp.SignedUsers = &api.SignedUsers{Users: resp.Users, Signature: usersSig}
+	} else {
+		// changed outside the console: agents keep the list they have, older
+		// agents get none (fail closed, they lock the listed accounts)
+		s.log.Error("device user list signature invalid, list not delivered", "device", id)
+		resp.Users = nil
 	}
 	// people deactivated in the directory (SCIM, Google) lose their device accounts:
 	// the agent locks accounts that are no longer listed

@@ -296,6 +296,9 @@ func (s *Server) appSave(w http.ResponseWriter, r *http.Request, sess session) {
 		if err == nil && r.FormValue("remove_icon") == "on" && icon == nil {
 			_, err = tx.Exec(ctx, `UPDATE catalog_apps SET icon=NULL, icon_tried=now() WHERE slug=$1`, app.ID)
 		}
+		if err == nil {
+			err = s.signCatalogApp(ctx, tx, app.ID)
+		}
 		return err
 	})
 	if errors.Is(err, errAppExists) {
@@ -363,14 +366,22 @@ func (s *Server) requestDecide(w http.ResponseWriter, r *http.Request, sess sess
 			if _, err := tx.Exec(ctx, `INSERT INTO catalog_apps(slug, name, mode, sources) VALUES ($1,$2,$3,$4)`, app, truncate(name, 80), mode, doc); err != nil {
 				return "", "", "", "", err
 			}
+			if err := s.signCatalogApp(ctx, tx, app); err != nil {
+				return "", "", "", "", err
+			}
 		} else if err != nil {
 			return "", "", "", "", err
 		} else if op == "approve-all" {
-			// "on request" opens up; a required app stays required
 			// "on request" opens up; a required app stays required, and a
 			// paused required app stays paused (enabling it would force-install it)
+			if err := s.catalogAppIntact(ctx, tx, app); err != nil {
+				return "", "", "", "", err
+			}
 			if _, err := tx.Exec(ctx, `UPDATE catalog_apps SET mode=CASE WHEN mode='request' THEN 'available' ELSE mode END,
 				enabled = enabled OR mode<>'required', updated_at=now() WHERE slug=$1`, app); err != nil {
+				return "", "", "", "", err
+			}
+			if err := s.signCatalogApp(ctx, tx, app); err != nil {
 				return "", "", "", "", err
 			}
 		}
@@ -382,7 +393,7 @@ func (s *Server) requestDecide(w http.ResponseWriter, r *http.Request, sess sess
 		return
 	}
 	if err != nil {
-		s.fail(w, err)
+		s.failUser(w, r, sess, err)
 		return
 	}
 	http.Redirect(w, r, "/software?tab=requests", http.StatusSeeOther)
@@ -483,6 +494,9 @@ func (s *Server) appImport(w http.ResponseWriter, r *http.Request, sess session)
 			if _, err := tx.Exec(ctx, `INSERT INTO catalog_apps(slug, name, mode, sources) VALUES ($1,$2,'available',$3)`, app.ID, app.Name, doc); err != nil {
 				return "", "", "", "", err
 			}
+			if err := s.signCatalogApp(ctx, tx, app.ID); err != nil {
+				return "", "", "", "", err
+			}
 			added = append(added, id)
 		}
 		return sess.Email, "catalog.import", "catalog", strings.Join(added, " "), nil
@@ -517,6 +531,9 @@ func (s *Server) remoteSave(w http.ResponseWriter, r *http.Request, sess session
 		_, err := tx.Exec(r.Context(), `INSERT INTO catalog_remotes(name, url, title, state, catalog_only) VALUES ($1,$2,$3,$4,$5)
 			ON CONFLICT (name) DO UPDATE SET url=EXCLUDED.url, title=EXCLUDED.title, state=EXCLUDED.state, catalog_only=EXCLUDED.catalog_only, updated_at=now()`,
 			rem.Name, rem.URL, rem.Title, rem.State, rem.CatalogOnly)
+		if err == nil {
+			err = s.signCatalogRemote(r.Context(), tx, rem.Name)
+		}
 		return err
 	})
 	if err != nil {
@@ -550,9 +567,15 @@ func (s *Server) remoteOp(w http.ResponseWriter, r *http.Request, sess session) 
 		}
 	}
 	err := s.auditAction(r.Context(), sess.Email, "catalog.remote."+op, name, "", func(tx pgx.Tx) error {
+		if err := s.catalogRemoteIntact(r.Context(), tx, name); err != nil {
+			return err
+		}
 		tag, err := tx.Exec(r.Context(), q, name)
 		if err == nil && tag.RowsAffected() == 0 {
 			err = pgx.ErrNoRows
+		}
+		if err == nil {
+			err = s.signCatalogRemote(r.Context(), tx, name)
 		}
 		return err
 	})
@@ -561,7 +584,7 @@ func (s *Server) remoteOp(w http.ResponseWriter, r *http.Request, sess session) 
 		return
 	}
 	if err != nil {
-		s.fail(w, err)
+		s.failUser(w, r, sess, err)
 		return
 	}
 	http.Redirect(w, r, "/software?tab=remotes", http.StatusSeeOther)
@@ -602,6 +625,9 @@ func (s *Server) flathubAdd(w http.ResponseWriter, r *http.Request, sess session
 		doc, _ := json.Marshal(app.Sources)
 		_, err = tx.Exec(ctx, `INSERT INTO catalog_apps(slug, name, summary, category, mode, sources, icon, icon_tried) VALUES ($1,$2,$3,$4,$5,$6,$7,now())`,
 			slug, app.Name, app.Summary, app.Category, app.Mode, doc, icon)
+		if err == nil {
+			err = s.signCatalogApp(ctx, tx, slug)
+		}
 		return sess.Email, "catalog.save", slug, "from Flathub " + id, err
 	})
 	if errors.Is(err, errAppExists) {

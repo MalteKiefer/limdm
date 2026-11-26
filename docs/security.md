@@ -22,12 +22,30 @@
   is created, with an Ed25519 key in `command.key` next to the CA key, never in the
   database. The signature covers device, command ID, type, creation time and payload. The
   agent pins the public key at its first check in with a signing server and from then on
-  runs only commands with a valid signature; refused ones are reported and logged. Whoever
-  can only write to the database cannot make a device run anything. Recovery keys for lost
+  runs only commands with a valid signature; refused ones are reported and logged. Recovery keys for lost
   mode travel beside the signed payload, inside the mTLS channel. Back up `command.key`
   with the CA. A new key reaches devices only through a rotation: the server announces it
   with a rollover record signed by the pinned key, and the agent refuses any other key
   change ([keys.md](keys.md#command-key)).
+* **Signed declarations.** Everything else a device acts on as root is signed with the same
+  key when an admin saves it, never when it is delivered: library items (name, type,
+  payload), catalog apps (ID, name, mode, sources with their package repositories, detect
+  names), managed Flatpak remotes and the user list of each device (bound to the device,
+  with the admin flags). The server checks the signature before it delivers anything and
+  leaves out what fails, with an error in its log. The agent checks catalog apps, remotes and
+  the user list again with its pinned key once the server announces that it signs them
+  (`signed_data` in the check in answer): entries without a valid signature are dropped, an
+  unsigned user list is refused and the last one stays, and the refusal is reported as an
+  event. Older agents ignore the signatures; they get no user list while the stored one does
+  not verify. A change that keeps signed fields (allowing or
+  blocking a remote, opening up an app on request) is refused when the stored entry no
+  longer verifies, so a database change is never signed later by accident. Whoever can only
+  write to the database cannot make a device run, install or trust anything an admin did not
+  sign; they can still change which signed items and apps reach which device (blueprint
+  assignment), stop delivery (a broken signature withholds the entry) and change display
+  only data: summary, category and icon of apps, branding, the store switches (which only
+  restrict), the public DNS fallback switch (TLS to the pinned CA still applies) and requests
+  to rotate escrowed recovery keys (the device makes the new key itself).
 * **Keys and HSM.** Device CA, network CA and command key can live in a PKCS#11 HSM
   (`LIMDM_KEY_PROVIDER=pkcs11` with `LIMDM_PKCS11_MODULE`, `LIMDM_PKCS11_TOKEN`,
   `LIMDM_PKCS11_PIN`; separate build with `-tags pkcs11`). The private keys then never

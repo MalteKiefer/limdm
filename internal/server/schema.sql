@@ -725,3 +725,24 @@ BEGIN
     END IF;
     RAISE EXCEPTION '% is append only', TG_TABLE_NAME;
 END $$;
+
+-- S1
+-- signatures of what devices act on as root besides library items (datasig.go)
+ALTER TABLE catalog_apps ADD COLUMN IF NOT EXISTS signature TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog_remotes ADD COLUMN IF NOT EXISTS signature TEXT NOT NULL DEFAULT '';
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS users_sig TEXT NOT NULL DEFAULT '';
+-- library item and blueprint names are unique per tenant, not globally
+ALTER TABLE library_items DROP CONSTRAINT IF EXISTS library_items_name_key;
+ALTER TABLE blueprints DROP CONSTRAINT IF EXISTS blueprints_name_key;
+CREATE UNIQUE INDEX IF NOT EXISTS library_items_tenant_name ON library_items(tenant_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS blueprints_tenant_name ON blueprints(tenant_id, name);
+-- failed local sign ins per account and client network: a lockout from one
+-- source does not lock the account for everyone else (local.go)
+CREATE TABLE IF NOT EXISTS local_login_failures (
+    name         TEXT NOT NULL REFERENCES local_admins(name) ON DELETE CASCADE,
+    source       TEXT NOT NULL,
+    failures     INT NOT NULL DEFAULT 0,
+    locked_until TIMESTAMPTZ,
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (name, source)
+);

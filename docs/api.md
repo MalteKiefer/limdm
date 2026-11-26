@@ -86,7 +86,8 @@ The response carries:
 | `server_time` | always |
 | `recovery_rotate` | escrowed recovery keys that were viewed and must be replaced |
 | `branding` | company name and logo of the device's tenant, when `branding_hash` differs ([brand-guidelines.md](brand-guidelines.md#customer-branding)) |
-| `catalog` | the self service app catalog, when `catalog_hash` differs |
+| `catalog` | the self service app catalog, when `catalog_hash` differs; every app and remote carries `signature` (command key over `limdm-catalog-app-v1` or `limdm-catalog-remote-v1` and the signed fields, [security.md](security.md#agent-channel)) |
+| `signed_data`, `signed_users` | the server signs catalog entries and the user list; `signed_users` is `{"users", "signature"}`, the list as saved (signature over `limdm-users-v1`, the device ID and the list), of which `users` may be a subset |
 | `fallback_dns` | the server setting that allows public DNS over HTTPS when the system resolver fails |
 | `command_key` | always: the public command key (hex) |
 | `command_key_rollover` | during a command key rotation: `{"key", "signature"}`, the new key signed by the old one |

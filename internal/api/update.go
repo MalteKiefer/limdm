@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/ed25519"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -115,4 +116,55 @@ func VerifyRollover(pinned ed25519.PublicKey, r KeyRollover) error {
 // compact payload. The server signs at saving and checks before delivery.
 func ItemSigned(name, typ string, payload []byte) []byte {
 	return fmt.Appendf(nil, "limdm-item-v1\n%s\n%s\n%s", name, typ, payload)
+}
+
+// Declaration like data outside library items is signed with the command
+// key too, when an admin saves it, so a database write alone changes nothing
+// a device acts on as root. The agent checks these signatures with the
+// pinned key once the server announces SignedData.
+
+// CatalogAppSigned is what a catalog app signature covers: what decides
+// what gets installed (ID, name, mode, sources with their repositories,
+// detect names). Summary, category, icon and the device's request state are
+// display only and change without an admin (Flathub metadata, requests).
+func CatalogAppSigned(a CatalogApp) []byte {
+	b, _ := json.Marshal(struct {
+		ID      string      `json:"id"`
+		Name    string      `json:"name"`
+		Mode    string      `json:"mode"`
+		Sources []AppSource `json:"sources"`
+		Detect  []string    `json:"detect,omitempty"`
+	}{a.ID, a.Name, a.Mode, a.Sources, a.Detect})
+	return append([]byte("limdm-catalog-app-v1\n"), b...)
+}
+
+// CatalogRemoteSigned is what a managed Flatpak remote signature covers.
+func CatalogRemoteSigned(r CatalogRemote) []byte {
+	r.Signature = ""
+	b, _ := json.Marshal(r)
+	return append([]byte("limdm-catalog-remote-v1\n"), b...)
+}
+
+// UsersSigned is what the signature of a device's user list covers: the
+// device and the list as an admin saved it (no list and an empty one are the same).
+func UsersSigned(deviceID string, users []User) []byte {
+	if users == nil {
+		users = []User{}
+	}
+	b, _ := json.Marshal(users)
+	return fmt.Appendf(nil, "limdm-users-v1\n%s\n%s", deviceID, b)
+}
+
+// SignedUsers is the user list of a device as an admin saved it, with its
+// signature. The check in answer's Users can be shorter (people disabled
+// in the directory), never longer or with other rights.
+type SignedUsers struct {
+	Users     []User `json:"users"`
+	Signature string `json:"signature"`
+}
+
+// VerifySigned checks a hex Ed25519 signature over msg.
+func VerifySigned(pub ed25519.PublicKey, msg []byte, sigHex string) bool {
+	sig, err := hex.DecodeString(sigHex)
+	return err == nil && len(pub) == ed25519.PublicKeySize && ed25519.Verify(pub, msg, sig)
 }

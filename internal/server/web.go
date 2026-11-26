@@ -1197,6 +1197,9 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 	ub, _ := json.Marshal(users)
 	err = s.auditAction(r.Context(), sess.Email, "device.assign", id, fmt.Sprintf("blueprint=%v tags=%v users=%s", r.FormValue("blueprint_id"), tags, ub), func(tx pgx.Tx) error {
 		_, err := tx.Exec(r.Context(), `UPDATE devices SET users=$2, blueprint_id=$3, tags=$4, primary_user_id=$5 WHERE id=$1`, id, string(ub), bpID, tags, primary)
+		if err == nil {
+			err = signDeviceUsers(r.Context(), tx, id)
+		}
 		return err
 	})
 	if err != nil {

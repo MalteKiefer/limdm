@@ -672,10 +672,13 @@ func (a *Agent) cycle(ctx context.Context) {
 	if req.UpdateResult != nil {
 		a.state.UpdateResult = nil // reported
 	}
+	// pinned first: what follows is checked against it
+	a.pinCommandKey(resp.CommandKey, resp.CommandKeyRollover)
 	a.applyBranding(resp.Branding)
 	a.state.FallbackDNS = resp.FallbackDNS
 	fallbackDNS.Store(resp.FallbackDNS && !a.cfg.NoFallbackDNS)
 	if resp.Catalog != nil {
+		a.verifyCatalog(resp.SignedData, resp.Catalog)
 		a.state.Catalog = resp.Catalog
 	}
 	if len(resp.RecoveryRotate) > 0 {
@@ -699,12 +702,13 @@ func (a *Agent) cycle(ctx context.Context) {
 		a.event("declarations updated (token %s)", resp.DeclarationsToken)
 		a.syncNow = true // converge and report right away
 	}
-	if !slices.Equal(resp.Users, a.state.Users) {
-		a.state.Users = resp.Users
+	if users, err := a.verifyUsers(resp); err != nil {
+		a.refused("device user list (the previous one stays)", err)
+	} else if !slices.Equal(users, a.state.Users) {
+		a.state.Users = users
 		a.syncNow = true
 	}
 	a.compose()
-	a.pinCommandKey(resp.CommandKey, resp.CommandKeyRollover)
 	if resp.DeviceCAs != "" {
 		a.updateTrustAnchors(resp.DeviceCAs)
 	}
