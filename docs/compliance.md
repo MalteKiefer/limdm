@@ -66,6 +66,51 @@ whenever a check, its level or a reference changes.
 
 The mapping is a technical proposal. It has not been reviewed by a certification body;
 the information security officer confirms it for the own scope.
+## Custom checks: `com.limdm.customchecks`
+
+IT defines its own checks as a library item. They are reported, counted, excepted
+(`exclude`), marked advisory, exported as evidence and trigger grace period, webhook and
+automatic lock exactly like the built in checks. They have no automatic remediation.
+
+```json
+{"checks": [
+  {"id": "custom.no_telnet", "title": "Telnet client is not installed", "severity": "medium", "level": 1,
+   "refs": {"bsi": ["SYS.2.3.A1"], "cis": ["Ensure telnet client is not installed"], "iso": ["A.8.19"]},
+   "package": {"name": "telnet", "state": "absent"}},
+  {"id": "custom.no_uid0", "title": "Only root has UID 0", "severity": "critical", "level": 1,
+   "query": {"sql": "SELECT username FROM users WHERE uid = 0 AND username <> 'root'", "expect": "no_rows"}}
+]}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | `custom.` followed by lower case letters, digits, `.`, `_` or `-`; use it in `exclude` and `advisory` |
+| `title` | one line, shown on the device and compliance pages |
+| `severity` | `low`, `medium`, `high` or `critical`; reported with the result |
+| `level` | 1 or 2; the check runs when the compliance level is at least this |
+| `refs` | free text framework references: `bsi`, `cis`, `iso` lists |
+
+Each check has exactly one test:
+
+| Test | Fields | Passes when |
+|---|---|---|
+| `query` | `sql`, `expect` (`rows`, `no_rows`, `compare`), for compare `column`, `op`, `value` | the osquery result has rows, has none, or has rows and `column` of every row satisfies `op value` |
+| `file` | `path`, `state` (`present`, `absent`), for present files optional `max_mode` (octal), `owner`, `group`, `contains`, `not_contains` (RE2, per line) | the file exists or not, its permission bits stay within `max_mode` (no setuid, setgid or sticky bit), owner and group match, a line matches `contains`, no line matches `not_contains` |
+| `sysctl` | `key`, `op`, `value` | the kernel parameter compares as given; a parameter the kernel does not have is `na` |
+| `package` | `name`, `state` (`installed`, `absent`) | the package is installed or not |
+| `service` | `name`, `state` (`active`, `inactive`), optional `enabled` | the unit is active or not and, when set, enabled or not |
+
+Operators: `eq`, `ne`, `contains`, `matches` (RE2) compare text; `lt`, `le`, `gt`, `ge`
+compare numbers (a value that is no number fails the check).
+
+Custom checks never run a shell. The only program a check starts is `osqueryi` with the
+query, for at most 30 seconds, without extensions. Server (on save) and agent (before
+running) both accept only one read only statement: it must start with `SELECT` or `WITH`,
+may not contain a semicolon (except a trailing one), comments, `INSERT`, `UPDATE`,
+`DELETE`, `REPLACE INTO`, `ATTACH`, `PRAGMA`, `load_extension` or the osquery tables
+`curl`, `curl_certificate` and `carves` (network requests and file carving). Without
+osquery on the device a query check fails. Items of several blueprints are merged by `id`;
+the item evaluated last wins.
 
 ## Policy: `com.limdm.compliance`
 
@@ -129,8 +174,8 @@ way with `"type": "device.tamper"` and a `detail` field.
 
 ## Evidence
 
-* **Evidence CSV** (`/export/compliance.csv`): every current check result per device with
-  agent version, catalog version, CIS benchmark, the generation time and reason, owner,
+* **Evidence CSV** (`/export/compliance.csv`): every current check result per device (custom
+  checks included) with agent version, catalog version, CIS benchmark, the generation time and reason, owner,
   approver and expiry of the active risk exception that covers it.
 * **Exceptions CSV** (`/export/exceptions.csv`): every risk exception with its state
   (active, expired, revoked).

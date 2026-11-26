@@ -78,7 +78,8 @@ Host installation with deb, rpm, Arch or Alpine packages behind Caddy, OIDC and 
 | [Desktop login](docs/desktop-login.md) | SSO login and session mode, reconfirmation, offline grace |
 | [Disk encryption](docs/disk-encryption.md) | Recovery key escrow and rotation |
 | [Network profiles](docs/network.md) | WLAN, 802.1X, WireGuard and OpenVPN profiles, EAP-TLS device certificates, CRL |
-| [Compliance](docs/compliance.md) | Checks, frameworks, policies, webhooks, evidence |
+| [Compliance](docs/compliance.md) | Checks, custom checks, frameworks, policies, webhooks, evidence |
+| [Remote shell](docs/remote-shell.md) | Audited support terminal from the console to a device |
 | [Software catalog](docs/software.md) | Self service apps in the desktop app, requests, Flathub and vendor repositories |
 | [Notifications](docs/notifications.md) | Email, Slack, Discord and webhook channels, events, delivery log |
 | [Security](docs/security.md) | Architecture, mTLS, signed commands, sessions, audit log, privacy |

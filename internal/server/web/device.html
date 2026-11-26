@@ -35,6 +35,7 @@
         </div></div>
         <div class="sub"><button type="button" class="menu-item sub-head" aria-haspopup="menu">{{t "Agent"}}</button><div class="sub-list" role="menu">
             <a role="menuitem" class="menu-item" href="/devices/{{$id}}?tab=commands&amp;type=script">{{t "Run script…"}}</a>
+            <a role="menuitem" class="menu-item" href="/devices/{{$id}}/shell">{{t "Remote shell…"}}</a>
             {{template "cmd" dict "ID" $id "CSRF" $.CSRF "Type" "allow_uninstall" "Label" "Allow uninstall for 1 hour"}}
         </div></div>
       </div>
@@ -459,6 +460,7 @@
   </form>
 </section>
 {{end}}
+<p class="muted"><a href="/devices/{{$id}}/shell">{{t "Remote shell sessions"}}</a></p>
 <section class="tablecard">
   <div class="card-head"><h2>{{t "History"}}</h2></div>
   <div class="scroll"><table>

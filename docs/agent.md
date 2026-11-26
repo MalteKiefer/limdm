@@ -78,7 +78,8 @@ fingerprint, no secret. It
    `1484 120A C4E9 F8A1 A577 AEEE 97A8 0C63 C9D8 B80B`,
 5. installs osquery and the agent; the package enrolls the device and starts the service.
 
-Optional: `LIMDM_ALLOW_SCRIPTS=true` allows remote scripts on this device. Running the
+Optional: `LIMDM_ALLOW_SCRIPTS=true` allows remote scripts and `LIMDM_ALLOW_REMOTE_SHELL=true`
+remote support shells ([remote-shell.md](remote-shell.md)) on this device. Running the
 script again on an enrolled device upgrades the agent.
 
 ## Mass deployment: enroll.conf
@@ -90,6 +91,7 @@ server = "https://mdm.example.com:8444"
 fingerprint = "<device CA SHA-256 from the Enrollment page>"
 token = "lmt_..."
 allow_scripts = false
+allow_remote_shell = false
 ```
 
 Then install the package by any means (your own apt or dnf mirror, the release files, or the
@@ -126,7 +128,7 @@ sudo limdm-agent enroll --config /etc/limdm/enroll.conf
 sudo systemctl enable --now limdm-agent
 ```
 
-or with flags: `limdm-agent enroll --server URL --fingerprint FP --token TOKEN [--allow-scripts]`.
+or with flags: `limdm-agent enroll --server URL --fingerprint FP --token TOKEN [--allow-scripts] [--allow-remote-shell]`.
 Distributions without apt, dnf or zypper use the tar.gz release; the agent falls back to native
 inventory when osquery is missing.
 
@@ -225,6 +227,7 @@ user also has an active local session (root is always allowed).
 | `limdm software request-new FLATPAK_ID [--remote R] [--name N] [--note TEXT]`, `requests` | ask for an app outside the catalog, list own requests |
 | `limdm sso [status\|confirm]` | company account sign in state, confirm with a code |
 | `limdm recovery-key` | escrow the LUKS recovery key with the disk passphrase |
+| `limdm support end` | end the remote support session IT opened ([remote-shell.md](remote-shell.md)) |
 
 `--json` prints `info`, `checks`, `profiles`, `certificates`, `log` and `software list` as JSON.
 The agent decides as for the app: only catalog apps install, and only in the modes the

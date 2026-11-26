@@ -52,7 +52,8 @@ func main() {
 		token := fs.String("token", "", "enrollment token")
 		fp := fs.String("fingerprint", "", "SHA-256 fingerprint of the device CA")
 		scripts := fs.Bool("allow-scripts", false, "allow remote shell scripts on this device")
-		conf := fs.String("config", "", "enroll with a config file (server, fingerprint, token, allow_scripts)")
+		shell := fs.Bool("allow-remote-shell", false, "allow interactive remote support shells on this device")
+		conf := fs.String("config", "", "enroll with a config file (server, fingerprint, token, allow_scripts, allow_remote_shell)")
 		fs.Parse(os.Args[2:])
 		if *conf != "" {
 			if err = agent.EnrollFromConfig(*conf); err == nil {
@@ -64,7 +65,7 @@ func main() {
 			err = errors.New("--server, --fingerprint and --token are required")
 			break
 		}
-		if err = agent.Enroll(*server, *token, *fp, *scripts); err == nil {
+		if err = agent.Enroll(*server, *token, *fp, *scripts, *shell); err == nil {
 			fmt.Println("enrolled. start the agent: systemctl enable --now limdm-agent")
 		}
 	case "run":

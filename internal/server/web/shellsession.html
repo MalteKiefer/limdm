@@ -1,0 +1,39 @@
+{{define "title"}}{{t "Remote shell"}} · {{.S.Hostname}}{{end}}
+{{define "content"}}
+<div class="page-head">
+  <div><h1>{{t "Remote shell"}}</h1><div class="meta"><span>{{.S.Hostname}}</span><span class="mono">{{.S.User}}</span><span>{{.S.By}}</span><span>{{fmtTime .S.Created}}</span></div></div>
+  <div class="actions">
+    {{if .CanEnd}}<form method="post" action="/shell/{{.S.ID}}/end">{{template "csrf" .CSRF}}<button class="danger">{{t "End session"}}</button></form>{{end}}
+    <a class="button secondary" href="/devices/{{.S.Device}}/shell">{{t "All sessions"}}</a>
+  </div>
+</div>
+{{if .Live}}
+  {{if .Terminal}}
+  <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
+  <section class="card terminal-card">
+    <p class="muted" id="shell-status" role="status" aria-live="polite">{{t "Waiting for the device to connect (up to three minutes)…"}}</p>
+    <div id="terminal" class="terminal" data-ws="/shell/{{.S.ID}}/ws?csrf={{.CSRF}}" data-connected="{{t "Connected."}}" data-ended="{{t "Session ended:"}}"></div>
+  </section>
+  <script src="/static/vendor/xterm/xterm.js" defer></script>
+  <script src="/static/vendor/xterm/addon-fit.js" defer></script>
+  <script src="/static/vendor/xterm/addon-canvas.js" defer></script>
+  <script src="/static/shell.js" defer></script>
+  {{else}}
+  <div class="notice error" role="alert">{{t "The terminal files are missing in this build (static/vendor/xterm). Run scripts/vendor-xterm.sh and rebuild the server."}}</div>
+  {{end}}
+{{else if .Running}}
+<div class="notice" role="status">{{t "The session is running. Its transcript is available once it ends."}}</div>
+{{else}}
+<section class="card">
+  <h2>{{t "Transcript"}}</h2>
+  <dl class="kv">
+    <dt>{{t "State"}}</dt><dd>{{t .S.State}}</dd>
+    <dt>{{t "Connected"}}</dt><dd>{{if .S.Connected}}{{fmtTime (derefTime .S.Connected)}}{{else}}–{{end}}</dd>
+    <dt>{{t "Ended"}}</dt><dd>{{if .S.Ended}}{{fmtTime (derefTime .S.Ended)}}{{else}}–{{end}}</dd>
+    <dt>{{t "Reason"}}</dt><dd>{{.S.Reason}}</dd>
+    <dt>{{t "Output"}}</dt><dd>{{.S.Bytes}} {{t "bytes"}}{{if .S.Truncated}} ({{t "truncated"}}){{end}}</dd>
+  </dl>
+  {{if .Transcript}}<pre class="transcript">{{.Transcript}}</pre>{{else}}<p class="muted">{{t "No output was recorded."}}</p>{{end}}
+</section>
+{{end}}
+{{end}}

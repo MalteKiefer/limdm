@@ -254,10 +254,15 @@ func procSessions() []graphicalSession {
 
 // notifyUsers shows a desktop notification in every graphical session.
 func (a *Agent) notifyUsers(title, body, urgency string) bool {
+	return notifyAs(a.company(), title, body, urgency)
+}
+
+// notifyAs is notifyUsers for goroutines that must not read the agent state.
+func notifyAs(company, title, body, urgency string) bool {
 	sent := false
 	for _, s := range graphicalSessions() {
 		args := append([]string{"-u", s.user, "--", "env"}, s.env...)
-		args = append(args, "notify-send", "--urgency="+urgency, "--app-name="+a.company())
+		args = append(args, "notify-send", "--urgency="+urgency, "--app-name="+company)
 		if _, err := os.Stat(brandingLogo); err == nil {
 			args = append(args, "--icon="+brandingLogo)
 		}

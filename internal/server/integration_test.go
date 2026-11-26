@@ -1213,6 +1213,7 @@ func TestAgentUpdates(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Server{db: db, cmdKey: testCmdKey, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s.rt.Store(&runtimeState{set: Settings{StaleHours: 24}, auth: &oidcAuth{}})
 	for i, id := range []string{"d1", "d2", "d3", "d4"} {
 		tags := "{}"
 		if i == 0 {

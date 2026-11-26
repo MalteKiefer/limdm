@@ -254,6 +254,9 @@ func (d Declaration) applySecurity(p *Policy) (bool, error) {
 		if ok, err := d.applyNetwork(p); ok {
 			return ok, err
 		}
+		if ok, err := d.applyCustom(p); ok {
+			return ok, err
+		}
 		return d.applyPlatform(p)
 	}
 	return true, errors.Join(errs...)
@@ -297,5 +300,8 @@ func mergeSecurity(typ string, a, b json.RawMessage) (json.RawMessage, bool, err
 		m, err := json.Marshal(Sudo{Rules: out, TimestampTimeout: x.TimestampTimeout})
 		return m, true, err
 	}
-	return mergeNetwork(typ, a, b)
+	if m, ok, err := mergeNetwork(typ, a, b); ok {
+		return m, ok, err
+	}
+	return mergeCustom(typ, a, b)
 }

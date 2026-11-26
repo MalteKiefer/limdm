@@ -74,12 +74,12 @@
 
 **Settings**, **Security**, **Four eyes approval** makes a second administrator approve:
 wipe, lost mode, scripts and role changes of console users, and optionally recovery key
-views. The action is stored as a request under **Approvals** (with an optional reason;
+views and remote shell sessions. The action is stored as a request under **Approvals** (with an optional reason;
 for recovery keys the reason or ticket reference is required) and announced as
 `approval.request`. Another admin approves or rejects it; the requester can never decide
 their own request. An approved command or role change runs at once, in the name of the
 requester, with the approval number and the approver in its audit entry. An approved
-recovery key view opens for the requester once, within one hour. Requests nobody decides
+recovery key view or remote shell opens for the requester once, within one hour. Requests nobody decides
 expire after 24 hours. Request, approval, rejection, expiry and use are audited. Bulk
 scripts create one request per device; commands from the admin API create a request too
 and answer `202` with its ID ([admin-api.md](admin-api.md#commands)).
@@ -102,7 +102,7 @@ console actions, settings changes, sign ins (also failed ones: local, and OIDC a
 `login.failed` with the reason `state`, `code exchange`, `id token` or `claims` and the
 client address, never codes or tokens; at most 30 per minute, the process log has all),
 enrollments, certificate rotations, commands, tamper events, recovery key escrow and every
-recovery key view, policy actions, exports.
+recovery key view, policy actions, exports, remote shell sessions (start and end).
 
 **Keyed chain.** Each entry stores `prev` (the hash of the entry before) and `hash`:
 
@@ -184,6 +184,39 @@ removes them; the deletion is one of them (`device.delete`).
   with `sshd -t`.
 * The desktop socket authorizes by peer credentials and active local session.
 * Secrets on the device (`device.pem`, login configuration, state) are root only, 0600.
+* **Custom compliance checks** run no shell. A query check starts `osqueryi` with one read
+  only `SELECT` (validated on server and agent, no extensions, 30 seconds); file, sysctl,
+  package and service tests are evaluated by the agent itself. Expressions are RE2 (linear
+  time). See [compliance.md](compliance.md#custom-checks-comlimdmcustomchecks).
+
+## Remote shell
+
+The remote shell ([remote-shell.md](remote-shell.md)) is remote code execution by design;
+these controls keep it narrow:
+
+* **Two opt ins.** The device must be enrolled with `allow_remote_shell` (local file, not
+  changeable from the server) and the server setting must be on. Helpdesk and root need
+  their own switches; the start goes through the four eyes hook `requireApproval`.
+* **Signed and fresh.** The `shell` command is signed like every command, and the agent
+  runs it only with a pinned command key and when it is younger than 10 minutes. Someone
+  who can write to the database cannot open a shell.
+* **No inbound port.** The device connects out over the existing mTLS agent channel; the
+  server pairs it only with the device the session was created for. The session ID is 256
+  random bits.
+* **Console side.** The WebSocket needs a valid console session of the user who started it,
+  the role and setting at that moment, the exact `Origin` and the CSRF token, so another
+  site cannot open it (cross site WebSocket hijacking). Access is checked again every
+  minute while the session runs.
+* **Visible and bounded.** The signed in user is notified and can end the session; maximum
+  duration and idle timeout are enforced on server and device; the whole process group is
+  hung up at the end.
+* **Accountable.** `shell.start` and `shell.end` go to the hash chained audit log, the
+  output is stored (1 MiB per session, 365 days) and only admins and auditors can read it.
+  Transcripts can contain whatever the session displayed, including secrets; treat them as
+  confidential.
+* The WebSocket server is a small RFC 6455 implementation without extensions (masked
+  client frames only, 64 KiB per message, UTF-8 checked); the terminal (xterm.js) is
+  served from the console, so the CSP stays `default-src 'self'`.
 
 ## Host hardening
 

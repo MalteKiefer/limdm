@@ -164,8 +164,8 @@ func (s *Server) approvalDecide(w http.ResponseWriter, r *http.Request, sess ses
 					return err
 				}
 				notices = append(notices, func() { s.notifyRoleChange(a.RequestedBy, a.Target, old, c.Role, sess.Email) })
-			case "recovery.view":
-				expires = time.Now().Add(viewWindow) // the requester opens the key within the hour
+			case "recovery.view", "remote_shell":
+				expires = time.Now().Add(viewWindow) // the requester opens the key or shell within the hour
 			default:
 				return fmt.Errorf("unknown approval action %q", a.Action)
 			}

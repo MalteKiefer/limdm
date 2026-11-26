@@ -46,6 +46,7 @@ type Settings struct {
 	// second admin's approval; FourEyesRecovery adds recovery key views.
 	FourEyes         bool `json:"four_eyes,omitempty"`
 	FourEyesRecovery bool `json:"four_eyes_recovery,omitempty"`
+	FourEyesShell    bool `json:"four_eyes_shell,omitempty"` // remote shell sessions
 	// RequireMFA refuses OIDC sign ins whose id token shows no second factor
 	// (amr), or, with MFAACR set, whose acr is not one of these values.
 	RequireMFA bool     `json:"require_mfa,omitempty"`
@@ -58,8 +59,9 @@ type Settings struct {
 	// Privacy opt ins, both off by default: Geolocation sends device public
 	// addresses to LIMDM_GEOIP_URL, FallbackDNS lets agents ask public DNS
 	// over HTTPS resolvers when the system resolver fails.
-	Geolocation bool `json:"geolocation,omitempty"`
-	FallbackDNS bool `json:"fallback_dns,omitempty"`
+	Geolocation bool                `json:"geolocation,omitempty"`
+	FallbackDNS bool                `json:"fallback_dns,omitempty"`
+	RemoteShell RemoteShellSettings `json:"remote_shell,omitzero"`
 }
 
 // PasswordPolicy: the minimum length (12..128, 12 when unset) and the
@@ -260,6 +262,9 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 	if err := validLogo(set.Logo); err != nil {
 		return nil, err
 	}
+	if err := set.RemoteShell.validate(); err != nil {
+		return nil, err
+	}
 	allow, err := parseNets(set.ConsoleAllow)
 	if err != nil {
 		return nil, fmt.Errorf("allowed networks: %w", err)
@@ -419,6 +424,7 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 			Digit: r.FormValue("digit") == "on", Symbol: r.FormValue("symbol") == "on", NoName: r.FormValue("no_name") == "on"}
 		set.FourEyes = r.FormValue("four_eyes") == "on"
 		set.FourEyesRecovery = set.FourEyes && r.FormValue("four_eyes_recovery") == "on"
+		set.FourEyesShell = set.FourEyes && r.FormValue("four_eyes_shell") == "on"
 		set.AuditRetentionDays, _ = strconv.Atoi(r.FormValue("audit_retention_days"))
 		if set.FourEyes && !cur.FourEyes {
 			n, err := s.activeAdmins(ctx)
@@ -432,6 +438,8 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 			}
 		}
 		set.Geolocation, set.FallbackDNS = r.FormValue("geolocation") == "on", r.FormValue("fallback_dns") == "on"
+	case "remote_shell":
+		set.RemoteShell = remoteShellForm(r)
 	default:
 		http.Error(w, "unknown settings section", http.StatusBadRequest)
 		return
@@ -486,10 +494,10 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		return
 	}
 	doc, _ := json.Marshal(storedSettings{Settings: set, SecretEnc: enc})
-	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d allow=%q block=%q rules=%+v four_eyes=%v four_eyes_recovery=%v require_mfa=%v acr=%q audit_retention_days=%d role_groups=%+v geolocation=%v fallback_dns=%v",
+	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d allow=%q block=%q rules=%+v four_eyes=%v four_eyes_recovery=%v four_eyes_shell=%v require_mfa=%v acr=%q audit_retention_days=%d role_groups=%+v geolocation=%v fallback_dns=%v",
 		set.OIDCIssuer, set.AllowedDomain, set.LocalLogin, set.StaleHours, set.WebhookURL != "", set.OIDCClientSecret != cur.OIDCClientSecret,
 		set.CompanyName, len(set.Logo), set.ConsoleAllow, set.ConsoleBlock, set.Rules,
-		set.FourEyes, set.FourEyesRecovery, set.RequireMFA, set.MFAACR, set.AuditRetentionDays, set.RoleGroups, set.Geolocation, set.FallbackDNS)
+		set.FourEyes, set.FourEyesRecovery, set.FourEyesShell, set.RequireMFA, set.MFAACR, set.AuditRetentionDays, set.RoleGroups, set.Geolocation, set.FallbackDNS) + fmt.Sprintf(" remote_shell=%+v", set.RemoteShell)
 	err = s.auditAction(ctx, sess.Email, "settings.save", "server", detail, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
 		return err

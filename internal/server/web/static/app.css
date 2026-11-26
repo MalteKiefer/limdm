@@ -586,3 +586,6 @@ pre.diff span { display: block; }
 pre.diff .d-add { background: var(--ok-soft); color: var(--ok); }
 pre.diff .d-del { background: var(--bad-soft); color: var(--bad); }
 pre.diff .d-same { color: var(--text-3); }
+/* E3: remote shell */
+.terminal-card .terminal { height: 60vh; min-height: 320px; background: #111; border-radius: var(--radius); padding: 6px; }
+pre.transcript { max-height: 70vh; overflow: auto; white-space: pre-wrap; font-family: var(--mono); font-size: 12px; }

@@ -46,6 +46,7 @@ const usage = `usage: limdm COMMAND [options]
   sso [status]                  company account of your session
   sso confirm                   confirm the company account (opens a sign in)
   recovery-key                  create the disk recovery key IT asks for
+  support end                   end the remote support session IT opened
 
   version
 
@@ -99,6 +100,15 @@ func run(cmd string, args []string) error {
 		return sso(sub)
 	case "recovery-key":
 		return recoveryKey()
+	case "support":
+		if len(args) != 1 || args[0] != "end" {
+			return errors.New("usage: limdm support end")
+		}
+		if _, err := call(agent.DesktopRequest{Op: "shell-end"}); err != nil {
+			return err
+		}
+		fmt.Println("remote support session ended")
+		return nil
 	}
 	return fmt.Errorf("unknown command %q (limdm help)", cmd)
 }
@@ -208,6 +218,9 @@ func info(args []string) error {
 		}
 		fmt.Fprintf(w, "Desktop login\t%s\n", st.DesktopLogin)
 		fmt.Fprintf(w, "Remote scripts\t%s\n", map[bool]string{true: "allowed", false: "not allowed"}[st.ScriptsAllow])
+		if st.RemoteShell != "" {
+			fmt.Fprintf(w, "Remote support\tsession running: %s (end it: limdm support end)\n", st.RemoteShell)
+		}
 		if st.OfflineLockH > 0 {
 			fmt.Fprintf(w, "Offline lock\tafter %d h without the server\n", st.OfflineLockH)
 		}

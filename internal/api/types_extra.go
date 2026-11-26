@@ -224,6 +224,7 @@ type ExtraPolicy struct {
 	Bootloader     *Bootloader     `json:"bootloader,omitempty"`
 	SoftwareStore  *SoftwareStore  `json:"software_store,omitempty"`
 	Printers       *Printers       `json:"printers,omitempty"`
+	CustomChecks   []CustomCheck   `json:"custom_checks,omitempty"`
 
 	Network []NetworkProfile `json:"network,omitempty"`
 }

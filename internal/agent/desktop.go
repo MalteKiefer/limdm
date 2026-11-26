@@ -81,6 +81,7 @@ type DesktopStatus struct {
 	DesktopLogin  string        `json:"desktop_login,omitempty"` // off | session | login
 	QueuedEvents  int           `json:"queued_events"`
 	QueuedResults int           `json:"queued_results"`
+	RemoteShell   string        `json:"remote_shell,omitempty"` // running support session: who, user, since
 }
 
 // DesktopSystem is the device as the last inventory saw it.
@@ -96,7 +97,7 @@ type DesktopSystem struct {
 
 // DesktopRequest and DesktopResponse are the socket protocol (one JSON line each).
 type DesktopRequest struct {
-	Op         string `json:"op"` // status | info | sync | escrow | catalog | app-install | app-remove | app-request | search | app-request-new | reboot-defer
+	Op         string `json:"op"` // status | info | sync | escrow | catalog | app-install | app-remove | app-request | search | app-request-new | reboot-defer | shell-end
 	App        string `json:"app,omitempty"`
 	Query      string `json:"query,omitempty"`   // search
 	Flatpak    string `json:"flatpak,omitempty"` // app-request-new
@@ -343,6 +344,7 @@ func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 		return DesktopResponse{Company: info.Company, Logo: info.Logo, Need: need}
 	case "info":
 		st := info.Status
+		st.RemoteShell = d.a.shellInfo() // live, not from the last cycle
 		return DesktopResponse{Company: info.Company, Logo: info.Logo, Need: need, Status: &st, Log: agentLog(),
 			LogLines: agentJournal(200), Profiles: info.Profiles, Certs: info.Certs}
 	case "catalog":
@@ -399,6 +401,11 @@ func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 			name = u.Username
 		}
 		return d.a.storeAction(strings.TrimPrefix(req.Op, "app-"), req.App, name, req.Note)
+	case "shell-end":
+		if !d.a.endShell("ended on the device by uid " + itoa(uid)) {
+			return DesktopResponse{Error: "no remote support session is running"}
+		}
+		return DesktopResponse{OK: true}
 	case "sync":
 		d.mu.Lock()
 		recent := time.Since(d.lastSync) < 30*time.Second

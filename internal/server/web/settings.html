@@ -41,6 +41,7 @@
   <div class="card-head stacked"><h2>{{t "Four eyes approval"}}</h2><p class="muted">{{t "Wipe, lost mode, scripts and role changes of console users wait until a second administrator approves them under Approvals. The requester can never approve their own request; requests expire after 24 hours. Needs at least two active administrators."}}</p></div>
   <label class="check"><input type="checkbox" name="four_eyes" {{if .Set.FourEyes}}checked{{end}}> {{t "Require a second administrator's approval"}}</label>
   <label class="check"><input type="checkbox" name="four_eyes_recovery" {{if .Set.FourEyesRecovery}}checked{{end}}> {{t "Also for recovery key views (the viewer gives a reason or ticket reference)"}}</label>
+  <label class="check"><input type="checkbox" name="four_eyes_shell" {{if .Set.FourEyesShell}}checked{{end}}> {{t "Also for remote shell sessions (open the approved session within one hour)"}}</label>
   <div class="card-head stacked"><h2>{{t "Audit log retention"}}</h2><p class="muted">{{t "Entries older than this are deleted once a day after the hash chain was verified; a signed checkpoint keeps the rest verifiable. 0 keeps everything."}}</p></div>
   <label>{{t "Keep audit entries (days)"}}<input name="audit_retention_days" type="number" min="0" max="36500" value="{{.Set.AuditRetentionDays}}"><small class="field-hint">{{t "0 or 365 to 36500"}}</small></label>
   <fieldset>
@@ -49,6 +50,16 @@
     <label class="check"><input type="checkbox" name="fallback_dns" {{if .Set.FallbackDNS}}checked{{end}}> {{t "Agents may ask public DNS over HTTPS resolvers (Cloudflare, Google) when the system resolver fails"}}</label>
   </fieldset>
   {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
+</form>
+<form class="card" method="post" action="/settings">
+  {{template "csrf" .CSRF}}<input type="hidden" name="section" value="remote_shell">
+  <div class="card-head stacked"><h2>{{t "Remote shell"}}</h2><p class="muted">{{t "Interactive terminal from the console to a device for support. A device also needs allow_remote_shell at enrollment. Sessions are audited and their output is recorded."}}</p></div>
+  <label class="check"><input type="checkbox" name="shell_enabled" {{if .Set.RemoteShell.Enabled}}checked{{end}}> {{t "Allow remote shells (admins)"}}</label>
+  <label class="check"><input type="checkbox" name="shell_helpdesk" {{if .Set.RemoteShell.Helpdesk}}checked{{end}}> {{t "The helpdesk role may start sessions"}}</label>
+  <label class="check"><input type="checkbox" name="shell_root" {{if .Set.RemoteShell.AllowRoot}}checked{{end}}> {{t "Sessions may run as root"}}</label>
+  <label>{{t "Maximum duration (minutes)"}}<input name="shell_max_minutes" type="number" min="5" max="480" {{with .Set.RemoteShell.MaxMinutes}}value="{{.}}"{{end}} placeholder="60"></label>
+  <label>{{t "Idle timeout (minutes)"}}<input name="shell_idle_minutes" type="number" min="1" max="120" {{with .Set.RemoteShell.IdleMinutes}}value="{{.}}"{{end}} placeholder="15"></label>
+  {{if $admin}}<div class="form-foot"><span class="muted">{{t "Empty: 60 and 15 minutes."}}</span><button>{{t "Save"}}</button></div>{{end}}
 </form>
 {{else if eq .Tab "sso"}}
 <form class="card" method="post" action="/settings">
