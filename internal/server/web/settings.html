@@ -151,7 +151,7 @@
   {{template "csrf" .CSRF}}<input type="hidden" name="section" value="monitoring">
   <div class="card-head stacked"><h2>{{t "Compliance webhook"}}</h2><p class="muted">{{t "One URL that receives signed JSON when a device becomes non-compliant, independent of the channels above."}}</p></div>
   <label>{{t "URL"}}<input name="webhook_url" value="{{.Set.WebhookURL}}" placeholder="{{t "https://hooks.example.com/limdm"}}" spellcheck="false"><small class="field-hint">{{t "Https URL receiving JSON when a device becomes non-compliant"}}</small></label>
-  {{if $admin}}<dl class="kv"><dt>{{t "Signing key"}}</dt><dd><span class="fp">{{.WebhookSecret}}</span><span class="sub">X-LiMDM-Signature: sha256=HMAC-SHA256(key, body)</span></dd></dl>{{end}}
+  {{if $admin}}<dl class="kv"><dt>{{t "Signing key"}}</dt><dd><span class="fp">{{.WebhookSecret}}</span><span class="sub">X-LiMDM-Signature: sha256=HMAC-SHA256(key, timestamp + "." + body)</span></dd></dl>{{end}}
   {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
 </form>{{end}}
 {{else if eq .Tab "branding"}}
