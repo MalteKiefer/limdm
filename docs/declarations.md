@@ -140,10 +140,23 @@ check the URL) and disables the original. Assign the item to a blueprint to appl
 ### `com.limdm.files` (list)
 
 ```json
-{"files": [{"path": "/etc/motd", "content": "...", "mode": "0644"}]}
+{"files": [{"path": "/etc/motd", "content": "...", "mode": "0644", "owner": "root", "group": "root"}]}
 ```
 
-Absolute, clean paths; merged by path.
+Absolute, clean paths; merged by path. `owner` and `group` are names (default root).
+Files removed from the declaration are deleted from the device: the agent remembers the
+paths it wrote (from this version on) and removes the undeclared ones, except while a files
+declaration is invalid.
+
+Paths whose content runs as code are refused unless the device was enrolled with
+`allow_scripts`, the same opt in remote scripts need: cron, systemd units, sudoers and doas,
+shell profiles and `/etc/environment`, PAM, `ld.so.preload` and `ld.so.conf`, rc and init
+scripts, polkit, udev, modprobe, sysctl, tmpfiles and binfmt, package manager hooks and
+configuration, kernel and initramfs hooks, GRUB and `/boot`, logrotate, X11 and autostart,
+network hooks, sshd, the account databases, the agent's own directories, `/root` and binary
+and library directories (`/usr/bin`, `/usr/lib`, `/opt` …). The agent also resolves a
+symlinked parent before the check, and refuses files with an execute bit. The full list is
+`rootCodePaths` in `internal/api/api.go`.
 
 ### `com.limdm.certificates` (list)
 

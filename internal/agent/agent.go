@@ -98,7 +98,8 @@ type State struct {
 	Held           []string             `json:"held,omitempty"`         // packages LiMDM put on apt hold
 	DNFExclude     string               `json:"dnf_exclude,omitempty"`  // excludepkgs= value LiMDM wrote to dnf.conf
 	PacmanIgnore   string               `json:"pacman_ignore,omitempty"`
-	SnapRefresh    string               `json:"snap_refresh,omitempty"` // "hold" or "timer=..." LiMDM set in snapd
+	SnapRefresh    string               `json:"snap_refresh,omitempty"`  // "hold" or "timer=..." LiMDM set in snapd
+	ManagedFiles   []string             `json:"managed_files,omitempty"` // paths written for com.limdm.files, removed when undeclared
 }
 
 type Agent struct {
@@ -688,14 +689,7 @@ func (a *Agent) enforce() {
 	} else if len(present) > 0 {
 		a.event("removed %v", present)
 	}
-	for _, f := range p.Files {
-		mode, _ := f.FileMode()
-		if changed, err := writeIfChanged(f.Path, f.Content, os.FileMode(mode)); err != nil {
-			a.problem(api.TypeFiles, "file %s: %v", f.Path, err)
-		} else if changed {
-			a.event("wrote %s", f.Path)
-		}
-	}
+	a.applyFiles(p.Files)
 	for _, s := range p.Services.Enable {
 		if !unitActive(s) {
 			if err := svc("enable-now", s); err != nil {

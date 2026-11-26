@@ -147,7 +147,9 @@ type filesPayload struct {
 type File struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
-	Mode    string `json:"mode"` // octal, default 0644
+	Mode    string `json:"mode"`            // octal, default 0644
+	Owner   string `json:"owner,omitempty"` // user name, default root
+	Group   string `json:"group,omitempty"` // group name, default root
 }
 
 type Firewall struct {
@@ -351,6 +353,11 @@ func (d Declaration) apply(p *Policy) error {
 			}
 			if userWritable(f.Path) {
 				bad("file %s: directories writable by users cannot be managed (symlink attacks)", f.Path)
+			}
+			for _, n := range []string{f.Owner, f.Group} {
+				if n != "" && !userRe.MatchString(n) {
+					bad("file %s: invalid owner or group %q", f.Path, n)
+				}
 			}
 		}
 		p.Files = v.Files
@@ -981,6 +988,42 @@ func CompareVersions(a, b string) int {
 		}
 	}
 	return 0
+}
+
+// rootCodePaths are files and directories (trailing slash) whose content
+// root or the system runs as code: cron, systemd units, sudoers, shell
+// profiles, PAM, the dynamic linker, init scripts, polkit, udev, modprobe,
+// package manager hooks, binaries and the agent itself. Files declarations
+// may write there only on devices enrolled with allow_scripts.
+var rootCodePaths = []string{
+	"/etc/cron.d/", "/etc/cron.hourly/", "/etc/cron.daily/", "/etc/cron.weekly/", "/etc/cron.monthly/", "/etc/crontab", "/etc/anacrontab", "/etc/periodic/",
+	"/etc/systemd/", "/usr/lib/systemd/", "/lib/systemd/", "/usr/local/lib/systemd/", "/run/systemd/", "/etc/xdg/systemd/",
+	"/etc/sudoers", "/etc/sudoers.d/", "/etc/doas.conf", "/etc/doas.d/",
+	"/etc/profile", "/etc/profile.d/", "/etc/bash.bashrc", "/etc/bashrc", "/etc/environment", "/etc/zsh/", "/etc/zshenv", "/etc/zprofile", "/etc/zshrc", "/etc/csh.cshrc", "/etc/csh.login", "/etc/fish/",
+	"/etc/pam.d/", "/etc/pam.conf", "/etc/security/", "/lib/security/", "/usr/lib/security/", "/lib64/security/", "/usr/lib64/security/",
+	"/etc/ld.so.preload", "/etc/ld.so.conf", "/etc/ld.so.conf.d/",
+	"/etc/rc.local", "/etc/rc.d/", "/etc/init.d/", "/etc/init/", "/etc/rc0.d/", "/etc/rc1.d/", "/etc/rc2.d/", "/etc/rc3.d/", "/etc/rc4.d/", "/etc/rc5.d/", "/etc/rc6.d/", "/etc/rcS.d/",
+	"/etc/local.d/", "/etc/conf.d/", "/etc/runlevels/",
+	"/etc/polkit-1/", "/usr/share/polkit-1/",
+	"/etc/udev/", "/usr/lib/udev/", "/lib/udev/",
+	"/etc/modprobe.d/", "/usr/lib/modprobe.d/", "/lib/modprobe.d/", "/etc/modules-load.d/", "/etc/modules", "/etc/binfmt.d/", "/etc/sysctl.conf", "/etc/sysctl.d/", "/etc/tmpfiles.d/",
+	"/etc/apt/apt.conf.d/", "/etc/dpkg/", "/etc/dnf/", "/etc/yum/", "/etc/pacman.conf", "/etc/pacman.d/", "/usr/share/libalpm/", "/etc/apk/",
+	"/etc/kernel/", "/etc/initramfs-tools/", "/etc/dracut.conf.d/", "/etc/grub.d/", "/etc/default/grub", "/boot/",
+	"/etc/logrotate.d/", "/etc/logrotate.conf", "/etc/X11/", "/etc/xdg/autostart/", "/etc/NetworkManager/dispatcher.d/", "/etc/network/", "/etc/ppp/",
+	"/etc/ssh/", "/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow", "/etc/nsswitch.conf",
+	"/etc/limdm/", "/var/lib/limdm/", "/usr/lib/limdm/", "/root/",
+	"/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/", "/usr/local/bin/", "/usr/local/sbin/", "/lib/", "/lib64/", "/usr/lib/", "/usr/lib64/", "/usr/libexec/", "/usr/local/lib/", "/usr/local/libexec/", "/opt/",
+}
+
+// RootCodePath reports whether a files declaration writing p (an absolute,
+// clean path) amounts to running code as root; see rootCodePaths.
+func RootCodePath(p string) bool {
+	for _, d := range rootCodePaths {
+		if p == d || p == strings.TrimSuffix(d, "/") || strings.HasSuffix(d, "/") && strings.HasPrefix(p, d) || !strings.HasSuffix(d, "/") && strings.HasPrefix(p, d+".") {
+			return true
+		}
+	}
+	return false
 }
 
 // userWritable reports paths below directories regular users can write to.

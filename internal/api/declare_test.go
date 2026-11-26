@@ -30,3 +30,23 @@ func TestUpdatesPatchFields(t *testing.T) {
 		}
 	}
 }
+
+func TestRootCodePath(t *testing.T) {
+	for p, want := range map[string]bool{
+		"/etc/cron.d/backup": true, "/etc/crontab": true, "/etc/sudoers": true, "/etc/sudoers.d/x": true, "/etc/systemd/system/x.service": true,
+		"/etc/profile.d/x.sh": true, "/etc/pam.d/sshd": true, "/etc/ld.so.preload": true, "/etc/init.d/x": true, "/etc/polkit-1/rules.d/x.rules": true,
+		"/etc/udev/rules.d/99.rules": true, "/etc/modprobe.d/x.conf": true, "/usr/local/bin/tool": true, "/etc/limdm/agent.json": true,
+		"/etc/default/grub.d/x.cfg": true,
+		"/etc/motd": false, "/etc/issue": false, "/etc/chrony/chrony.conf": false, "/etc/profiles": false, "/srv/app/config.yml": false,
+	} {
+		if RootCodePath(p) != want {
+			t.Errorf("%s: want %v", p, want)
+		}
+	}
+	if err := valid(TypeFiles, `{"files":[{"path":"/etc/x","content":"x","mode":"0640","owner":"root","group":"ssl-cert"}]}`); err != nil {
+		t.Fatal(err)
+	}
+	if valid(TypeFiles, `{"files":[{"path":"/etc/x","content":"x","owner":"Bad Name"}]}`) == nil {
+		t.Fatal("invalid owner accepted")
+	}
+}
