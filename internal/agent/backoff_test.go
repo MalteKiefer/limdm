@@ -69,3 +69,11 @@ func TestCheckinWait(t *testing.T) {
 		t.Fatalf("never shorter than the interval: %v", w)
 	}
 }
+
+func TestBusyHugeRetryAfter(t *testing.T) {
+	resp := &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{"Retry-After": {"9999999999"}}}
+	var be busyError
+	if !errors.As(busyOf("checkin", resp), &be) || be.after < maxRetryAfter || be.after > maxRetryAfter*5/4+time.Second {
+		t.Fatalf("after %s", be.after)
+	}
+}

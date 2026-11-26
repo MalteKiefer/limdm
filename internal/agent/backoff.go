@@ -41,9 +41,10 @@ func busyOf(what string, resp *http.Response) error {
 	}
 	d := time.Minute
 	if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s >= 0 {
-		d = time.Duration(s) * time.Second
+		// cap before multiplying: a huge value overflows to a negative
+		// duration, and the jitter below panics on it
+		d = time.Duration(min(s, int(maxRetryAfter/time.Second))) * time.Second
 	}
-	d = min(d, maxRetryAfter)
 	return busyError{what: what, after: d + time.Duration(mrand.Int64N(int64(d/4)+int64(time.Second)))} //nolint:gosec // jitter, not a secret
 }
 
