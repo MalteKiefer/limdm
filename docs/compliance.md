@@ -246,8 +246,15 @@ command (new logins blocked, sessions locked) and are written to the audit log a
 | Device tag | one tag, or empty for every device |
 | Reason | 1 to 1000 characters |
 | Risk owner | 1 to 200 characters |
-| Approver | the person who accepted the risk, 1 to 200 characters; with [four eyes approval](security.md#four-eyes-approval) on it must not be the admin who records it |
+| Approver | the person who accepted the risk, 1 to 200 characters |
 | Expires | a date within the next three years; the exception is valid through that day |
+
+With [four eyes approval](security.md#four-eyes-approval) off an admin adds the exception
+directly and names the approver. With it on, and always for the helpdesk (console app,
+**Request exception**, or `POST /api/v1/exception-requests`), the exception is a request in
+the inbox (approval action `exception.add`): another admin approves it and is recorded as its
+approver, the requester as its creator. A helpdesk account limited to device tags asks for
+one of its own tags.
 
 Adding (`exception.add`) and revoking (`exception.revoke`) are audited. With several tenants an exception
 belongs to its tenant.
@@ -316,6 +323,19 @@ account.
   the history existed start with their last report as baseline.
 * **Inventory CSV**, **Packages CSV** (device list), **Audit CSV** and the audit
   **JSON Lines** export for asset management and audits.
+* **Signed evidence** (`evidence.json`, console app **Export evidence**, or
+  `/api/v1/exports/evidence.json?days=90`): one bundle (format `limdm-evidence/1`) with the
+  score and device states, the framework rates, every current check result per device with
+  its catalog and agent version, all risk exceptions, the fleet history and every change of a
+  check result within the window (1 to 365 days), and `generated_at` and `generated_by`. It
+  is signed with the command key (Ed25519, an HSM key works too) over
+  `limdm-evidence/1\n` followed by the compact payload. Check it offline with
+  `limdm-server evidence [-ca DIR | -key HEX] verify evidence.json`, which also accepts the
+  previous key during a key rotation.
+* **Evidence report** (`evidence.pdf`): a PDF rendered on the server from such a bundle, in
+  the language of the console, with score, frameworks, failing checks, active exceptions,
+  versions, and the SHA-256, key ID and signature of the bundle. Each evidence export also
+  writes `evidence.sign` with the bundle's SHA-256 and key ID.
 * Every export writes two audit entries: `export` before (who, which file, which filter)
   and `export.done` after, with the row count and the SHA-256 of exactly the file sent, so a
   file handed to an auditor can be matched to its entry.

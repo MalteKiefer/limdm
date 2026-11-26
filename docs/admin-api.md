@@ -147,14 +147,15 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `GET /api/v1/approvals/{id}` | read | | `200` approval request |
 | `POST /api/v1/approvals/{id}/approve`, `.../reject` | admin | | `200` approval request (with `credentials` of an approved local account); `409` for an own, decided or expired request; audited as `approval.approve` or `approval.reject` |
 | `GET /api/v1/exceptions` | read | | `200` `{"items": [...]}` risk exceptions with `state` |
-| `POST /api/v1/exceptions` | admin | `{"check_id", "mode", "tag", "reason", "owner", "approver", "expires": "YYYY-MM-DD"}` | `201` `{"id"}`; audited as `exception.add` |
+| `POST /api/v1/exceptions` | admin | `{"check_id", "mode", "tag", "reason", "owner", "approver", "expires": "YYYY-MM-DD"}` | `201` `{"id"}`; audited as `exception.add`; with four eyes approval on `202` `{"approval_id"}` (the approving admin becomes the approver) |
 | `DELETE /api/v1/exceptions/{id}` | admin | | `204`; audited as `exception.revoke` |
 | `GET /api/v1/compliance` | read | | `200` device states, every reported check with pass, fail, n/a and exception counts, framework controls; titles in the caller's language |
 | `GET /api/v1/compliance/checks/{id}` | read | | `200` one check with the result of each device in scope (failing first, at most 500) |
 | `GET /api/v1/compliance/heatmap?group=blueprint\|tenant` | read | | `200` passed and failed results per check area and blueprint or tenant |
 | `GET /api/v1/compliance/history?at=YYYY-MM-DD&device=ID` | read | | `200` state at the end of that day, per device or for one device with its changes |
 | `GET /api/v1/compliance/policies` | read | | `200` compliance policies and custom checks of the library with the blueprints using them |
-| `GET /api/v1/exports/{kind}` | audit | | the console export (`compliance.csv`, `compliance-history.csv`, `exceptions.csv`, `inventory.csv`, `packages.csv`, `audit.csv`, `audit.jsonl`), audited as `export` and `export.done` with the SHA-256 |
+| `GET /api/v1/exports/{kind}` | audit | | the console export (`compliance.csv`, `compliance-history.csv`, `exceptions.csv`, `inventory.csv`, `packages.csv`, `audit.csv`, `audit.jsonl`, `evidence.json`, `evidence.pdf` with `days` 1..365, default 90), audited as `export` and `export.done` with the SHA-256; the evidence exports also as `evidence.sign` |
+| `POST /api/v1/exception-requests` | helpdesk | `{"check_id", "mode", "tag", "reason", "owner", "expires"}` | `202` `{"approval_id"}`; a four eyes request (`exception.add`) another admin approves |
 | `GET /api/v1/tokens` | audit | | `200` `{"items": [...]}` tokens without secrets |
 | `POST /api/v1/tokens` | admin | `{"name", "role", "days", "read_only", "scope_tags", "scopes"}` | `201` token with `token` (the secret, shown once); audited as `api_token.create` |
 | `DELETE /api/v1/tokens/{id}` | admin | | `204`; audited as `api_token.revoke` |
