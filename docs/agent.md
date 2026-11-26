@@ -21,11 +21,19 @@ there.
 
 | Family | Distributions | Packages | Init | Notes |
 |---|---|---|---|---|
-| Debian | Debian, Ubuntu, Mint, Pop!_OS | apt, `.deb` | systemd | full feature set |
-| Fedora | Fedora, CentOS Stream, RHEL, Rocky, Alma | dnf, `.rpm` | systemd | full feature set |
-| SUSE | openSUSE Leap, openSUSE Tumbleweed, SLES, SLED | zypper, `.rpm` | systemd | see [SUSE](#suse) |
+| Debian | Debian 12 and later, Ubuntu 22.04 and later, Mint 21 and later, Pop!_OS 22.04 and later | apt, `.deb` | systemd | full feature set |
+| Fedora | Fedora, CentOS Stream 9 and later, RHEL, Rocky and Alma 9 and later | dnf, `.rpm` | systemd | full feature set |
+| SUSE | openSUSE Leap 16, openSUSE Tumbleweed, SLES and SLED 16 | zypper, `.rpm` | systemd | see [SUSE](#suse) |
 | Arch | Arch, Manjaro, EndeavourOS | pacman, `.pkg.tar.zst` | systemd | no osquery (native inventory); pending updates through `pacman-contrib`; updates are always full upgrades |
-| Alpine | Alpine | apk, `.apk` | OpenRC | no osquery; no host firewall management; SSO login needs linux-pam; no systemd watchdog (supervise-daemon restarts the agent) |
+| Alpine | Alpine 3.17 and later | apk, `.apk` | OpenRC | no osquery; no host firewall management; SSO login needs linux-pam; no systemd watchdog (supervise-daemon restarts the agent) |
+
+The agent needs OpenSSL 3: the installer verifies the Ed25519 signature of the release with
+`openssl pkeyutl -rawin`, which OpenSSL 1.1.1 lacks, and the packages depend on
+`openssl >= 3`. Systems whose default OpenSSL is 1.1.1 are not supported, with no fallback:
+Ubuntu 20.04, Debian 11, RHEL, Rocky and Alma 8, CentOS Stream 8, openSUSE Leap 15 and
+SLES 15 (both still ship OpenSSL 1.1.1 as `openssl`), and Alpine 3.16 and older. On them
+the installer stops with "this system is not supported by the LiMDM agent (OpenSSL 3
+required)".
 
 Arch and Alpine are rolling or have no separate security channel: every pending update
 counts for the security update check, and "install all updates" upgrades everything.
@@ -50,8 +58,8 @@ dependencies, and the agent installs any missing tool itself.
   package names and Fedora (rpm-md) repositories. Switching off unmanaged `.repo` files
   works as on Fedora, with the original kept in `/var/lib/limdm/repo-backup`.
 * osquery comes from the official rpm repository, as on Fedora.
-* Firewall: firewalld. Mandatory access control is checked as it runs: AppArmor (Leap 15,
-  SLES 15) or SELinux (Leap 16, Tumbleweed).
+* Firewall: firewalld. Mandatory access control is checked as it runs: AppArmor or
+  SELinux (Leap 16 and Tumbleweed use SELinux).
 * PAM: the SSO hook goes into `common-auth` (the `common-auth-pc` file of pam-config);
   if a later `pam-config` run drops it, the agent adds it again. The password quality fix
   installs `pam_pwquality` and runs `pam-config --add --pwquality`.
@@ -173,8 +181,9 @@ sudo systemctl enable --now limdm-agent
 
 or with flags: `limdm-agent enroll --server URL --fingerprint FP --token TOKEN [--allow-scripts] [--allow-remote-shell]`.
 `install-agent.sh` verifies the signature of `limdm_<version>_SHA256SUMS` and the package
-checksum before it installs anything; `LIMDM_SKIP_SIGNATURE=true` skips this for packages
-you built yourself.
+checksum before it installs anything; there is no way to skip it. Packages you build yourself
+are signed with your own release key (`limdm-server keygen`, see [operations.md](operations.md#release-key)).
+Both installers stop at once on a system without OpenSSL 3.
 Distributions without apt, dnf, zypper, pacman or apk use the tar.gz release; the agent
 falls back to native inventory when osquery is missing.
 

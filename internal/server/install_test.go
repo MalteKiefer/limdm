@@ -62,3 +62,43 @@ func TestInstallScriptVerifiesSums(t *testing.T) {
 		t.Fatal("a changed SHA256SUMS must not verify")
 	}
 }
+
+// TestInstallScriptsNeedOpenSSL3 runs the OpenSSL check of /install.sh and
+// scripts/install-agent.sh against fake openssl binaries: 1.1.1 and LibreSSL
+// are refused, OpenSSL 3 with pkeyutl -rawin is accepted.
+func TestInstallScriptsNeedOpenSSL3(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh missing")
+	}
+	ca, err := loadOrCreateCA(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{ca: ca, cfg: Config{ReleaseRepo: "o/r", PublicURL: "https://mdm.test", AgentURL: "https://mdm.test:8444", ReleaseKey: strings.Repeat("ab", 32)}}
+	w := httptest.NewRecorder()
+	s.installScript(w, httptest.NewRequest("GET", "/install.sh", nil))
+	agentScript, err := os.ReadFile("../../scripts/install-agent.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, script := range map[string]string{"install.sh": w.Body.String(), "install-agent.sh": string(agentScript)} {
+		if strings.Contains(script, "SKIP_SIGNATURE") || !strings.Contains(script, `openssl_ok || { echo "this system is not supported by the LiMDM agent (OpenSSL 3 required)"`) {
+			t.Fatalf("%s: OpenSSL 3 check missing or a skip path left", name)
+		}
+		start := strings.Index(script, "openssl_ok() {")
+		end := start + strings.Index(script[start:], "\n}\n") + 3
+		for version, want := range map[string]bool{"OpenSSL 1.1.1f  31 Mar 2020": false, "LibreSSL 3.8.2": false, "OpenSSL 3.0.13 30 Jan 2024": true} {
+			bin := t.TempDir()
+			fake := "#!/bin/sh\ncase \"$1\" in version) echo '" + version + "' ;; pkeyutl) echo ' -rawin  Indicate the input data is in raw form' >&2 ;; esac\n"
+			if err := os.WriteFile(filepath.Join(bin, "openssl"), []byte(fake), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			c := exec.Command(sh, "-c", script[start:end]+"openssl_ok")
+			c.Env = []string{"PATH=" + bin + ":/usr/bin:/bin"}
+			if got := c.Run() == nil; got != want {
+				t.Errorf("%s with %q: accepted %v", name, version, got)
+			}
+		}
+	}
+}

@@ -41,7 +41,15 @@ REPO='[[.Repo]]'
 RELEASE_KEY='[[.ReleaseKey]]' # Ed25519 public release key (hex) of this server
 
 [ "$(id -u)" -eq 0 ] || { echo "run as root" >&2; exit 1; }
-for c in curl sha256sum openssl awk; do command -v "$c" >/dev/null 2>&1 || { echo "$c is required" >&2; exit 1; }; done
+# The release signature needs OpenSSL 3: Ed25519 verification of raw input
+# (pkeyutl -rawin). Older systems are not supported, there is no way around it.
+openssl_ok() {
+    command -v openssl >/dev/null 2>&1 || return 1
+    case "$(openssl version 2>/dev/null)" in "OpenSSL "[3-9].*|"OpenSSL "[1-9][0-9].*) ;; *) return 1 ;; esac
+    case "$(openssl pkeyutl -help 2>&1)" in *-rawin*) ;; *) return 1 ;; esac
+}
+openssl_ok || { echo "this system is not supported by the LiMDM agent (OpenSSL 3 required)" >&2; exit 1; }
+for c in curl sha256sum awk; do command -v "$c" >/dev/null 2>&1 || { echo "$c is required" >&2; exit 1; }; done
 
 # verify_sums KEY SUMS SIG: the Ed25519 release signature (hex) over
 # "limdm SHA256SUMS v1\n" and the sums file, with the hex public KEY.
@@ -98,7 +106,7 @@ base="https://github.com/$REPO/releases/download/$tag"
 curl -fsSL -o "$tmp/$pkg" "$base/$pkg"
 curl -fsSL -o "$tmp/sums" "$base/limdm_${ver}_SHA256SUMS"
 curl -fsSL -o "$tmp/sums.sig" "$base/limdm_${ver}_SHA256SUMS.sig"
-verify_sums "$RELEASE_KEY" "$tmp/sums" "$tmp/sums.sig" || { echo "release signature of limdm_${ver}_SHA256SUMS invalid (needs OpenSSL 3)" >&2; exit 1; }
+verify_sums "$RELEASE_KEY" "$tmp/sums" "$tmp/sums.sig" || { echo "release signature of limdm_${ver}_SHA256SUMS invalid" >&2; exit 1; }
 ( cd "$tmp" && grep " $pkg\$" sums | sha256sum -c - ) || { echo "checksum mismatch for $pkg" >&2; exit 1; }
 
 key=$(cat <<'KEY'

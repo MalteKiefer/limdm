@@ -144,21 +144,23 @@ nfpms:
     # Desktop tools are only suggested: servers must not pull in GTK.
     overrides:
       deb:
-        dependencies: [osquery, systemd, util-linux, cryptsetup-bin, iproute2, procps, kmod, gpg]
+        dependencies: [osquery, systemd, util-linux, cryptsetup-bin, iproute2, procps, kmod, gpg, "openssl (>= 3)"]
         recommends: [unattended-upgrades, ufw, libpam-pwquality, auditd, nftables]
         suggests: [zenity, kdialog, libnotify-bin, dconf-cli, flatpak, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1]
       # one rpm for Fedora and SUSE: hard dependencies only on names both use;
       # iproute, procps-ng and gnupg2 are named iproute2, procps and gpg2 on
       # SUSE, so they are weak (dnf and zypper install recommends by default)
+      # openssl: the release signature needs OpenSSL 3 (install.sh); SUSE
+      # names the package openssl-3, a rich dependency accepts either
       rpm:
-        dependencies: [osquery, systemd, util-linux, cryptsetup, kmod]
+        dependencies: [osquery, systemd, util-linux, cryptsetup, kmod, "(openssl >= 3 or openssl-3)"]
         recommends: [iproute, procps-ng, gnupg2, firewalld, audit, dnf-plugins-core, nftables]
         suggests: [zenity, kdialog, libnotify, dconf, flatpak, python3-gobject, gtk4, libadwaita]
       # osquery is not packaged for Arch and Alpine; the agent uses its native inventory there
       archlinux:
-        dependencies: [systemd, util-linux, cryptsetup, iproute2, procps-ng, kmod, gnupg, shadow, pacman-contrib]
+        dependencies: [systemd, util-linux, cryptsetup, iproute2, procps-ng, kmod, gnupg, shadow, pacman-contrib, "openssl>=3"]
       apk:
-        dependencies: [openrc, findmnt, lsblk, runuser, cryptsetup, iproute2, procps, kmod, gnupg, shadow, bash]
+        dependencies: [openrc, findmnt, lsblk, runuser, cryptsetup, iproute2, procps, kmod, gnupg, shadow, bash, "openssl>=3"]
     # pacman and apk run separate hooks on upgrade (post_upgrade, .post-upgrade);
     # the agent update relies on the restart in the post install script
     archlinux:
