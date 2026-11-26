@@ -402,3 +402,19 @@ END $$;
 DROP TRIGGER IF EXISTS dir_users_tombstone ON dir_users;
 CREATE TRIGGER dir_users_tombstone AFTER INSERT OR UPDATE OF email OR DELETE ON dir_users
     FOR EACH ROW EXECUTE FUNCTION dir_users_tombstone();
+
+-- W1
+-- Structured results of script commands and recurring scripts (newest 200 per device).
+CREATE TABLE IF NOT EXISTS script_results (
+    id          BIGSERIAL PRIMARY KEY,
+    device_id   TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    command_id  BIGINT,
+    name        TEXT NOT NULL DEFAULT '',
+    exit_code   INTEGER NOT NULL,
+    stdout      TEXT NOT NULL DEFAULT '',
+    stderr      TEXT NOT NULL DEFAULT '',
+    started_at  TIMESTAMPTZ NOT NULL,
+    ended_at    TIMESTAMPTZ NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS script_results_device ON script_results(device_id, id);

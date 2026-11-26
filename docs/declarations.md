@@ -198,10 +198,15 @@ files.
 ### `com.limdm.scripts` (list)
 
 ```json
-{"scripts": [{"name": "cleanup", "interval_hours": 24, "body": "#!/bin/sh\njournalctl --vacuum-time=30d"}]}
+{"scripts": [{"name": "cleanup", "interval_hours": 24, "body": "#!/bin/sh\njournalctl --vacuum-time=$KEEP",
+              "params": {"KEEP": "30d"}, "timeout_minutes": 10}]}
 ```
 
-Recurring root scripts, only on devices enrolled with `allow_scripts`.
+Recurring root scripts, only on devices enrolled with `allow_scripts`. `params` are passed as
+environment variables (names as for the script command, reserved ones such as `PATH` and
+`LD_*` are refused), `timeout_minutes` is 1 to 240 (default 30). Each run is reported to the
+server with exit code, start, end and truncated output and shown under **Script results**
+on the device page.
 
 ## Security
 

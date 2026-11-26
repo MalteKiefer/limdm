@@ -424,12 +424,15 @@ func (a *Agent) applyScripts(scripts []api.Script) error {
 			continue
 		}
 		a.state.ScriptRuns[sc.Name] = time.Now().Round(0) // wall clock, suspend included
-		out, err := runScript(sc.Body)
+		res, err := runScript(sc.Body, sc.Params, sc.TimeoutMinutes)
+		res.Name = sc.Name
+		if len(a.state.ScriptResults) >= 50 { // bounded while offline: the oldest go first
+			a.state.ScriptResults = a.state.ScriptResults[1:]
+		}
+		a.state.ScriptResults = append(a.state.ScriptResults, res)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", sc.Name, err))
-			continue
 		}
-		a.event("script %s ran: %s", sc.Name, lastLines(out, 2))
 	}
 	return errors.Join(errs...)
 }

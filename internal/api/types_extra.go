@@ -117,9 +117,67 @@ type Flatpak struct {
 }
 
 type Script struct {
-	Name          string `json:"name"`
-	IntervalHours int    `json:"interval_hours"`
-	Body          string `json:"body"`
+	Name           string            `json:"name"`
+	IntervalHours  int               `json:"interval_hours"`
+	Body           string            `json:"body"`
+	Params         map[string]string `json:"params,omitempty"`          // environment variables for the script
+	TimeoutMinutes int               `json:"timeout_minutes,omitempty"` // 1..240, default 30
+}
+
+// ScriptCommand is the payload of the "script" command when it carries
+// parameters or a timeout; a plain body is still accepted.
+type ScriptCommand struct {
+	Body           string            `json:"body"`
+	Params         map[string]string `json:"params,omitempty"`
+	TimeoutMinutes int               `json:"timeout_minutes,omitempty"`
+}
+
+// ScriptResult is the structured outcome of a script run. Output is
+// truncated to its last MaxScriptOutput bytes per stream.
+type ScriptResult struct {
+	Name      string    `json:"name,omitempty"`       // recurring script, empty for a command
+	CommandID int64     `json:"command_id,omitempty"` // script command
+	ExitCode  int       `json:"exit_code"`            // -1: did not start or timed out
+	Stdout    string    `json:"stdout,omitempty"`
+	Stderr    string    `json:"stderr,omitempty"`
+	Start     time.Time `json:"start"`
+	End       time.Time `json:"end"`
+}
+
+// MaxScriptOutput bounds stdout and stderr of one script result.
+const MaxScriptOutput = 16 << 10
+
+var (
+	scriptParamRe   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
+	reservedEnvVars = []string{"PATH", "IFS", "HOME", "SHELL", "ENV", "BASH_ENV", "SHELLOPTS", "BASHOPTS", "PS4", "CDPATH", "GLOBIGNORE",
+		"PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PERL5LIB", "PERL5OPT", "PERLLIB", "RUBYLIB", "RUBYOPT", "NODE_OPTIONS", "NODE_PATH", "TMPDIR"}
+)
+
+// ValidateScriptParams checks parameter names and values and the timeout.
+// Names are environment variable names that do not change how an
+// interpreter or the dynamic linker loads code.
+func ValidateScriptParams(params map[string]string, timeout int) error {
+	if len(params) > 50 {
+		return errors.New("at most 50 parameters")
+	}
+	size := 0
+	for k, v := range params {
+		up := strings.ToUpper(k)
+		if !scriptParamRe.MatchString(k) || slices.Contains(reservedEnvVars, up) || strings.HasPrefix(up, "LD_") || strings.HasPrefix(up, "LC_") || strings.HasPrefix(up, "DYLD_") {
+			return fmt.Errorf("parameter %q: letters, digits and underscore, not a reserved variable (PATH, LD_*, BASH_ENV …)", k)
+		}
+		if strings.ContainsRune(v, 0) || len(v) > 4096 {
+			return fmt.Errorf("parameter %s: up to 4096 characters, no NUL", k)
+		}
+		size += len(k) + len(v)
+	}
+	if size > 32<<10 {
+		return errors.New("parameters up to 32 KiB in total")
+	}
+	if timeout < 0 || timeout > 240 {
+		return errors.New("timeout_minutes must be 1..240 (0 for the default of 30)")
+	}
+	return nil
 }
 
 type Banner struct {
@@ -414,6 +472,9 @@ func (d Declaration) applyExtra(p *Policy) (bool, error) {
 		for _, sc := range v.Scripts {
 			if !nameRe.MatchString(sc.Name) || sc.IntervalHours < 1 || sc.IntervalHours > 24*30 || sc.Body == "" || len(sc.Body) > 64<<10 {
 				bad("script %q: name, interval 1..720 hours and a body up to 64 KiB are required", sc.Name)
+			}
+			if err := ValidateScriptParams(sc.Params, sc.TimeoutMinutes); err != nil {
+				bad("script %q: %v", sc.Name, err)
 			}
 		}
 		p.Extra.Scripts = v.Scripts

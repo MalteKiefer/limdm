@@ -261,8 +261,10 @@ shown) and run an action on all of them, like in RMM tools:
 * **Software**: install or remove a catalog app (also per device under **Software**,
   **Catalog**).
 * **Tags**: add or remove a tag.
+* **Script** (admins only): run a script with parameters and a timeout on every selected
+  device that allows scripts.
 
-Lost mode, wipe and scripts stay single device actions. Filter the list by tag, or follow a
+Lost mode and wipe stay single device actions. Filter the list by tag, or follow a
 count from another page: every device count in the console (catalog installs, Flatpaks and
 remotes on devices, blueprints, agent versions, failing checks) opens the list filtered to
 those devices, ready for a bulk action. Tags are also blueprint conditions.
@@ -298,6 +300,13 @@ Other commands:
   unattended-upgrades or PackageKit) or dnf, then system wide Flatpaks.
 * **Run script**: a shebang (`#!/bin/bash`, `#!/usr/bin/env python3`) picks the
   interpreter, otherwise `/bin/sh`; works on hardened systems with a noexec `/var`.
+  **Parameters** (`NAME=value` per line) arrive as environment variables; names are
+  letters, digits and underscore, and variables that change how code is loaded (`PATH`,
+  `LD_*`, `BASH_ENV`, `PYTHONPATH` …) are refused. The timeout is 1 to 240 minutes
+  (default 30). The device reports exit code, start and end, and the last 16 KiB of stdout
+  and stderr; **Script results** on the **Commands** tab shows the newest 50 (200 are
+  kept per device). Recurring scripts (`com.limdm.scripts`) report the same way instead of
+  an event.
 * **Send message**: a notification and a dialog in every graphical session; the command
   fails when no dialog could be shown.
 

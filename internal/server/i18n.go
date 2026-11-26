@@ -722,6 +722,17 @@ var deCatalog = map[string]string{
 	// W1
 	"GNOME settings (dconf)": "GNOME Einstellungen (dconf)",
 	"Local accounts":         "Lokale Konten",
+	"Parameters":             "Parameter",
+	"One NAME=value per line, passed as environment variables": "Ein NAME=Wert pro Zeile, als Umgebungsvariablen übergeben",
+	"Timeout in minutes":     "Zeitlimit in Minuten",
+	"Script results":         "Skriptergebnisse",
+	"newest 200 kept":        "die neuesten 200 werden behalten",
+	"Exit code":              "Exit Code",
+	"Started":                "Gestartet",
+	"Ended":                  "Beendet",
+	"Errors":                 "Fehler",
+	"No script results yet.": "Noch keine Skriptergebnisse.",
+	"Run this script as root on the selected devices?":                                                   "Dieses Skript als root auf den ausgewählten Geräten ausführen?",
 	"Look up the location of device public addresses (sent to the geolocation service)":                  "Standort der öffentlichen Geräteadressen nachschlagen (wird an den Geolocation Dienst gesendet)",
 	"Agents may ask public DNS over HTTPS resolvers (Cloudflare, Google) when the system resolver fails": "Agenten dürfen öffentliche DNS over HTTPS Resolver (Cloudflare, Google) fragen, wenn der Systemresolver versagt",
 }

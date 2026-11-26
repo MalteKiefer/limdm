@@ -927,9 +927,10 @@ type LostMode struct {
 }
 
 type CommandResult struct {
-	ID     int64  `json:"id"`
-	OK     bool   `json:"ok"`
-	Output string `json:"output"`
+	ID     int64         `json:"id"`
+	OK     bool          `json:"ok"`
+	Output string        `json:"output"`
+	Script *ScriptResult `json:"script,omitempty"` // script command: structured result
 }
 
 type CheckinRequest struct {
@@ -947,7 +948,8 @@ type CheckinRequest struct {
 	UpdateResult      *UpdateResult   `json:"update_result,omitempty"` // outcome of the last agent update
 	Events            []string        `json:"events,omitempty"`
 	CatalogHash       string          `json:"catalog_hash,omitempty"`
-	AppRequests       []AppRequest    `json:"app_requests,omitempty"` // self service requests of users
+	AppRequests       []AppRequest    `json:"app_requests,omitempty"`   // self service requests of users
+	ScriptResults     []ScriptResult  `json:"script_results,omitempty"` // runs of recurring scripts
 }
 
 // Branding is the company name and PNG logo shown by the desktop helper.

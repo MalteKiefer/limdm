@@ -99,6 +99,7 @@ type State struct {
 	DNFExclude     string                    `json:"dnf_exclude,omitempty"`  // excludepkgs= value LiMDM wrote to dnf.conf
 	PacmanIgnore   string                    `json:"pacman_ignore,omitempty"`
 	SnapRefresh    string                    `json:"snap_refresh,omitempty"`   // "hold" or "timer=..." LiMDM set in snapd
+	ScriptResults  []api.ScriptResult        `json:"script_results,omitempty"` // recurring script runs not yet reported
 	ManagedFiles   []string                  `json:"managed_files,omitempty"`  // paths written for com.limdm.files, removed when undeclared
 	FirewallRules  []api.FirewallRule        `json:"firewall_rules,omitempty"` // allow rules LiMDM added
 	LocalUsers     map[string]localUserState `json:"local_users,omitempty"`    // accounts com.limdm.localusers manages
@@ -570,7 +571,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	statusHash := hex.EncodeToString(sum[:])
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
 		StatusHash: statusHash, Results: a.state.Results, Events: a.pendingEvents(), Metrics: metrics(), BrandingHash: a.state.BrandingHash,
-		UpdateResult: a.state.UpdateResult}
+		UpdateResult: a.state.UpdateResult, ScriptResults: a.state.ScriptResults}
 	if a.state.Catalog != nil {
 		req.CatalogHash = a.state.Catalog.Hash
 	}
@@ -607,6 +608,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	a.enforceOffline(true)
 	// drop only what was sent: entries added meanwhile (unlock events, desktop) stay
 	a.state.Results = a.state.Results[len(req.Results):]
+	a.state.ScriptResults = a.state.ScriptResults[len(req.ScriptResults):]
 	a.evMu.Lock()
 	// by content, not by count: a full queue drops its oldest routine line
 	// while the check in runs, so the sent lines are no longer a prefix
@@ -839,13 +841,23 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 			err = errors.New("remote scripts are disabled on this device (allow_scripts)")
 			break
 		}
-		out, err = runScript(c.Payload)
+		var sc api.ScriptCommand
+		if sc, err = parseScriptCommand(c.Payload); err != nil {
+			break
+		}
+		var res api.ScriptResult
+		res, err = runScript(sc.Body, sc.Params, sc.TimeoutMinutes)
+		res.CommandID = c.ID
+		r.Script, out = &res, scriptOutput(res)
 	default:
 		err = fmt.Errorf("unknown command %q", c.Type)
 	}
 	a.event("command %d (%s) executed, error=%v", c.ID, c.Type, err)
 	r.OK = err == nil
 	r.Output = lastLines(out, 200)
+	if r.Script != nil {
+		r.Output = out
+	}
 	if err != nil {
 		r.Output += "\n" + err.Error()
 	}
@@ -857,25 +869,6 @@ const (
 	nologinFile = "/etc/nologin"
 	nologinText = "This device is locked by IT (LiMDM). Contact your administrator.\n"
 )
-
-// runScript runs a script IT sent. A shebang line picks the interpreter
-// (bash, python …); without one it runs with /bin/sh.
-func runScript(body string) (string, error) {
-	f, err := os.CreateTemp(stateDir, "script-*")
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(f.Name())
-	_, err = f.WriteString(strings.ReplaceAll(body, "\r\n", "\n")) // pasted from Windows editors
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return "", err
-	}
-	argv := append(scriptInterpreter(body), f.Name())
-	return run(30*time.Minute, argv[0], argv[1:]...)
-}
 
 // scriptInterpreter reads the shebang ("#!/usr/bin/env python3",
 // "#!/bin/bash -e"); the file itself is never executed, so a noexec

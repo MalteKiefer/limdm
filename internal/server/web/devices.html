@@ -39,6 +39,13 @@
       <div class="menu-row"><button class="small" name="action" value="command:app_install">{{t "Install"}}</button>
         <button class="small secondary" name="action" value="command:app_remove" data-confirm="{{t "Remove the app from the selected devices?"}}">{{t "Remove"}}</button></div>
     </div></details>
+  <details class="menu"><summary class="button small">{{t "Script"}}</summary>
+    <div class="menu-list left menu-form" role="menu">
+      <label>{{t "Script"}}<textarea name="payload" rows="5" class="code" placeholder="#!/bin/sh"></textarea><small class="field-hint">{{t "Runs as root, only if the device allows scripts"}}</small></label>
+      <label>{{t "Parameters"}}<textarea name="params" rows="2" class="code" placeholder="TARGET=/srv/data" spellcheck="false"></textarea><small class="field-hint">{{t "One NAME=value per line, passed as environment variables"}}</small></label>
+      <label>{{t "Timeout in minutes"}}<input name="timeout_minutes" type="number" min="1" max="240" placeholder="30"></label>
+      <div class="menu-row"><button class="small" name="action" value="command:script" data-confirm="{{t "Run this script as root on the selected devices?"}}">{{t "Run script"}}</button></div>
+    </div></details>
   <details class="menu"><summary class="button small">{{t "Tags"}}</summary>
     <div class="menu-list left menu-form" role="menu">
       <label>{{t "Tag"}}<input name="tag" data-enter="tag-add" list="known-tags" maxlength="32" placeholder="{{t "finance"}}" spellcheck="false"></label>
