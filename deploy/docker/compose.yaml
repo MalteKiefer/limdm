@@ -43,9 +43,16 @@ services:
       LIMDM_OIDC_ALLOWED_DOMAIN: ${LIMDM_OIDC_ALLOWED_DOMAIN:-}
       LIMDM_ADMINS: ${LIMDM_ADMINS:-}
       LIMDM_AUDITORS: ${LIMDM_AUDITORS:-}
+      # backups and package uploads are staged here: the container is read
+      # only, the state volume (CA directory, uploads) is in every backup
+      TMPDIR: /var/lib/limdm-server
     volumes:
       - state:/var/lib/limdm-server
       - dbsocket:/var/run/postgresql
+      # local backup target: add a target with the directory /backups under
+      # Settings, Backup (mkdir backups && sudo chown 65532 backups first),
+      # or use S3, B2, SFTP or WebDAV (docs/backup.md)
+      - ./backups:/backups
     ports:
       - "80:80"
       - "443:443"

@@ -194,6 +194,10 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		p.sample("limdm_audit_verified_timestamp_seconds", float64(verified.Unix()))
 	}
 
+	if err := s.backupMetrics(ctx, &p); err != nil { // backup.go
+		s.apiFail(w, err)
+		return
+	}
 	p.family("limdm_http_requests_total", "counter", "HTTP requests by listener, method and status code.")
 	httpCounts.Lock()
 	keys := make([]httpKey, 0, len(httpCounts.m))

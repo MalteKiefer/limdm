@@ -49,6 +49,7 @@ var notifyEvents = []struct{ Type, Label string }{
 	{"audit.broken", "Audit log verification failed"},
 	{"network.crl_token", "Network CRL token rotated"},
 	{"keys.rotate", "Key rotation started or finished"},
+	{"backup.failed", "Backup failed or stored backup damaged"},
 }
 
 // notifyCommand announces privileged commands once they are queued.
@@ -415,7 +416,6 @@ func (s *Server) notify(n notice) {
 			s.log.Error("notifications", "err", err)
 			return
 		}
-		_, _ = s.db.Exec(ctx, `DELETE FROM notification_log WHERE at < now() - interval '30 days'`) // retention
 		for _, c := range chans {
 			if len(c.Events) > 0 && !slices.Contains(c.Events, n.Type) || c.Tenant != nil && *c.Tenant != n.Tenant {
 				continue

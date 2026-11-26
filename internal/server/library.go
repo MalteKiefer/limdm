@@ -605,6 +605,9 @@ func (s *Server) saveLibraryItem(ctx context.Context, actor string, it *api.Libr
 		}
 		it.Payload = p
 	}
+	if err := s.checkArtifactRefs(ctx, it); err != nil { // packages.go
+		return invalid(err)
+	}
 	return s.storeItem(ctx, actor, "library.save", "save", it, false)
 }
 
