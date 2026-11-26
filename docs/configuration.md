@@ -100,10 +100,12 @@ Rules enforced by the server:
 groups (comma separated in **Users**; a device is in scope when it carries one of the tags
 or its primary user is in one of the groups). Empty means every device; admins are never
 limited. The server enforces the scope on the device list, overview, compliance page, device
-page, commands (single and bulk), recovery keys, CSV exports and the audit log (entries
-about devices in scope); a device outside the scope is answered with 404. Pages with fleet
-wide data that are not filtered (Directory, Agents, Software) are refused to scoped
-accounts.
+page, commands (single and bulk), recovery keys, CSV exports (also packages and compliance
+history), the compliance history page and the audit log with its CSV and JSON Lines exports
+(entries about devices in scope); a device outside the scope is answered with 404. Pages
+with fleet wide data that are not filtered (Directory, Agents, Software, Network
+certificates, version history) are refused to scoped accounts. API tokens can carry scope
+tags too ([admin-api.md](admin-api.md#tokens)); scoped tokens get no metrics.
 
 ## Profile
 

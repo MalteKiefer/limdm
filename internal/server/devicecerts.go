@@ -193,7 +193,7 @@ func (s *Server) networkCRL(ctx context.Context) ([]byte, error) {
 }
 
 func (s *Server) networkRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /network", s.page(s.adminOrAuditor(s.networkPage)))
+	mux.HandleFunc("GET /network", s.page(s.adminOrAuditor(s.unscoped(s.networkPage)))) // every device's certificates
 	mux.HandleFunc("POST /network/crl-token", s.page(s.networkCRLToken))
 	mux.HandleFunc("GET /network/ca.pem", s.page(func(w http.ResponseWriter, r *http.Request, _ session) {
 		w.Header().Set("Content-Type", "application/x-pem-file")

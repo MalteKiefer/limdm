@@ -104,9 +104,14 @@ func (s *Server) complianceHistory(w http.ResponseWriter, r *http.Request, sess 
 		http.Error(w, "at must be a date (YYYY-MM-DD)", http.StatusBadRequest)
 		return
 	}
+	if device != "" && !s.inScope(ctx, sess, device) {
+		http.NotFound(w, r)
+		return
+	}
 	at := cutoff.AddDate(0, 0, -1).Format("2006-01-02")
+	cond, sargs := scopeCond(sess, 2)
 	rows, err := s.db.Query(ctx, `SELECT h.device_id, d.hostname, h.check_id, h.status, h.detail, h.at, h.catalog_version
-		FROM (`+historyStateSQL+`) h JOIN devices d ON d.id = h.device_id ORDER BY d.hostname, h.device_id, h.check_id`, cutoff, device)
+		FROM (`+historyStateSQL+`) h JOIN devices d ON d.id = h.device_id WHERE `+cond+` ORDER BY d.hostname, h.device_id, h.check_id`, append([]any{cutoff, device}, sargs...)...)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -144,7 +149,8 @@ func (s *Server) complianceHistory(w http.ResponseWriter, r *http.Request, sess 
 			return
 		}
 	}
-	all, err := s.listDevices(ctx)
+	cond, sargs = scopeCond(sess, 0)
+	all, err := s.listDevicesWhere(ctx, cond, sargs...)
 	if err != nil {
 		s.fail(w, err)
 		return

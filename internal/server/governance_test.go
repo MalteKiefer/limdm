@@ -161,6 +161,15 @@ func TestGovernance(t *testing.T) {
 	if code, _ := ui("GET", "/devices/d2", nil, "a@x.de", "admin"); code != 200 {
 		t.Fatalf("admins are not scoped: %d", code)
 	}
+	if code, body := ui("GET", "/compliance/history", nil, "h@x.de", "helpdesk"); code != 200 || strings.Contains(body, "pc2") {
+		t.Fatalf("scoped compliance history: %d", code)
+	}
+	if code, _ := ui("GET", "/compliance/history?device=d2", nil, "h@x.de", "helpdesk"); code != http.StatusNotFound {
+		t.Fatalf("compliance history outside the scope: %d", code)
+	}
+	if code, _ := ui("GET", "/library/1/history", nil, "h@x.de", "helpdesk"); code != http.StatusForbidden {
+		t.Fatalf("scoped version history: %d", code)
+	}
 
 	// ---- four eyes ----
 	must(`UPDATE console_users SET disabled=true WHERE email='b@x.de'`)
