@@ -40,15 +40,17 @@
   (`signed_data` in the check in answer): entries without a valid signature are dropped, an
   unsigned user list is refused and the last one stays, and the refusal is reported as an
   event. Older agents ignore the signatures; they get no user list while the stored one does
-  not verify. A change that keeps signed fields (allowing or
-  blocking a remote, opening up an app on request) is refused when the stored entry no
-  longer verifies, so a database change is never signed later by accident. Whoever can only
-  write to the database cannot make a device run, install or trust anything an admin did not
-  sign; they can still change which signed items and apps reach which device (blueprint
-  assignment), stop delivery (a broken signature withholds the entry) and change display
-  only data: summary, category and icon of apps, branding, the store switches (which only
-  restrict), the public DNS fallback switch (TLS to the pinned CA still applies) and requests
-  to rotate escrowed recovery keys (the device makes the new key itself).
+  not verify. A change that keeps signed fields (allowing or blocking a remote, opening up an
+  app on request) is refused when the stored entry no longer verifies, so a database change
+  is never signed later by accident.
+
+  Whoever can only write to the database cannot make a device run, install or trust anything
+  an admin did not sign. They can still change which signed items and apps reach which
+  device (blueprint assignment, approved app requests), stop delivery (a broken signature
+  withholds the entry), and change what grants nothing on a device: summary, category and
+  icon of apps, branding, the store switches (which only restrict), risk exceptions (which
+  only exclude compliance checks), the public DNS fallback switch (TLS to the pinned CA still
+  applies) and requests to rotate escrowed recovery keys (the device makes the new key itself).
 * **Keys and HSM.** Device CA, network CA and command key can live in a PKCS#11 HSM
   (`LIMDM_KEY_PROVIDER=pkcs11` with `LIMDM_PKCS11_MODULE`, `LIMDM_PKCS11_TOKEN`,
   `LIMDM_PKCS11_PIN`; separate build with `-tags pkcs11`). The private keys then never
