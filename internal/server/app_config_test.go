@@ -216,6 +216,50 @@ func TestAppConfigAPI(t *testing.T) {
 	want(code, body, 200, `"snippet"`)
 	var pid int64
 	_ = db.QueryRow(ctx, `SELECT id FROM artifacts`).Scan(&pid)
+	// device scoped accounts and tokens: nothing read or written
+	code, body = call(admin, "POST", "/api/v1/tokens", `{"name":"desk","role":"helpdesk","days":30,"scope_tags":["prod"]}`)
+	var tok struct{ Token string }
+	if _ = json.Unmarshal([]byte(body), &tok); code != 201 || tok.Token == "" {
+		t.Fatalf("scoped token: %d %s", code, body)
+	}
+	bearer := func(method, path, ctype string, body io.Reader) {
+		t.Helper()
+		req, _ := http.NewRequest(method, srv.URL+path, body)
+		req.Header.Set("Authorization", "Bearer "+tok.Token)
+		if ctype != "" {
+			req.Header.Set("Content-Type", ctype)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 403 {
+			t.Fatalf("scoped token %s %s: %d", method, path, resp.StatusCode)
+		}
+	}
+	var mp bytes.Buffer
+	mw := multipart.NewWriter(&mp)
+	_ = mw.WriteField("name", "scoped")
+	_ = mw.WriteField("kind", "script")
+	fw, _ := mw.CreateFormFile("file", "s.sh")
+	_, _ = fw.Write([]byte("#!/bin/sh\n"))
+	_ = mw.Close()
+	bearer("POST", "/api/v1/packages", mw.FormDataContentType(), &mp)
+	bearer("DELETE", "/api/v1/packages/"+itoa(pid), "", nil)
+	// a scoped auditor token has the role for these reads, the scope refuses them
+	code, body = call(admin, "POST", "/api/v1/tokens", `{"name":"aud","role":"auditor","days":30,"scope_tags":["prod"]}`)
+	if _ = json.Unmarshal([]byte(body), &tok); code != 201 {
+		t.Fatalf("scoped auditor token: %d %s", code, body)
+	}
+	bearer("GET", "/api/v1/packages", "", nil)
+	bearer("GET", "/api/v1/software/catalog", "", nil)
+	bearer("GET", "/api/v1/config/library/"+id+"/versions", "", nil)
+	var arts int
+	_ = db.QueryRow(ctx, `SELECT count(*) FROM artifacts`).Scan(&arts)
+	if arts != 1 {
+		t.Fatalf("scoped callers changed packages: %d", arts)
+	}
 	if code, _ := call(admin, "DELETE", "/api/v1/packages/"+itoa(pid), ""); code != 204 {
 		t.Fatalf("delete package: %d", code)
 	}

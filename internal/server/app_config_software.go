@@ -33,18 +33,37 @@ func (s *Server) appConfigSoftwareRoutes(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/software/remotes/{name}/{op}", s.need("admin", s.softwareAPI(s.apiRemoteOp)))
 	m.HandleFunc("GET /api/v1/software/settings", s.need("audit", s.softwareAPI(s.apiSoftwareSettings)))
 	m.HandleFunc("PUT /api/v1/software/settings", s.need("admin", s.softwareAPI(s.apiSoftwareSettingsSave)))
-	m.HandleFunc("GET /api/v1/packages", s.need("audit", s.apiPackages))
-	m.HandleFunc("POST /api/v1/packages", s.need("admin", s.apiPackageUpload))
-	m.HandleFunc("DELETE /api/v1/packages/{id}", s.need("admin", s.apiPackageDelete))
-	m.HandleFunc("PUT /api/v1/packages/settings", s.need("admin", s.apiPackageSettings))
+	m.HandleFunc("GET /api/v1/packages", s.need("audit", unscopedAPI(s.apiPackages)))
+	m.HandleFunc("POST /api/v1/packages", s.need("admin", unscopedAPI(s.apiPackageUpload)))
+	m.HandleFunc("DELETE /api/v1/packages/{id}", s.need("admin", unscopedAPI(s.apiPackageDelete)))
+	m.HandleFunc("PUT /api/v1/packages/settings", s.need("admin", unscopedAPI(s.apiPackageSettings)))
 }
 
 // softwareAPI refuses accounts bound to a tenant and device scoped ones, as
 // the console's software pages do (not tenant routes, unscoped).
 func (s *Server) softwareAPI(h apiHandlerFunc) apiHandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request, c apiCaller) {
-		if sess := c.sess(); sess.TenantOnly() || sess.scoped() {
+	return unscopedAPI(func(w http.ResponseWriter, r *http.Request, c apiCaller) {
+		if c.sess().TenantOnly() {
 			problem(w, http.StatusForbidden, "the software catalog is managed by global administrators")
+			return
+		}
+		h(w, r, c)
+	})
+}
+
+// deviceScoped reports an account or token limited to some devices: the
+// console's scope rule (scoped), and also an admin token that carries scope
+// tags. Such callers never change fleet wide configuration.
+func deviceScoped(sess session) bool {
+	return sess.scoped() || len(sess.Tags) > 0 || len(sess.Groups) > 0
+}
+
+// unscopedAPI refuses device scoped callers before the handler reads the
+// request body, as the console's unscoped wrapper does for its pages.
+func unscopedAPI(h apiHandlerFunc) apiHandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request, c apiCaller) {
+		if deviceScoped(c.sess()) {
+			problem(w, http.StatusForbidden, "not available for accounts limited to a device scope")
 			return
 		}
 		h(w, r, c)
@@ -446,10 +465,6 @@ type apiPackageConfig struct {
 
 func (s *Server) apiPackages(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	ctx, sess := r.Context(), c.sess()
-	if sess.scoped() {
-		problem(w, http.StatusForbidden, "not available for accounts limited to a device scope")
-		return
-	}
 	tcond, targs := tenantCond(sess, "a.tenant_id", 0)
 	icond, _ := tenantCond(sess, "i.tenant_id", 0)
 	rows, err := s.db.Query(ctx, `SELECT a.id, a.tenant_id, a.sha256, a.name, a.version, a.kind, a.filename, a.store, a.size, a.uploaded_by, a.approved_by, a.created_at,

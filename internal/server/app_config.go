@@ -24,11 +24,11 @@ import (
 
 func (s *Server) appConfigRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/config/blueprints", s.need("read", s.apiConfigBlueprints))
-	m.HandleFunc("POST /api/v1/config/blueprints/preview", s.need("admin", s.apiConfigBlueprintPreview))
+	m.HandleFunc("POST /api/v1/config/blueprints/preview", s.need("admin", unscopedAPI(s.apiConfigBlueprintPreview)))
 	m.HandleFunc("GET /api/v1/config/library", s.need("read", s.apiConfigLibrary))
-	m.HandleFunc("POST /api/v1/config/library/preview", s.need("admin", s.apiConfigItemPreview))
-	m.HandleFunc("GET /api/v1/config/{kind}/{id}/versions", s.need("read", s.apiConfigVersions))
-	m.HandleFunc("POST /api/v1/config/{kind}/{id}/rollback", s.need("admin", s.apiConfigRollback))
+	m.HandleFunc("POST /api/v1/config/library/preview", s.need("admin", unscopedAPI(s.apiConfigItemPreview)))
+	m.HandleFunc("GET /api/v1/config/{kind}/{id}/versions", s.need("read", unscopedAPI(s.apiConfigVersions)))
+	m.HandleFunc("POST /api/v1/config/{kind}/{id}/rollback", s.need("admin", unscopedAPI(s.apiConfigRollback)))
 	s.appConfigSoftwareRoutes(m)
 }
 
@@ -446,10 +446,6 @@ func (s *Server) configVersions(w http.ResponseWriter, r *http.Request, c apiCal
 	table, ok := configKinds[r.PathValue("kind")]
 	if !ok {
 		problem(w, http.StatusNotFound, "unknown kind")
-		return "", 0, nil, false
-	}
-	if c.sess().scoped() {
-		problem(w, http.StatusForbidden, "not available for accounts limited to a device scope")
 		return "", 0, nil, false
 	}
 	id, ok := pathID(w, r)
