@@ -433,13 +433,21 @@ well.
 * Terminal and SSH sessions of people end (they cannot be locked); root's stay. While the
   device is locked, the agent ends such sessions again every minute.
 * Graphical sessions are locked, not ended, like on Windows and macOS (unsaved work stays):
-  GNOME, KDE Plasma, Xfce, Cinnamon and MATE through logind,
+  GNOME, KDE Plasma, Xfce, Cinnamon and MATE through logind (Xfce additionally with i3lock),
   compositors and window managers without a logind aware locker (labwc, sway, Hyprland,
   river, niri, Wayfire, i3 and others) get swaylock or i3lock started directly, again every
   minute while the device stays locked.
 
-Whether a session is locked is checked: logind's LockedHint or a running locker; only
-where neither shows after a few seconds does the agent start swaylock or i3lock itself.
+Whether a session still needs the agent's locker is decided only from what the session's
+user cannot fake. The agent skips a session whose logind `Desktop` (set by the display
+manager at login) is GNOME, KDE Plasma, Cinnamon or MATE, whose shell locks itself on
+logind's request, or where a verified locker already covers the session's display: a
+swaylock, i3lock, hyprlock, gtklock, waylock, slock or xsecurelock binary owned by root in
+a system directory, run by the session's user, with the session's `DISPLAY` or
+`WAYLAND_DISPLAY`. logind's `LockedHint` (the session owner sets it) and process names
+(any program can be called `i3lock`) are not trusted. Everywhere else the agent starts
+swaylock or i3lock itself. Xfce sessions therefore may get i3lock on top of their own
+locker.
 Sessions are found through logind, one by one (also several sessions of one user), and
 each gets the display and D-Bus environment of its own processes.
 

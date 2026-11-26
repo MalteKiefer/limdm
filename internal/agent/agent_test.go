@@ -805,6 +805,25 @@ State=active`
 	if s := parseSessions(props); !s[1].Locked || s[1].Type != "wayland" || s[1].Audit != "4" {
 		t.Fatalf("parsed: %+v", s[1])
 	}
+	if s := parseSessions("Id=9\nDesktop=GNOME\n"); len(s) != 1 || s[0].Desktop != "GNOME" {
+		t.Fatalf("desktop: %+v", s)
+	}
+}
+
+func TestRemoteLockTrust(t *testing.T) {
+	// only desktops whose shell honours logind's lock request skip the
+	// agent's locker; LockedHint and process names are not trusted (F11)
+	for d, want := range map[string]bool{"GNOME": true, "ubuntu:GNOME": true, "KDE": true, "plasma": true, "sway": false, "i3": false, "": false, "Hyprland": false} {
+		if logindLocks(d) != want {
+			t.Errorf("logindLocks(%q) = %v", d, !want)
+		}
+	}
+	if verifiedLocker(graphicalSession{uid: "1000", kind: "x11"}) {
+		t.Error("a session without display has no verified locker")
+	}
+	if trustedExe("self", map[string]bool{"i3lock": true}) {
+		t.Error("the test binary is no trusted locker")
+	}
 }
 
 func TestScriptInterpreter(t *testing.T) {

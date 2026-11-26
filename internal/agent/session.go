@@ -112,8 +112,8 @@ type graphicalSession struct {
 
 // loginSession is a logind session with what the agent needs from it.
 type loginSession struct {
-	ID, User, UID, Type, Class, State, Audit string
-	Remote, Locked                           bool
+	ID, User, UID, Type, Class, State, Audit, Desktop string // Desktop: set at login, the user cannot change it
+	Remote, Locked                                    bool
 }
 
 // loginSessions lists logind sessions in one loginctl call.
@@ -132,7 +132,7 @@ func loginSessions() []loginSession {
 		return nil
 	}
 	props, err := sh("loginctl", append(append([]string{"show-session"}, ids...),
-		"-p", "Id", "-p", "Name", "-p", "User", "-p", "Type", "-p", "Class", "-p", "State", "-p", "Remote", "-p", "LockedHint", "-p", "Audit")...)
+		"-p", "Id", "-p", "Name", "-p", "User", "-p", "Type", "-p", "Class", "-p", "State", "-p", "Remote", "-p", "LockedHint", "-p", "Audit", "-p", "Desktop")...)
 	if err != nil {
 		return nil
 	}
@@ -154,7 +154,7 @@ func parseSessions(props string) []loginSession {
 			continue
 		}
 		res = append(res, loginSession{ID: kv["Id"], User: kv["Name"], UID: kv["User"], Type: kv["Type"], Class: kv["Class"],
-			State: kv["State"], Audit: kv["Audit"], Remote: kv["Remote"] == "yes", Locked: kv["LockedHint"] == "yes"})
+			State: kv["State"], Audit: kv["Audit"], Desktop: kv["Desktop"], Remote: kv["Remote"] == "yes", Locked: kv["LockedHint"] == "yes"})
 	}
 	return res
 }
