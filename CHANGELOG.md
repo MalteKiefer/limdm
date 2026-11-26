@@ -1,8 +1,115 @@
 # Changelog
 
 All notable changes, newest first. Versions follow [Semantic Versioning](https://semver.org).
+Dates are release tag dates. **Breaking** marks changes that need action from operators or
+change behavior they rely on.
 
-## 0.15.0
+## 0.16.0 (2026-11-26)
+
+### Upgrade notes
+- **Breaking:** stop every server instance before the first 0.16 instance starts. The audit chain switches to keyed hashes with a recorded switch point; an instance with an outdated audit key refuses to write entries. See [docs/operations.md](docs/operations.md#upgrading-from-015-to-016).
+- **Breaking:** `/healthz` is a liveness check only. Point load balancers and monitoring at `/readyz`.
+- **Breaking:** the release workflow needs the variable `UPDATE_PUBKEY` and the secret `RELEASE_SIGNING_KEY`; agent self updates fail closed without a release key.
+- Set `LIMDM_TRUSTED_PROXIES` when the reverse proxy is not on loopback. New variables: `LIMDM_DRAIN_SECONDS`, `LIMDM_MULTI_TENANT`, `LIMDM_SYSLOG`, `LIMDM_KEY_PROVIDER`, `LIMDM_PKCS11_*`.
+- The webhook signing secret is migrated automatically: receivers keep working.
+- Key rotation needs agents 0.16 or newer.
+
+### Added
+- Multi tenancy for MSPs and groups of companies, off by default (`LIMDM_MULTI_TENANT=true` shows the tenant pages and switcher). Tenant list for global administrators (create, rename, disable), tenant switcher and global audit view.
+- Per tenant branding (company name, logo, accent color) with the global branding as fallback, shown in the console and on the tenant's devices.
+- Shared library items and blueprints of the Default tenant, readable by every tenant.
+- Enrollment tokens enroll into their tenant; API tokens, console users and notification channels belong to a tenant or are global.
+- Several server instances behind a load balancer on one PostgreSQL database ([docs/high-availability.md](docs/high-availability.md)). Settings reload on every instance, remote shell sessions are relayed between instances, background jobs run once with leader handover.
+- `/readyz` readiness check (database, schema, keys, notifications), graceful shutdown with `LIMDM_DRAIN_SECONDS`, and `LIMDM_TRUSTED_PROXIES` for load balancers whose `X-Forwarded-For` is trusted.
+- An instance with a different CA directory, or one missing the audit switch point, refuses to start.
+- Key rotation without enrolling devices again for the device CA, network CA, command signing key and session key (`limdm-server keys status|rotate|finish`, Settings, Security, Keys card with progress, audited, notification event `keys.rotate`).
+- PKCS#11 HSM key provider (`LIMDM_KEY_PROVIDER=pkcs11`, `LIMDM_PKCS11_MODULE`, `LIMDM_PKCS11_TOKEN`, `LIMDM_PKCS11_PIN`) in a separate build with `-tags pkcs11`; `limdm-server sign -pkcs11 LABEL`.
+- `LIMDM_SESSION_KEY` accepts several comma separated keys, the new one first; sealed values are sealed again with the new key in the background.
+- The webhook signing secret is its own sealed value, unaffected by session key rotations and rotatable with `limdm-server keys rotate webhook` or the Keys card.
+- docs/keys.md with key inventory, HSM setup, rotation runbooks and compromise procedure; docs/console.md with every console page and the role matrix; docs/README.md as index.
+- Admin REST API under `/api/v1/` with API tokens (roles, read only, expiry, revocation, audited), OpenAPI 3.1 at `/api/v1/openapi.json`; the 202 approval answer (`approval_id`), token `scope_tags`, tenant handling and `tenant_id` of audit entries are documented there.
+- Prometheus metrics at `/metrics`, protected by API tokens of the metrics, admin or auditor role.
+- Device filter by installed package with version comparison (`pkg=openssl < 3.0.13`) and Packages CSV export.
+- Four eyes approval for wipe, lost mode, scripts, console role changes and optionally recovery key views and remote shell sessions (Settings, Security; Approvals page).
+- Device scopes for helpdesk and auditor accounts (tags, directory groups), enforced server side; console roles from directory groups or the OIDC groups claim.
+- Optional MFA requirement for OIDC console sign in (`amr`, or configured `acr` values).
+- Optional audit log retention with a signed checkpoint at the cut; deletion of retired devices with their personal data.
+- Risk exceptions with reason, owner, approver and expiry; only active ones reach devices; shown on the compliance page and in the evidence export (`exceptions.csv`).
+- Notification events for recovery key views, wipe and lost mode, scripts, role changes, approval requests and a broken audit chain.
+- Version history for library items and blueprints with diff, rollback and restore of deleted objects; a review step shows the change and the affected devices before saving.
+- Keyed (HMAC-SHA256) audit chain with recorded switch point; JSON Lines audit export and `limdm-server audit verify|key`; "Verify whole chain" action; audit paging and date filtered exports.
+- Syslog (RFC 5424, UDP or TCP) forwarding of audit entries and device events via `LIMDM_SYSLOG`.
+- Compliance history per device and check with a report at any date (console and CSV).
+- Catalog version reported by the agent; CIS recommendation numbers with benchmark edition and BSI requirement IDs in check references.
+- Custom compliance checks (`com.limdm.customchecks`): read only osquery queries or file, sysctl, package and service conditions, with severity, level and framework references; they count like built in checks.
+- Remote support shell: audited interactive terminal from the console to a device over the existing mTLS channel. Off by default, needs `allow_remote_shell` at enrollment and the server setting. Transcripts for admins and auditors, `limdm support end` on the device.
+- `limdm-agent enroll --allow-remote-shell`, `allow_remote_shell` in enroll.conf, `LIMDM_ALLOW_REMOTE_SHELL` for install.sh.
+- Patch management in `com.limdm.updates`: weekdays, package holds, autoremove, snap refresh control.
+- Restart announcement after updates; the user can postpone within the limits of the declaration.
+- Owner and group in `com.limdm.files`.
+- Firewall rules with source networks.
+- Declarations `com.limdm.dconf` and `com.limdm.localusers` (with SSH keys).
+- Script parameters, script timeout, structured script results on the device page, bulk scripts for admins.
+- Diagnostics command "Collect logs" with a redacted, audited download.
+- SUSE family support (openSUSE Leap, Tumbleweed, SLES, SLED) with zypper for packages, security patches and updates, zypper repositories, package source backup and osquery.
+- Printers declaration `com.limdm.printers` (CUPS via lpadmin, driverless IPP Everywhere or PPD, default printer, duplex, paper size, managed `limdm-` queues).
+- Inventory reports TPM presence, version and LUKS volumes bound to the TPM.
+- `tpm2` option in `com.limdm.diskencryption` binds LUKS volumes to the TPM 2.0 with systemd-cryptenroll (configurable PCRs, optional PIN), plus the compliance check `disk.tpm`.
+- `com.limdm.network` declaration: WLAN (WPA2/WPA3 personal and enterprise), wired 802.1X (EAP-TLS, PEAP, TTLS) with CA pinning and server domain match, WireGuard with device generated keys, OpenVPN import, applied as NetworkManager keyfiles.
+- EAP-TLS device certificates from a separate network CA, issued from agent CSRs over mTLS, renewed automatically, revoked on retire and wipe.
+- Network certificates page with network CA download, CRL download and a bearer token for RADIUS CRL fetches. Issued certificates and WireGuard public keys on the device page.
+- Help page with glossary, device states, roles and device actions by impact; documentation links in page headers; status tooltips.
+- The library item editor shows a type description, a field reference generated from the payload types, a live JSON check, a Format button and a documentation link.
+- First steps checklist on the overview; empty states with an action.
+- Copy buttons for tokens, install commands, enroll.conf, fingerprint and credentials; password repeat field and generator for local device accounts.
+- Blueprint source on the device page and assignments in the blueprint list.
+- Mobile menu button; keyboard navigation in action menus.
+- Tests check every relative documentation link, every `LIMDM_` variable in docs/configuration.md and every declaration type in docs/declarations.md.
+
+### Changed
+- **Breaking:** `/healthz` no longer queries the database; use `/readyz` for load balancers.
+- **Breaking:** the audit chain keeps one key segment per command key (`audit-keys`); `limdm-server audit key` prints one line per segment; an instance with an outdated audit key refuses to write entries.
+- **Breaking:** geolocation (ipwho.is) and the DNS over HTTPS fallback are opt in through a server setting, default off.
+- **Breaking:** without `allow_scripts`, `com.limdm.files` writes only to plain text allowlist locations.
+- **Breaking:** undeclared files and firewall rules are removed from devices.
+- **Breaking:** the helpdesk role gets exactly the device commands its description promises, from one server side list.
+- Agents adopt a new command key only from a rollover record signed by the pinned key, accept new device CAs over the mTLS channel and renew certificates when the server asks.
+- The device scope filter also filters by tenant; tenant accounts reach only tenant aware routes (deny by default), and every device route checks the device centrally.
+- Audit entries record their tenant, hashed as a fifth field when set; audit CSV, JSON Lines and the API return `tenant_id`.
+- Declaration resolution loads only library items of the device's tenant and of the Default tenant.
+- Syslog forwarding continues from its stored position after a restart or leader change.
+- Every instance downloads agent packages into its own release directory.
+- Device list filters combine (AND); search, status counts and paging run in the database (200 devices per page).
+- Finished commands are pruned after 180 days; `device_events` rows can only be deleted by the retention job.
+- The desktop login client secret is stored encrypted on the server; existing items are migrated at startup.
+- Evidence CSV includes agent version, catalog version, CIS benchmark and generation time; every export is audited with its SHA-256.
+- Command audit entries link enqueue and result via command ID with the device as target.
+- Check results carry an optional `severity`; osquery runs with `--disable_extensions`.
+- Network secrets are masked in the library editor and the audit log; saving the mask keeps the stored value.
+- The rpm package keeps only dependency names that Fedora and SUSE share; iproute, procps-ng and gnupg2 are weak dependencies.
+- Repositories accept `family: suse` and key files under `/usr/lib/rpm/gnupg/keys`.
+- Console errors render inside the layout, translated, with technical detail and a back link.
+- Confirmation before irreversible or disruptive actions; security actions ordered by impact with explanations.
+- Notification channels and the compliance webhook share one Settings tab.
+- Check titles, check details and audit actions are shown translated and readable; German terms unified.
+- Every document in docs/ was checked against the code and rewritten where it was wrong or incomplete.
+
+### Fixed
+- A key rotation whose database transaction failed left `keys.json` on the new keys while the database named the old ones; `keys.json` is now replaced only after the commit.
+- A session key rotation changed the webhook signature and broke every receiver.
+- The proxy declaration reaches the agent; dnf4, pacman, apk and flatpak honor it.
+- New firewall rules apply while the firewall is active.
+- Self updates fail closed without a release key; a release fails without a signing key.
+- Failed OIDC sign ins are written to the audit log.
+- The agent no longer labels policy exclusions "documented exception (risk accepted)".
+- Concurrent settings saves and SCIM updates on different instances no longer overwrite each other.
+- Device assign, retire, delete and agent update requests check the device scope; ending a remote shell checks the device scope; revoking an unknown risk exception answers 404.
+- Key status and rotation are limited to global administrators.
+- docs/compliance.md no longer claims a CIS reference for every check.
+- The stale "will be configured here" integrations text and hard coded English sentences in templates are gone.
+- The compliance webhook card shows that the signature covers the timestamp and the body.
+
+## 0.15.0 (2026-11-26)
 
 ### Added
 - `limdm` command line for users on the device: `info` shows everything about the device and the agent; `software list|install|remove|request|search|request-new|requests`, `checks`, `profiles`, `certificates`, `log`, `sync`, `sso` and `recovery-key` do what the LiMDM app does. Packaged with the agent.
@@ -13,7 +120,7 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 ### Fixed
 - The software store lock rule was deleted and rewritten on every cycle, which sent "software stores read only" each time.
 
-## 0.14.0
+## 0.14.0 (2026-11-25)
 
 ### Added
 - Settings, Security: a password policy (minimum length, character classes, no user name) for passwords set in the console, on devices and for local console accounts.
@@ -35,7 +142,7 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 - Server: OIDC outage at start keeps local login and settings usable; proxies without a port and proxy only DNS work for notifications; the agent TLS certificate copy is race free; the rate limiter stays bounded; SCIM PUT is serialized with PATCH; insecure remotes cannot be allowed; console items saved under 0.12 with a broken signature are marked in the library.
 - Console: row menus open as a bottom sheet on phones; channel errors stay on the Integrations tab; more German texts; focus ring on the kind picker; helpdesk sees no dead links and no empty column.
 
-## 0.13.0
+## 0.13.0 (2026-11-25)
 
 ### Added
 - Device events are paged, 50 per page.
@@ -65,30 +172,175 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 - Release signatures uploaded after a release was imported are added later; an older agent version picked for a device is dropped instead of being offered forever.
 - Concurrent settings saves no longer overwrite each other; viewing a recovery key keeps a pending rotation.
 
-## 0.12.0
+## 0.12.0 (2026-11-25)
 
 ### Added
 - Agent for CentOS Stream and other RHEL rebuilds, Arch (pacman) and Alpine (apk, OpenRC).
 - Library items are signed with `command.key`; changed items are not delivered.
 - RFC 9457 problem details for the agent API; `docs/api.md`.
+- Notifications to email, Slack, Discord and webhooks with per channel events; a confirmation dialog for destructive actions.
+- Catalog installs and removals show progress and an outcome banner.
 
 ### Changed
 - Database sessions get statement, lock and idle transaction timeouts.
 - Enrollment is rate limited per address; Flathub search and icons per device, cached for an hour.
 - A second enrollment of the same machine ID is recorded in the audit log (`device.duplicate`).
 - One check in per device at a time; background loops survive panics and run on one instance only.
-- The session cookie is `__Host-limdm_session`; everybody signs in once again after the update.
+- **Breaking:** the session cookie is `__Host-limdm_session`; everybody signs in once again after the update.
 
-## 0.11.0
-- SSO session mode like Platform SSO and Passport; directory suspensions lock accounts at the next poll.
-- Signed commands, fallback DNS over HTTPS, local users and admin rights from the console.
-- Device page header like Iru, protective action notices, SSH and disk encryption checks.
+## 0.11.0 (2026-11-25)
 
-## 0.10.2
-- Device tags, bulk actions, clickable device counts, flyout menus, native desktop dialogs.
+### Added
+- SSO session mode like Platform SSO and Passport: the first login binds the account with SSO, later logins use the local password until reconfirmation or the offline grace ends.
+- Directory suspensions and deletions lock device accounts at the next poll.
+- Signed commands (Ed25519, checked by the agent), fallback DNS over HTTPS, local users and admin rights from the console.
+- SSH and disk encryption compliance checks.
+- Device page header with key facts; protective actions (lock, lost mode, wipe, uninstall) stay visible as notices.
+- greetd, swaylock, hyprlock, i3lock and other greeters and lockers run the desktop login.
 
-## 0.10.1
-- App requests outside the catalog, Flathub search in the console, vendor package repositories.
+### Changed
+- **Breaking:** the default SSO mode is `session`; the strict behavior stays available as mode `login`, and SSO can be switched off per item.
+- Faster frontend: charts load only on the overview, command output on demand, one delegated event listener.
 
-## 0.10.0
-- Software catalog for self service installs.
+## 0.10.2 (2026-11-25)
+
+### Added
+- Device tags as chips, tag filter, selection with bulk actions.
+- Clickable device counts everywhere (catalog installs, Flatpaks, remotes, blueprints).
+- Install and remove catalog apps remotely, per device and in bulk.
+- Action menus with flyout submenus; native desktop dialogs.
+- The tray menu shows who manages the device, its state and the agent version.
+
+### Changed
+- The blueprint editor offers only library items not assigned yet; catalog apps without icon or summary are completed from Flathub.
+
+## 0.10.1 (2026-11-25)
+
+### Added
+- App requests for apps outside the catalog from the desktop app, with approval in the console.
+- Flathub search in the console (Add app); vendor package repositories per catalog app (Debian and Fedora), seeded with Mullvad VPN, Tailscale, NetBird and 50 more Flathub apps.
+- Managed Flatpak remotes (`catalog_remotes`, Flathub seeded) and the policy `only_managed_remotes`.
+- Import of Flatpaks installed on devices into the catalog; `com.limdm.softwarestore` declaration for the store policy per blueprint.
+
+### Fixed
+- `/var/cache/limdm` was 0700, so catalog icons were unreadable for the desktop app.
+
+## 0.10.0 (2026-11-25)
+
+### Added
+- Software catalog for self service installs without admin rights: catalog and requests in the console (Software page), detection across Flatpak and packages on the agent, Software page with search and categories in the desktop app.
+
+## 0.9.2 (2026-11-25)
+
+### Added
+- `com.limdm.screenlock`: screen lock and login screen privacy on GNOME, Budgie, Cinnamon, MATE (dconf locks), KDE and wlroots desktops; login managers GDM, SDDM and LightDM (hide users, no autologin).
+
+### Changed
+- The item editor swaps the example settings when the type changes; a certificate upload replaces the example entry.
+
+### Fixed
+- Review fixes for the screen lock: login screen changes only with `hide_users` or `allow_autologin`, the idle locker follows remediate and exclude, desktops without a supported locker fail the check.
+
+## 0.9.1 (2026-11-25)
+
+### Added
+- Desktop app: Profiles page (declarations with secrets masked), Certificates, full log, logo and dark mode.
+- PEM and CRT upload (bundles) in the library editor for certificates.
+
+### Changed
+- The Agents page hides versions older than every agent in use.
+
+## 0.9.0 (2026-11-25)
+
+### Added
+- GTK 4 and libadwaita desktop app (`/usr/lib/limdm/limdm-desktop-ui`); LiMDM logo for console, favicon and app icons.
+
+### Fixed
+- The desktop helper starts reliably through `systemd-run --user`; the agent installs the GTK typelibs on desktops.
+
+## 0.8.5 (2026-11-25)
+
+### Changed
+- Due agent updates trigger an immediate check in (`/api/v1/poll`), except while an offered version installs.
+
+## 0.8.4 (2026-11-25)
+
+### Added
+- Command `message` (console "Send message…"); a lock notifies the user first.
+- Desktop helper autostart through a global systemd user unit and XDG autostart.
+
+### Changed
+- With `network_info: false` the server stores no public address and no location.
+- The restart and shutdown delay counts from sending; users are notified.
+
+## 0.8.3 (2026-11-25)
+
+### Added
+- Installation guide with host hardening, fail2ban filters and jails and CrowdSec (`deploy/fail2ban`, `deploy/crowdsec`).
+- The server logs failed OIDC sign ins with reason and client address.
+
+### Changed
+- Settings tabs carry real labels in English and German; row actions are aligned and dialogs centered.
+
+## 0.8.2 (2026-11-25)
+
+### Added
+- Update a single device to a chosen agent version.
+- Settings in tabs (General, SSO, Monitoring, Branding, Integrations); grouped and filterable library table; recovery key in a dialog with copy.
+- Tray icon for the desktop helper (StatusNotifierItem).
+
+### Changed
+- Packages depend on the tools the agent calls; desktop tools are installed only on desktops.
+
+## 0.8.1 (2026-11-25)
+
+### Added
+- Flatpak applications and remotes (system and per user) in the inventory; `com.limdm.flatpak` remotes with `scope` and `disabled`.
+- The agent installs zenity or kdialog on devices with a desktop; helper dialogs follow the GNOME HIG.
+- The overview shows escrowed recovery keys.
+
+### Fixed
+- Signals reach only the agent's main process.
+
+## 0.8.0 (2026-11-25)
+
+### Added
+- Agent self updates with automatic rollback: Agents page with versions from GitHub releases, rollout policy (automatic, pilot tag, delay), three failed devices block a version.
+- The release workflow signs the checksums with `RELEASE_SIGNING_KEY`.
+- Public address of every check in with location lookup.
+
+## 0.7.0 (2026-11-25)
+
+### Added
+- Desktop login: local password after SSO.
+- Lost mode and remote wipe; lost mode blocks logins and ends sessions.
+- Tamper protection: the agent refuses manual stops, a watchdog restarts it and reports tampering.
+- Device page Network tab (interfaces, VPN clients, DNS); profile with tabs and the version in the sidebar.
+
+### Changed
+- Routine agent events go to `device_events` instead of the audit log.
+- SCIM follows RFC 7643 and 7644 (scimType, filters per resource, PATCH).
+
+### Fixed
+- SCIM DELETE did not reach devices; administrators removed from the environment kept access.
+- A lost renewal response no longer locks a device out.
+
+## 0.6.0 (2026-11-25)
+
+First tagged release. It contains all work since the initial commit on 2026-11-24.
+
+### Added
+- Server and agent: declarative model with typed declarations, mTLS agent channel with a private device CA and CSR based enrollment, OIDC console login with PKCE, compliance checks for CIS Level 1 and 2 with safe remediation, desktop login through the OIDC device flow, append only hash chained audit log, signed agent self updates.
+- Local admin fallback with TOTP (`LIMDM_LOCAL_LOGIN`, `limdm-server local-admin add|reset|disable|enable|list`), osquery inventory, sidebar console with light and dark theme.
+- Library and blueprints as assignment maps with nested conditions and inheritance; declaration types for package sources, CA certificates, sysctl, kernel modules, sshd options, login banner, DNS, NTP, proxy, Flatpak and recurring scripts.
+- Directory: SCIM 2.0 server and Google Workspace sync; console roles admin, helpdesk and auditor; all server settings in the console with sealed secrets; compliance policies with grace period, signed webhook and automatic lock; history charts; English and German console.
+- Disk encryption recovery key escrow (`com.limdm.diskencryption`), polkit, sudo and boot loader password declarations.
+- Desktop helper (`limdm-desktop`) with the agent socket, company name and logo branding, disabling package sources with backup, profile page with TOTP and recovery codes.
+- Agent deployment from the console: `/install.sh`, `enroll.conf` for mass deployment, `LIMDM_RELEASE_REPO`.
+- Container image (distroless, non root), Docker Compose with Caddy, `LIMDM_AGENT_HOSTS`.
+
+### Changed
+- **Breaking:** priority blueprints were migrated to the assignment map model.
+
+### Fixed
+- Every form post failed the CSRF check; device actions and inventory views.
