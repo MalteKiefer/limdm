@@ -27,11 +27,47 @@ func (s *Server) appConfigRoutes(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/config/blueprints/preview", s.need("admin", unscopedAPI(s.apiConfigBlueprintPreview)))
 	m.HandleFunc("GET /api/v1/config/library", s.need("read", s.apiConfigLibrary))
 	m.HandleFunc("POST /api/v1/config/library/preview", s.need("admin", unscopedAPI(s.apiConfigItemPreview)))
+	m.HandleFunc("GET /api/v1/config/library/template", s.need("admin", unscopedAPI(s.apiConfigItemTemplate)))
 	m.HandleFunc("GET /api/v1/config/{kind}/{id}/versions", s.need("read", unscopedAPI(s.apiConfigVersions)))
 	m.HandleFunc("POST /api/v1/config/{kind}/{id}/rollback", s.need("admin", unscopedAPI(s.apiConfigRollback)))
 	m.HandleFunc("POST /api/v1/config/blueprints/{id}/pilot", s.need("admin", unscopedAPI(s.apiConfigPilotStart)))
 	m.HandleFunc("POST /api/v1/config/blueprints/{id}/pilot/{op}", s.need("admin", unscopedAPI(s.apiConfigPilotEnd)))
 	s.appConfigSoftwareRoutes(m)
+}
+
+// apiConfigItemTemplate is the start of a new library item, as the console's
+// new item page fills it: from a source file (file) or a Flatpak remote
+// (remote, inst) a device reported, with mode edit, disable or enable, or
+// else the example payload of the type.
+func (s *Server) apiConfigItemTemplate(w http.ResponseWriter, r *http.Request, c apiCaller) {
+	ctx := r.Context()
+	q := r.URL.Query()
+	var it api.LibraryItem
+	var err error
+	switch device := q.Get("device"); {
+	case device != "":
+		if !s.inScope(ctx, c.sess(), device) {
+			problem(w, http.StatusNotFound, "device not found")
+			return
+		}
+		if q.Get("remote") != "" {
+			it, err = s.flatpakTemplate(ctx, device, q.Get("remote"), q.Get("inst"), q.Get("mode"))
+		} else {
+			it, err = s.sourceTemplate(ctx, device, q.Get("file"), q.Get("mode"))
+		}
+		if err != nil {
+			problem(w, http.StatusNotFound, "nothing to take over from this device")
+			return
+		}
+	default:
+		ex, ok := api.Types[q.Get("type")]
+		if !ok {
+			problemField(w, http.StatusBadRequest, "type", "unknown declaration type")
+			return
+		}
+		it = api.LibraryItem{Type: q.Get("type"), Payload: json.RawMessage(ex)}
+	}
+	writeJSON(w, map[string]any{"type": it.Type, "name": it.Name, "description": it.Description, "payload": it.Payload})
 }
 
 // configKinds maps the {kind} of a versions route to its table.

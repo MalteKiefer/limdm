@@ -126,7 +126,9 @@ function Header({ d, target, menu, open }: { d: DeviceDetail; target: Target; me
           <span className="font-mono">{inv.serial}</span>
         </Fact>
         <Fact label={t('devices.fact.user')}>
-          {d.primary_user && (helpdeskView ? d.primary_user : <a href={`/directory?q=${encodeURIComponent(d.primary_user)}`}>{d.primary_user}</a>)}
+          {d.primary_user && (helpdeskView ? d.primary_user : <Link to="/settings" search={{ s: 'directory', sel: undefined }}>
+                {d.primary_user}
+              </Link>)}
         </Fact>
         <Fact label={t('devices.fact.blueprint')}>
           {d.blueprints.find((b) => b.applies)?.name ?? d.blueprint}
@@ -209,7 +211,9 @@ function Notices({ d }: { d: DeviceDetail }) {
         <>
           <ShieldAlert size={15} aria-hidden />
           <strong>{t('devices.notice.tamper')}</strong> {dateTime(d.tampered_at)}.{' '}
-          {audit ? <a href={`/audit?action=agent.tamper&target=${encodeURIComponent(d.id)}`}>{t('devices.notice.tamperAudit')}</a> : t('devices.notice.tamperAudit')}
+          {audit ? <Link to="/activity" search={{ action: 'agent.tamper', target: d.id } as never}>
+              {t('devices.notice.tamperAudit')}
+            </Link> : t('devices.notice.tamperAudit')}
         </>,
       ),
     )
@@ -407,10 +411,10 @@ function Compliance({ d }: { d: DeviceDetail }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap justify-end gap-2">
-        <a className="btn" href="/compliance#exceptions">
+        <Link className="btn" to="/compliance/exceptions" search={{ new: checks.find((c) => c.status === 'fail')?.id ?? '1' }}>
           {t('devices.comp.exception')}
-        </a>
-        <a className="btn" href="/export/compliance.csv">
+        </Link>
+        <a className="btn" href="/api/v1/exports/compliance.csv">
           <Download size={14} aria-hidden /> {t('devices.comp.evidence')}
         </a>
       </div>
@@ -480,7 +484,9 @@ function Config({ d }: { d: DeviceDetail }) {
             {d.chain.map((b, i) => (
               <span key={b.id}>
                 {i > 0 && ' → '}
-                <a href={`/blueprints/${b.id}`}>{b.name}</a>
+                <Link to="/config/blueprints/$id" params={{ id: String(b.id) }}>
+                  {b.name}
+                </Link>
               </span>
             ))}
           </span>
@@ -491,9 +497,9 @@ function Config({ d }: { d: DeviceDetail }) {
             {d.items.map((it, i) => (
               <li key={it.id} className="flex items-center gap-3 py-1.5">
                 <span className="num w-6 text-muted">{i + 1}</span>
-                <a href={`/library/${it.id}`} className="flex-1 hover:underline">
+                <Link to="/config/library/$id" params={{ id: String(it.id) }} className="flex-1 hover:underline">
                   {it.name}
-                </a>
+                </Link>
                 <span className="font-mono text-[12px] text-muted">{it.type}</span>
               </li>
             ))}

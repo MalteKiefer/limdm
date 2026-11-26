@@ -1461,6 +1461,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/config/library/template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Start of a new library item
+         * @description Admins, not for device scoped callers. With device: a sources item from a source file (file) or a Flatpak item from a remote (remote, inst) that device reported, mode edit, disable or enable. Without device: the example payload of type. Nothing is saved.
+         */
+        get: operations["configItemTemplate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/config/{kind}/{id}/versions": {
         parameters: {
             query?: never;
@@ -7134,6 +7154,52 @@ export interface operations {
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    configItemTemplate: {
+        parameters: {
+            query?: {
+                /** @description declaration type (without device) */
+                type?: string;
+                /** @description device ID to take a source or remote from */
+                device?: string;
+                /** @description source file of the device */
+                file?: string;
+                /** @description Flatpak remote of the device */
+                remote?: string;
+                /** @description Flatpak installation of the remote */
+                inst?: string;
+                /** @description what the item does with it */
+                mode?: "edit" | "disable" | "enable";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        name: string;
+                        description: string;
+                        payload: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
         };

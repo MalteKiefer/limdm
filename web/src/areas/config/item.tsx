@@ -15,7 +15,7 @@ import { EmptyState, ErrorState, LoadingState, errorText } from '../../component
 import { toast } from '../../components/toast'
 import { Badge, Modal, PageHeader, Segmented } from '../../components/ui'
 import { useT } from '../../i18n'
-import { previewItem, useDeleteItem, useLibrary, usePackages, useSaveItem, useSchema, useTypes, type ItemInput } from './api'
+import { previewItem, useDeleteItem, useTemplate, useLibrary, usePackages, useSaveItem, useSchema, useTypes, type ItemInput } from './api'
 import { Impact, PreviewDiff, Versions } from './components'
 import { usePreview } from './usePreview'
 
@@ -24,20 +24,28 @@ const pretty = (v: unknown) => JSON.stringify(v ?? {}, null, 2)
 
 export function LibraryItemPage() {
   const { id } = useParams({ strict: false }) as { id: string }
-  const s = useSearch({ strict: false }) as { view?: string; type?: string; from?: string }
+  const s = useSearch({ strict: false }) as { view?: string; type?: string; from?: string; device?: string; file?: string; remote?: string; inst?: string; mode?: string }
   const t = useT()
   const nav = useNavigate()
   const lib = useLibrary()
   const isNew = id === 'new'
   const pkgs = usePackages(isNew && !!s.from)
+  // any other new item starts from the example of its type or what a device reported (?device=&file= or &remote=&inst=, mode)
+  const tpl = useTemplate(isNew && !s.from && !!(s.type || s.device), { type: s.type, device: s.device, file: s.file, remote: s.remote, inst: s.inst, mode: s.mode })
   const num = isNew ? undefined : Number(id)
   const stored = lib.data?.items.find((i) => i.id === num)
   const view = s.view === 'versions' && num ? 'versions' : 'edit'
   if (lib.error) return <ErrorState error={lib.error} onRetry={() => void lib.refetch()} />
-  if (!lib.data || pkgs.isLoading) return <LoadingState rows={8} />
+  if (tpl.error) return <ErrorState error={tpl.error} />
+  if (!lib.data || pkgs.isLoading || tpl.isLoading) return <LoadingState rows={8} />
   // a new uploaded packages item from the package list: prefilled with that upload
   const upload = isNew ? pkgs.data?.items.find((x) => x.sha256 === s.from) : undefined
-  const prefill = upload && s.type === pkgs.data?.type ? { name: upload.name, payload: { artifacts: [{ sha256: upload.sha256, name: upload.name, kind: upload.kind, size: upload.size }] } } : undefined
+  const prefill =
+    upload && s.type === pkgs.data?.type
+      ? { name: upload.name, payload: { artifacts: [{ sha256: upload.sha256, name: upload.name, kind: upload.kind, size: upload.size }] } }
+      : tpl.data
+        ? { name: tpl.data.name, description: tpl.data.description, payload: tpl.data.payload as Obj }
+        : undefined
   const deleted = !isNew && !stored ? lib.data.deleted.find((d) => d.id === num) : undefined
   if (!isNew && !stored && !deleted) return <EmptyState title={t('state.notFoundTitle')}>{t('state.notFoundBody')}</EmptyState>
   return (
@@ -60,13 +68,13 @@ export function LibraryItemPage() {
           <Versions kind="library" id={num!} />
         </>
       ) : (
-        <ItemEditor key={id} stored={stored} type={stored?.type ?? s.type ?? ''} prefill={prefill} />
+        <ItemEditor key={id} stored={stored} type={stored?.type ?? tpl.data?.type ?? s.type ?? ''} prefill={prefill} />
       )}
     </div>
   )
 }
 
-function ItemEditor({ stored, type, prefill }: { stored?: ItemInput & { used_by: string[]; read_only: boolean; invalid: boolean }; type: string; prefill?: { name: string; payload: Obj } }) {
+function ItemEditor({ stored, type, prefill }: { stored?: ItemInput & { used_by: string[]; read_only: boolean; invalid: boolean }; type: string; prefill?: { name: string; description?: string; payload: Obj } }) {
   const t = useT()
   const nav = useNavigate()
   const me = useMe()
@@ -79,7 +87,7 @@ function ItemEditor({ stored, type, prefill }: { stored?: ItemInput & { used_by:
   const readOnly = !admin || !!stored?.read_only
   const initial = useMemo(() => ({ name: stored?.name ?? '', description: stored?.description ?? '', payload: (stored?.payload ?? {}) as Obj }), [stored])
   const [name, setName] = useState(prefill?.name ?? initial.name)
-  const [desc, setDesc] = useState(initial.description)
+  const [desc, setDesc] = useState(prefill?.description ?? initial.description)
   const [payload, setPayload] = useState<Obj>(prefill?.payload ?? initial.payload)
   const [mode, setMode] = useState<'form' | 'json'>('form')
   const [json, setJson] = useState(pretty(prefill?.payload ?? initial.payload))

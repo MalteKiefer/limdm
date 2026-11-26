@@ -119,6 +119,14 @@ func TestAppConfigAPI(t *testing.T) {
 		t.Fatalf("preview: %s", body)
 	}
 	is(422)(call(admin, "POST", "/api/v1/config/library/preview", `{"name":"x","type":"com.limdm.agent","payload":{"checkin_seconds":5}}`))
+	// new items start from the example payload or what a device reported
+	if code, body := call(admin, "GET", "/api/v1/config/library/template?type=com.limdm.agent", ""); code != 200 || !strings.Contains(body, `"checkin_seconds":300`) {
+		t.Fatalf("template: %d %s", code, body)
+	}
+	is(400)(call(admin, "GET", "/api/v1/config/library/template?type=nope", ""))
+	is(404)(call(admin, "GET", "/api/v1/config/library/template?device=d1&remote=flathub&inst=system&mode=edit", ""))
+	is(404)(call(admin, "GET", "/api/v1/config/library/template?device=nope&file=x", ""))
+	is(403)(call(auditor, "GET", "/api/v1/config/library/template?type=com.limdm.agent", ""))
 	code, body = call(admin, "PUT", "/api/v1/library-items/"+id, `{"name":"base","type":"com.limdm.compliance","payload":{"level":2,"remediate":false,"exclude":[]}}`)
 	want(code, body, 200, `"level":2`)
 	code, body = call(auditor, "GET", "/api/v1/config/library/"+id+"/versions", "")

@@ -2,7 +2,7 @@
 import { Link } from '@tanstack/react-router'
 import { Download, FileCode2, KeyRound, MoreHorizontal, Package, Plus, Terminal, Activity as ActivityIcon, Search } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
-import { postForm } from '../../api/client'
+import { api, unwrap } from '../../api/client'
 import { useCan } from '../../api/me'
 import { DataGrid, type GridColumn } from '../../components/datagrid'
 import { Field } from '../../components/form'
@@ -181,8 +181,12 @@ function Sources({ d }: { d: DeviceDetail }) {
                     <span className="text-muted">{t('devices.sw.managed')}</span>
                   ) : (
                     <span className="flex gap-3">
-                      <a href={`/library/new?from=${encodeURIComponent(d.id)}&file=${encodeURIComponent(r.file)}&mode=edit`}>{t('devices.sw.edit')}</a>
-                      <a href={`/library/new?from=${encodeURIComponent(d.id)}&file=${encodeURIComponent(r.file)}&mode=disable`}>{t('devices.sw.disable')}</a>
+                      <Link to="/config/library/$id" params={{ id: 'new' }} search={{ device: d.id, file: r.file, mode: 'edit' }}>
+                        {t('devices.sw.edit')}
+                      </Link>
+                      <Link to="/config/library/$id" params={{ id: 'new' }} search={{ device: d.id, file: r.file, mode: 'disable' }}>
+                        {t('devices.sw.disable')}
+                      </Link>
                     </span>
                   ),
                 ]
@@ -207,12 +211,14 @@ function Apps({ d }: { d: DeviceDetail }) {
   )
   const inst = (i: string) => (i === 'system' ? t('devices.sw.system') : <Badge>{i}</Badge>)
   const addToCatalog = (flatpak: string) =>
-    postForm('/software/import', { device: d.id, flatpak })
+    unwrap(api.POST('/api/v1/software/import', { body: { flatpaks: [flatpak] } }))
       .then(() => (toast(t('devices.sw.added')), void qc.invalidateQueries({ queryKey: ['devices'] })))
       .catch((e: unknown) => toast(errorText(e), 'error'))
   return (
     <div className="flex flex-col gap-[var(--gap)]">
-      <Card title={t('devices.sw.remotes')} id="dv-rem" action={admin ? <a className="btn" href="/library/new?type=com.limdm.flatpak">{t('devices.sw.addRemote')}</a> : undefined}>
+      <Card title={t('devices.sw.remotes')} id="dv-rem" action={admin ? <Link className="btn" to="/config/library/$id" params={{ id: 'new' }} search={{ type: 'com.limdm.flatpak' }}>
+              {t('devices.sw.addRemote')}
+            </Link> : undefined}>
         <Table
           caption={t('devices.sw.remotes')}
           empty={t('devices.sw.noRemotes')}
@@ -230,8 +236,12 @@ function Apps({ d }: { d: DeviceDetail }) {
               ...(admin
                 ? [
                     <span className="flex gap-3">
-                      <a href={`/library/new?from=${encodeURIComponent(d.id)}&remote=${encodeURIComponent(r.name)}&inst=${encodeURIComponent(r.installation)}&mode=edit`}>{t('devices.sw.edit')}</a>
-                      <a href={`/library/new?from=${encodeURIComponent(d.id)}&remote=${encodeURIComponent(r.name)}&inst=${encodeURIComponent(r.installation)}&mode=${r.disabled ? 'enable' : 'disable'}`}>{t(r.disabled ? 'devices.sw.enable' : 'devices.sw.disable')}</a>
+                      <Link to="/config/library/$id" params={{ id: 'new' }} search={{ device: d.id, remote: r.name, inst: r.installation, mode: 'edit' }}>
+                        {t('devices.sw.edit')}
+                      </Link>
+                      <Link to="/config/library/$id" params={{ id: 'new' }} search={{ device: d.id, remote: r.name, inst: r.installation, mode: r.disabled ? 'enable' : 'disable' }}>
+                        {t(r.disabled ? 'devices.sw.enable' : 'devices.sw.disable')}
+                      </Link>
                     </span>,
                   ]
                 : []),
@@ -256,7 +266,9 @@ function Apps({ d }: { d: DeviceDetail }) {
               f.origin,
               inst(f.installation),
               d.catalog_flatpaks[f.id] ? (
-                <a href={`/software/apps/${d.catalog_flatpaks[f.id]}`}>{t('devices.sw.inCatalog')}</a>
+                <Link to="/config/software/$id" params={{ id: d.catalog_flatpaks[f.id] }}>
+                  {t('devices.sw.inCatalog')}
+                </Link>
               ) : admin ? (
                 <button type="button" className="btn btn-ghost !h-7 text-[12.5px]" onClick={() => void addToCatalog(f.id)}>
                   <Plus size={13} aria-hidden /> {t('devices.sw.addToCatalog')}
@@ -305,7 +317,9 @@ function Catalog({ d }: { d: DeviceDetail }) {
           {n.ok ? t(n.type === 'install' ? 'devices.sw.noteInstalled' : 'devices.sw.noteRemoved') : t(n.type === 'install' ? 'devices.sw.noteInstallFailed' : 'devices.sw.noteRemoveFailed', { error: n.error ?? '' })} <span className="text-muted">{dateTime(n.at)}</span>
         </div>
       ))}
-      <Card title={t('devices.sw.catalogTitle')} id="dv-cat" action={<a className="btn" href="/software">{t('devices.sw.manageCatalog')}</a>}>
+      <Card title={t('devices.sw.catalogTitle')} id="dv-cat" action={<Link className="btn" to="/config" search={{ tab: 'software' }}>
+                {t('devices.sw.manageCatalog')}
+              </Link>}>
         <Table
           caption={t('devices.sw.catalogTitle')}
           empty={t('devices.sw.noCatalog')}
@@ -350,7 +364,7 @@ function Requests({ d }: { d: DeviceDetail }) {
   const admin = useCan('admin')
   const qc = useQueryClient()
   const decide = (id: number, op: 'approve' | 'deny') =>
-    postForm(`/software/requests/${id}/${op}`)
+    unwrap(api.POST('/api/v1/software/requests/{id}/{op}', { params: { path: { id, op } } }))
       .then(() => (toast(t('devices.sw.decided')), void qc.invalidateQueries({ queryKey: ['devices'] })))
       .catch((e: unknown) => toast(errorText(e), 'error'))
   return (
@@ -605,7 +619,9 @@ function Network({ d }: { d: DeviceDetail }) {
         </Card>
       )}
       {d.network_certs.length > 0 && (
-        <Card title={t('devices.net.certs')} id="dv-nc" action={audit ? <a href="/network">{t('devices.net.ca')}</a> : undefined}>
+        <Card title={t('devices.net.certs')} id="dv-nc" action={audit ? <Link to="/settings" search={{ s: 'network', sel: undefined }}>
+                {t('devices.net.ca')}
+              </Link> : undefined}>
           <Table
             caption={t('devices.net.certs')}
             empty=""

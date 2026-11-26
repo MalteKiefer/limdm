@@ -4800,6 +4800,119 @@
         }
       }
     },
+    "/api/v1/config/library/template": {
+      "get": {
+        "operationId": "configItemTemplate",
+        "summary": "Start of a new library item",
+        "description": "Admins, not for device scoped callers. With device: a sources item from a source file (file) or a Flatpak item from a remote (remote, inst) that device reported, mode edit, disable or enable. Without device: the example payload of type. Nothing is saved.",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "declaration type (without device)"
+          },
+          {
+            "name": "device",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "device ID to take a source or remote from"
+          },
+          {
+            "name": "file",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "source file of the device"
+          },
+          {
+            "name": "remote",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Flatpak remote of the device"
+          },
+          {
+            "name": "inst",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Flatpak installation of the remote"
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "edit",
+                "disable",
+                "enable"
+              ]
+            },
+            "description": "what the item does with it"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "name",
+                    "description",
+                    "payload"
+                  ],
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "payload": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
     "/api/v1/config/{kind}/{id}/versions": {
       "get": {
         "operationId": "configVersions",

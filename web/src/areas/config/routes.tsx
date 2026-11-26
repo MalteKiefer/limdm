@@ -25,7 +25,7 @@ export const configArea: Area = {
       getParentRoute: () => shell,
       path: '/config/library/$id',
       component: lazyRouteComponent(() => import('./item'), 'LibraryItemPage'),
-      validateSearch: (s: Record<string, unknown>) => ({ view: str(s.view), type: str(s.type), from: str(s.from) }),
+      validateSearch: (s: Record<string, unknown>) => ({ view: str(s.view), type: str(s.type), from: str(s.from), device: str(s.device), file: str(s.file), remote: str(s.remote), inst: str(s.inst), mode: str(s.mode) }),
     }),
     createRoute({
       getParentRoute: () => shell,

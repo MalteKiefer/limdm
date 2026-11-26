@@ -23,6 +23,9 @@ export type Kind = 'blueprints' | 'library'
 export type SaveResult = { pending: boolean; id?: number | string }
 
 export const useBlueprints = () => useQuery({ queryKey: ['config', 'blueprints'], queryFn: () => unwrap(api.GET('/api/v1/config/blueprints')) })
+/** The start of a new library item: example payload of a type or a device's source or remote. */
+export const useTemplate = (enabled: boolean, query: { type?: string; device?: string; file?: string; remote?: string; inst?: string; mode?: string }) =>
+  useQuery({ queryKey: ['config', 'template', query], enabled, staleTime: Infinity, queryFn: () => unwrap(api.GET('/api/v1/config/library/template', { params: { query: query as never } })) })
 export const useLibrary = () => useQuery({ queryKey: ['config', 'library'], queryFn: () => unwrap(api.GET('/api/v1/config/library')) })
 
 export function useTypes() {
