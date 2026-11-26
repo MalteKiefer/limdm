@@ -4,6 +4,74 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.17.0 (2026-11-26)
+
+### Upgrade notes
+- **Breaking:** the agent needs OpenSSL 3. `/install.sh` and `scripts/install-agent.sh` stop at once with "this system is not supported by the LiMDM agent (OpenSSL 3 required)" when `openssl pkeyutl -rawin` (Ed25519) is missing, and the agent packages depend on `openssl >= 3` (`openssl-3` on SUSE). Ubuntu 20.04, Debian 11, RHEL, Rocky and Alma 8, CentOS Stream 8, openSUSE Leap 15, SLES 15 and Alpine 3.16 and older are no longer supported. `LIMDM_SKIP_SIGNATURE` is gone; sign your own builds with your own release key.
+- **Breaking:** notification targets in private networks are refused unless the private networks option on **Settings, Notifications** (Compliance webhook card) is on. Global channels to an internal SIEM or mail relay need that setting.
+- **Breaking:** tenant webhook channels sign with their own per tenant secret over `timestamp.tenant.body`; tenant receivers must switch to the new secret and message.
+- **Breaking:** the audit log now defaults to a retention of 3 years instead of forever. Set **Settings, Data retention** before the upgrade if you must keep it longer.
+- **Breaking:** declared file paths with symlink components (for example `/bin` on merged `/usr`) now fail; declare the real path.
+- **Breaking:** osquery 4 or newer is required (`--enable_tables`).
+- **Breaking:** PgBouncer is supported in session mode only; transaction or statement pooling breaks advisory locks and notifications.
+- **Breaking:** once backups are configured, the server deb and rpm make a backup before every package upgrade, and a failed backup stops the upgrade (`LIMDM_SKIP_UPGRADE_BACKUP=1` in the environment of apt or dnf skips it). Check that the backup targets are reachable before upgrading.
+- The first start migrates installed packages from `devices.packages` into `device_packages` and partitions `device_metrics` by day; at 50,000 devices plan a few minutes.
+- `LIMDM_LOG_LEVEL`, `LIMDM_ACCESS_LOG`, `LIMDM_AUDIT_API_READS`, `LIMDM_UPDATE_DOWNLOADS`, `LIMDM_MAX_CHECKINS`, `LIMDM_AGENT_PROXY_PROTOCOL`, `LIMDM_SYSLOG` and `LIMDM_SYSLOG_CA` are only initial values of **Settings, Operations** now; once saved in the console the stored values win.
+- Library item and blueprint names are unique per tenant instead of globally.
+
+### Added
+- `limdm-server backup create|list|verify|restore|restore-test` and scheduled backups: age encrypted, command key signed archives of database, CA directory and uploads to local, S3 (Object Lock, multipart), Backblaze B2, SFTP and WebDAV targets, with weekly checksum verification, audit entries, failure notifications and metrics.
+- Several backup schedules in **Settings, Backup**: every N hours with offset, weekdays at times, monthly on a day, strict cron; each with its own targets, time zone (DST safe) and retention (keep last, days, daily, weekly, monthly, yearly), a general rule for archives outside a schedule, previews of the next runs and of what is kept. Create, edit, pause, resume, run now and delete in the console, audited.
+- Backup before package upgrades (deb and rpm pre install script).
+- Restore window that re-pins device certificates renewed after the backup; `-replay` re-applies revocations from an audit export or syslog.
+- **Settings, Data retention**: a period per data type (audit log, device events, compliance history, commands, script results, diagnostics, shell transcripts, metrics, notification log).
+- Package repository (**Software, Packages**) and the `com.limdm.artifacts` declaration: per tenant storage (local or S3) with quotas, four eyes approval of uploads, hash verified install on devices with `allow_scripts`.
+- **Settings, Operations**: log level, access log, audited API reads, download and check in limits, PROXY protocol sources and syslog target with CA, applied at runtime on every instance and audited.
+- Signatures for catalog apps, managed Flatpak remotes and device user lists, verified by server and agent (`signed_data`, `signed_users`).
+- Four eyes approval for root effective library items (including `com.limdm.artifacts`), required catalog apps or apps with a package repository, and admin API tokens (console and admin API, `202` with the approval).
+- SCIM allowed networks; per tenant webhook signing secret; setting to let global channels reach private networks; `LIMDM_RELEASE_PUBLIC_KEY`.
+- Admin API for approvals, risk exceptions, API tokens and tenants; `/api/v1/docs` reference page; token scopes (`read`, `commands`, `library`, `audit`, `admin`).
+- `Idempotency-Key` for command requests; `ETag` and `If-Match` for library items and blueprints, checked in the transaction of the save.
+- `422` problem details name the request field (`errors: [{field, message}]`); all problem details carry `urn:limdm:problem:<code>` and `code`.
+- Staggered agent rollout (`spread_hours`, default 24 h).
+- `LIMDM_DB_MAX_CONNS`, PROXY protocol v2 on the agent listener, syslog over `tcp+tls://`.
+- `X-Request-ID` on every answer; `limdm_http_request_duration_seconds` histogram.
+- Sizing table in docs/operations.md; docs/backup.md, docs/retention.md, docs/packages.md.
+
+### Changed
+- Installed packages are stored in `device_packages` (one row per package) and written by diff at check in; package filters, the packages CSV export and the device page read it.
+- Audit entries and device events of a check in are written at its commit.
+- The schema is applied only when its hash changed; new indexes are built concurrently.
+- `device_metrics` is partitioned by day; whole days are dropped by the metrics retention.
+- Busy database and overload answer `503` with `Retry-After`.
+- Agent honors `Retry-After`, backs off failed check ins, runs at lower CPU and I/O priority and keeps volatile values out of the status hash.
+- Enrollment and API token failure limits count per address and token.
+- Group mappings never grant admin through SCIM only groups, nor at all while four eyes is on.
+- Local lockout per account and client network.
+- `/install.sh` and `install-agent.sh` verify the release signature (OpenSSL 3 required).
+- Without "Sessions may run as root" the remote shell also refuses accounts in sudo, wheel or admin and accounts with sudoers rules, NOPASSWD included.
+- The desktop socket refuses app changes, key escrow, SSO confirmation and reboot deferral from SSH sessions of the same user.
+- Archive names carry the schedule name; an existing daily backup hour becomes the schedule `daily`.
+- Server settings, the package store and package uploads and deletes check the role inside their handlers, not only through the route.
+
+### Fixed
+- Database writes could make devices install packages, add repositories or grant sudo without a signature (contrary to docs/security.md).
+- Custom compliance check queries are validated with a SQLite style tokenizer and may read only an allowlist of local osquery tables; quoted or schema qualified names no longer bypass the check. osqueryi runs with `--enable_tables` and `--disable_tables`, and check details carry only row counts and a bounded compared value.
+- The helpdesk role can no longer reset, lock or unlock accounts with uid 0, admin group membership or sudo rules; accounts with uid 0 are refused for every role.
+- The PAM SSO device flow no longer starts from `su`, `sudo`, with any `PAM_RHOST`, on a pseudo terminal or from a remote logind session; polkit needs a local seat session.
+- Managed files are written and removed without following symlinks; undeclared files are removed only when they still hold the content LiMDM wrote.
+- The remote lock no longer trusts `LockedHint` or running locker processes; sessions without a self locking desktop always get the agent's locker.
+- Diagnostics redact the user fields of failed logins, tokens in URLs, all `Authorization` headers and common token formats.
+- Discord markdown and links from device text.
+- Unauthenticated permanent lockout of break glass accounts.
+- docs/operations.md claimed that devices reconnect after any restore; devices that renewed their certificate after the backup were locked out.
+- Pool deadlock in the check in under load.
+- Syslog skipped device events committed out of order.
+- The rate limiter dropped all counters at 50,000 keys.
+- Over long device filters returned the whole fleet.
+- Group blueprints crossed tenants.
+- Concurrent first starts of a new version could deadlock.
+
 ## 0.16.0 (2026-11-26)
 
 ### Upgrade notes
