@@ -4,6 +4,12 @@
   <div><h1>{{t "Overview"}} {{template "doclink" "concepts.md"}}</h1><div class="meta"><span>{{.Active}} {{t "active devices"}}</span></div></div>
   <div class="actions"><a class="button secondary" href="/export/compliance.csv">{{t "Evidence CSV"}}</a><a class="button" href="/tokens">{{t "Enroll device"}}</a></div>
 </div>
+{{if .Steps}}<section class="card onboarding" aria-labelledby="onb-h">
+  <div class="card-head"><h2 id="onb-h">{{t "First steps"}}</h2>
+    <form method="post" action="/onboarding/dismiss">{{template "csrf" .CSRF}}<button class="secondary small">{{t "Hide"}}</button></form></div>
+  <ol class="steps">{{range .Steps}}<li class="{{if .Done}}done{{end}}"><span class="step-mark" aria-hidden="true">{{if .Done}}✓{{end}}</span>
+    <div><a href="{{.Link}}">{{t .Label}}</a>{{if .Done}} <span class="muted">{{t "done"}}</span>{{end}}<small class="field-hint">{{t .Hint}}</small></div></li>{{end}}</ol>
+</section>{{end}}
 <div class="stats">
   <a class="stat" href="/devices?status=compliant" title="{{statusHelp "compliant"}}"><div class="label"><span class="dot ok"></span>{{t "Compliant"}}</div><div class="value">{{index .Counts "compliant"}}</div><div class="hint">{{pct (index .Counts "compliant") .Active}}{{t "% of active"}}</div></a>
   <a class="stat" href="/devices?status=non-compliant" title="{{statusHelp "non-compliant"}}"><div class="label"><span class="dot bad"></span>{{t "Non-compliant"}}</div><div class="value">{{index .Counts "non-compliant"}}</div><div class="hint">{{t "At least one failing check"}}</div></a>

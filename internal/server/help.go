@@ -279,3 +279,49 @@ func (s *Server) blueprintAssignments(ctx context.Context) (map[int64]*bpAssignm
 	}
 	return m, rows.Err()
 }
+
+// onboardingCookie hides the first steps checklist in this browser.
+const onboardingCookie = "limdm_onboarding"
+
+// onboardingStep is one item of the first steps checklist on the overview.
+type onboardingStep struct {
+	Label, Hint, Link string
+	Done              bool
+}
+
+// onboarding lists the first steps of a new installation for admins; nil
+// once every step is done or the checklist was dismissed in this browser.
+func (s *Server) onboarding(ctx context.Context, r *http.Request, sess session) ([]onboardingStep, error) {
+	if sess.Role != "admin" {
+		return nil, nil
+	}
+	if c, err := r.Cookie(onboardingCookie); err == nil && c.Value == "hidden" {
+		return nil, nil
+	}
+	var tokens, blueprints, devices bool
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM audit_log WHERE action='token.create'),
+		EXISTS(SELECT 1 FROM blueprints WHERE name <> 'default'), EXISTS(SELECT 1 FROM devices)`).Scan(&tokens, &blueprints, &devices); err != nil {
+		return nil, err
+	}
+	set := s.settings()
+	steps := []onboardingStep{
+		{"Company settings", "Name and logo shown in the console and on devices", "/settings", set.CompanyName != ""},
+		{"Sign in method", "Connect the identity provider (OIDC) so admins sign in with their company account", "/settings", set.OIDCIssuer != "" && set.OIDCClientID != ""},
+		{"First enrollment token", "A one time token lets the first device join", "/tokens", tokens || devices},
+		{"First blueprint", "Decide which library items devices get", "/blueprints/new", blueprints},
+		{"First device", "Install the agent with the token", "/tokens", devices},
+	}
+	for _, st := range steps {
+		if !st.Done {
+			return steps, nil
+		}
+	}
+	return nil, nil
+}
+
+// onboardingDismiss hides the checklist in this browser for a year.
+func (s *Server) onboardingDismiss(w http.ResponseWriter, r *http.Request, _ session) {
+	http.SetCookie(w, &http.Cookie{Name: onboardingCookie, Value: "hidden", Path: "/", Secure: true, HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, MaxAge: 365 * 24 * 3600})
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}

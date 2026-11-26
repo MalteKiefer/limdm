@@ -683,6 +683,12 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("GET %s: %d", p, code)
 		}
 	}
+	if code, body := ui("GET", "/", nil, adminSess); code != 200 || !strings.Contains(body, "First steps") {
+		t.Fatalf("overview without company settings must show the first steps: %d", code)
+	}
+	if code, _ := ui("POST", "/onboarding/dismiss", url.Values{}, adminSess); code != http.StatusSeeOther {
+		t.Fatalf("dismiss first steps: %d", code)
+	}
 	var cmdsBefore, cmdsAfter int
 	db.QueryRow(ctx, `SELECT count(*) FROM commands`).Scan(&cmdsBefore)
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"user_password"}, "username": {"jdoe"},

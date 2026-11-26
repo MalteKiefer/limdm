@@ -23,5 +23,5 @@
     </tbody>{{end}}
   </table></div>
 </section>
-{{else}}<div class="empty card">{{t "The library is empty. Create the first item."}}</div>{{end}}
+{{else}}<div class="empty card">{{t "The library is empty. Create the first item."}}{{if eq .Sess.Role "admin"}}<div class="empty-action"><a class="button" href="/library/new">{{t "New item"}}</a></div>{{end}}</div>{{end}}
 {{end}}

@@ -64,7 +64,7 @@
     <td class="mono"><a href="/devices?agent={{.AgentVersion}}">{{.AgentVersion}}</a></td>
     <td>{{ago .LastSeen}}</td>
   </tr>
-  {{else}}<tr><td colspan="9" class="empty">{{if .Filter}}{{t "No devices match this filter."}}{{else}}{{t "No devices match. Create an enrollment token to add the first one."}}{{end}}</td></tr>{{end}}
+  {{else}}<tr><td colspan="9" class="empty">{{if .Filter}}{{t "No devices match this filter."}}{{else if .Total}}{{t "No devices match."}}{{else}}{{t "No devices enrolled yet. Create an enrollment token and install the agent with it."}}{{if eq $.Sess.Role "admin"}}<div class="empty-action"><a class="button" href="/tokens">{{t "Enroll device"}}</a></div>{{end}}{{end}}</td></tr>{{end}}
   </tbody>
 </table></div></div>
 {{end}}

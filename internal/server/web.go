@@ -216,6 +216,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, na
 func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", s.page(s.overview))
 	mux.HandleFunc("GET /help", s.page(s.helpPage))
+	mux.HandleFunc("POST /onboarding/dismiss", s.page(s.onboardingDismiss))
 	mux.HandleFunc("GET /devices", s.page(s.devices))
 	mux.HandleFunc("GET /devices/{id}", s.page(s.device))
 	mux.HandleFunc("POST /devices/bulk", s.helpdeskPage(s.devicesBulk))
@@ -545,7 +546,12 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 		s.fail(w, err)
 		return
 	}
-	s.render(w, r, sess, "overview", map[string]any{"Trend": trend, "Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
+	steps, err := s.onboarding(ctx, r, sess)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.render(w, r, sess, "overview", map[string]any{"Steps": steps, "Trend": trend, "Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
 		"Recent": recent, "StaleHours": s.settings().StaleHours})
 }
 

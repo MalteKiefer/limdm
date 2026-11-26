@@ -18,6 +18,6 @@
 </form>
 <div class="tablecard"><div class="scroll"><table>
   <thead><tr><th class="num">#</th><th>{{t "Time"}}</th><th>{{t "Actor"}}</th><th>{{t "Action"}}</th><th>{{t "Target"}}</th><th>{{t "Detail"}}</th></tr></thead>
-  <tbody>{{range .Entries}}<tr><td class="num muted">{{.ID}}</td><td>{{fmtTime .At}}</td><td><a href="/audit?actor={{.Actor}}">{{.Actor}}</a></td><td><a href="/audit?action={{.Action}}">{{auditLabel .Action}}</a><span class="sub mono">{{.Action}}</span></td><td class="mono"><a href="/audit?target={{.Target}}">{{.Target}}</a></td><td><pre>{{.Detail}}</pre></td></tr>{{end}}</tbody>
+  <tbody>{{range .Entries}}<tr><td class="num muted">{{.ID}}</td><td>{{fmtTime .At}}</td><td><a href="/audit?actor={{.Actor}}">{{.Actor}}</a></td><td><a href="/audit?action={{.Action}}">{{auditLabel .Action}}</a><span class="sub mono">{{.Action}}</span></td><td class="mono"><a href="/audit?target={{.Target}}">{{.Target}}</a></td><td><pre>{{.Detail}}</pre></td></tr>{{else}}<tr><td colspan="6" class="empty">{{if or .F.q .F.actor .F.action .F.target .F.from .F.to}}{{t "No entries match the filter."}} <a href="/audit">{{t "Reset"}}</a>{{else}}{{t "Nothing recorded yet."}}{{end}}</td></tr>{{end}}</tbody>
 </table></div></div>
 {{end}}

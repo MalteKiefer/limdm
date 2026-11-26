@@ -21,7 +21,7 @@
     <td class="muted">{{appSources .Sources}}</td>
     <td class="num">{{if .Installs}}<a class="count" href="/devices?app={{.ID}}">{{.Installs}}</a>{{else}}<span class="muted">0</span>{{end}}</td>
     <td>{{if .Scope}}{{len .Scope}} {{t "blueprints"}}{{else}}<span class="muted">{{t "all devices"}}</span>{{end}}</td>
-  </tr>{{else}}<tr><td colspan="7" class="empty">{{t "The catalog is empty."}}</td></tr>{{end}}</tbody>
+  </tr>{{else}}<tr><td colspan="7" class="empty">{{t "The catalog is empty."}}{{if eq $.Sess.Role "admin"}}<div class="empty-action"><a class="button" href="/software/new">{{t "Add app"}}</a></div>{{end}}</td></tr>{{end}}</tbody>
 </table></div></section>
 {{if and .Fleet (eq .Sess.Role "admin")}}
 <form class="tablecard" method="post" action="/software/import">

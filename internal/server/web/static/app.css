@@ -614,3 +614,10 @@ table.fieldref th, table.fieldref td { padding: 5px 8px; font-size: 12.5px; }
 table.fieldref td.mono { overflow-wrap: anywhere; }
 .dh-facts dd .fact-sub { display: block; font-weight: 400; font-size: 12px; color: var(--text-3); }
 a.lvl { color: inherit; text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; }
+.onboarding .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.onboarding .steps li { display: flex; gap: 10px; align-items: flex-start; }
+.onboarding .step-mark { flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--line-strong); display: grid; place-items: center; font-size: 12px; margin-top: 1px; }
+.onboarding li.done .step-mark { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+.onboarding li.done a { color: var(--text-2); }
+.onboarding form { margin: 0; }
+.empty-action { margin-top: 10px; }
