@@ -109,19 +109,38 @@ func (s *Server) complianceHistory(w http.ResponseWriter, r *http.Request, sess 
 		return
 	}
 	at := cutoff.AddDate(0, 0, -1).Format("2006-01-02")
+	devices, state, changes, err := s.historyState(ctx, sess, cutoff, device)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	cond, sargs := scopeCond(sess, 0)
+	all, err := s.listDevicesWhere(ctx, cond, sargs...)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	csv := url.Values{"at": {at}}
+	if device != "" {
+		csv.Set("device", device)
+	}
+	s.render(w, r, sess, "compliance_history", map[string]any{"At": at, "Device": device, "Devices": devices, "State": state,
+		"Changes": changes, "All": all, "CSV": "/export/compliance-history.csv?" + csv.Encode()})
+}
+
+// historyState is the state of the devices in the scope of sess at cutoff,
+// summed per device, and for one device also its changes (newest first, at
+// most 500). The console page and the app API share it.
+func (s *Server) historyState(ctx context.Context, sess session, cutoff time.Time, device string) (devices []*historyDevice, state, changes []historyRow, err error) {
 	cond, sargs := scopeCond(sess, 2)
 	rows, err := s.db.Query(ctx, `SELECT h.device_id, d.hostname, h.check_id, h.status, h.detail, h.at, h.catalog_version
 		FROM (`+historyStateSQL+`) h JOIN devices d ON d.id = h.device_id WHERE `+cond+` ORDER BY d.hostname, h.device_id, h.check_id`, append([]any{cutoff, device}, sargs...)...)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return nil, nil, nil, err
 	}
-	state, err := pgx.CollectRows(rows, pgx.RowToStructByPos[historyRow])
-	if err != nil {
-		s.fail(w, err)
-		return
+	if state, err = pgx.CollectRows(rows, pgx.RowToStructByPos[historyRow]); err != nil {
+		return nil, nil, nil, err
 	}
-	var devices []*historyDevice
 	for _, h := range state {
 		if len(devices) == 0 || devices[len(devices)-1].ID != h.DeviceID {
 			devices = append(devices, &historyDevice{ID: h.DeviceID, Hostname: h.Hostname})
@@ -136,29 +155,15 @@ func (s *Server) complianceHistory(w http.ResponseWriter, r *http.Request, sess 
 			d.Other++
 		}
 	}
-	var changes []historyRow
 	if device != "" {
 		rows, err := s.db.Query(ctx, `SELECT c.device_id, d.hostname, c.check_id, c.status, c.detail, c.at, c.catalog_version
 			FROM compliance_changes c JOIN devices d ON d.id = c.device_id WHERE c.device_id = $1 AND c.at < $2 ORDER BY c.id DESC LIMIT 500`, device, cutoff)
 		if err != nil {
-			s.fail(w, err)
-			return
+			return nil, nil, nil, err
 		}
 		if changes, err = pgx.CollectRows(rows, pgx.RowToStructByPos[historyRow]); err != nil {
-			s.fail(w, err)
-			return
+			return nil, nil, nil, err
 		}
 	}
-	cond, sargs = scopeCond(sess, 0)
-	all, err := s.listDevicesWhere(ctx, cond, sargs...)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	csv := url.Values{"at": {at}}
-	if device != "" {
-		csv.Set("device", device)
-	}
-	s.render(w, r, sess, "compliance_history", map[string]any{"At": at, "Device": device, "Devices": devices, "State": state,
-		"Changes": changes, "All": all, "CSV": "/export/compliance-history.csv?" + csv.Encode()})
+	return devices, state, changes, nil
 }

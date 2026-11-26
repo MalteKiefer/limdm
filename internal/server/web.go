@@ -1337,7 +1337,7 @@ func (s *Server) tokenCreate(w http.ResponseWriter, r *http.Request, sess sessio
 // ---- compliance reporting ----
 
 type checkAgg struct {
-	ID, Title                string
+	ID, Title, Severity      string
 	Level                    int
 	Refs                     api.Refs
 	Pass, Fail, NA, Excepted int
@@ -1484,7 +1484,7 @@ func (s *Server) fleetCompliance(ctx context.Context, where string, args ...any)
 		for _, c := range res {
 			a := checks[c.ID]
 			if a == nil {
-				a = &checkAgg{ID: c.ID, Title: c.Title, Level: c.Level, Refs: c.Refs}
+				a = &checkAgg{ID: c.ID, Title: c.Title, Severity: c.Severity, Level: c.Level, Refs: c.Refs}
 				checks[c.ID] = a
 			}
 			switch c.Status {
