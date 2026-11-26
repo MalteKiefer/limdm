@@ -991,8 +991,8 @@ func (s *Server) apiItemSave(w http.ResponseWriter, r *http.Request, c apiCaller
 		}
 	}
 	if err := s.saveLibraryItem(withIfMatch(r), c.actor(), &it); err != nil {
-		if aid, ok := pendingApproval(err); ok { // four eyes: an admin decides in the console
-			w.Header().Set("Location", "/approvals")
+		if aid, ok := pendingApproval(err); ok { // four eyes: another admin decides (console or API)
+			w.Header().Set("Location", "/api/v1/approvals/"+strconv.FormatInt(aid, 10))
 			writeJSONStatus(w, http.StatusAccepted, map[string]any{"approval_id": aid, "status": "pending"})
 			return
 		}
