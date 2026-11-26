@@ -18,23 +18,26 @@ export function Field({ label, help, error, required, children, htmlFor }: { lab
   const errId = error ? `${id}-err` : undefined
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-[13px] font-medium">
-        {label}
-        {required && (
-          <>
-            <span className="text-bad" aria-hidden>
-              {' '}
-              *
-            </span>
-            <span className="sr-only"> {t('common.required')}</span>
-          </>
+      {/* label and help grow, so the inputs of a row line up when help texts differ in height */}
+      <div className="flex grow flex-col gap-1">
+        <label htmlFor={id} className="text-[13px] font-medium">
+          {label}
+          {required && (
+            <>
+              <span className="text-bad" aria-hidden>
+                {' '}
+                *
+              </span>
+              <span className="sr-only"> {t('common.required')}</span>
+            </>
+          )}
+        </label>
+        {help && (
+          <p id={helpId} className="text-[12.5px] text-muted">
+            {help}
+          </p>
         )}
-      </label>
-      {help && (
-        <p id={helpId} className="text-[12.5px] text-muted">
-          {help}
-        </p>
-      )}
+      </div>
       {children({ id, describedBy: [helpId, errId].filter(Boolean).join(' ') || undefined, invalid: !!error })}
       {error && (
         <p id={errId} className="flex items-center gap-1 text-[12.5px] font-medium text-bad">
