@@ -45,6 +45,12 @@
   is never signed later by accident. Rows that existed before these signatures are signed
   once per installation, at the first start of 0.17, recorded in the database
   (`settings` key `data-signed-v1`); an instance added or rebuilt later signs nothing.
+  Each signature also covers a sequence number that grows with every signed change of the
+  entry (the database clock in microseconds, so it keeps growing after a restore). The agent
+  keeps the highest number it accepted per app, remote and user list and refuses a lower
+  one, so an older signed state written back into the database (an earlier repository, a
+  revoked admin flag) is not applied again. Not covered: a deleted catalog entry written
+  back with its old signature on a device that never saw a newer state of it.
 
   Whoever can only write to the database cannot make a device run, install or trust anything
   an admin did not sign. They can still change which signed items and apps reach which

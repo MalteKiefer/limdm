@@ -34,6 +34,8 @@ type CatalogApp struct {
 	Request  string      `json:"request,omitempty"` // this device's request: pending | approved | denied
 	// Signature is the command key's signature over CatalogAppSigned.
 	Signature string `json:"signature,omitempty"`
+	// Seq grows with every signed change (SignedSeq).
+	Seq int64 `json:"seq,omitempty"`
 }
 
 // AppSource is a way to install an app.
@@ -69,6 +71,7 @@ type CatalogRemote struct {
 	State       string `json:"state"`               // allowed | blocked
 	CatalogOnly bool   `json:"catalog_only"`        // with RestrictFlathub only catalog apps
 	Signature   string `json:"signature,omitempty"` // command key signature over CatalogRemoteSigned
+	Seq         int64  `json:"seq,omitempty"`       // grows with every signed change (SignedSeq)
 }
 
 var remoteNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)

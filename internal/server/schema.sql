@@ -854,3 +854,8 @@ CREATE TABLE IF NOT EXISTS device_packages (
     PRIMARY KEY (device_id, name, arch, version)
 );
 CREATE INDEX IF NOT EXISTS device_packages_name ON device_packages(name, device_id);
+
+-- review: sequence numbers of signed data (api.SignedSeq)
+ALTER TABLE catalog_apps ADD COLUMN IF NOT EXISTS seq BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE catalog_remotes ADD COLUMN IF NOT EXISTS seq BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS users_seq BIGINT NOT NULL DEFAULT 0;

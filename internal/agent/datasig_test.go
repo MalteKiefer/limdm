@@ -21,7 +21,7 @@ func TestSignedDataRefused(t *testing.T) {
 	alice := api.User{Username: "alice", Email: "a@example.com"}
 	bob := api.User{Username: "bob", Email: "b@example.com"}
 	signed := []api.User{alice, bob}
-	su := &api.SignedUsers{Users: signed, Signature: sign(api.UsersSigned("dev1", signed))}
+	su := &api.SignedUsers{Users: signed, Signature: sign(api.UsersSigned("dev1", signed, 0))}
 	resp := func(users []api.User, su *api.SignedUsers) api.CheckinResponse {
 		return api.CheckinResponse{SignedData: true, Users: users, SignedUsers: su}
 	}
@@ -34,7 +34,7 @@ func TestSignedDataRefused(t *testing.T) {
 	if _, err := a.verifyUsers(resp(signed, nil)); err == nil {
 		t.Fatal("an unsigned list from a signing server must be refused")
 	}
-	other := &api.SignedUsers{Users: signed, Signature: sign(api.UsersSigned("dev2", signed))}
+	other := &api.SignedUsers{Users: signed, Signature: sign(api.UsersSigned("dev2", signed, 0))}
 	if _, err := a.verifyUsers(resp(signed, other)); err == nil {
 		t.Fatal("a list signed for another device must be refused")
 	}
@@ -55,5 +55,44 @@ func TestSignedDataRefused(t *testing.T) {
 	a.verifyCatalog(true, c)
 	if len(c.Apps) != 1 || c.Apps[0].ID != "firefox" || len(c.Remotes) != 1 || c.Remotes[0].URL != rem.URL {
 		t.Fatalf("only signed entries may stay: %+v %+v", c.Apps, c.Remotes)
+	}
+}
+
+// An older signed state written back into the server's database is
+// refused once a newer one was accepted.
+func TestSignedDataReplay(t *testing.T) {
+	pub, key, _ := ed25519.GenerateKey(rand.Reader)
+	sign := func(msg []byte) string { return hex.EncodeToString(ed25519.Sign(key, msg)) }
+	a := &Agent{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	a.cfg.DeviceID = "dev1"
+	a.state.CommandKey = hex.EncodeToString(pub)
+	users := func(seq int64, admin bool) api.CheckinResponse {
+		u := []api.User{{Username: "alice", Email: "a@example.com", Admin: admin}}
+		return api.CheckinResponse{SignedData: true, Users: u, SignedUsers: &api.SignedUsers{Users: u, Seq: seq, Signature: sign(api.UsersSigned("dev1", u, seq))}}
+	}
+	if _, err := a.verifyUsers(users(5, true)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.verifyUsers(users(9, false)); err != nil { // admin flag revoked
+		t.Fatal(err)
+	}
+	if _, err := a.verifyUsers(users(5, true)); err == nil {
+		t.Fatal("the older list with the admin flag was accepted again")
+	}
+	if _, err := a.verifyUsers(users(9, false)); err != nil {
+		t.Fatal("the current list must stay accepted")
+	}
+	app := func(seq int64, debian string) api.CatalogApp {
+		ap := api.CatalogApp{ID: "tool", Name: "Tool", Mode: api.AppRequired, Seq: seq, Sources: []api.AppSource{{Kind: "package", Debian: debian}}}
+		ap.Signature = sign(api.CatalogAppSigned(ap))
+		return ap
+	}
+	c := &api.Catalog{Apps: []api.CatalogApp{app(7, "tool")}}
+	if a.verifyCatalog(true, c); len(c.Apps) != 1 {
+		t.Fatal("current app refused")
+	}
+	c = &api.Catalog{Apps: []api.CatalogApp{app(3, "old-tool")}}
+	if a.verifyCatalog(true, c); len(c.Apps) != 0 {
+		t.Fatal("an older signed app was accepted again")
 	}
 }

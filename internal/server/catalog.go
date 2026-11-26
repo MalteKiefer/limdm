@@ -209,12 +209,12 @@ type catalogRow struct {
 	Installs int
 }
 
-const catalogCols = `slug, name, summary, category, mode, sources, detect, enabled, scope, icon_hash <> '', icon_hash, updated_at, signature`
+const catalogCols = `slug, name, summary, category, mode, sources, detect, enabled, scope, icon_hash <> '', icon_hash, updated_at, signature, seq`
 
 func scanCatalog(row pgx.CollectableRow) (catalogRow, error) {
 	var r catalogRow
 	var src []byte
-	err := row.Scan(&r.ID, &r.Name, &r.Summary, &r.Category, &r.Mode, &src, &r.Detect, &r.Enabled, &r.Scope, &r.HasIcon, &r.IconHash, &r.Updated, &r.Signature)
+	err := row.Scan(&r.ID, &r.Name, &r.Summary, &r.Category, &r.Mode, &src, &r.Detect, &r.Enabled, &r.Scope, &r.HasIcon, &r.IconHash, &r.Updated, &r.Signature, &r.Seq)
 	if err == nil {
 		err = json.Unmarshal(src, &r.Sources)
 	}
@@ -421,7 +421,7 @@ func appSourcesText(src []api.AppSource) string {
 }
 
 func (s *Server) catalogRemotes(ctx context.Context, q querier) ([]api.CatalogRemote, error) {
-	rows, err := q.Query(ctx, `SELECT name, url, title, state, catalog_only, signature FROM catalog_remotes ORDER BY name`)
+	rows, err := q.Query(ctx, `SELECT name, url, title, state, catalog_only, signature, seq FROM catalog_remotes ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}

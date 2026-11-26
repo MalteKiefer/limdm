@@ -47,9 +47,18 @@ func dataSigOK(msg []byte, sig string) bool {
 		(itemPrevKey != nil && api.VerifySigned(itemPrevKey, msg, sig))
 }
 
+// seqNow is the next sequence number of a signed entry (api.SignedSeq):
+// the database clock in microseconds, so numbers keep growing after a
+// restore from a backup, and at least one above the entry's last.
+const seqNow = `(extract(epoch from clock_timestamp()) * 1000000)::bigint`
+
 // signCatalogApp signs an app as it reads back from the database, inside
-// the transaction of the admin action that wrote it.
+// the transaction of the admin action that wrote it, with the next
+// sequence number (api.SignedSeq).
 func (s *Server) signCatalogApp(ctx context.Context, tx pgx.Tx, slug string) error {
+	if _, err := tx.Exec(ctx, `UPDATE catalog_apps SET seq=greatest(seq + 1, `+seqNow+`) WHERE slug=$1`, slug); err != nil {
+		return err
+	}
 	apps, err := s.catalogApps(ctx, tx, `WHERE slug=$1`, slug)
 	if err != nil || len(apps) == 0 {
 		return err
@@ -74,8 +83,8 @@ func (s *Server) catalogAppIntact(ctx context.Context, tx pgx.Tx, slug string) e
 // catalogRemoteIntact is catalogAppIntact for a managed remote.
 func (s *Server) catalogRemoteIntact(ctx context.Context, tx pgx.Tx, name string) error {
 	var r api.CatalogRemote
-	err := tx.QueryRow(ctx, `SELECT name, url, title, state, catalog_only, signature FROM catalog_remotes WHERE name=$1`, name).
-		Scan(&r.Name, &r.URL, &r.Title, &r.State, &r.CatalogOnly, &r.Signature)
+	err := tx.QueryRow(ctx, `SELECT name, url, title, state, catalog_only, signature, seq FROM catalog_remotes WHERE name=$1`, name).
+		Scan(&r.Name, &r.URL, &r.Title, &r.State, &r.CatalogOnly, &r.Signature, &r.Seq)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil // the caller answers not found
 	}
@@ -88,8 +97,9 @@ func (s *Server) catalogRemoteIntact(ctx context.Context, tx pgx.Tx, name string
 // signCatalogRemote signs a managed remote like signCatalogApp.
 func (s *Server) signCatalogRemote(ctx context.Context, tx pgx.Tx, name string) error {
 	var r api.CatalogRemote
-	err := tx.QueryRow(ctx, `SELECT name, url, title, state, catalog_only FROM catalog_remotes WHERE name=$1`, name).
-		Scan(&r.Name, &r.URL, &r.Title, &r.State, &r.CatalogOnly)
+	err := tx.QueryRow(ctx, `UPDATE catalog_remotes SET seq=greatest(seq + 1, `+seqNow+`) WHERE name=$1
+		RETURNING name, url, title, state, catalog_only, seq`, name).
+		Scan(&r.Name, &r.URL, &r.Title, &r.State, &r.CatalogOnly, &r.Seq)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // removed
@@ -103,14 +113,15 @@ func (s *Server) signCatalogRemote(ctx context.Context, tx pgx.Tx, name string) 
 // signDeviceUsers signs the user list of a device like signCatalogApp.
 func signDeviceUsers(ctx context.Context, tx pgx.Tx, id string) error {
 	var raw []byte
-	if err := tx.QueryRow(ctx, `SELECT users FROM devices WHERE id=$1`, id).Scan(&raw); err != nil {
+	var seq int64
+	if err := tx.QueryRow(ctx, `UPDATE devices SET users_seq=greatest(users_seq + 1, `+seqNow+`) WHERE id=$1 RETURNING users, users_seq`, id).Scan(&raw, &seq); err != nil {
 		return err
 	}
 	var users []api.User
 	if err := json.Unmarshal(raw, &users); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `UPDATE devices SET users_sig=$2 WHERE id=$1`, id, signData(api.UsersSigned(id, users)))
+	_, err := tx.Exec(ctx, `UPDATE devices SET users_sig=$2 WHERE id=$1`, id, signData(api.UsersSigned(id, users, seq)))
 	return err
 }
 
@@ -139,7 +150,7 @@ func (s *Server) signedRows(ctx context.Context) ([]storedData, error) {
 	for _, r := range remotes {
 		out = append(out, storedData{"catalog_remotes", "name", r.Name, api.CatalogRemoteSigned(r), r.Signature})
 	}
-	rows, err := s.db.Query(ctx, `SELECT id, users, users_sig FROM devices WHERE NOT retired`)
+	rows, err := s.db.Query(ctx, `SELECT id, users, users_sig, users_seq FROM devices WHERE NOT retired`)
 	if err != nil {
 		return nil, err
 	}
@@ -147,14 +158,15 @@ func (s *Server) signedRows(ctx context.Context) ([]storedData, error) {
 	for rows.Next() {
 		var id, sig string
 		var raw []byte
-		if err := rows.Scan(&id, &raw, &sig); err != nil {
+		var seq int64
+		if err := rows.Scan(&id, &raw, &sig, &seq); err != nil {
 			return nil, err
 		}
 		var users []api.User
 		if err := json.Unmarshal(raw, &users); err != nil {
 			return nil, fmt.Errorf("device %s users: %w", id, err)
 		}
-		out = append(out, storedData{"devices", "id", id, api.UsersSigned(id, users), sig})
+		out = append(out, storedData{"devices", "id", id, api.UsersSigned(id, users, seq), sig})
 	}
 	return out, rows.Err()
 }

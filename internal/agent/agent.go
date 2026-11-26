@@ -88,6 +88,7 @@ type State struct {
 	CommandKey          string                    `json:"command_key,omitempty"`      // pinned public key commands are signed with
 	CommandKeyPrev      string                    `json:"command_key_prev,omitempty"` // key before the last rollover, accepted until CommandKeyPrevUntil
 	CommandKeyPrevUntil time.Time                 `json:"command_key_prev_until,omitzero"`
+	SignedSeq           map[string]int64          `json:"signed_seq,omitempty"` // highest accepted sequence number per signed entry (api.SignedSeq)
 	Enrollment          string                    `json:"enrollment,omitempty"` // server and device ID this state belongs to
 	EscrowNotified      time.Time                 `json:"escrow_notified"`
 	Company             string                    `json:"company,omitempty"`

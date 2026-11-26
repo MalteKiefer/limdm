@@ -77,14 +77,29 @@ func TestSignedCatalogAndUsers(t *testing.T) {
 		t.Fatal(err)
 	}
 	tx.Commit(ctx)
+	var seq int64
 	check := func() bool {
 		var sig string
 		var users []api.User
-		db.QueryRow(ctx, `SELECT users, users_sig FROM devices WHERE id='d1'`).Scan(&users, &sig)
-		return dataSigOK(api.UsersSigned("d1", users), sig)
+		db.QueryRow(ctx, `SELECT users, users_sig, users_seq FROM devices WHERE id='d1'`).Scan(&users, &sig, &seq)
+		return dataSigOK(api.UsersSigned("d1", users, seq), sig)
 	}
-	if !check() {
-		t.Fatal("signed user list does not verify")
+	if !check() || seq == 0 {
+		t.Fatalf("signed user list does not verify or has no sequence number (%d)", seq)
+	}
+	// every signed change takes a higher number (agents refuse lower ones)
+	first := seq
+	tx, _ = db.Begin(ctx)
+	if err := signDeviceUsers(ctx, tx, "d1"); err != nil {
+		t.Fatal(err)
+	}
+	tx.Commit(ctx)
+	if !check() || seq <= first {
+		t.Fatalf("sequence number did not grow: %d -> %d", first, seq)
+	}
+	var appSeq int64
+	if db.QueryRow(ctx, `SELECT seq FROM catalog_apps WHERE slug='tool'`).Scan(&appSeq); appSeq == 0 {
+		t.Fatal("a saved catalog app has no sequence number")
 	}
 	db.Exec(ctx, `UPDATE devices SET users='[{"username":"mm","email":"m@firma.de","admin":true}]' WHERE id='d1'`)
 	if check() {

@@ -34,26 +34,47 @@ func signedBy(keys []ed25519.PublicKey, msg []byte, sig string) bool {
 	return slices.ContainsFunc(keys, func(k ed25519.PublicKey) bool { return api.VerifySigned(k, msg, sig) })
 }
 
-// verifyCatalog drops the apps and remotes whose signature does not verify.
+// verifyCatalog drops the apps and remotes whose signature does not verify
+// or whose sequence number is below one accepted before.
 func (a *Agent) verifyCatalog(signed bool, c *api.Catalog) {
 	if !signed || a.state.CommandKey == "" {
 		return
 	}
 	keys := a.commandKeys()
 	c.Apps = slices.DeleteFunc(c.Apps, func(app api.CatalogApp) bool {
+		err := errors.New("signature invalid")
 		if signedBy(keys, api.CatalogAppSigned(app), app.Signature) {
-			return false
+			if err = a.seqOK("app:"+app.ID, app.Seq); err == nil {
+				return false
+			}
 		}
-		a.refused("catalog app "+app.ID, errors.New("signature invalid"))
+		a.refused("catalog app "+app.ID, err)
 		return true
 	})
 	c.Remotes = slices.DeleteFunc(c.Remotes, func(r api.CatalogRemote) bool {
+		err := errors.New("signature invalid")
 		if signedBy(keys, api.CatalogRemoteSigned(r), r.Signature) {
-			return false
+			if err = a.seqOK("remote:"+r.Name, r.Seq); err == nil {
+				return false
+			}
 		}
-		a.refused("Flatpak remote "+r.Name, errors.New("signature invalid"))
+		a.refused("Flatpak remote "+r.Name, err)
 		return true
 	})
+}
+
+// seqOK accepts a signed entry's sequence number unless a higher one of
+// the same entry was accepted before (an older signed state written back
+// into the server's database), and records it.
+func (a *Agent) seqOK(key string, seq int64) error {
+	if last := a.state.SignedSeq[key]; seq < last {
+		return fmt.Errorf("older than the accepted state (%d < %d)", seq, last)
+	}
+	if a.state.SignedSeq == nil {
+		a.state.SignedSeq = map[string]int64{}
+	}
+	a.state.SignedSeq[key] = seq
+	return nil
 }
 
 // verifyUsers returns the device users to apply. The list may be shorter
@@ -67,13 +88,16 @@ func (a *Agent) verifyUsers(resp api.CheckinResponse) ([]api.User, error) {
 	if su == nil {
 		return nil, errors.New("not signed")
 	}
-	if !signedBy(a.commandKeys(), api.UsersSigned(a.cfg.DeviceID, su.Users), su.Signature) {
+	if !signedBy(a.commandKeys(), api.UsersSigned(a.cfg.DeviceID, su.Users, su.Seq), su.Signature) {
 		return nil, errors.New("signature invalid")
 	}
 	for _, u := range resp.Users {
 		if !slices.Contains(su.Users, u) {
 			return nil, fmt.Errorf("user %s is not in the signed list", u.Username)
 		}
+	}
+	if err := a.seqOK("users", su.Seq); err != nil {
+		return nil, err
 	}
 	return resp.Users, nil
 }

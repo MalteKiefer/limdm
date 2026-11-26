@@ -122,6 +122,14 @@ func ItemSigned(name, typ string, payload []byte) []byte {
 // key too, when an admin saves it, so a database write alone changes nothing
 // a device acts on as root. The agent checks these signatures with the
 // pinned key once the server announces SignedData.
+//
+// SignedSeq: every signature covers a sequence number that grows with
+// each signed change of the entry (the server's database clock in
+// microseconds; 0 for rows signed before it existed, left out of the
+// message). The agent keeps the highest number
+// per entry and refuses a lower one, so an older signed state written back
+// into the database (an earlier repository, a revoked admin flag) is not
+// applied again.
 
 // CatalogAppSigned is what a catalog app signature covers: what decides
 // what gets installed (ID, name, mode, sources with their repositories,
@@ -134,7 +142,8 @@ func CatalogAppSigned(a CatalogApp) []byte {
 		Mode    string      `json:"mode"`
 		Sources []AppSource `json:"sources"`
 		Detect  []string    `json:"detect,omitempty"`
-	}{a.ID, a.Name, a.Mode, a.Sources, a.Detect})
+		Seq     int64       `json:"seq,omitempty"`
+	}{a.ID, a.Name, a.Mode, a.Sources, a.Detect, a.Seq})
 	return append([]byte("limdm-catalog-app-v1\n"), b...)
 }
 
@@ -146,13 +155,18 @@ func CatalogRemoteSigned(r CatalogRemote) []byte {
 }
 
 // UsersSigned is what the signature of a device's user list covers: the
-// device and the list as an admin saved it (no list and an empty one are the same).
-func UsersSigned(deviceID string, users []User) []byte {
+// device and the list as an admin saved it (no list and an empty one are
+// the same), and its sequence number (SignedSeq) when it has one.
+func UsersSigned(deviceID string, users []User, seq int64) []byte {
 	if users == nil {
 		users = []User{}
 	}
 	b, _ := json.Marshal(users)
-	return fmt.Appendf(nil, "limdm-users-v1\n%s\n%s", deviceID, b)
+	msg := fmt.Appendf(nil, "limdm-users-v1\n%s\n%s", deviceID, b)
+	if seq != 0 {
+		msg = fmt.Appendf(msg, "\n%d", seq)
+	}
+	return msg
 }
 
 // SignedUsers is the user list of a device as an admin saved it, with its
@@ -161,6 +175,7 @@ func UsersSigned(deviceID string, users []User) []byte {
 type SignedUsers struct {
 	Users     []User `json:"users"`
 	Signature string `json:"signature"`
+	Seq       int64  `json:"seq,omitempty"`
 }
 
 // VerifySigned checks a hex Ed25519 signature over msg.
