@@ -705,9 +705,10 @@ type Package struct {
 
 // Refs maps a check to the frameworks it provides evidence for.
 type Refs struct {
-	CIS []string `json:"cis,omitempty"` // CIS Benchmark recommendation titles
-	BSI []string `json:"bsi,omitempty"` // IT-Grundschutz modules / requirements
-	ISO []string `json:"iso,omitempty"` // ISO/IEC 27001:2022 Annex A controls
+	CIS          []string `json:"cis,omitempty"`           // CIS Benchmark recommendation number and title
+	CISBenchmark string   `json:"cis_benchmark,omitempty"` // benchmark name and version the CIS numbers refer to
+	BSI          []string `json:"bsi,omitempty"`           // IT-Grundschutz modules / requirements
+	ISO          []string `json:"iso,omitempty"`           // ISO/IEC 27001:2022 Annex A controls
 }
 
 type CheckResult struct {
@@ -726,6 +727,9 @@ type Status struct {
 	Inventory    Inventory           `json:"inventory"`
 	Checks       []CheckResult       `json:"checks"`
 	Declarations []DeclarationStatus `json:"declarations"`
+	// CatalogVersion is the version of the agent's check catalog and its
+	// framework mapping the Checks were made with.
+	CatalogVersion string `json:"catalog_version,omitempty"`
 }
 
 type Command struct {

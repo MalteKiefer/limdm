@@ -552,7 +552,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	a.lastFlatpaks = inv.Flatpaks
 	a.lastSystem = DesktopSystem{OS: strings.TrimSpace(inv.OSName + " " + inv.OSVersion), Kernel: inv.Kernel, Arch: inv.Arch,
 		Inventory: inv.Source, Vendor: inv.Vendor, Model: inv.Model, Serial: inv.Serial}
-	status := api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus()}
+	status := api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus(), CatalogVersion: CatalogVersion}
 	sb, _ := json.Marshal(status)
 	sum := sha256.Sum256(sb)
 	statusHash := hex.EncodeToString(sum[:])

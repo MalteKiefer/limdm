@@ -12,4 +12,7 @@
     <td>{{if .Parent}}{{index $names (deref .Parent)}}{{else}}<span class="muted">{{t "none"}}</span>{{end}}</td>
     <td class="num">{{if .Devices}}<a class="count" href="/devices?blueprint={{.Name}}">{{.Devices}}</a>{{else}}<span class="muted">0</span>{{end}}</td><td>{{fmtTime .Updated}}</td></tr>{{end}}</tbody>
 </table></div></div>
+{{if .Deleted}}<section class="tablecard"><div class="card-head"><h2>{{t "Deleted"}}</h2><span class="muted">{{t "The last version stays in the history and can be restored."}}</span></div>
+  <div class="scroll"><table><thead><tr><th>{{t "Name"}}</th><th>{{t "Deleted"}}</th><th>{{t "By"}}</th></tr></thead>
+  <tbody>{{range .Deleted}}<tr><td><a href="/blueprints/{{.ID}}/history">{{.Name}}</a></td><td>{{fmtTime .At}}</td><td>{{.By}}</td></tr>{{end}}</tbody></table></div></section>{{end}}
 {{end}}

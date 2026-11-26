@@ -39,9 +39,12 @@ func main() {
 		err = sign(os.Args[2:])
 	case "local-admin":
 		err = localAdmin(os.Args[2:])
+	case "audit":
+		err = auditCmd(os.Args[2:])
 	default:
 		err = errors.New(`usage: limdm-server [serve | keygen -out FILE | sign -key FILE SHA256SUMS
-                     | local-admin [-env FILE] [-role admin|auditor] [-out FILE] add|reset|disable|enable|list [NAME]]`)
+                     | local-admin [-env FILE] [-role admin|auditor] [-out FILE] add|reset|disable|enable|list [NAME]
+                     | audit [-ca DIR] [-key HEX -keyed-from ID] verify FILE.jsonl | audit [-ca DIR] key]`)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -103,6 +106,55 @@ func serve(log *slog.Logger) error {
 
 // localAdmin manages fallback admin accounts. Generated credentials go to
 // stdout or, with -out, to a new 0600 file so they do not end up in logs.
+// auditCmd verifies a JSON Lines audit export outside the server, or prints
+// the audit key for an auditor who verifies on another machine.
+func auditCmd(args []string) error {
+	fs := flag.NewFlagSet("audit", flag.ExitOnError)
+	def := os.Getenv("LIMDM_CA_DIR")
+	if def == "" {
+		def = "/var/lib/limdm-server/ca"
+	}
+	caDir := fs.String("ca", def, "CA directory with command.key")
+	keyHex := fs.String("key", "", "audit key (hex) instead of the CA directory")
+	keyedFrom := fs.Int64("keyed-from", 0, "first keyed entry, with -key")
+	fs.Parse(args)
+	var key []byte
+	var from int64
+	var err error
+	if *keyHex != "" {
+		if key, err = hex.DecodeString(*keyHex); err != nil || len(key) != 32 {
+			return errors.New("-key must be 64 hex characters")
+		}
+		from = *keyedFrom
+	} else if key, from, err = server.AuditKeyFromDir(*caDir); err != nil {
+		return fmt.Errorf("audit key: %w", err)
+	}
+	switch {
+	case fs.Arg(0) == "key":
+		fmt.Printf("key=%s keyed_from=%d\n", hex.EncodeToString(key), from)
+		return nil
+	case fs.Arg(0) == "verify" && fs.NArg() == 2:
+		f, err := os.Open(fs.Arg(1))
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		n, first, last, broken, err := server.VerifyAuditExport(f, key, from)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return errors.New("no entries in the file")
+		}
+		if broken != 0 {
+			return fmt.Errorf("chain broken at entry %d (%d entries read)", broken, n)
+		}
+		fmt.Printf("%d entries, %d to %d: chain intact\n", n, first, last)
+		return nil
+	}
+	return errors.New("usage: limdm-server audit [-ca DIR] [-key HEX -keyed-from ID] verify FILE.jsonl | key")
+}
+
 func localAdmin(args []string) error {
 	fs := flag.NewFlagSet("local-admin", flag.ExitOnError)
 	envFile := fs.String("env", "", "read LIMDM_* settings from this env file (e.g. /etc/limdm-server/server.env)")

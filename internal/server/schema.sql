@@ -402,3 +402,77 @@ END $$;
 DROP TRIGGER IF EXISTS dir_users_tombstone ON dir_users;
 CREATE TRIGGER dir_users_tombstone AFTER INSERT OR UPDATE OF email OR DELETE ON dir_users
     FOR EACH ROW EXECUTE FUNCTION dir_users_tombstone();
+
+-- W3
+CREATE OR REPLACE FUNCTION rows_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION '% is append only', TG_TABLE_NAME; END $$;
+-- Catalog version of the device's last check report (evidence export).
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS catalog_version TEXT NOT NULL DEFAULT '';
+
+-- Compliance history: one row per change of a check result (devices report
+-- only changes). Pruned after 365 days like device_events, keeping the last
+-- row before the cutoff so the state at any date stays known.
+CREATE TABLE IF NOT EXISTS compliance_changes (
+    id              BIGSERIAL PRIMARY KEY,
+    device_id       TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    at              TIMESTAMPTZ NOT NULL,
+    check_id        TEXT NOT NULL,
+    status          TEXT NOT NULL, -- pass | fail | na | excepted | advisory | removed
+    detail          TEXT NOT NULL DEFAULT '',
+    catalog_version TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS compliance_changes_device ON compliance_changes(device_id, check_id, id);
+CREATE INDEX IF NOT EXISTS compliance_changes_at ON compliance_changes USING brin(at);
+DROP TRIGGER IF EXISTS compliance_changes_append_only ON compliance_changes;
+CREATE TRIGGER compliance_changes_append_only BEFORE UPDATE ON compliance_changes
+    FOR EACH ROW EXECUTE FUNCTION rows_append_only();
+-- baseline for devices that reported before the history existed
+INSERT INTO compliance_changes(device_id, at, check_id, status, detail, catalog_version)
+    SELECT d.id, coalesce(d.last_seen, now()), c->>'id', coalesce(c->>'status', ''), coalesce(c->>'detail', ''), d.catalog_version
+    FROM devices d, jsonb_array_elements(d.checks) c
+    WHERE c->>'id' IS NOT NULL AND NOT EXISTS (SELECT 1 FROM compliance_changes x WHERE x.device_id = d.id);
+
+-- Versions of library items and blueprints: every save, rollback and delete
+-- (the deleted payload stays). No foreign key, versions outlive the object.
+CREATE TABLE IF NOT EXISTS library_item_versions (
+    id          BIGSERIAL PRIMARY KEY,
+    item_id     BIGINT NOT NULL,
+    version     INT NOT NULL,
+    name        TEXT NOT NULL,
+    type        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    payload     JSONB NOT NULL,
+    signature   TEXT NOT NULL DEFAULT '',
+    deleted     BOOLEAN NOT NULL DEFAULT false,
+    note        TEXT NOT NULL DEFAULT '',
+    created_by  TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (item_id, version)
+);
+CREATE TABLE IF NOT EXISTS blueprint_versions (
+    id           BIGSERIAL PRIMARY KEY,
+    blueprint_id BIGINT NOT NULL,
+    version      INT NOT NULL,
+    name         TEXT NOT NULL,
+    description  TEXT NOT NULL DEFAULT '',
+    parent_id    BIGINT,
+    tree         JSONB NOT NULL,
+    deleted      BOOLEAN NOT NULL DEFAULT false,
+    note         TEXT NOT NULL DEFAULT '',
+    created_by   TEXT NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (blueprint_id, version)
+);
+DROP TRIGGER IF EXISTS library_item_versions_append_only ON library_item_versions;
+CREATE TRIGGER library_item_versions_append_only BEFORE UPDATE OR DELETE ON library_item_versions
+    FOR EACH ROW EXECUTE FUNCTION rows_append_only();
+DROP TRIGGER IF EXISTS blueprint_versions_append_only ON blueprint_versions;
+CREATE TRIGGER blueprint_versions_append_only BEFORE UPDATE OR DELETE ON blueprint_versions
+    FOR EACH ROW EXECUTE FUNCTION rows_append_only();
+-- baseline version of objects saved before versioning existed
+INSERT INTO library_item_versions(item_id, version, name, type, description, payload, signature, note, created_by, created_at)
+    SELECT i.id, 1, i.name, i.type, i.description, i.payload, i.signature, 'baseline', 'system', i.updated_at FROM library_items i
+    WHERE NOT EXISTS (SELECT 1 FROM library_item_versions v WHERE v.item_id = i.id);
+INSERT INTO blueprint_versions(blueprint_id, version, name, description, parent_id, tree, note, created_by, created_at)
+    SELECT b.id, 1, b.name, b.description, b.parent_id, b.tree, 'baseline', 'system', b.updated_at FROM blueprints b
+    WHERE NOT EXISTS (SELECT 1 FROM blueprint_versions v WHERE v.blueprint_id = b.id);

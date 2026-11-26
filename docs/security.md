@@ -62,10 +62,61 @@ start otherwise. Schema changes run as versioned migrations under an advisory lo
 
 ## Audit log
 
-Append only (a trigger blocks `UPDATE`, `DELETE` and `TRUNCATE`) and hash chained; the audit
-page verifies the whole chain and shows where it breaks. Recorded: console actions,
-settings changes, sign ins (also failed ones), enrollments, certificate rotations, command
-results, tamper events, recovery key escrow and every recovery key view, policy actions.
+Append only (a trigger blocks `UPDATE`, `DELETE` and `TRUNCATE`) and hash chained. Recorded:
+console actions, settings changes, sign ins (also failed ones: local, and OIDC as
+`login.failed` with the reason `state`, `code exchange`, `id token` or `claims` and the
+client address, never codes or tokens; at most 30 per minute, the process log has all),
+enrollments, certificate rotations, commands, tamper events, recovery key escrow and every
+recovery key view, policy actions, exports.
+
+**Keyed chain.** Each entry stores `prev` (the hash of the entry before) and `hash`:
+
+```
+hash = HMAC-SHA256(key, prev || be64(at_us) || be64(len(actor)) || actor || be64(len(action)) || action
+                        || be64(len(target)) || target || be64(len(detail)) || detail)
+```
+
+`at_us` is the time in Unix microseconds, `be64` an unsigned 64 bit big endian integer; the
+first entry has 32 zero bytes as `prev`. The key is derived from `command.key` with HKDF
+(SHA-256, info `limdm audit chain v1`), so it never lives in the database: whoever can only
+write to the database cannot recompute the chain after changing a row. Entries written
+before the keyed chain was introduced use plain SHA-256 over the same bytes; the first keyed entry is recorded in
+`audit-keyed-from` next to `command.key` and as the entry `audit.keyed`. Back up the CA
+directory: without `command.key` and that file, keyed entries cannot be verified. Stop all
+server instances for the upgrade, an old instance would write plain entries after the
+switch.
+
+**Verification.** The audit page verifies incrementally from the last checkpoint, a
+background run verifies the whole chain daily, and **Verify whole chain** does it on demand
+(audited as `audit.verify`). A break shows the first changed entry.
+
+**Export and outside verification.** The page filters by text, actor, action, target and
+date and pages through the whole log. **CSV** and **JSON Lines** export the filtered entries
+with `prev` and `hash`; JSON Lines has the raw values (`at_us`, the fields, `prev`, `hash`
+in hex, `scheme`). Recompute an export on the server, or give the key to an auditor:
+
+```sh
+limdm-server audit verify limdm-20261126-audit.jsonl   # reads LIMDM_CA_DIR
+limdm-server audit key                                 # key=<hex> keyed_from=<id>
+limdm-server audit -key <hex> -keyed-from <id> verify limdm-20261126-audit.jsonl
+```
+
+An export of a date range starts in the middle of the chain: the first entry's `prev` is
+taken as given and every following entry must continue it. Whoever holds the key can
+compute valid hashes, so hand it only to the verifying auditor.
+
+**Commands** are linked through the chain alone: the enqueue entry (`command.<type>`, actor
+the admin) and the result entry (`command.result`, actor `device:<id>`) both have the device
+as target and start with `command <id>`; the result adds the type, `ok` or `failed` and, for
+failures, the last line of the output.
+
+**SIEM.** With `LIMDM_SYSLOG=udp://host:514` or `tcp://host:514` (octet counting framing)
+the server forwards new audit entries (`MSGID audit`, structured data `id`, `actor`,
+`action`, `target`, `hash`) and device events (`MSGID event`) as RFC 5424 messages, facility
+13 (log audit). Control characters in values are replaced, structured data is escaped.
+Forwarding starts with the entries written after the server started and retries unsent
+ones; there is no TLS, so use it on a trusted network or a local relay. The copy outside
+the database is the external anchor of the chain.
 
 Routine agent events (every change the agent makes on a device, desktop logins) are high
 volume and kept separately in `device_events`: append only, 365 days, shown on the device

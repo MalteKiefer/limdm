@@ -38,6 +38,7 @@ func (s *Server) historyLoop(ctx context.Context) {
 				s.log.Error("audit verification", "err", err)
 			} else {
 				s.auditBroken.Store(broken) // shown on the audit page next to the incremental result
+				s.auditVerifiedAt.Store(time.Now().Unix())
 				if broken != 0 {
 					s.log.Error("audit log hash chain broken", "entry", broken)
 				}
@@ -46,7 +47,9 @@ func (s *Server) historyLoop(ctx context.Context) {
 		}
 		if _, err := s.db.Exec(ctx, `DELETE FROM device_metrics WHERE at < now() - interval '30 days';
 			DELETE FROM fleet_history WHERE day < current_date - 400;
-			DELETE FROM device_events WHERE at < now() - interval '365 days'`); err != nil {
+			DELETE FROM device_events WHERE at < now() - interval '365 days';
+			DELETE FROM compliance_changes c WHERE c.at < now() - interval '365 days' AND EXISTS (SELECT 1 FROM compliance_changes n
+				WHERE n.device_id = c.device_id AND n.check_id = c.check_id AND n.id > c.id AND n.at < now() - interval '365 days')`); err != nil {
 			s.log.Error("prune history", "err", err)
 		}
 	}

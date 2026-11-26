@@ -1026,7 +1026,7 @@ func TestRecoveryEscrow(t *testing.T) {
 	}
 	// commands are signed with the command key over what was created
 	tx, _ = db.Begin(ctx)
-	if err := s.insertCommand(ctx, tx, "d1", "lock", "", "admin@firma.de"); err != nil {
+	if _, err := s.insertCommand(ctx, tx, "d1", "lock", "", "admin@firma.de"); err != nil {
 		t.Fatal(err)
 	}
 	var signed api.Command
