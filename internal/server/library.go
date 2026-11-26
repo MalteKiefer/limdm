@@ -280,7 +280,7 @@ func resolveDevice(ctx context.Context, q pgx.Tx, deviceID string) (resolved, er
 		maps[i] = b.Tree
 	}
 	ids := api.Resolve(maps, facts)
-	if res.Items, err = libraryItems(ctx, q, ids); err != nil {
+	if res.Items, err = libraryItems(ctx, q, deviceID, ids); err != nil {
 		return res, err
 	}
 	if res.Decls, err = api.Merge(res.Items); err != nil {
@@ -289,12 +289,16 @@ func resolveDevice(ctx context.Context, q pgx.Tx, deviceID string) (resolved, er
 	return res, applyExceptions(ctx, q, deviceID, res.Decls) // risk exceptions (exceptions.go)
 }
 
-// libraryItems loads items and returns them in the order of ids.
-func libraryItems(ctx context.Context, q pgx.Tx, ids []int64) ([]api.LibraryItem, error) {
+// libraryItems loads the items of a device and returns them in the order
+// of ids. Only items of the device's tenant and of the default tenant
+// (kept by global admins) resolve, so a reference across tenants that got
+// past validation never delivers another tenant's item.
+func libraryItems(ctx context.Context, q pgx.Tx, deviceID string, ids []int64) ([]api.LibraryItem, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	rows, err := q.Query(ctx, `SELECT id, name, type, description, payload, signature FROM library_items WHERE id = ANY($1)`, ids)
+	rows, err := q.Query(ctx, `SELECT id, name, type, description, payload, signature FROM library_items
+		WHERE id = ANY($1) AND tenant_id IN (1, (SELECT tenant_id FROM devices WHERE id=$2))`, ids, deviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -604,6 +608,11 @@ func (s *Server) saveLibraryItem(ctx context.Context, actor string, it *api.Libr
 // audit entry in one transaction and sets it.ID. restore lets a rollback
 // recreate a deleted item under its old ID.
 func (s *Server) storeItem(ctx context.Context, actor, action, note string, it *api.LibraryItem, restore bool) error {
+	if it.ID > 0 && !restore { // ownership before anything else, so validation reveals nothing
+		if err := tenantGuard(ctx, s.db, "library_items", it.ID); err != nil {
+			return err
+		}
+	}
 	if err := s.restoreNetworkSecrets(ctx, it); err != nil {
 		return err
 	}

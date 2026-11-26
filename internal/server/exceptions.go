@@ -149,6 +149,10 @@ func (s *Server) exceptionRevoke(w http.ResponseWriter, r *http.Request, sess se
 		err := tx.QueryRow(r.Context(), `UPDATE risk_exceptions SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL AND `+tcond+` RETURNING check_id`, append([]any{id}, targs...)...).Scan(&check)
 		return sess.Email, "exception.revoke", check, "#" + strconv.FormatInt(id, 10), err
 	})
+	if errors.Is(err, pgx.ErrNoRows) && !s.tenantOwns(r.Context(), sess, "risk_exceptions", id, false) {
+		s.notFound(w, r, sess)
+		return
+	}
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		s.fail(w, err)
 		return

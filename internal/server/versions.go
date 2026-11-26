@@ -457,6 +457,10 @@ func (s *Server) libraryRollback(w http.ResponseWriter, r *http.Request, sess se
 		http.NotFound(w, r)
 		return
 	}
+	if !s.tenantOwns(ctx, sess, "library_items", id, false) {
+		s.notFound(w, r, sess)
+		return
+	}
 	vs, err := s.itemVersions(ctx, id)
 	if err != nil {
 		s.fail(w, err)
@@ -479,6 +483,10 @@ func (s *Server) blueprintRollback(w http.ResponseWriter, r *http.Request, sess 
 	n, err := strconv.Atoi(r.FormValue("version"))
 	if !ok || err != nil {
 		http.NotFound(w, r)
+		return
+	}
+	if !s.tenantOwns(ctx, sess, "blueprints", id, false) {
+		s.notFound(w, r, sess)
 		return
 	}
 	vs, err := s.blueprintVersions(ctx, id)
