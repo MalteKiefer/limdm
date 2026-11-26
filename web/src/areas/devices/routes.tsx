@@ -1,8 +1,11 @@
-// The devices area: routes and navigation entry.
+// The devices area: routes, navigation entry and palette commands.
 import { createRoute, lazyRouteComponent } from '@tanstack/react-router'
-import { Monitor } from 'lucide-react'
+import { Monitor, Plus } from 'lucide-react'
 import type { Area } from '../../app/area'
 import { str } from '../../app/Stub'
+import { t } from '../../i18n'
+
+const page = (name: 'DevicesPage' | 'DevicePage' | 'EnrollPage' | 'ShellPage') => lazyRouteComponent(() => import('./pages'), name)
 
 export const devicesArea: Area = {
   id: 'devices',
@@ -11,14 +14,17 @@ export const devicesArea: Area = {
     createRoute({
       getParentRoute: () => shell,
       path: '/devices',
-      component: lazyRouteComponent(() => import('./pages'), 'DevicesPage'),
+      component: page('DevicesPage'),
       validateSearch: (s: Record<string, unknown>) => ({ q: str(s.q), sort: str(s.sort), sel: str(s.sel) }),
     }),
+    createRoute({ getParentRoute: () => shell, path: '/devices/enroll', component: page('EnrollPage') }),
     createRoute({
       getParentRoute: () => shell,
       path: '/devices/$id',
-      component: lazyRouteComponent(() => import('./pages'), 'DevicePage'),
-      validateSearch: (s: Record<string, unknown>) => ({ tab: str(s.tab) }),
+      component: page('DevicePage'),
+      validateSearch: (s: Record<string, unknown>) => ({ tab: str(s.tab), sub: str(s.sub) }),
     }),
+    createRoute({ getParentRoute: () => shell, path: '/devices/$id/shell/$sid', component: page('ShellPage') }),
   ],
+  commands: () => [{ id: 'devices.enroll', label: t('devices.add'), icon: Plus, keywords: 'enroll token agent install registrieren', run: (go) => go('/devices/enroll') }],
 }

@@ -33,7 +33,7 @@
               "type": "string",
               "maxLength": 1000
             },
-            "description": "Query language: free words match host name, OS, id, blueprint or tags; keys status (compliant, in-grace, non-compliant, stale, pending, retired), os, tag, blueprint, agent, check (failing check id), pkg (name with optional version comparison), app, flatpak, remote, seen (>7d older, <2h newer; m, h, d). Example: status:non-compliant os:\"Ubuntu 24\" tag:prod. Unknown keys are an error."
+            "description": "Query language: free words match host name, OS, id, blueprint or tags; keys status (compliant, in-grace, non-compliant, stale, pending, retired, locked), os, kind (desktop, server), tag, blueprint, agent, check (failing check id), pkg (name with optional version comparison), app, flatpak, remote, seen (>7d older, <2h newer; m, h, d). Example: status:non-compliant os:\"Ubuntu 24\" tag:prod. German names work too: zustand, system, schlagwort, pruefung, paket, zuletzt, offline (offline:7d), art; status konform, nicht-konform, in-karenz, veraltet, offline, ausstehend, ausgemustert, gesperrt; art arbeitsplatz, laptop, server. Unknown keys are an error."
           },
           {
             "name": "sort",
@@ -234,8 +234,8 @@
       },
       "patch": {
         "operationId": "updateDevice",
-        "summary": "Change tags and the explicit blueprint",
-        "description": "Fields left out stay unchanged; blueprint_id null assigns the default blueprint. Audited as device.assign. Role admin, not read only.",
+        "summary": "Change tags, blueprint, desktop users and primary user",
+        "description": "Fields left out stay unchanged; blueprint_id null assigns the default blueprint, primary_user empty clears it. Audited as device.assign. Role admin, not read only.",
         "requestBody": {
           "required": true,
           "content": {
@@ -279,6 +279,48 @@
             "$ref": "#/components/responses/Problem"
           },
           "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteDevice",
+        "summary": "Delete a retired device for good",
+        "description": "Deletes the device with its events, metrics, commands, recovery keys and app requests. Audited as device.delete. Role admin.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Device id"
+          },
+          {
+            "name": "confirm",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The host name"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -1805,7 +1847,7 @@
               "type": "string",
               "maxLength": 1000
             },
-            "description": "Query language: free words match host name, OS, id, blueprint or tags; keys status (compliant, in-grace, non-compliant, stale, pending, retired), os, tag, blueprint, agent, check (failing check id), pkg (name with optional version comparison), app, flatpak, remote, seen (>7d older, <2h newer; m, h, d). Example: status:non-compliant os:\"Ubuntu 24\" tag:prod. Unknown keys are an error."
+            "description": "Query language: free words match host name, OS, id, blueprint or tags; keys status (compliant, in-grace, non-compliant, stale, pending, retired, locked), os, kind (desktop, server), tag, blueprint, agent, check (failing check id), pkg (name with optional version comparison), app, flatpak, remote, seen (>7d older, <2h newer; m, h, d). Example: status:non-compliant os:\"Ubuntu 24\" tag:prod. German names work too: zustand, system, schlagwort, pruefung, paket, zuletzt, offline (offline:7d), art; status konform, nicht-konform, in-karenz, veraltet, offline, ausstehend, ausgemustert, gesperrt; art arbeitsplatz, laptop, server. Unknown keys are an error."
           },
           {
             "name": "q",
@@ -3592,6 +3634,960 @@
           }
         }
       }
+    },
+    "/api/v1/devices/{id}/detail": {
+      "get": {
+        "operationId": "deviceDetail",
+        "summary": "Everything the device page shows",
+        "description": "The device with its inventory, check results, declaration states, resolved blueprint chain, protective actions, recovery key metadata, network certificates, catalog state, app requests, 7 day metrics and the switches that decide which actions the caller sees. Any API role except metrics; diagnostics only for admin and helpdesk.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Device id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/packages": {
+      "get": {
+        "operationId": "devicePackages",
+        "summary": "Installed packages of a device",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Device id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DevicePackage"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/timeline": {
+      "get": {
+        "operationId": "deviceTimeline",
+        "summary": "Activity of a device, newest first",
+        "description": "Merges device events, commands, script results, remote shell sessions (the helpdesk sees its own) and diagnostics bundles (admin and helpdesk).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Device id"
+          },
+          {
+            "$ref": "#/components/parameters/limit"
+          },
+          {
+            "$ref": "#/components/parameters/cursor"
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "event",
+                "command",
+                "script",
+                "shell",
+                "diagnostics"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelinePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/diagnostics/{cid}": {
+      "get": {
+        "operationId": "downloadDiagnostics",
+        "summary": "Download a diagnostics bundle",
+        "description": "Plain text attachment; audited as device.diagnostics.download. Roles admin and helpdesk.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Device id"
+          },
+          {
+            "name": "cid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The bundle",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/retire": {
+      "post": {
+        "operationId": "retireDevice",
+        "summary": "Retire a device and revoke its certificates",
+        "description": "Audited as device.retire. Role admin.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Device id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The retired device",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Device"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/agent-update": {
+      "post": {
+        "operationId": "requestAgentUpdate",
+        "summary": "Update the agent at the next check in",
+        "description": "version empty: the newest approved version. Audited as agent_update.request. Role admin.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Device id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "string"
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Requested",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/recovery-keys/{uuid}/view": {
+      "post": {
+        "operationId": "viewRecoveryKey",
+        "summary": "Show a disk recovery key",
+        "description": "Audited as recovery.view and announced on the device. With four eyes for recovery keys the answer has no key but a state: reason (send a reason to request approval), requested, pending. Roles admin and helpdesk.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Device id"
+          },
+          {
+            "name": "uuid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryKeyView"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/shell": {
+      "post": {
+        "operationId": "startShell",
+        "summary": "Start a remote shell session",
+        "description": "Console sessions only; the terminal connects to /shell/{session}/ws with the CSRF token. 202 when the session waits for four eyes approval. Audited as shell.start.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Device id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "user": {
+                    "type": "string"
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/shell-sessions": {
+      "get": {
+        "operationId": "deviceShellSessions",
+        "summary": "Remote shell sessions of a device",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Device id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ShellSession"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shell-sessions/{sid}": {
+      "get": {
+        "operationId": "shellSession",
+        "summary": "One remote shell session with its transcript",
+        "description": "The transcript goes to admins and auditors after the session ended.",
+        "parameters": [
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShellSession"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shell-sessions/{sid}/end": {
+      "post": {
+        "operationId": "endShell",
+        "summary": "End a running remote shell session",
+        "description": "The user who started it or an admin.",
+        "parameters": [
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Ended"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/bulk": {
+      "post": {
+        "operationId": "bulkDevices",
+        "summary": "Run one action on many devices",
+        "description": "action: command:<type> (not lost or wipe), agent-update, tag-add, tag-remove. params are the fields of the command (as createCommand) or tag. Commands under four eyes become one approval per device. Roles admin and helpdesk (helpdesk: its commands only).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Queued or requested",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "queued",
+                        "approval"
+                      ]
+                    },
+                    "devices": {
+                      "type": "integer"
+                    },
+                    "approvals": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/primary-users": {
+      "get": {
+        "operationId": "primaryUserSuggestions",
+        "summary": "Directory people for the primary user field",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Role admin.",
+        "responses": {
+          "200": {
+            "description": "Up to 20 email addresses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/enrollment-tokens": {
+      "get": {
+        "operationId": "listEnrollmentTokens",
+        "summary": "Active enrollment tokens and the install data",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createEnrollmentToken",
+        "summary": "Create an enrollment token",
+        "description": "The token is in this answer only. Audited as token.create. Role admin.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "note": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "blueprint_id": {
+                    "type": "integer"
+                  },
+                  "uses": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10000
+                  },
+                  "days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 90
+                  }
+                },
+                "required": [
+                  "uses",
+                  "days"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "token": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "token"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/enrollment-tokens/{id}": {
+      "delete": {
+        "operationId": "revokeEnrollmentToken",
+        "summary": "Revoke an enrollment token",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Devices enrolled with it stay. Audited as token.revoke. Role admin.",
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/catalog-apps": {
+      "get": {
+        "operationId": "deviceCatalogApps",
+        "summary": "Enabled catalog apps for bulk install and removal",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3761,8 +4757,35 @@
           "inventory": {
             "type": "object",
             "description": "Inventory as reported by the agent (single device only)"
+          },
+          "desktop": {
+            "type": "string",
+            "description": "Desktop environment, empty on servers"
+          },
+          "memory_mb": {
+            "type": "integer"
+          },
+          "auto_locked": {
+            "type": "boolean",
+            "description": "Locked by the compliance policy"
           }
-        }
+        },
+        "required": [
+          "id",
+          "hostname",
+          "os",
+          "agent_version",
+          "blueprint",
+          "tags",
+          "status",
+          "failing",
+          "checks",
+          "last_seen",
+          "retired",
+          "desktop",
+          "memory_mb",
+          "auto_locked"
+        ]
       },
       "DevicePage": {
         "type": "object",
@@ -3800,6 +4823,31 @@
               "integer",
               "null"
             ]
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "username": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": "string"
+                },
+                "admin": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "username",
+                "email"
+              ]
+            }
+          },
+          "primary_user": {
+            "type": "string",
+            "description": "Email of a directory person; empty clears it"
           }
         }
       },
@@ -6375,6 +7423,875 @@
             "type": "string"
           }
         }
+      },
+      "DevicePackage": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "arch": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "arch"
+        ]
+      },
+      "TimelineEntry": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "event",
+              "command",
+              "script",
+              "shell",
+              "diagnostics"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "by": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "extra": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "at",
+          "title",
+          "status",
+          "by",
+          "detail",
+          "extra"
+        ]
+      },
+      "TimelinePage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TimelineEntry"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "RecoveryKeyView": {
+        "type": "object",
+        "properties": {
+          "hostname": {
+            "type": "string"
+          },
+          "device": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "",
+              "reason",
+              "pending",
+              "requested"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "rotate": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "hostname",
+          "device",
+          "uuid",
+          "state",
+          "rotate"
+        ]
+      },
+      "ShellSession": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "local_user": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "end_reason": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "connected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "bytes": {
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "live": {
+            "type": "boolean"
+          },
+          "can_end": {
+            "type": "boolean"
+          },
+          "transcript": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "device_id",
+          "hostname",
+          "requested_by",
+          "local_user",
+          "state",
+          "end_reason",
+          "created_at",
+          "connected_at",
+          "ended_at",
+          "bytes",
+          "truncated",
+          "live",
+          "can_end"
+        ]
+      },
+      "BulkRequest": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "action": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          }
+        },
+        "required": [
+          "ids",
+          "action"
+        ]
+      },
+      "EnrollmentToken": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "blueprint": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "uses_left": {
+            "type": "integer"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "note",
+          "blueprint",
+          "created_by",
+          "uses_left",
+          "expires_at"
+        ]
+      },
+      "EnrollmentInfo": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EnrollmentToken"
+            }
+          },
+          "agent_url": {
+            "type": "string"
+          },
+          "public_url": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "release_repo": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "agent_url",
+          "public_url",
+          "fingerprint",
+          "release_repo"
+        ]
+      },
+      "DeviceDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Device"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "inventory": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "check_results": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "declarations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "identifier": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string"
+                    },
+                    "reasons": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "identifier",
+                    "type",
+                    "state",
+                    "reasons"
+                  ]
+                }
+              },
+              "chain": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "assigned": {
+                      "type": "boolean"
+                    },
+                    "applies": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ]
+                }
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "type"
+                  ]
+                }
+              },
+              "blueprints": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "assigned": {
+                      "type": "boolean"
+                    },
+                    "applies": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ]
+                }
+              },
+              "blueprint_source": {
+                "type": "object",
+                "properties": {
+                  "Kind": {
+                    "type": "string"
+                  },
+                  "Group": {
+                    "type": "string"
+                  },
+                  "Priority": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "Kind",
+                  "Group",
+                  "Priority"
+                ]
+              },
+              "primary_user": {
+                "type": "string"
+              },
+              "desktop_users": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "username": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "admin": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "username",
+                    "email",
+                    "admin"
+                  ]
+                }
+              },
+              "protective": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "by": {
+                      "type": "string"
+                    },
+                    "at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "status",
+                    "by",
+                    "at"
+                  ]
+                }
+              },
+              "tampered_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "auto_locked": {
+                "type": "boolean"
+              },
+              "failing_since": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "grace_until": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "lock_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "notify_on_grace": {
+                "type": "boolean"
+              },
+              "cert_expires": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "update_state": {
+                "type": "string"
+              },
+              "update_version": {
+                "type": "string"
+              },
+              "update_requested": {
+                "type": "boolean"
+              },
+              "external_ip": {
+                "type": "string"
+              },
+              "geo": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": true
+              },
+              "place": {
+                "type": "string"
+              },
+              "recovery_keys": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "uuid": {
+                      "type": "string"
+                    },
+                    "device": {
+                      "type": "string"
+                    },
+                    "escrowed": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "viewed_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    },
+                    "viewed_by": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "rotate": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "uuid",
+                    "device",
+                    "escrowed",
+                    "viewed_at",
+                    "viewed_by",
+                    "rotate"
+                  ]
+                }
+              },
+              "agent_versions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "network_certs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "serial": {
+                      "type": "string"
+                    },
+                    "sans": {
+                      "type": "string"
+                    },
+                    "not_before": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "not_after": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "state": {
+                      "type": "string"
+                    },
+                    "revoked_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "serial",
+                    "sans",
+                    "not_before",
+                    "not_after",
+                    "state"
+                  ]
+                }
+              },
+              "app_names": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "app_busy": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "app_notes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "app": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "app",
+                    "type",
+                    "ok",
+                    "at"
+                  ]
+                }
+              },
+              "catalog_flatpaks": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "catalog_requests": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "app": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "username": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "decided_by": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "decided_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "app",
+                    "name",
+                    "username",
+                    "note",
+                    "status",
+                    "decided_by",
+                    "decided_at",
+                    "created_at"
+                  ]
+                }
+              },
+              "encryption_exempt": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "mem_pct": {
+                      "type": "number"
+                    },
+                    "root_pct": {
+                      "type": "number"
+                    },
+                    "load1": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "at",
+                    "mem_pct",
+                    "root_pct",
+                    "load1"
+                  ]
+                }
+              },
+              "package_count": {
+                "type": "integer"
+              },
+              "password_min": {
+                "type": "integer"
+              },
+              "shell": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "allowed": {
+                    "type": "boolean"
+                  },
+                  "allow_root": {
+                    "type": "boolean"
+                  },
+                  "max_minutes": {
+                    "type": "integer"
+                  },
+                  "idle_minutes": {
+                    "type": "integer"
+                  },
+                  "four_eyes": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "allowed",
+                  "allow_root",
+                  "max_minutes",
+                  "idle_minutes",
+                  "four_eyes"
+                ]
+              },
+              "four_eyes_commands": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "four_eyes_recovery": {
+                "type": "boolean"
+              },
+              "diagnostics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "command_id": {
+                      "type": "integer"
+                    },
+                    "size": {
+                      "type": "integer"
+                    },
+                    "at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "command_id",
+                    "size",
+                    "at"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "inventory",
+              "check_results",
+              "declarations",
+              "chain",
+              "items",
+              "blueprints",
+              "blueprint_source",
+              "primary_user",
+              "desktop_users",
+              "protective",
+              "tampered_at",
+              "auto_locked",
+              "failing_since",
+              "grace_until",
+              "lock_at",
+              "notify_on_grace",
+              "cert_expires",
+              "update_state",
+              "update_version",
+              "update_requested",
+              "external_ip",
+              "geo",
+              "place",
+              "recovery_keys",
+              "agent_versions",
+              "network_certs",
+              "app_names",
+              "app_busy",
+              "app_notes",
+              "catalog_flatpaks",
+              "catalog_requests",
+              "encryption_exempt",
+              "metrics",
+              "package_count",
+              "password_min",
+              "shell",
+              "four_eyes_commands",
+              "four_eyes_recovery",
+              "diagnostics"
+            ]
+          }
+        ]
       }
     }
   }

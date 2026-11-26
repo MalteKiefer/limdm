@@ -103,35 +103,62 @@ func (s *Server) recoveryKeys(ctx context.Context, deviceID string) ([]recoveryR
 
 // recoveryView reveals one key to admins and helpdesk (POST with CSRF) and audits it.
 func (s *Server) recoveryView(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	id, uuid := r.PathValue("id"), r.FormValue("uuid")
-	reason := strings.TrimSpace(r.FormValue("reason"))
-	if len(reason) > 500 || strings.ContainsAny(reason, "\x00\r\n") {
-		s.errorPage(w, r, sess, http.StatusBadRequest, "reason: up to 500 characters on one line")
-		return
-	}
-	if !s.inScope(ctx, sess, id) {
+	id := r.PathValue("id")
+	res, err := s.viewRecoveryKey(r.Context(), sess, id, r.FormValue("uuid"), r.FormValue("reason"))
+	var ue *userError
+	switch {
+	case errors.Is(err, errNotFound):
 		http.NotFound(w, r)
 		return
+	case errors.As(err, &ue):
+		s.errorPage(w, r, sess, ue.Status, ue.Msg)
+		return
+	case err != nil:
+		s.fail(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	s.render(w, r, sess, "recovery", map[string]any{"ID": id, "Host": res.Host, "Path": res.Path, "UUID": res.UUID,
+		"State": res.State, "Key": res.Key, "Rotate": res.Rotate})
+}
+
+// recoveryResult is the outcome of a recovery key view: the key (State
+// empty), or with four eyes on "reason" (a reason is needed to ask),
+// "pending" (asked before) or "requested" (asked now).
+type recoveryResult struct {
+	Host   string `json:"hostname"`
+	Path   string `json:"device"`
+	UUID   string `json:"uuid"`
+	State  string `json:"state"`
+	Key    string `json:"key,omitempty"`
+	Rotate bool   `json:"rotate"`
+}
+
+// viewRecoveryKey opens one escrowed key for the caller, with the four eyes
+// rule, the audit entry and the notice on the device. errNotFound when the
+// device is out of scope or has no such key.
+func (s *Server) viewRecoveryKey(ctx context.Context, sess session, id, uuid, reason string) (recoveryResult, error) {
+	reason = strings.TrimSpace(reason)
+	if len(reason) > 500 || strings.ContainsAny(reason, "\x00\r\n") {
+		return recoveryResult{}, &userError{http.StatusBadRequest, "reason: up to 500 characters on one line"}
+	}
+	if !s.inScope(ctx, sess, id) {
+		return recoveryResult{}, errNotFound
 	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return recoveryResult{}, err
 	}
 	defer tx.Rollback(ctx)
-	var path, host string
 	var sealed []byte
+	res := recoveryResult{UUID: uuid}
 	err = tx.QueryRow(ctx, `SELECT k.device_path, k.sealed, d.hostname FROM recovery_keys k JOIN devices d ON d.id=k.device_id
-		WHERE k.device_id=$1 AND k.uuid=$2`, id, uuid).Scan(&path, &sealed, &host)
+		WHERE k.device_id=$1 AND k.uuid=$2`, id, uuid).Scan(&res.Path, &sealed, &res.Host)
 	if errors.Is(err, pgx.ErrNoRows) {
-		http.NotFound(w, r)
-		return
+		return res, errNotFound
 	} else if err != nil {
-		s.fail(w, err)
-		return
+		return res, err
 	}
-	view := map[string]any{"ID": id, "Host": host, "Path": path, "UUID": uuid}
 	approvedBy := ""
 	if s.settings().FourEyesRecovery {
 		// an approved request of this viewer for this volume opens the key once
@@ -145,68 +172,56 @@ func (s *Server) recoveryView(w http.ResponseWriter, r *http.Request, sess sessi
 			var pending bool
 			if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approvals WHERE action='recovery.view' AND target=$1 AND payload->>'uuid'=$2
 				AND requested_by=$3 AND status='pending' AND expires_at > now())`, id, uuid, sess.Email).Scan(&pending); err != nil {
-				s.fail(w, err)
-				return
+				return res, err
 			}
 			switch {
 			case pending:
-				view["State"] = "pending"
+				res.State = "pending"
 			case reason == "":
-				view["State"] = "reason"
+				res.State = "reason"
 			default:
-				if _, err := s.requestApproval(ctx, sess, "recovery.view", id, map[string]string{"uuid": uuid, "device": path}, reason); err != nil {
-					s.fail(w, err)
-					return
+				if _, err := s.requestApproval(ctx, sess, "recovery.view", id, map[string]string{"uuid": uuid, "device": res.Path}, reason); err != nil {
+					return res, err
 				}
-				view["State"] = "requested"
+				res.State = "requested"
 			}
-			w.Header().Set("Cache-Control", "no-store")
-			s.render(w, r, sess, "recovery", view)
-			return
+			return res, nil
 		case err != nil:
-			s.fail(w, err)
-			return
+			return res, err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE approvals SET status='used' WHERE id=$1`, aid); err != nil {
-			s.fail(w, err)
-			return
+			return res, err
 		}
 		reason, approvedBy = aReason, fmt.Sprintf(" approval #%d by %s", aid, by)
 	}
 	key, err := s.openRecovery(id, uuid, sealed)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return res, err
 	}
 	decls, err := effectiveDeclarations(ctx, tx, id)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return res, err
 	}
 	pol, _ := api.Compose(decls)
 	rotate := pol.Extra.DiskEncryption != nil && pol.Extra.DiskEncryption.RotateAfterView
 	if _, err := tx.Exec(ctx, `UPDATE recovery_keys SET viewed_at=now(), viewed_by=$3, rotate=rotate OR $4 WHERE device_id=$1 AND uuid=$2`,
 		id, uuid, sess.Email, rotate); err != nil {
-		s.fail(w, err)
-		return
+		return res, err
 	}
-	detail := path + " " + uuid
+	detail := res.Path + " " + uuid
 	if reason != "" {
 		detail += fmt.Sprintf(" reason=%q", reason)
 	}
 	if err := audit(ctx, tx, sess.Email, "recovery.view", id, detail+approvedBy); err != nil {
-		s.fail(w, err)
-		return
+		return res, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		s.fail(w, err)
-		return
+		return res, err
 	}
 	s.notifyDevice(id, []notice{{Type: "recovery.view", Severity: "warning", Title: "Recovery key viewed",
-		Text: fmt.Sprintf("%s viewed the recovery key of %s. Reason: %s.", sess.Email, path, firstNonEmpty(reason, "none given"))}})
-	w.Header().Set("Cache-Control", "no-store")
-	view["Key"], view["Rotate"] = key, rotate
-	s.render(w, r, sess, "recovery", view)
+		Text: fmt.Sprintf("%s viewed the recovery key of %s. Reason: %s.", sess.Email, res.Path, firstNonEmpty(reason, "none given"))}})
+	res.Key, res.Rotate = key, rotate
+	return res, nil
 }
 
 // attachRecoveryKeys adds the escrowed keys to "lost" commands at delivery:

@@ -642,20 +642,12 @@ func splitOlder(rels []releaseView, fleet []versionCount) (current, older []rele
 // next check in, regardless of policy and delay.
 func (s *Server) deviceAgentUpdate(w http.ResponseWriter, r *http.Request, sess session) {
 	id, target := r.PathValue("id"), strings.TrimSpace(r.FormValue("version"))
-	if target != "" {
-		var ok bool
-		if err := s.db.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM agent_releases WHERE version=$1 AND NOT blocked)`, target).Scan(&ok); err != nil || !ok {
-			s.errorPage(w, r, sess, http.StatusBadRequest, "unknown or blocked version")
-			return
-		}
+	err := s.requestAgentUpdate(r.Context(), sess.Email, id, target)
+	var ue *userError
+	if errors.As(err, &ue) {
+		s.errorPage(w, r, sess, ue.Status, ue.Msg)
+		return
 	}
-	err := s.auditAction(r.Context(), sess.Email, "agent_update.request", id, target, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(r.Context(), `UPDATE devices SET update_requested=true, update_target=$2 WHERE id=$1 AND NOT retired`, id, target)
-		if err == nil && tag.RowsAffected() == 0 {
-			err = errNotFound
-		}
-		return err
-	})
 	if errors.Is(err, errNotFound) {
 		http.NotFound(w, r)
 		return
@@ -669,6 +661,25 @@ func (s *Server) deviceAgentUpdate(w http.ResponseWriter, r *http.Request, sess 
 		back = "/agents"
 	}
 	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
+// requestAgentUpdate marks a device for an agent update at its next check
+// in: target is an approved, unblocked version, or empty for the newest.
+// errNotFound when the device is unknown or retired.
+func (s *Server) requestAgentUpdate(ctx context.Context, actor, id, target string) error {
+	if target != "" {
+		var ok bool
+		if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM agent_releases WHERE version=$1 AND NOT blocked)`, target).Scan(&ok); err != nil || !ok {
+			return &userError{http.StatusBadRequest, "unknown or blocked version"}
+		}
+	}
+	return s.auditAction(ctx, actor, "agent_update.request", id, target, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE devices SET update_requested=true, update_target=$2 WHERE id=$1 AND NOT retired`, id, target)
+		if err == nil && tag.RowsAffected() == 0 {
+			err = errNotFound
+		}
+		return err
+	})
 }
 
 var (

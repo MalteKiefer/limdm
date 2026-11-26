@@ -41,12 +41,16 @@ export interface paths {
         get: operations["getDevice"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete a retired device for good
+         * @description Deletes the device with its events, metrics, commands, recovery keys and app requests. Audited as device.delete. Role admin.
+         */
+        delete: operations["deleteDevice"];
         options?: never;
         head?: never;
         /**
-         * Change tags and the explicit blueprint
-         * @description Fields left out stay unchanged; blueprint_id null assigns the default blueprint. Audited as device.assign. Role admin, not read only.
+         * Change tags, blueprint, desktop users and primary user
+         * @description Fields left out stay unchanged; blueprint_id null assigns the default blueprint, primary_user empty clears it. Audited as device.assign. Role admin, not read only.
          */
         patch: operations["updateDevice"];
         trace?: never;
@@ -1065,6 +1069,318 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/devices/{id}/detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Everything the device page shows
+         * @description The device with its inventory, check results, declaration states, resolved blueprint chain, protective actions, recovery key metadata, network certificates, catalog state, app requests, 7 day metrics and the switches that decide which actions the caller sees. Any API role except metrics; diagnostics only for admin and helpdesk.
+         */
+        get: operations["deviceDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Installed packages of a device */
+        get: operations["devicePackages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Activity of a device, newest first
+         * @description Merges device events, commands, script results, remote shell sessions (the helpdesk sees its own) and diagnostics bundles (admin and helpdesk).
+         */
+        get: operations["deviceTimeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/diagnostics/{cid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download a diagnostics bundle
+         * @description Plain text attachment; audited as device.diagnostics.download. Roles admin and helpdesk.
+         */
+        get: operations["downloadDiagnostics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retire a device and revoke its certificates
+         * @description Audited as device.retire. Role admin.
+         */
+        post: operations["retireDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/agent-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update the agent at the next check in
+         * @description version empty: the newest approved version. Audited as agent_update.request. Role admin.
+         */
+        post: operations["requestAgentUpdate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/recovery-keys/{uuid}/view": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Show a disk recovery key
+         * @description Audited as recovery.view and announced on the device. With four eyes for recovery keys the answer has no key but a state: reason (send a reason to request approval), requested, pending. Roles admin and helpdesk.
+         */
+        post: operations["viewRecoveryKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/shell": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a remote shell session
+         * @description Console sessions only; the terminal connects to /shell/{session}/ws with the CSRF token. 202 when the session waits for four eyes approval. Audited as shell.start.
+         */
+        post: operations["startShell"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/shell-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Remote shell sessions of a device */
+        get: operations["deviceShellSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/shell-sessions/{sid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One remote shell session with its transcript
+         * @description The transcript goes to admins and auditors after the session ended.
+         */
+        get: operations["shellSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/shell-sessions/{sid}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End a running remote shell session
+         * @description The user who started it or an admin.
+         */
+        post: operations["endShell"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run one action on many devices
+         * @description action: command:<type> (not lost or wipe), agent-update, tag-add, tag-remove. params are the fields of the command (as createCommand) or tag. Commands under four eyes become one approval per device. Roles admin and helpdesk (helpdesk: its commands only).
+         */
+        post: operations["bulkDevices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/primary-users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Directory people for the primary user field
+         * @description Role admin.
+         */
+        get: operations["primaryUserSuggestions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/enrollment-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Active enrollment tokens and the install data */
+        get: operations["listEnrollmentTokens"];
+        put?: never;
+        /**
+         * Create an enrollment token
+         * @description The token is in this answer only. Audited as token.create. Role admin.
+         */
+        post: operations["createEnrollmentToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/enrollment-tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke an enrollment token
+         * @description Devices enrolled with it stay. Audited as token.revoke. Role admin.
+         */
+        delete: operations["revokeEnrollmentToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/catalog-apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Enabled catalog apps for bulk install and removal */
+        get: operations["deviceCatalogApps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1087,20 +1403,20 @@ export interface components {
             }[];
         };
         Device: {
-            id?: string;
-            hostname?: string;
-            os?: string;
-            agent_version?: string;
+            id: string;
+            hostname: string;
+            os: string;
+            agent_version: string;
             /** @description Effective blueprint name */
-            blueprint?: string;
-            tags?: string[];
+            blueprint: string;
+            tags: string[];
             /** @enum {string} */
-            status?: "compliant" | "in grace" | "non-compliant" | "stale" | "pending" | "retired";
-            failing?: number;
-            checks?: number;
+            status: "compliant" | "in grace" | "non-compliant" | "stale" | "pending" | "retired";
+            failing: number;
+            checks: number;
             /** Format: date-time */
-            last_seen?: string | null;
-            retired?: boolean;
+            last_seen: string | null;
+            retired: boolean;
             /** @description Explicitly assigned blueprint (single device only) */
             blueprint_id?: number | null;
             /**
@@ -1110,6 +1426,11 @@ export interface components {
             enrolled_at?: string;
             /** @description Inventory as reported by the agent (single device only) */
             inventory?: Record<string, never>;
+            /** @description Desktop environment, empty on servers */
+            desktop: string;
+            memory_mb: number;
+            /** @description Locked by the compliance policy */
+            auto_locked: boolean;
         };
         DevicePage: {
             items: components["schemas"]["Device"][];
@@ -1120,6 +1441,13 @@ export interface components {
             /** @description Replaces all tags; stored in lower case */
             tags?: string[];
             blueprint_id?: number | null;
+            users?: {
+                username: string;
+                email: string;
+                admin?: boolean;
+            }[];
+            /** @description Email of a directory person; empty clears it */
+            primary_user?: string;
         };
         CommandRequest: {
             /** @description A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create */
@@ -1819,6 +2147,227 @@ export interface components {
             items: components["schemas"]["ReportRun"][];
             next_cursor?: string;
         };
+        DevicePackage: {
+            name: string;
+            version: string;
+            arch: string;
+        };
+        TimelineEntry: {
+            /** @enum {string} */
+            kind: "event" | "command" | "script" | "shell" | "diagnostics";
+            id: string;
+            /** Format: date-time */
+            at: string;
+            title: string;
+            status: string;
+            by: string;
+            detail: string;
+            extra: string;
+        };
+        TimelinePage: {
+            items: components["schemas"]["TimelineEntry"][];
+            next_cursor?: string;
+        };
+        RecoveryKeyView: {
+            hostname: string;
+            device: string;
+            uuid: string;
+            /** @enum {string} */
+            state: "" | "reason" | "pending" | "requested";
+            key?: string;
+            rotate: boolean;
+        };
+        ShellSession: {
+            id: string;
+            device_id: string;
+            hostname: string;
+            requested_by: string;
+            local_user: string;
+            state: string;
+            end_reason: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            connected_at: string | null;
+            /** Format: date-time */
+            ended_at: string | null;
+            bytes: number;
+            truncated: boolean;
+            live: boolean;
+            can_end: boolean;
+            transcript?: string;
+        };
+        BulkRequest: {
+            ids: string[];
+            action: string;
+            params?: {
+                [key: string]: string | number | boolean;
+            };
+        };
+        EnrollmentToken: {
+            id: string;
+            note: string;
+            blueprint: string;
+            created_by: string;
+            uses_left: number;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        EnrollmentInfo: {
+            items: components["schemas"]["EnrollmentToken"][];
+            agent_url: string;
+            public_url: string;
+            fingerprint: string;
+            release_repo: string;
+        };
+        DeviceDetail: components["schemas"]["Device"] & {
+            inventory: {
+                [key: string]: unknown;
+            };
+            check_results: {
+                [key: string]: unknown;
+            }[];
+            declarations: {
+                identifier: string;
+                type: string;
+                state: string;
+                reasons: string[];
+            }[];
+            chain: {
+                id: number;
+                name: string;
+                assigned?: boolean;
+                applies?: boolean;
+            }[];
+            items: {
+                id: number;
+                name: string;
+                type: string;
+            }[];
+            blueprints: {
+                id: number;
+                name: string;
+                assigned?: boolean;
+                applies?: boolean;
+            }[];
+            blueprint_source: {
+                Kind: string;
+                Group: string;
+                Priority: number;
+            };
+            primary_user: string;
+            desktop_users: {
+                username: string;
+                email: string;
+                admin: boolean;
+            }[];
+            protective: {
+                type: string;
+                status: string;
+                by: string;
+                /** Format: date-time */
+                at: string;
+            }[];
+            /** Format: date-time */
+            tampered_at: string | null;
+            auto_locked: boolean;
+            /** Format: date-time */
+            failing_since: string | null;
+            /** Format: date-time */
+            grace_until: string | null;
+            /** Format: date-time */
+            lock_at: string | null;
+            notify_on_grace: boolean;
+            /** Format: date-time */
+            cert_expires: string;
+            update_state: string;
+            update_version: string;
+            update_requested: boolean;
+            external_ip: string;
+            geo: {
+                [key: string]: unknown;
+            } | null;
+            place: string;
+            recovery_keys: {
+                uuid: string;
+                device: string;
+                /** Format: date-time */
+                escrowed: string;
+                /** Format: date-time */
+                viewed_at: string | null;
+                viewed_by: string | null;
+                rotate: boolean;
+            }[];
+            agent_versions: string[];
+            network_certs: {
+                serial: string;
+                sans: string;
+                /** Format: date-time */
+                not_before: string;
+                /** Format: date-time */
+                not_after: string;
+                state: string;
+                /** Format: date-time */
+                revoked_at?: string;
+                reason?: string;
+            }[];
+            app_names: {
+                [key: string]: string;
+            };
+            app_busy: {
+                [key: string]: string;
+            };
+            app_notes: {
+                app: string;
+                type: string;
+                error?: string;
+                ok: boolean;
+                /** Format: date-time */
+                at: string;
+            }[];
+            catalog_flatpaks: {
+                [key: string]: string;
+            };
+            catalog_requests: {
+                id: number;
+                app: string;
+                name: string;
+                username: string;
+                note: string;
+                status: string;
+                decided_by: string | null;
+                /** Format: date-time */
+                decided_at: string | null;
+                /** Format: date-time */
+                created_at: string;
+            }[];
+            encryption_exempt: string[];
+            metrics: {
+                /** Format: date-time */
+                at: string;
+                mem_pct: number;
+                root_pct: number;
+                load1: number;
+            }[];
+            package_count: number;
+            password_min: number;
+            shell: {
+                enabled: boolean;
+                allowed: boolean;
+                allow_root: boolean;
+                max_minutes: number;
+                idle_minutes: number;
+                four_eyes: boolean;
+            };
+            four_eyes_commands: string[];
+            four_eyes_recovery: boolean;
+            diagnostics: {
+                command_id: number;
+                size: number;
+                /** Format: date-time */
+                at: string;
+            }[];
+        };
     };
     responses: {
         /** @description Error as RFC 9457 problem details */
@@ -1845,7 +2394,7 @@ export interface operations {
     listDevices: {
         parameters: {
             query?: {
-                /** @description Query language: free words match host name, OS, id, blueprint or tags; keys status (compliant, in-grace, non-compliant, stale, pending, retired), os, tag, blueprint, agent, check (failing check id), pkg (name with optional version comparison), app, flatpak, remote, seen (>7d older, <2h newer; m, h, d). Example: status:non-compliant os:"Ubuntu 24" tag:prod. Unknown keys are an error. */
+                /** @description Query language: free words match host name, OS, id, blueprint or tags; keys status (compliant, in-grace, non-compliant, stale, pending, retired, locked), os, kind (desktop, server), tag, blueprint, agent, check (failing check id), pkg (name with optional version comparison), app, flatpak, remote, seen (>7d older, <2h newer; m, h, d). Example: status:non-compliant os:"Ubuntu 24" tag:prod. German names work too: zustand, system, schlagwort, pruefung, paket, zuletzt, offline (offline:7d), art; status konform, nicht-konform, in-karenz, veraltet, offline, ausstehend, ausgemustert, gesperrt; art arbeitsplatz, laptop, server. Unknown keys are an error. */
                 filter?: string;
                 /** @description Sort field, - for descending; default hostname. The cursor belongs to the sort it came with. */
                 sort?: "hostname" | "-hostname" | "os" | "-os" | "agent" | "-agent" | "failing" | "-failing" | "last_seen" | "-last_seen";
@@ -1921,6 +2470,34 @@ export interface operations {
             404: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
+        };
+    };
+    deleteDevice: {
+        parameters: {
+            query: {
+                /** @description The host name */
+                confirm: string;
+            };
+            header?: never;
+            path: {
+                /** @description Device id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
         };
     };
     updateDevice: {
@@ -2873,7 +3450,7 @@ export interface operations {
     deviceFacets: {
         parameters: {
             query?: {
-                /** @description Query language: free words match host name, OS, id, blueprint or tags; keys status (compliant, in-grace, non-compliant, stale, pending, retired), os, tag, blueprint, agent, check (failing check id), pkg (name with optional version comparison), app, flatpak, remote, seen (>7d older, <2h newer; m, h, d). Example: status:non-compliant os:"Ubuntu 24" tag:prod. Unknown keys are an error. */
+                /** @description Query language: free words match host name, OS, id, blueprint or tags; keys status (compliant, in-grace, non-compliant, stale, pending, retired, locked), os, kind (desktop, server), tag, blueprint, agent, check (failing check id), pkg (name with optional version comparison), app, flatpak, remote, seen (>7d older, <2h newer; m, h, d). Example: status:non-compliant os:"Ubuntu 24" tag:prod. German names work too: zustand, system, schlagwort, pruefung, paket, zuletzt, offline (offline:7d), art; status konform, nicht-konform, in-karenz, veraltet, offline, ausstehend, ausgemustert, gesperrt; art arbeitsplatz, laptop, server. Unknown keys are an error. */
                 filter?: string;
                 /** @description Substring of host name, OS, id, blueprint or tag, case insensitive */
                 q?: string;
@@ -3892,6 +4469,532 @@ export interface operations {
             404: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
+        };
+    };
+    deviceDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Device id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceDetail"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    devicePackages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Device id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["DevicePackage"][];
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deviceTimeline: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["limit"];
+                /** @description next_cursor of the previous page */
+                cursor?: components["parameters"]["cursor"];
+                kind?: "event" | "command" | "script" | "shell" | "diagnostics";
+            };
+            header?: never;
+            path: {
+                /** @description Device id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimelinePage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    downloadDiagnostics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Device id */
+                id: string;
+                cid: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The bundle */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    retireDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Device id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The retired device */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Device"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    requestAgentUpdate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Device id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Requested */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status: string;
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    viewRecoveryKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Device id */
+                id: string;
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryKeyView"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    startShell: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Device id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    user?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Started */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        status: string;
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deviceShellSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Device id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ShellSession"][];
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    shellSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShellSession"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    endShell: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ended */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    bulkDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Queued or requested */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "queued" | "approval";
+                        devices?: number;
+                        approvals?: number;
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    primaryUserSuggestions: {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Up to 20 email addresses */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: string[];
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listEnrollmentTokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentInfo"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    createEnrollmentToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    note?: string;
+                    blueprint_id?: number;
+                    uses: number;
+                    days: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        token: string;
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    revokeEnrollmentToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    deviceCatalogApps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            id: string;
+                            name: string;
+                        }[];
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
         };
     };
 }

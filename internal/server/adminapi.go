@@ -636,6 +636,9 @@ type apiDevice struct {
 	Checks       int             `json:"checks"`
 	LastSeen     *time.Time      `json:"last_seen"`
 	Retired      bool            `json:"retired"`
+	Desktop      string          `json:"desktop"`
+	MemoryMB     uint64          `json:"memory_mb"`
+	Locked       bool            `json:"auto_locked"`
 	BlueprintID  *int64          `json:"blueprint_id,omitempty"`
 	EnrolledAt   *time.Time      `json:"enrolled_at,omitempty"`
 	Inventory    json.RawMessage `json:"inventory,omitempty"`
@@ -646,7 +649,8 @@ func toAPIDevice(d deviceRow) apiDevice {
 		d.Tags = []string{}
 	}
 	return apiDevice{ID: d.ID, Hostname: d.Hostname, OS: d.OS, AgentVersion: d.AgentVersion, Blueprint: d.Blueprints, Tags: d.Tags,
-		Status: d.Status, Failing: d.Failing, Checks: d.Checks, LastSeen: d.LastSeen, Retired: d.Retired}
+		Status: d.Status, Failing: d.Failing, Checks: d.Checks, LastSeen: d.LastSeen, Retired: d.Retired,
+		Desktop: d.Desktop, MemoryMB: d.MemoryMB, Locked: d.AutoLocked}
 }
 
 func (s *Server) apiDevices(w http.ResponseWriter, r *http.Request, c apiCaller) {
@@ -711,17 +715,45 @@ func (s *Server) apiDeviceGet(w http.ResponseWriter, r *http.Request, c apiCalle
 	writeJSON(w, d)
 }
 
-// apiDevicePatch changes a device's tags and explicit blueprint (null:
-// default), with the console's tag rules and audit action.
+// apiDevicePatch changes a device's tags, explicit blueprint (null:
+// default), desktop users and primary user (empty: none), with the
+// console's rules and audit action (deviceAssign).
 func (s *Server) apiDevicePatch(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	ctx := r.Context()
 	id := r.PathValue("id")
 	var body struct {
 		Tags        *[]string       `json:"tags"`
 		BlueprintID json.RawMessage `json:"blueprint_id"`
+		Users       *[]api.User     `json:"users"`
+		PrimaryUser *string         `json:"primary_user"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
+	}
+	users := []byte("[]") // a valid parameter even when users stay
+	if body.Users != nil {
+		seen := map[string]bool{}
+		for i, u := range *body.Users {
+			u.Email = strings.ToLower(strings.TrimSpace(u.Email))
+			(*body.Users)[i] = u
+			if err := u.Validate(); err != nil || seen[u.Username] {
+				problemField(w, http.StatusUnprocessableEntity, "users", "invalid or repeated user "+strconv.Quote(u.Username))
+				return
+			}
+			seen[u.Username] = true
+		}
+		users, _ = json.Marshal(*body.Users)
+	}
+	var primary *int64
+	if body.PrimaryUser != nil {
+		if email := strings.ToLower(strings.TrimSpace(*body.PrimaryUser)); email != "" {
+			uid, err := s.dirPersonID(ctx, c.sess(), email)
+			if err != nil {
+				problemField(w, http.StatusUnprocessableEntity, "primary_user", "primary user not found in the directory")
+				return
+			}
+			primary = &uid
+		}
 	}
 	var tags []string
 	if body.Tags != nil {
@@ -765,11 +797,23 @@ func (s *Server) apiDevicePatch(w http.ResponseWriter, r *http.Request, c apiCal
 	if setBP {
 		detail = append(detail, "blueprint="+strings.Trim(string(body.BlueprintID), " "))
 	}
+	if body.Users != nil {
+		detail = append(detail, "users="+string(users))
+	}
+	if body.PrimaryUser != nil {
+		detail = append(detail, "primary_user="+strings.ToLower(strings.TrimSpace(*body.PrimaryUser)))
+	}
 	err := s.auditAction(ctx, c.actor(), "device.assign", id, strings.Join(detail, " "), func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `UPDATE devices SET tags = CASE WHEN $2 THEN $3::text[] ELSE tags END,
-			blueprint_id = CASE WHEN $4 THEN $5::bigint ELSE blueprint_id END WHERE id=$1`, id, body.Tags != nil, tags, setBP, bpID)
+			blueprint_id = CASE WHEN $4 THEN $5::bigint ELSE blueprint_id END,
+			users = CASE WHEN $6 THEN $7::jsonb ELSE users END,
+			primary_user_id = CASE WHEN $8 THEN $9::bigint ELSE primary_user_id END WHERE id=$1`,
+			id, body.Tags != nil, tags, setBP, bpID, body.Users != nil, string(users), body.PrimaryUser != nil, primary)
 		if err == nil && tag.RowsAffected() == 0 {
 			err = &userError{http.StatusNotFound, "device not found"}
+		}
+		if err == nil && body.Users != nil {
+			err = signDeviceUsers(ctx, tx, id)
 		}
 		return err
 	})

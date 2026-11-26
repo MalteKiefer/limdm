@@ -305,34 +305,46 @@ var shellErrors = map[string]string{
 }
 
 func (s *Server) shellStart(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx, id := r.Context(), r.PathValue("id")
+	id := r.PathValue("id")
+	sid, refused, err := s.startShell(r.Context(), sess, id, r.FormValue("user"))
+	var ue *userError
+	switch {
+	case errors.Is(err, errNotFound):
+		http.NotFound(w, r)
+	case errors.As(err, &ue):
+		s.errorPage(w, r, sess, ue.Status, ue.Msg)
+	case err != nil:
+		s.fail(w, err)
+	case refused != "":
+		http.Redirect(w, r, "/devices/"+id+"/shell?err="+refused, http.StatusSeeOther)
+	default:
+		http.Redirect(w, r, "/shell/"+sid, http.StatusSeeOther)
+	}
+}
+
+// startShell starts a remote shell session on a device for the caller and
+// returns its id. A refused start names its key in shellErrors ("approval":
+// the session waits for four eyes approval and was requested).
+func (s *Server) startShell(ctx context.Context, sess session, id, localUser string) (sid, refused string, err error) {
 	set := s.settings().RemoteShell
 	if !set.allows(sess.Role) {
-		s.errorPage(w, r, sess, http.StatusForbidden, "remote shell is not enabled for your role")
-		return
-	}
-	back := func(code string) {
-		http.Redirect(w, r, "/devices/"+id+"/shell?err="+code, http.StatusSeeOther)
+		return "", "", &userError{http.StatusForbidden, "remote shell is not enabled for your role"}
 	}
 	var retired bool
 	if err := s.db.QueryRow(ctx, `SELECT retired FROM devices WHERE id=$1`, id).Scan(&retired); err != nil || retired || !s.inScope(ctx, sess, id) {
-		http.NotFound(w, r)
-		return
+		return "", "", errNotFound
 	}
 	maxM, idleM := set.Limits()
-	cmd := api.ShellCommand{Session: randToken(32), User: strings.TrimSpace(r.FormValue("user")), AllowRoot: set.AllowRoot,
+	cmd := api.ShellCommand{Session: randToken(32), User: strings.TrimSpace(localUser), AllowRoot: set.AllowRoot,
 		By: sess.Email, MaxMinutes: maxM, IdleMinutes: idleM}
 	if cmd.User == "root" && !set.AllowRoot {
-		back("root")
-		return
+		return "", "root", nil
 	}
 	if cmd.Validate() != nil {
-		back("user")
-		return
+		return "", "user", nil
 	}
 	if !set.AllowRoot && cmd.User != "" && s.accountPrivileged(ctx, id, cmd.User) { // the agent checks again
-		back("admin")
-		return
+		return "", "admin", nil
 	}
 	user := cmd.User
 	if user == "" {
@@ -340,11 +352,9 @@ func (s *Server) shellStart(w http.ResponseWriter, r *http.Request, sess session
 	}
 	approvalID, err := s.requireApproval(ctx, sess, "remote_shell", id, user)
 	if errors.Is(err, errAwaitingApproval) {
-		back("approval")
-		return
+		return "", "approval", nil
 	} else if err != nil {
-		s.fail(w, err)
-		return
+		return "", "", err
 	}
 	payload, _ := json.Marshal(cmd)
 	var cmdID int64
@@ -361,14 +371,13 @@ func (s *Server) shellStart(w http.ResponseWriter, r *http.Request, sess session
 		return err
 	})
 	if err != nil {
-		s.fail(w, err)
-		return
+		return "", "", err
 	}
 	l := newLiveShell(cmd.Session, id, sess.Email, cmdID)
 	s.shells.put(l)
 	go s.homeRelay(l, s.openBox(l.id, "h"))
 	go s.watchShell(l, time.Duration(maxM)*time.Minute, time.Duration(idleM)*time.Minute) //nolint:gosec // the session outlives this request
-	http.Redirect(w, r, "/shell/"+cmd.Session, http.StatusSeeOther)
+	return cmd.Session, "", nil
 }
 
 // watchShell enforces the connect wait, maximum duration and idle timeout,
