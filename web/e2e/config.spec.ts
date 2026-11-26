@@ -29,6 +29,7 @@ async function shoot(page: Page, name: string) {
 }
 
 test('every declaration type has a form without JSON', async ({ page }) => {
+  test.setTimeout(180_000) // 33 page loads; CI runners are slower than 30 s allows
   await page.goto('/app/config?tab=library')
   const types = await page.evaluate(async () => ((await (await fetch('/api/v1/schemas?lang=de')).json()).items as { type: string }[]).map((x) => x.type))
   expect(types.length).toBe(33)
