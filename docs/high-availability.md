@@ -24,11 +24,12 @@ PostgreSQL itself is made highly available with the usual tools (see
   `LIMDM_AGENT_URL`, OIDC and syslog settings. Different session keys make sessions and
   sealed secrets unreadable on the other instances.
 * **The same CA directory** (`LIMDM_CA_DIR`) on every instance. It holds the device CA, the
-  network CA, `command.key` (command and item signatures, audit chain key) and the
-  `audit-keyed-from` switch point. Two ways, both supported:
+  network CA, the command key (command and item signatures, audit chain key), `keys.json`
+  (active and retiring key names), `audit-keys` (audit key segments of earlier command
+  keys) and the `audit-keyed-from` switch point. Two ways, both supported:
   * a shared volume (NFS, CephFS, a cluster file system), mounted on every instance with
-    mode 0700 for the `limdm` user; the files are written once at the first start and only
-    read afterwards, or
+    mode 0700 for the `limdm` user; the files are written at the first start and by key
+    rotations, and only read otherwise, or
   * start the first instance once, then copy the directory (`rsync -a`, encrypted channel)
     to the others before starting them.
 
@@ -215,7 +216,8 @@ keep device addresses on 8444.
 
 Each periodic job runs on exactly one instance, the holder of its PostgreSQL advisory lock:
 directory sync, history (fleet snapshot, full audit verification, audit and data retention,
-expiry of approvals), catalog icons and syslog forwarding. The other instances try to take
+expiry of approvals), catalog icons, syslog forwarding and sealing values again after a
+session key rotation. The other instances try to take
 over every 15 seconds. The leader checks its lock connection every 15 seconds; if it breaks
 (database failover, network), the job stops before another instance can start it.
 Notifications from these jobs (`audit.broken`) are therefore sent once. Notifications caused
@@ -225,8 +227,9 @@ Syslog forwarding stores its position in the table `syslog_cursor`. A new leader
 after the last entry the previous one sent: no gaps, at most the last batch twice after a
 crash. Device events that commit out of id order can still be skipped, as before.
 
-Agent package downloads run on every instance (see `LIMDM_RELEASE_DIR` above). Which
-instance leads which job is logged ("leading background loop").
+Agent package downloads run on every instance (see `LIMDM_RELEASE_DIR` above), and so does
+the retry of an OIDC discovery that failed at startup. Which instance leads which job is
+logged ("leading background loop").
 
 ## Remote shell
 
@@ -285,7 +288,8 @@ ones run. `server_instances.version` shows which version each instance runs:
   0.16. A 0.15 instance still running afterwards would append plain hashes behind the
   switch point and break the chain. Stop all instances, start one 0.16 instance, wait for
   `/readyz`, then distribute the CA directory (it now contains `audit-keyed-from`) and
-  start the others.
+  start the others. The other changes of this upgrade:
+  [operations.md](operations.md#upgrading-from-015-to-016).
 * changes of `LIMDM_SESSION_KEY` (sealed secrets would be unreadable on the other
   instances) and key rotations of the CA directory.
 
