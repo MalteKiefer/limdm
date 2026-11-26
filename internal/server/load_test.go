@@ -202,6 +202,41 @@ func TestStatusConstraints(t *testing.T) {
 	}
 }
 
+// A script retrying a wrong token locks out only that token from its
+// address, not valid tokens behind the same NAT; the audit log gets at most
+// 30 failures a minute.
+func TestTokenFailureLimits(t *testing.T) {
+	db := loadTestDB(t, 4)
+	s := loadTestServer(db)
+	tokenFailures.Lock()
+	tokenFailures.window, tokenFailures.n = time.Time{}, 0
+	tokenFailures.Unlock()
+	try := func(tok string) int {
+		r := httptest.NewRequest("GET", "/api/v1/devices", nil)
+		r.Header.Set("Authorization", "Bearer "+tok)
+		w := httptest.NewRecorder()
+		s.bearer(w, r)
+		return w.Code
+	}
+	for range 20 {
+		if c := try("wrong"); c != http.StatusUnauthorized {
+			t.Fatalf("failure: %d", c)
+		}
+	}
+	if c := try("wrong"); c != http.StatusTooManyRequests {
+		t.Fatalf("21st try of the same token: %d", c)
+	}
+	for i := range 20 {
+		if c := try("other" + strconv.Itoa(i)); c != http.StatusUnauthorized {
+			t.Fatalf("another token from the same address: %d", c)
+		}
+	}
+	var n int
+	if err := db.QueryRow(context.Background(), `SELECT count(*) FROM audit_log WHERE action='api.auth_failed'`).Scan(&n); err != nil || n != 30 {
+		t.Fatalf("audited failures: %d %v", n, err)
+	}
+}
+
 func TestRolloutOffset(t *testing.T) {
 	spread := 24 * time.Hour
 	if rolloutOffset("d1", "1.0.0", spread) != rolloutOffset("d1", "1.0.0", spread) {

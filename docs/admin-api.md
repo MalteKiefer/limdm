@@ -72,9 +72,11 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 ## Limits
 
 * 600 requests per minute and token; then `429` with `Retry-After: 60`.
-* Failed authentications: 20 per client address in five minutes, as for SCIM; then `429`
-  with `Retry-After: 300` before the token is even checked. A request without any token
-  counts but is not audited.
+* Failed authentications: 20 per client address and token in five minutes, as for SCIM, and
+  200 per client address; then `429` with `Retry-After: 300` before the token is even
+  checked. A script retrying a wrong token so locks out only that token, not valid tokens
+  behind the same NAT. A request without any token counts but is not audited, and at most 30
+  failures a minute go to the audit log (the server log gets every one).
 * Request bodies up to 1 MiB; a larger body answers `400`.
 * The console's network allow and block lists apply.
 

@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -82,27 +83,51 @@ func auditIP(r *http.Request) string {
 	return "invalid"
 }
 
+// tokenFailures caps the audit entries of failed token checks: each takes
+// the global audit lock, and anyone can send tokens.
+var tokenFailures struct {
+	sync.Mutex
+	window time.Time
+	n      int
+}
+
+// auditTokenFailure tells whether a failed token check may go to the audit
+// log: at most 30 per minute; the process log gets every one.
+func auditTokenFailure() bool {
+	tokenFailures.Lock()
+	defer tokenFailures.Unlock()
+	if time.Since(tokenFailures.window) > time.Minute {
+		tokenFailures.window, tokenFailures.n = time.Now(), 0
+	}
+	tokenFailures.n++
+	return tokenFailures.n <= 30
+}
+
 // bearer checks the request's API token. Failed checks are limited per
-// client (20 in five minutes, as for SCIM) and a presented but unknown,
-// expired or revoked token is audited. Valid tokens get 600 requests per
+// client and token (20 in five minutes, as for SCIM) and per client (200),
+// so one script with a wrong token does not lock out valid tokens behind
+// the same NAT. A presented but unknown, expired or revoked token is
+// audited (at most 30 entries a minute). Valid tokens get 600 requests per
 // minute.
 func (s *Server) bearer(w http.ResponseWriter, r *http.Request) (apiCaller, bool) {
 	ctx := r.Context()
-	key := "apifail:" + rateKey(r)
+	tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	th := sha(tok)
+	src := "apifail:" + rateKey(r)
+	key := src + ":" + hex.EncodeToString(th[:8])
 	var c apiCaller
-	if s.limit.over(key, 20, 5*time.Minute) {
+	if s.limit.over(key, 20, 5*time.Minute) || s.limit.over(src, 200, 5*time.Minute) {
 		w.Header().Set("Retry-After", "300")
 		problem(w, http.StatusTooManyRequests, "too many failed attempts")
 		return c, false
 	}
-	tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	reason := "bearer token required"
 	if ok && tok != "" {
 		var expires time.Time
 		var revoked *time.Time
 		var tenantOff bool
 		err := s.db.QueryRow(ctx, `SELECT k.id, k.name, k.role, k.read_only, k.scope_tags, coalesce(k.tenant_id, 0), coalesce(t.disabled, false), k.expires_at, k.revoked_at
-			FROM api_tokens k LEFT JOIN tenants t ON t.id=k.tenant_id WHERE k.token_hash=$1`, sha(tok)).
+			FROM api_tokens k LEFT JOIN tenants t ON t.id=k.tenant_id WHERE k.token_hash=$1`, th).
 			Scan(&c.ID, &c.Name, &c.Role, &c.ReadOnly, &c.Tags, &c.Tenant, &tenantOff, &expires, &revoked)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
@@ -120,6 +145,9 @@ func (s *Server) bearer(w http.ResponseWriter, r *http.Request) (apiCaller, bool
 			reason = ""
 		}
 		if reason != "" {
+			s.log.Warn("api token refused", "reason", reason, "remote", auditIP(r), "request_id", requestID(w))
+		}
+		if reason != "" && auditTokenFailure() {
 			if err := s.auditAction(ctx, "api", "api.auth_failed", c.Name, reason+" from "+auditIP(r), nil); err != nil {
 				s.log.Error("audit api.auth_failed", "err", err)
 			}
@@ -127,6 +155,7 @@ func (s *Server) bearer(w http.ResponseWriter, r *http.Request) (apiCaller, bool
 	}
 	if reason != "" {
 		s.limit.allow(key, 20, 5*time.Minute) // counts the failure
+		s.limit.allow(src, 200, 5*time.Minute)
 		w.Header().Set("WWW-Authenticate", `Bearer realm="limdm", error="invalid_token"`)
 		problem(w, http.StatusUnauthorized, reason)
 		return apiCaller{}, false
