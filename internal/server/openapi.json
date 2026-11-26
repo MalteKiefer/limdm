@@ -1785,6 +1785,21 @@
               "internal",
               "busy"
             ]
+          },
+          "errors": {
+            "type": "array",
+            "description": "422 only: the request field the error is about (empty: the request as a whole)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },

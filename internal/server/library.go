@@ -730,7 +730,7 @@ func (s *Server) restoreNetworkSecrets(ctx context.Context, it *api.LibraryItem)
 	}
 	p, err := api.RestoreNetworkSecrets(it.Payload, stored)
 	if err != nil {
-		return invalid(err)
+		return invalid("payload", err)
 	}
 	it.Payload = p
 	return nil
@@ -743,14 +743,25 @@ func (s *Server) saveLibraryItem(ctx context.Context, actor string, it *api.Libr
 	if it.Type == api.TypeBootloader { // hash a plain password before it is validated and stored
 		p, err := api.PrepareBootloader(it.Payload)
 		if err != nil {
-			return invalid(err)
+			return invalid("payload", err)
 		}
 		it.Payload = p
 	}
 	if err := s.checkArtifactRefs(ctx, it); err != nil { // packages.go
-		return invalid(err)
+		return invalid("payload", err)
 	}
 	return s.storeItem(ctx, actor, "library.save", "save", it, false)
+}
+
+// itemField names the request field a validation error of it is about.
+func itemField(it api.LibraryItem, err error) string {
+	switch {
+	case strings.TrimSpace(it.Name) == "" || len(it.Name) > 100:
+		return "name"
+	case strings.HasPrefix(err.Error(), "unknown declaration type"):
+		return "type"
+	}
+	return "payload"
 }
 
 // storeItem validates, signs and saves an item with its new version and
@@ -766,7 +777,7 @@ func (s *Server) storeItem(ctx context.Context, actor, action, note string, it *
 		return err
 	}
 	if err := it.Validate(); err != nil {
-		return invalid(err)
+		return invalid(itemField(*it, err), err)
 	}
 	sealed, _, err := sealItemSecrets(it.Type, it.Payload) // never stored, signed, versioned or audited in clear
 	if err != nil {
@@ -774,7 +785,7 @@ func (s *Server) storeItem(ctx context.Context, actor, action, note string, it *
 	}
 	var compact bytes.Buffer
 	if err := json.Compact(&compact, sealed); err != nil {
-		return invalid(err)
+		return invalid("payload", err)
 	}
 	it.Payload = compact.Bytes()
 	if s.itemNeedsApproval(*it) { // four eyes: stored as a request, signed when approved
@@ -1024,7 +1035,7 @@ func (s *Server) saveBlueprint(ctx context.Context, actor string, bp *blueprintR
 // validateBlueprint checks name, items and inheritance before a save.
 func (s *Server) validateBlueprint(ctx context.Context, bp blueprintRec) error {
 	if !identOK(bp.Name) {
-		return invalid(errors.New("name must be 1..64 characters: letters, digits, dot, dash, underscore"))
+		return invalid("name", errors.New("name must be 1..64 characters: letters, digits, dot, dash, underscore"))
 	}
 	if bp.Name == "default" && ownerTenant(ctx) != defaultTenant { // names are unique per tenant; default applies by name
 		return &userError{http.StatusConflict, "the name is already in use"}
@@ -1038,7 +1049,7 @@ func (s *Server) validateBlueprint(ctx context.Context, bp blueprintRec) error {
 		ids[it.ID] = true
 	}
 	if err := api.ValidateTree(bp.Tree, func(i int64) bool { return ids[i] }); err != nil {
-		return invalid(err)
+		return invalid("tree", err)
 	}
 	if bp.Parent == nil {
 		return nil
@@ -1049,11 +1060,11 @@ func (s *Server) validateBlueprint(ctx context.Context, bp blueprintRec) error {
 		return err
 	}
 	if !ok {
-		return invalid(errors.New("the parent blueprint does not exist"))
+		return invalid("parent_id", errors.New("the parent blueprint does not exist"))
 	}
 	if bp.ID > 0 {
 		if err := s.checkNoCycle(ctx, bp.ID, *bp.Parent); err != nil {
-			return invalid(err)
+			return invalid("parent_id", err)
 		}
 	}
 	return nil

@@ -119,7 +119,7 @@ type (
 // saveBackupConfig validates, stores and audits the configuration.
 func (s *Server) saveBackupConfig(ctx context.Context, actor string, c BackupConfig, what string) error {
 	if err := c.validate(); err != nil {
-		return invalid(err)
+		return invalid("backup", err)
 	}
 	doc, _ := json.Marshal(c)
 	var targets []string

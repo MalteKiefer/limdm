@@ -40,6 +40,11 @@ var apiRoles = []string{"admin", "helpdesk", "auditor", "metrics"}
 
 // apiFail answers an API request with the error's status, or 500.
 func (s *Server) apiFail(w http.ResponseWriter, err error) {
+	var fe *fieldError
+	if errors.As(err, &fe) {
+		problemField(w, http.StatusUnprocessableEntity, fe.Field, fe.Msg)
+		return
+	}
 	if code, msg := errStatus(err); code != 0 {
 		problem(w, code, msg)
 		return
@@ -679,13 +684,13 @@ func (s *Server) apiDevicePatch(w http.ResponseWriter, r *http.Request, c apiCal
 	if body.Tags != nil {
 		for _, t := range *body.Tags {
 			if strings.Contains(t, ",") {
-				problem(w, http.StatusUnprocessableEntity, "invalid tag "+strconv.Quote(t))
+				problemField(w, http.StatusUnprocessableEntity, "tags", "invalid tag "+strconv.Quote(t))
 				return
 			}
 		}
 		var err error
 		if tags, err = parseTags(strings.Join(*body.Tags, ",")); err != nil {
-			problem(w, http.StatusUnprocessableEntity, err.Error())
+			problemField(w, http.StatusUnprocessableEntity, "tags", err.Error())
 			return
 		}
 	}
@@ -697,16 +702,16 @@ func (s *Server) apiDevicePatch(w http.ResponseWriter, r *http.Request, c apiCal
 	}
 	if setBP && string(body.BlueprintID) != "null" {
 		if err := json.Unmarshal(body.BlueprintID, &bpID); err != nil {
-			problem(w, http.StatusUnprocessableEntity, "blueprint_id must be a number or null")
+			problemField(w, http.StatusUnprocessableEntity, "blueprint_id", "blueprint_id must be a number or null")
 			return
 		}
 		if !s.tenantOwns(ctx, c.sess(), "blueprints", *bpID, true) {
-			problem(w, http.StatusUnprocessableEntity, "unknown blueprint")
+			problemField(w, http.StatusUnprocessableEntity, "blueprint_id", "unknown blueprint")
 			return
 		}
 		var ok bool
 		if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blueprints WHERE id=$1)`, *bpID).Scan(&ok); err != nil || !ok {
-			problem(w, http.StatusUnprocessableEntity, "unknown blueprint")
+			problemField(w, http.StatusUnprocessableEntity, "blueprint_id", "unknown blueprint")
 			return
 		}
 	}
@@ -773,7 +778,7 @@ func (s *Server) apiCommandCreate(w http.ResponseWriter, r *http.Request, c apiC
 		case float64:
 			form.Set(k, strconv.FormatFloat(x, 'f', -1, 64))
 		default:
-			problem(w, http.StatusUnprocessableEntity, "params: strings, numbers and booleans only")
+			problemField(w, http.StatusUnprocessableEntity, "params", "params: strings, numbers and booleans only")
 			return
 		}
 	}
@@ -800,13 +805,13 @@ func (s *Server) apiCommandCreate(w http.ResponseWriter, r *http.Request, c apiC
 		s.deny(w, r, c, msg)
 		return
 	default:
-		problem(w, http.StatusUnprocessableEntity, msg)
+		problemField(w, http.StatusUnprocessableEntity, "params", msg)
 		return
 	}
 	if s.needsApproval(body.Type) { // four eyes: an admin decides in the console
 		aid, err := s.requestApproval(ctx, c.sess(), "command", id, commandApproval{Type: body.Type, Payload: payload}, strings.TrimSpace(form.Get("reason")))
 		if err != nil {
-			problem(w, http.StatusUnprocessableEntity, err.Error())
+			problemField(w, http.StatusUnprocessableEntity, "params.reason", err.Error())
 			return
 		}
 		w.Header().Set("Location", "/api/v1/approvals/"+strconv.FormatInt(aid, 10))

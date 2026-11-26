@@ -99,7 +99,10 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 * Errors are RFC 9457 problem details (`application/problem+json`) with `status`, `detail`
   and a machine readable `code` (`type` is `urn:limdm:problem:<code>`: `bad_request`,
   `unauthorized`, `forbidden`, `not_found`, `conflict`, `invalid`, `rate_limited`, `busy`, ...),
-  also for unknown paths (`404`) and wrong methods (`405` with `Allow`). A `401` carries
+  also for unknown paths (`404`) and wrong methods (`405` with `Allow`). A `422` names the
+  request field in `errors: [{"field": "payload", "message": "..."}]` (`name`, `type`,
+  `payload`, `tree`, `parent_id`, `tags`, `blueprint_id`, `params`, or the
+  `Idempotency-Key` header; empty when the request as a whole is wrong). A `401` carries
   `WWW-Authenticate: Bearer realm="limdm", error="invalid_token"`.
 * Status codes: `200` read or replaced, `201` created (with `Location`), `202` command
   queued or approval requested, `204` deleted, `400` malformed request, `401` token missing

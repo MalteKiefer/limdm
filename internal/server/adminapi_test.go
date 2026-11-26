@@ -192,8 +192,13 @@ func TestAdminAPI(t *testing.T) {
 	if resp, body := call(adminTok, "POST", "/api/v1/library-items", item); resp.StatusCode != 409 {
 		t.Fatalf("duplicate name: %d %s", resp.StatusCode, body)
 	}
-	if resp, _ := call(adminTok, "POST", "/api/v1/library-items", `{"name":"x","type":"com.limdm.packages","payload":{"install":["bad name"]}}`); resp.StatusCode != 422 {
-		t.Fatalf("invalid payload: %d", resp.StatusCode)
+	if resp, body := call(adminTok, "POST", "/api/v1/library-items", `{"name":"x","type":"com.limdm.packages","payload":{"install":["bad name"]}}`); resp.StatusCode != 422 ||
+		!strings.Contains(body, `"errors":[{"field":"payload","message":`) {
+		t.Fatalf("invalid payload: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := call(adminTok, "POST", "/api/v1/library-items", `{"name":"","type":"com.limdm.packages","payload":{}}`); resp.StatusCode != 422 ||
+		!strings.Contains(body, `"field":"name"`) {
+		t.Fatalf("missing name: %d %s", resp.StatusCode, body)
 	}
 	if resp, _ := call(adminTok, "DELETE", resp.Header.Get("Location"), ""); resp.StatusCode != 204 {
 		t.Fatalf("delete: %d", resp.StatusCode)

@@ -443,7 +443,7 @@ func (s *Server) idempotent(h apiHandlerFunc) apiHandlerFunc {
 			}
 			switch {
 			case prevHash != hash:
-				problem(w, http.StatusUnprocessableEntity, "this Idempotency-Key was used for another request")
+				problemField(w, http.StatusUnprocessableEntity, "Idempotency-Key", "this Idempotency-Key was used for another request")
 			case status == 0:
 				w.Header().Set("Retry-After", "1")
 				problem(w, http.StatusConflict, "a request with this Idempotency-Key is still running")

@@ -1300,7 +1300,11 @@ var problemCodes = map[int]string{
 // problem answers the agent API with RFC 9457 problem details, so clients
 // can tell errors apart by status and type instead of parsing text. The type
 // is urn:limdm:problem:<code>, the code is also a member of its own.
-func problem(w http.ResponseWriter, status int, detail string) {
+func problem(w http.ResponseWriter, status int, detail string) { problemField(w, status, "", detail) }
+
+// problemField is a problem; a 422 names the request field it is about in
+// errors (empty when it concerns the request as a whole).
+func problemField(w http.ResponseWriter, status int, field, detail string) {
 	code := problemCodes[status]
 	if code == "" {
 		code = strconv.Itoa(status)
@@ -1308,7 +1312,11 @@ func problem(w http.ResponseWriter, status int, detail string) {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"type": "urn:limdm:problem:" + code, "code": code, "title": http.StatusText(status), "status": status, "detail": detail})
+	body := map[string]any{"type": "urn:limdm:problem:" + code, "code": code, "title": http.StatusText(status), "status": status, "detail": detail}
+	if status == http.StatusUnprocessableEntity {
+		body["errors"] = []map[string]string{{"field": field, "message": detail}}
+	}
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // retryLater answers 503 with Retry-After: the server is overloaded, not the
