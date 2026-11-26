@@ -35,7 +35,6 @@ import (
 
 const (
 	backupFormat   = 1
-	lockBackup     = 7369 // one backup run at a time across instances
 	backupSuffix   = ".lbk"
 	manifestName   = "manifest.json"
 	manifestSig    = "manifest.sig"

@@ -33,6 +33,7 @@ const (
 	lockSettings = 7367 // console settings saves
 	lockSCIM     = 7368 // SCIM read, modify and write
 	lockEvents   = 7369 // device event inserts up to their commit (storeEvents)
+	lockBackup   = 7370 // one backup run at a time across instances
 )
 
 const (
