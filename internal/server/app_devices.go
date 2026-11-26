@@ -902,6 +902,7 @@ type enrollInfo struct {
 	PublicURL   string           `json:"public_url"`
 	Fingerprint string           `json:"fingerprint"`
 	Repo        string           `json:"release_repo"`
+	Limits      EnrollSettings   `json:"limits"` // defaults and maxima of a new token
 }
 
 // apiEnrollTokens lists the active enrollment tokens of the caller's tenant
@@ -917,7 +918,8 @@ func (s *Server) apiEnrollTokens(w http.ResponseWriter, r *http.Request, c apiCa
 	if list == nil {
 		list = []apiEnrollToken{}
 	}
-	writeJSON(w, enrollInfo{Items: list, AgentURL: s.cfg.AgentURL, PublicURL: s.cfg.PublicURL, Fingerprint: s.tlsCA().Fingerprint(), Repo: s.cfg.ReleaseRepo})
+	writeJSON(w, enrollInfo{Items: list, AgentURL: s.cfg.AgentURL, PublicURL: s.cfg.PublicURL, Fingerprint: s.tlsCA().Fingerprint(), Repo: s.cfg.ReleaseRepo,
+		Limits: s.settings().Enroll.withDefaults()})
 }
 
 // apiEnrollTokenCreate creates a token (createEnrollToken); the answer is

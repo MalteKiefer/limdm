@@ -561,12 +561,14 @@ func (s *Server) retireDevice(ctx context.Context, actor, id string) error {
 
 // ---- enrollment tokens ----
 
-// createEnrollToken creates an enrollment token for 1..10000 uses and
-// 1..90 days, optionally binding new devices to a blueprint (0: default),
-// and returns it; it is shown only once.
+// createEnrollToken creates an enrollment token within the limits of
+// Settings, Enrollment (0 uses or days: the default there), optionally
+// binding new devices to a blueprint (0: default), and returns it; it is
+// shown only once.
 func (s *Server) createEnrollToken(ctx context.Context, sess session, note string, blueprintID int64, uses, days int) (string, error) {
-	if uses < 1 || uses > 10000 || days < 1 || days > 90 {
-		return "", &userError{http.StatusBadRequest, "uses 1..10000, days 1..90"}
+	uses, days, err := s.settings().Enroll.tokenLimits(uses, days)
+	if err != nil {
+		return "", err
 	}
 	var bpID *int64
 	if blueprintID > 0 {
@@ -577,7 +579,7 @@ func (s *Server) createEnrollToken(ctx context.Context, sess session, note strin
 	}
 	token := "lmt_" + randToken(24)
 	note = truncate(note, 200)
-	err := s.auditAction(ctx, sess.Email, "token.create", note, fmt.Sprintf("uses=%d days=%d blueprint=%d", uses, days, blueprintID), func(tx pgx.Tx) error {
+	err = s.auditAction(ctx, sess.Email, "token.create", note, fmt.Sprintf("uses=%d days=%d blueprint=%d", uses, days, blueprintID), func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO enroll_tokens(token_hash, note, blueprint_id, uses_left, expires_at, created_by, tenant_id)
 			VALUES ($1,$2,$3,$4, now() + make_interval(days => $5), $6, $7)`, sha(token), note, bpID, uses, days, sess.Email, ownerTenant(ctx))
 		return err

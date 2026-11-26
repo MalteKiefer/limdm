@@ -760,9 +760,11 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(ctx)
 	var blueprintID *int64
 	var tenantID int64 // the device joins the tenant of its token
+	var usesLeft int
+	var note string
 	err = tx.QueryRow(ctx, `UPDATE enroll_tokens SET uses_left = uses_left - 1
 		WHERE token_hash=$1 AND uses_left > 0 AND expires_at > now()
-		AND tenant_id IN (SELECT id FROM tenants WHERE NOT disabled) RETURNING blueprint_id, tenant_id`, th).Scan(&blueprintID, &tenantID)
+		AND tenant_id IN (SELECT id FROM tenants WHERE NOT disabled) RETURNING blueprint_id, tenant_id, uses_left, note`, th).Scan(&blueprintID, &tenantID, &usesLeft, &note)
 	if err != nil {
 		s.limit.allow(tokKey, 20, 5*time.Minute) // counts the failure
 		s.limit.allow(src, 200, 5*time.Minute)
@@ -781,7 +783,8 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		s.failAPI(w, err)
 		return
 	}
-	if err := audit(ctx, tx, "device:"+id, "device.enroll", id, truncate(req.Hostname, 255)+" cert "+serial); err != nil {
+	if err := audit(ctx, tx, "device:"+id, "device.enroll", id, fmt.Sprintf("%s cert %s token %s (%q) uses left %d",
+		truncate(req.Hostname, 255), serial, hex.EncodeToString(th)[:12], note, usesLeft)); err != nil {
 		s.failAPI(w, err)
 		return
 	}

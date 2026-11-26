@@ -137,6 +137,7 @@ func (s *Server) settingsView(r *http.Request, c apiCaller, set Settings) apiSet
 		PublicURL: s.cfg.PublicURL, RedirectURI: s.cfg.PublicURL + "/auth/callback", ClientIP: clientIP(r)}
 	v.Logo = nil
 	v.Ops = v.Ops.withDefaults()
+	v.Enroll = v.Enroll.withDefaults()
 	for _, row := range retentionRows(set) {
 		v.RetentionKinds = append(v.RetentionKinds, apiRetentionKind{row.Key, row.Days, row.Default, row.Min, row.Max, row.Forever})
 	}

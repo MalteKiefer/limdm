@@ -211,7 +211,7 @@ func TestAppDevicesAPI(t *testing.T) {
 	}
 
 	// enrollment tokens
-	if code, _ := call(admin, "POST", "/api/v1/enrollment-tokens", `{"note":"batch","uses":0,"days":7}`); code != 422 {
+	if code, _ := call(admin, "POST", "/api/v1/enrollment-tokens", `{"note":"batch","uses":501,"days":7}`); code != 422 {
 		t.Fatalf("token validation: %d", code)
 	}
 	code, tok := call(admin, "POST", "/api/v1/enrollment-tokens", `{"note":"batch","uses":3,"days":7}`)

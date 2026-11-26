@@ -931,3 +931,9 @@ CREATE TABLE IF NOT EXISTS blueprint_pilots (
     PRIMARY KEY (pilot_id, device_id)
 );
 CREATE INDEX IF NOT EXISTS blueprint_pilots_blueprint ON blueprint_pilots(blueprint_id);
+
+-- R3-S
+-- enrollment tokens: at most 500 uses and 30 days (enrollsettings.go); older
+-- tokens are cut down to these limits once
+UPDATE enroll_tokens SET uses_left = LEAST(uses_left, 500), expires_at = LEAST(expires_at, now() + interval '30 days')
+    WHERE uses_left > 500 OR expires_at > now() + interval '30 days';
