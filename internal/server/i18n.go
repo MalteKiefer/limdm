@@ -1623,4 +1623,6 @@ var deCatalog = map[string]string{
 	"Report schedule deleted": "Berichtszeitplan gelöscht",
 	"Scheduled report run":    "Geplanter Bericht erzeugt",
 	"Report downloaded":       "Bericht heruntergeladen",
+	// integration/ui-redesign
+	"New console": "Neue Konsole",
 }

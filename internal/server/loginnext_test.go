@@ -4,24 +4,24 @@ import "testing"
 
 func TestSafeNext(t *testing.T) {
 	for in, want := range map[string]string{
-		"":                           "/",
+		"":                           "/app/",
 		"/app/":                      "/app/",
 		"/app/settings?s=users":      "/app/settings?s=users",
 		"/devices/d1":                "/devices/d1",
-		"//evil.example":             "/",
-		"/\\evil.example":            "/",
-		"https://evil.example/app/":  "/",
-		"app/":                       "/",
-		"/login?next=/x":             "/",
-		"/logout":                    "/",
-		"/auth/callback":             "/",
-		"/api/v1/me":                 "/",
+		"//evil.example":             "/app/",
+		"/\\evil.example":            "/app/",
+		"https://evil.example/app/":  "/app/",
+		"app/":                       "/app/",
+		"/login?next=/x":             "/app/",
+		"/logout":                    "/app/",
+		"/auth/callback":             "/app/",
+		"/api/v1/me":                 "/app/",
 		"/app/%0d%0aSet-Cookie:x":    "/app/%0d%0aSet-Cookie:x",
-		"/app/\nx":                   "/",
-		"/app/../login":              "/",
-		"javascript:alert(1)":        "/",
-		"/%2f%2fevil.example":        "/",
-		"/app/?q=" + string(rune(7)): "/",
+		"/app/\nx":                   "/app/",
+		"/app/../login":              "/app/",
+		"javascript:alert(1)":        "/app/",
+		"/%2f%2fevil.example":        "/app/",
+		"/app/?q=" + string(rune(7)): "/app/",
 	} {
 		if got := safeNext(in); got != want {
 			t.Errorf("safeNext(%q) = %q, want %q", in, got, want)

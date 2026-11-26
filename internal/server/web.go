@@ -233,7 +233,9 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	s.networkRoutes(mux)
 	s.tenantPages(mux)
 	s.shellRoutes(mux)
-	mux.HandleFunc("GET /{$}", s.page(s.overview))
+	// the console app is the default; the classic overview stays under /classic
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/app/", http.StatusFound) })
+	mux.HandleFunc("GET /classic", s.page(s.overview))
 	mux.HandleFunc("GET /help", s.page(s.helpPage))
 	mux.HandleFunc("POST /onboarding/dismiss", s.page(s.onboardingDismiss))
 	mux.HandleFunc("GET /devices", s.page(s.devices))

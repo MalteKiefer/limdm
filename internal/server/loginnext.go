@@ -8,7 +8,7 @@ import (
 )
 
 // defaultNext is where a sign in without a (valid) next target lands.
-const defaultNext = "/"
+const defaultNext = "/app/"
 
 // safeNext returns the page a sign in returns to: a path of this origin in
 // the console app (/app/) or the classic console, never another host, a

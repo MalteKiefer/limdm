@@ -361,7 +361,7 @@ func TestTenantIsolation(t *testing.T) {
 	}
 	// a disabled tenant cannot sign in
 	exec(`UPDATE tenants SET disabled=true WHERE id=3`)
-	if code, _ := do("GET", "/", nil); code != http.StatusFound {
+	if code, _ := do("GET", "/classic", nil); code != http.StatusFound {
 		t.Fatalf("disabled tenant still signed in: %d", code)
 	}
 }

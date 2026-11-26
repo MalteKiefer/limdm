@@ -14,7 +14,7 @@
   <aside class="side" id="side">
     <div class="brand"><button type="button" class="nav-toggle" aria-expanded="false" aria-controls="side" data-nav-toggle aria-label="{{t "Menu"}}"><span aria-hidden="true">☰</span></button>{{if .Brand.Logo}}<img src="{{.Brand.LogoURL}}" alt="">{{else}}<img src="/static/logo.svg" alt="">{{end}} {{if .Brand.Name}}{{.Brand.Name}}{{else}}{{t "LiMDM"}}{{end}}</div>
     <nav class="nav" aria-label="{{t "Main"}}">
-      <a href="/" {{if eq .Page "overview"}}class="on" aria-current="page"{{end}}>{{t "Overview"}}</a>
+      <a href="/classic" {{if eq .Page "overview"}}class="on" aria-current="page"{{end}}>{{t "Overview"}}</a>
       <a href="/devices" {{if or (eq .Page "devices") (eq .Page "device")}}class="on" aria-current="page"{{end}}>{{t "Devices"}}</a>
       <a href="/compliance" {{if eq .Page "compliance"}}class="on" aria-current="page"{{end}}>{{t "Compliance"}}</a>
       <span class="group">{{t "Configuration"}}</span>
@@ -37,6 +37,7 @@
       {{if eq .Sess.Role "admin"}}<a href="/network" {{if eq .Page "network"}}class="on" aria-current="page"{{end}}>{{t "Network certificates"}}</a>{{end}}
       {{end}}
       <a class="nav-help{{if eq .Page "help"}} on{{end}}" href="/help" {{if eq .Page "help"}}aria-current="page"{{end}}>{{t "Help"}}</a>
+      <a href="/app/">{{t "New console"}}</a>
     </nav>
     <div class="who">
       <a class="who-user {{if eq .Page "profile"}}on{{end}}" href="/profile" title="{{t "Profile"}}">
