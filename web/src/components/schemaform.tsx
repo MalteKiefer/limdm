@@ -6,11 +6,13 @@
 // Supported: objects (x-order keeps the field order, x-section groups
 // fields into cards), booleans (switch), enums (up to three as a segmented
 // control, else a select; x-enumTitles names them), numbers, strings
-// (x-widget textarea), lists of scalars (chips), lists of flat objects (an
-// editable table), lists of other objects (repeated fieldsets), maps
-// (key and value table), nested objects (fieldsets).
+// (x-widget textarea, code with a file loader, secret as a masked input),
+// lists of scalars (chips, numbers for integer lists), lists of choices
+// (x-widget checkboxes), lists of flat objects (an editable table), lists of
+// other objects (repeated fieldsets), maps (key and value table), nested
+// objects (fieldsets). Integer choices keep their number type.
 import { Validator, type OutputUnit } from '@cfworker/json-schema'
-import { Plus, Trash2, X } from 'lucide-react'
+import { Eye, EyeOff, FileUp, Plus, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import { t, useT } from '../i18n'
 import { Field } from './form'
@@ -20,11 +22,12 @@ export type JSONSchema = {
   type?: 'object' | 'string' | 'integer' | 'number' | 'boolean' | 'array'
   title?: string
   description?: string
-  enum?: string[]
+  enum?: (string | number)[]
   format?: string
   'x-enumTitles'?: string[]
   'x-section'?: string
-  'x-widget'?: 'textarea'
+  'x-widget'?: 'textarea' | 'code' | 'secret' | 'checkboxes'
+  'x-secret'?: boolean
   'x-order'?: string[]
   'x-patternHint'?: string
   minimum?: number
@@ -143,7 +146,7 @@ function Prop({ name, schema: s, value, onChange, errors, path, required, idPref
           {s.description && <p className="text-[12.5px] text-muted">{s.description}</p>}
           {err && <p className="text-[12.5px] font-medium text-bad">{err}</p>}
         </div>
-        <Switch id={id} checked={!!value} onChange={onChange} label={label} />
+        <Switch id={id} checked={!!(value ?? s.default)} onChange={onChange} label={label} />
       </div>
     )
   if (s.type === 'object' && isMap(s)) return <MapTable label={label} schema={s} value={(value as Record<string, unknown>) ?? {}} onChange={onChange} errors={errors} path={path} />
@@ -177,41 +180,48 @@ function Prop({ name, schema: s, value, onChange, errors, path, required, idPref
 function Scalar({ s, id, describedBy, invalid, label, value, onChange, compact }: { s: JSONSchema; id?: string; describedBy?: string; invalid: boolean; label: string; value: unknown; onChange: (v: unknown) => void; compact?: boolean }) {
   const common = { id, 'aria-describedby': describedBy, 'aria-invalid': invalid || undefined, 'aria-label': compact ? label : undefined }
   const cls = compact ? 'field !h-8 !px-2' : 'field'
+  // choices keep the type of the schema: integer levels stay numbers, an
+  // emptied select removes the field instead of sending ""
+  const pick = (v: string) => (v === '' ? undefined : s.type === 'integer' || s.type === 'number' ? Number(v) : v)
+  if (s.type === 'array' && s['x-widget'] === 'checkboxes' && s.items?.enum) return <Checkboxes s={s} label={label} value={(value as unknown[]) ?? []} onChange={onChange} describedBy={describedBy} />
   if (s.enum && s.enum.length <= 3 && !compact)
-    return <Segmented label={label} value={String(value ?? '')} onChange={onChange} options={s.enum.map((v, i) => ({ value: v, label: s['x-enumTitles']?.[i] ?? v }))} />
+    return <Segmented label={label} value={String(value ?? s.default ?? '')} onChange={(v) => onChange(pick(v))} options={s.enum.map((v, i) => ({ value: String(v), label: s['x-enumTitles']?.[i] ?? String(v) }))} />
   if (s.enum)
     return (
-      <select {...common} className={cls} value={String(value ?? '')} onChange={(e) => onChange(e.target.value)}>
+      <select {...common} className={cls} value={String(value ?? '')} onChange={(e) => onChange(pick(e.target.value))}>
         <option value="" />
         {s.enum.map((v, i) => (
-          <option key={v} value={v}>
-            {s['x-enumTitles']?.[i] ?? v}
+          <option key={String(v)} value={String(v)}>
+            {s['x-enumTitles']?.[i] ?? String(v)}
           </option>
         ))}
       </select>
     )
   if (s.type === 'integer' || s.type === 'number')
     return <input {...common} type="number" inputMode="numeric" className={`${cls} num max-w-[160px]`} value={value == null ? '' : String(value)} min={s.minimum} max={s.maximum} step={s.type === 'integer' ? 1 : 'any'} onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} />
-  if (s.type === 'array') return <Chips {...common} value={(value as string[]) ?? []} onChange={onChange} />
+  if (s.type === 'array') return <Chips {...common} numeric={s.items?.type === 'integer' || s.items?.type === 'number'} value={(value as (string | number)[]) ?? []} onChange={onChange} />
   if (s.type === 'boolean') return <input {...common} type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked)} />
   if (s['x-widget'] === 'textarea' && !compact) return <textarea {...common} rows={4} className={cls} value={String(value ?? '')} onChange={(e) => onChange(e.target.value)} />
+  if (s['x-widget'] === 'code' && !compact) return <CodeArea common={common} label={label} value={String(value ?? '')} onChange={onChange} />
+  if (s['x-widget'] === 'secret' || s['x-secret']) return <Secret common={common} cls={cls} label={label} value={String(value ?? '')} onChange={onChange} />
   return <input {...common} className={cls} value={String(value ?? '')} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)} />
 }
 
-function Chips({ value, onChange, id, ...rest }: { value: string[]; onChange: (v: string[]) => void; id?: string }) {
+function Chips({ value, onChange, id, numeric, ...rest }: { value: (string | number)[]; onChange: (v: (string | number)[]) => void; id?: string; numeric?: boolean }) {
   const tr = useT()
   const [draft, setDraft] = useState('')
   const add = () => {
-    const v = draft.trim()
-    if (v && !value.includes(v)) onChange([...value, v])
+    const raw = draft.trim()
+    const v = numeric && raw !== '' && !Number.isNaN(Number(raw)) ? Number(raw) : raw
+    if (raw && !value.includes(v)) onChange([...value, v])
     setDraft('')
   }
   return (
     <div className="field flex !h-auto min-h-[34px] flex-wrap items-center gap-1 py-1">
       {value.map((v) => (
-        <span key={v} className="inline-flex items-center gap-1 rounded bg-surface-2 py-0.5 pr-0.5 pl-2 font-mono text-[12px]">
+        <span key={String(v)} className="inline-flex items-center gap-1 rounded bg-surface-2 py-0.5 pr-0.5 pl-2 font-mono text-[12px]">
           {v}
-          <button type="button" className="grid size-4 place-items-center rounded hover:bg-line" aria-label={tr('query.remove', { token: v })} onClick={() => onChange(value.filter((x) => x !== v))}>
+          <button type="button" className="grid size-4 place-items-center rounded hover:bg-line" aria-label={tr('query.remove', { token: String(v) })} onClick={() => onChange(value.filter((x) => x !== v))}>
             <X size={11} />
           </button>
         </span>
@@ -232,6 +242,67 @@ function Chips({ value, onChange, id, ...rest }: { value: string[]; onChange: (v
         }}
         onBlur={add}
       />
+    </div>
+  )
+}
+
+type Common = { id?: string; 'aria-describedby'?: string; 'aria-invalid'?: boolean; 'aria-label'?: string }
+
+/** Choices of a list as checkboxes, in the order of the schema. */
+function Checkboxes({ s, label, value, onChange, describedBy }: { s: JSONSchema; label: string; value: unknown[]; onChange: (v: unknown[] | undefined) => void; describedBy?: string }) {
+  const opts = s.items!.enum!
+  return (
+    <div role="group" aria-label={label} aria-describedby={describedBy} className="flex flex-wrap gap-x-4 gap-y-1.5">
+      {opts.map((o, i) => (
+        <label key={String(o)} className="inline-flex items-center gap-1.5 text-[13px]">
+          <input
+            type="checkbox"
+            checked={value.includes(o)}
+            onChange={(e) => {
+              const next = opts.filter((x) => (x === o ? e.target.checked : value.includes(x)))
+              onChange(next.length ? next : undefined)
+            }}
+          />
+          {s.items!['x-enumTitles']?.[i] ?? String(o)}
+        </label>
+      ))}
+    </div>
+  )
+}
+
+/** Monospace text (scripts, PEM, SQL) that can also be loaded from a file. */
+function CodeArea({ common, label, value, onChange }: { common: Common; label: string; value: string; onChange: (v: unknown) => void }) {
+  const tr = useT()
+  return (
+    <div className="flex flex-col gap-1">
+      <textarea {...common} rows={Math.min(18, Math.max(4, value.split('\n').length + 1))} spellCheck={false} wrap="off" className="field font-mono text-[12.5px] leading-5" value={value} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)} />
+      <label className="btn btn-ghost w-fit cursor-pointer text-[12.5px]">
+        <FileUp size={14} aria-hidden /> {tr('schema.loadFile')}
+        <input
+          type="file"
+          className="sr-only"
+          aria-label={`${tr('schema.loadFile')}: ${label}`}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f && f.size <= 1 << 20) void f.text().then((txt) => onChange(txt))
+            e.target.value = ''
+          }}
+        />
+      </label>
+    </div>
+  )
+}
+
+/** A secret: masked by default, the mask the server sends stays as it is. */
+function Secret({ common, cls, label, value, onChange }: { common: Common; cls: string; label: string; value: string; onChange: (v: unknown) => void }) {
+  const tr = useT()
+  const [show, setShow] = useState(false)
+  return (
+    <div className="flex items-center gap-1">
+      <input {...common} type={show ? 'text' : 'password'} autoComplete="new-password" spellCheck={false} className={`${cls} font-mono`} value={value} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)} />
+      <button type="button" className="btn btn-ghost !h-8 px-2" aria-pressed={show} aria-label={`${tr(show ? 'schema.hide' : 'schema.show')}: ${label}`} onClick={() => setShow(!show)}>
+        {show ? <EyeOff size={14} aria-hidden /> : <Eye size={14} aria-hidden />}
+      </button>
     </div>
   )
 }

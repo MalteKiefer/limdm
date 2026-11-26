@@ -1258,9 +1258,15 @@ export interface components {
             items?: number[];
             branches?: {
                 /** @enum {string} */
-                match?: "all" | "any";
-                rules?: Record<string, never>[];
-                nodes?: components["schemas"]["Node"][];
+                match: "all" | "any";
+                rules: {
+                    /** @example tag */
+                    field: string;
+                    /** @example has */
+                    op: string;
+                    value: string;
+                }[];
+                nodes: components["schemas"]["Node"][];
             }[];
             else?: components["schemas"]["Node"][];
         };
@@ -1555,11 +1561,11 @@ export interface components {
             };
         };
         ConfigDeleted: {
-            id?: number;
-            name?: string;
+            id: number;
+            name: string;
             /** Format: date-time */
-            at?: string;
-            by?: string;
+            at: string;
+            by: string;
         };
         ConfigBlueprintSource: {
             /** @enum {string} */

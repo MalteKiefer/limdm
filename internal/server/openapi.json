@@ -4126,7 +4126,25 @@
                 "rules": {
                   "type": "array",
                   "items": {
-                    "type": "object"
+                    "type": "object",
+                    "required": [
+                      "field",
+                      "op",
+                      "value"
+                    ],
+                    "properties": {
+                      "field": {
+                        "type": "string",
+                        "example": "tag"
+                      },
+                      "op": {
+                        "type": "string",
+                        "example": "has"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    }
                   }
                 },
                 "nodes": {
@@ -4135,7 +4153,12 @@
                     "$ref": "#/components/schemas/Node"
                   }
                 }
-              }
+              },
+              "required": [
+                "match",
+                "rules",
+                "nodes"
+              ]
             }
           },
           "else": {
@@ -5187,7 +5210,13 @@
           "by": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "id",
+          "name",
+          "at",
+          "by"
+        ]
       },
       "ConfigBlueprintSource": {
         "type": "object",
