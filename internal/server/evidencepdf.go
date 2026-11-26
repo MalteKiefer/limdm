@@ -46,7 +46,7 @@ func pdfText(s string) string {
 		case r == '\n' || r == '\t':
 			b.WriteByte(' ')
 		case r >= 32 && r < 127, r >= 160 && r < 256:
-			b.WriteByte(byte(r))
+			b.WriteByte(byte(r)) // #nosec G115 -- r < 256 in this case
 		default:
 			b.WriteByte('?')
 		}
