@@ -24,6 +24,7 @@ const views: Record<SectionId, ComponentType> = {
   password: mod(server, 'Password'),
   approvals: mod(server, 'Approvals'),
   shell: mod(server, 'RemoteShell'),
+  enroll: mod(server, 'Enrollment'),
   keys: mod(ops, 'Keys'),
   users: mod(people, 'Users'),
   tenants: mod(people, 'Tenants'),

@@ -2,7 +2,7 @@
 // "only-global" hides a section from tenant accounts and accounts with a
 // device scope (the server refuses them too), "multi" shows it only with
 // multi tenancy; admin hides it from auditors.
-import { Archive, Bell, Building2, Cpu, DatabaseBackup, Fingerprint, FolderTree, Gauge, Globe, KeyRound, LockKeyhole, Network, ShieldCheck, SquareTerminal, Stamp, UserCog, Users, Wifi, type LucideIcon } from 'lucide-react'
+import { Archive, Bell, Building2, Cpu, DatabaseBackup, Fingerprint, FolderTree, Gauge, Globe, KeyRound, LockKeyhole, Network, ShieldCheck, SquareTerminal, Stamp, TicketCheck, UserCog, Users, Wifi, type LucideIcon } from 'lucide-react'
 
 export type SectionId =
   | 'general'
@@ -12,6 +12,7 @@ export type SectionId =
   | 'password'
   | 'approvals'
   | 'shell'
+  | 'enroll'
   | 'keys'
   | 'users'
   | 'tenants'
@@ -34,6 +35,7 @@ export const sections: SectionMeta[] = [
   { id: 'password', icon: LockKeyhole, group: 'security', tenant: 'only-global' },
   { id: 'approvals', icon: Stamp, group: 'security', tenant: 'only-global' },
   { id: 'shell', icon: SquareTerminal, group: 'security', tenant: 'only-global' },
+  { id: 'enroll', icon: TicketCheck, group: 'security', tenant: 'only-global' },
   { id: 'keys', icon: KeyRound, group: 'security', tenant: 'only-global', admin: true },
   { id: 'users', icon: Users, group: 'people' },
   { id: 'tenants', icon: Building2, group: 'people', tenant: 'multi' },

@@ -221,7 +221,7 @@ in two rounds:
    agent sends the request again with the credential; only then the token is used and the
    certificate issued.
 
-The server records the device as **TPM bound** (device page, **Security** facts), pins the
+The server records the device as **TPM bound** (device page, **Device key** fact), pins the
 AK and keeps the SHA-256 of the EK public area. A renewal creates a new key in the TPM and
 stays TPM bound when the pinned AK certifies it. Without a TPM, or when a TPM command fails,
 the agent uses a file key as before. **Settings**, **Enrollment**, **Require TPM bound key**
