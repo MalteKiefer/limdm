@@ -1,41 +1,126 @@
 # Development
 
-Go (see `go.mod`), no cgo: every binary builds with `CGO_ENABLED=0`.
+Go (version in `go.mod`), no cgo: every release binary builds with `CGO_ENABLED=0` for
+linux amd64 and arm64. The only exception is the optional PKCS#11 server build.
+
+## Build
 
 ```sh
 make build                                               # dist/limdm-{server,agent}-linux-{amd64,arm64}
-make test                                                # unit tests
-make lint                                                # golangci-lint
-make integration DB=postgres://limdm@127.0.0.1:5432/limdm  # needs an empty database
-make snapshot                                            # goreleaser snapshot: deb, rpm, tar.gz
+make build VERSION=0.16.0 UPDATE_PUBKEY=<hex>            # version and release key compiled in
+make test                                                # go vet and unit tests
+make lint                                                # golangci-lint v2 (.golangci.yml)
+make integration DB=postgres://limdm@127.0.0.1:5432/limdm  # TestIntegration against an empty database
+make snapshot                                            # goreleaser snapshot: deb, rpm, apk, Arch packages, tar.gz, no publishing
+make clean                                               # removes dist/
 ```
 
-Integration tests drop and recreate the `public` schema of the given database. Never point
-them at a database with data.
+`make build` builds only the server and the agent. `limdm` (the device CLI) and
+`limdm-desktop` (the desktop helper) are built by goreleaser (`make snapshot`) or with
+`go build ./cmd/limdm ./cmd/limdm-desktop`. An agent built without `UPDATE_PUBKEY` refuses
+every self update ([operations.md](operations.md#release-key)).
+
+### PKCS#11 build
+
+The HSM key provider (`LIMDM_KEY_PROVIDER=pkcs11`) needs cgo and the build tag `pkcs11`:
+
+```sh
+CGO_ENABLED=1 go build -tags pkcs11 -trimpath -ldflags "-s -w" -o limdm-server ./cmd/limdm-server
+```
+
+Without the tag the provider files are left out and the server refuses `pkcs11` at start.
+Details, container image and a SoftHSM test: [keys.md](keys.md#separate-build).
+
+## Tests
+
+| Command | Runs |
+|---|---|
+| `go test ./...` | unit tests; tests that need PostgreSQL or the network skip themselves |
+| `LIMDM_TEST_DATABASE_URL=postgres://... go test ./internal/server` | every database test (integration, API, tenants, keys, HA, remote shell, evidence) |
+| `make integration DB=postgres://...` | only `TestIntegration` |
+| `LIMDM_LIVE_DNS=1 go test -run TestDoHLive ./internal/agent` | asks the real DNS over HTTPS resolvers |
+| `CGO_ENABLED=1 go test -tags pkcs11 ./internal/server` | PKCS#11 key parsing tests |
+
+The database tests drop and recreate the `public` schema of `LIMDM_TEST_DATABASE_URL`.
+Never point them at a database with data. CI runs `go test -race -count=1 ./...` with a
+PostgreSQL on the runner, so the database tests run there.
+
+CI also checks `go mod tidy -diff`, `gofmt -l`, the cross compile for amd64 and arm64,
+`go vet`, golangci-lint, govulncheck, `goreleaser check`, actionlint and zizmor for the
+workflows, and a dependency review with a license allowlist on pull requests.
+
+## Lint
+
+`make lint` runs golangci-lint at the version pinned in the `Makefile` and in CI, with the
+configuration in `.golangci.yml` (`nolintlint` is on: an exception is a
+`//nolint:<linter> // reason` comment on the line).
 
 ## Layout
 
 | Path | |
 |---|---|
-| `cmd/limdm-server`, `cmd/limdm-agent`, `cmd/limdm-desktop` | entry points |
-| `internal/api` | protocol types, declaration validation, blueprint resolution and merging |
-| `internal/server` | console, agent API, SCIM, directory sync, migrations (`schema.sql`, `library.go`) |
-| `internal/server/web` | templates, CSS, the blueprint editor script |
-| `internal/agent` | agent: enforcement, compliance checks, inventory, PAM, desktop socket |
-| `packaging`, `deploy`, `scripts` | systemd units, packages, Docker Compose, Caddy, install script |
+| `cmd/limdm-server` | server: `serve`, `keygen`, `sign`, `local-admin`, `audit`, `keys` |
+| `cmd/limdm-agent` | agent daemon and `enroll` |
+| `cmd/limdm` | device CLI, the command line counterpart of the desktop app (talks to the agent's local socket) |
+| `cmd/limdm-desktop` | desktop helper in the user session (notifications, tray, branding) |
+| `internal/api` | wire protocol types, declaration types and validation, blueprint resolution and merging, release and command signatures, remote shell frames |
+| `internal/server` | console, agent API, admin API and OpenAPI document, SCIM, directory sync, notifications, keys, tenants, remote shell relay, schema (`schema.sql`) and data migrations (`library.go`) |
+| `internal/server/web` | templates, CSS, scripts (blueprint editor, remote shell terminal) |
+| `internal/server/web/static/vendor/xterm` | vendored xterm.js for the remote shell |
+| `internal/agent` | agent: enforcement, compliance checks, inventory, PAM, desktop socket, remote shell |
+| `packaging` | systemd and OpenRC units, package scripts, PAM config, desktop files, artwork |
+| `deploy` | Docker Compose, Caddy, CrowdSec, fail2ban |
+| `scripts` | `install-agent.sh`, `vendor-xterm.sh` |
+| `docs` | this documentation; console help links point here |
 
 ## Conventions
 
 * Validation lives in `internal/api` and runs on server and agent.
-* Console texts are English keys; German translations in `internal/server/i18n.go`. A test
-  fails when a template text has no German entry.
+* Console texts are English keys, wrapped as `{{t "..."}}` in templates. Every such text and
+  every declaration type label needs a German entry in `deCatalog` in
+  `internal/server/i18n.go`; `TestGermanCatalogComplete` fails otherwise.
+* `internal/server/schema.sql` runs at every start, so every statement must be idempotent
+  (`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `CREATE OR REPLACE`, guarded
+  constraints). The integration test applies the schema twice and fails when the second run
+  fails. Data conversions that must run once go into the versioned `migrations` list in
+  `internal/server/library.go` (recorded in `schema_migrations`). Migrations run in one
+  transaction under an advisory lock, so several instances can start together.
+* `internal/server/openapi.json` is written by hand and embedded in the server; the tests
+  only check that it is valid, so update it with every admin API change.
 * Commits are signed; `main` only accepts pull requests with passing checks.
 
+## xterm.js
+
+The console terminal of the remote shell uses xterm.js with the fit and canvas addons,
+vendored into `internal/server/web/static/vendor/xterm` and embedded in the server binary.
+Without these files the session page shows that the terminal files are missing.
+
+```sh
+scripts/vendor-xterm.sh
+```
+
+The script needs `npm`, fetches the exact versions pinned in it from the npm registry
+(integrity checked by npm), and writes `SHA256SUMS`. Later runs refuse files that differ
+from that file. Commit the directory. To update, change the versions in the script, delete
+`SHA256SUMS`, run it and review the diff.
+
 ## Release
+
+Requirements in the GitHub repository, both in the protected `release` environment:
+
+| Name | Kind | Content |
+|---|---|---|
+| `UPDATE_PUBKEY` | variable | public release key printed by `limdm-server keygen -out release.key` |
+| `RELEASE_SIGNING_KEY` | secret | content of `release.key` |
+
+The workflow fails when either is missing. See [operations.md](operations.md#release-key).
 
 1. Merge to `main`.
 2. `git tag -s vX.Y.Z -m "LiMDM vX.Y.Z" && git push origin vX.Y.Z`
 3. Approve the `release` environment in GitHub Actions.
 
-The workflow runs goreleaser (packages, archives, SBOMs, checksums), attests build
-provenance and publishes `ghcr.io/maltekiefer/limdm-server`.
+The workflow runs goreleaser (packages, archives, SBOMs, checksums, the server image
+`ghcr.io/maltekiefer/limdm-server`), signs `SHA256SUMS` with
+`limdm-server sign -key-env RELEASE_SIGNING_KEY` and uploads `SHA256SUMS.sig`, and attests
+build provenance for packages, archives, checksums, `scripts/install-agent.sh` and the
+image.

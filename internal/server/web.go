@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -51,6 +52,14 @@ var pages = func() map[string]map[string]*template.Template {
 
 func parsePages(lang, layout string) map[string]*template.Template {
 	T := func(s string) string { return translate(lang, s) }
+	actionLabel := func(a string) string {
+		return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot",
+			"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script",
+			"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour", "message": "Message",
+			"app_install": "Install app", "app_remove": "Remove app",
+			"user_create": "Create user", "user_admin": "Change admin rights", "user_lock": "Lock user", "user_unlock": "Unlock user",
+			"user_password": "Reset password", "user_delete": "Delete user", "software_remove": "Remove software", "diagnostics": "Collect logs", "shell": "Remote shell"}[a])
+	}
 	funcs := template.FuncMap{
 		"dict": func(kv ...any) map[string]any { // arguments for shared partials
 			m := make(map[string]any, len(kv)/2)
@@ -60,6 +69,7 @@ func parsePages(lang, layout string) map[string]*template.Template {
 			return m
 		},
 		"t":       T,
+		"errmsg":  func(msg string) friendlyMsg { return friendlyError(lang, msg) },
 		"lang":    func() string { return lang },
 		"version": func() string { return Version },
 		"ago": func(t *time.Time) string {
@@ -96,17 +106,16 @@ func parsePages(lang, layout string) map[string]*template.Template {
 			}
 			return t
 		},
-		"actionLabel": func(a string) string {
-			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot",
-				"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script",
-				"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour", "message": "Message",
-				"app_install": "Install app", "app_remove": "Remove app",
-				"user_create": "Create user", "user_admin": "Change admin rights", "user_lock": "Lock user", "user_unlock": "Unlock user",
-				"user_password": "Reset password", "user_delete": "Delete user", "software_remove": "Remove software"}[a])
-		},
-		"join":      strings.Join,
-		"hasPrefix": strings.HasPrefix,
-		"fmtTime":   func(t time.Time) string { return t.Local().Format(layout) },
+		"actionLabel": actionLabel,
+		"auditLabel":  func(a string) string { return auditLabel(lang, a, actionLabel) },
+		"statusHelp":  func(st string) string { return T(statusHelp[st]) },
+		"checkDetail": func(d string) string { return checkDetail(lang, d) },
+		"itemMeta":    func() map[string]typeMeta { return itemMeta(lang) },
+		"typeDesc":    func(t string) string { return T(typeInfo[t].Desc) },
+		"docs":        func(p string) string { return docsURL + p },
+		"join":        strings.Join,
+		"hasPrefix":   strings.HasPrefix,
+		"fmtTime":     func(t time.Time) string { return t.Local().Format(layout) },
 		"gib": func(mb uint64) string {
 			if mb == 0 {
 				return T("n/a")
@@ -146,7 +155,7 @@ func (s *Server) helpdeskPage(h handler) http.HandlerFunc { return s.pageFor(h, 
 func (s *Server) adminOrAuditor(h handler) handler {
 	return func(w http.ResponseWriter, r *http.Request, sess session) {
 		if sess.Role == "helpdesk" {
-			http.Error(w, "not available for the helpdesk role", http.StatusForbidden)
+			s.errorPage(w, r, sess, http.StatusForbidden, "not available for the helpdesk role")
 			return
 		}
 		h(w, r, sess)
@@ -160,14 +169,27 @@ func (s *Server) pageFor(h handler, postRole string) http.HandlerFunc {
 			http.Redirect(w, r, "/login", http.StatusFound)
 			return
 		}
+		if !tenantAllowed(sess, r.Pattern) { // deny by default (tenant.go)
+			s.errorPage(w, r, sess, http.StatusForbidden, "not available for tenant accounts")
+			return
+		}
+		if sess.Tenant != 0 && tenantRoutes[r.Pattern] {
+			r = r.WithContext(withTenant(r.Context(), sess.Tenant))
+		}
+		// every device route checks the device against tenant and scope here,
+		// so a handler cannot forget it
+		if strings.Contains(r.Pattern, "/devices/{id}") && (sess.Tenant != 0 || sess.scoped()) && !s.inScope(r.Context(), sess, r.PathValue("id")) {
+			s.notFound(w, r, sess)
+			return
+		}
 		if r.Method == http.MethodPost {
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 			if sess.Role != "admin" && postRole != "self" && (postRole != "helpdesk" || sess.Role != "helpdesk") {
-				http.Error(w, "your role cannot change this", http.StatusForbidden)
+				s.errorPage(w, r, sess, http.StatusForbidden, "your role cannot change this")
 				return
 			}
 			if !s.csrfOK(r, sess) {
-				http.Error(w, "csrf check failed", http.StatusForbidden)
+				s.errorPage(w, r, sess, http.StatusForbidden, "csrf check failed")
 				return
 			}
 		}
@@ -185,6 +207,9 @@ var typeLabels = map[string]string{
 	api.TypeFlatpak: "Flatpak apps", api.TypeScripts: "Recurring scripts",
 	api.TypeDiskEncryption: "Disk encryption recovery", api.TypePolkit: "polkit rules", api.TypeSudo: "sudo rules",
 	api.TypeBootloader: "Boot loader password", api.TypeSoftwareStore: "Software store policy",
+	api.TypePrinters: "Printers",
+	api.TypeDconf:    "GNOME settings (dconf)", api.TypeLocalUsers: "Local accounts",
+	api.TypeCustomChecks: "Custom compliance checks",
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, name string, data map[string]any) {
@@ -194,8 +219,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, na
 	data["Sess"] = sess
 	data["CSRF"] = s.csrfToken(sess)
 	data["Page"] = name
-	b := s.branding()
-	data["Brand"] = map[string]any{"Name": b.Name, "Logo": len(b.Logo) > 0, "V": b.Hash}
+	s.consoleBrand(r.Context(), sess, data)
 	var buf bytes.Buffer
 	if err := pages[requestLang(r)+"/"+requestDateFormat(r)][name].Execute(&buf, data); err != nil {
 		s.fail(w, err)
@@ -206,21 +230,27 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, na
 }
 
 func (s *Server) webRoutes(mux *http.ServeMux) {
+	s.networkRoutes(mux)
+	s.tenantPages(mux)
+	s.shellRoutes(mux)
 	mux.HandleFunc("GET /{$}", s.page(s.overview))
+	mux.HandleFunc("GET /help", s.page(s.helpPage))
+	mux.HandleFunc("POST /onboarding/dismiss", s.page(s.onboardingDismiss))
 	mux.HandleFunc("GET /devices", s.page(s.devices))
 	mux.HandleFunc("GET /devices/{id}", s.page(s.device))
 	mux.HandleFunc("POST /devices/bulk", s.helpdeskPage(s.devicesBulk))
 	mux.HandleFunc("POST /devices/{id}/command", s.helpdeskPage(s.deviceCommand))
+	mux.HandleFunc("GET /devices/{id}/diagnostics/{cid}", s.page(s.diagnosticsDownload))
 	mux.HandleFunc("POST /devices/{id}/agent-update", s.page(s.deviceAgentUpdate))
 	mux.HandleFunc("POST /devices/{id}/recovery", s.helpdeskPage(s.recoveryView))
-	mux.HandleFunc("GET /directory", s.page(s.adminOrAuditor(s.directoryPage)))
+	mux.HandleFunc("GET /directory", s.page(s.adminOrAuditor(s.unscoped(s.directoryPage))))
 	mux.HandleFunc("POST /directory/groups", s.page(s.groupAssign))
 	mux.HandleFunc("POST /directory/scim-token", s.page(s.scimToken))
 	mux.HandleFunc("POST /directory/google", s.page(s.googleConfigure))
 	mux.HandleFunc("POST /directory/google/sync", s.page(s.googleSyncNow))
 	mux.HandleFunc("GET /users", s.page(s.adminOrAuditor(s.usersPage)))
-	mux.HandleFunc("GET /agents", s.page(s.adminOrAuditor(s.agentsPage)))
-	mux.HandleFunc("GET /software", s.page(s.adminOrAuditor(s.softwarePage)))
+	mux.HandleFunc("GET /agents", s.page(s.adminOrAuditor(s.unscoped(s.agentsPage))))
+	mux.HandleFunc("GET /software", s.page(s.adminOrAuditor(s.unscoped(s.softwarePage))))
 	mux.HandleFunc("GET /software/new", s.page(s.adminOrAuditor(s.appEdit)))
 	mux.HandleFunc("GET /software/apps/{id}", s.page(s.adminOrAuditor(s.appEdit)))
 	mux.HandleFunc("GET /software/icons/{id}", s.page(func(w http.ResponseWriter, r *http.Request, _ session) { s.catalogIcon(w, r) }))
@@ -248,22 +278,35 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /settings/notifications", s.page(s.channelSave))
 	mux.HandleFunc("POST /settings/notifications/{id}/{op}", s.page(s.channelOp))
 	mux.HandleFunc("POST /settings", s.page(s.settingsSave))
+	mux.HandleFunc("POST /settings/keys/{op}/{kind}", s.page(s.unscoped(s.keysAction))) // keys.go
 	mux.HandleFunc("POST /devices/{id}/assign", s.page(s.deviceAssign))
 	mux.HandleFunc("POST /devices/{id}/retire", s.page(s.deviceRetire))
 	mux.HandleFunc("GET /blueprints", s.page(s.blueprints))
 	mux.HandleFunc("GET /blueprints/{id}", s.page(s.blueprintEdit))
 	mux.HandleFunc("POST /blueprints", s.page(s.blueprintSave))
 	mux.HandleFunc("POST /blueprints/{id}/delete", s.page(s.blueprintDelete))
+	mux.HandleFunc("GET /blueprints/{id}/history", s.page(s.unscoped(s.blueprintHistory)))
+	mux.HandleFunc("POST /blueprints/{id}/rollback", s.page(s.blueprintRollback))
 	mux.HandleFunc("GET /library", s.page(s.library))
 	mux.HandleFunc("GET /library/{id}", s.page(s.libraryEdit))
 	mux.HandleFunc("POST /library", s.page(s.librarySave))
 	mux.HandleFunc("POST /library/{id}/delete", s.page(s.libraryDelete))
+	mux.HandleFunc("GET /library/{id}/history", s.page(s.unscoped(s.libraryHistory)))
+	mux.HandleFunc("POST /library/{id}/rollback", s.page(s.libraryRollback))
 	mux.HandleFunc("GET /tokens", s.page(s.tokens))
 	mux.HandleFunc("POST /tokens", s.page(s.tokenCreate))
 	mux.HandleFunc("POST /tokens/{id}/revoke", s.page(s.tokenRevoke))
 	mux.HandleFunc("GET /compliance", s.page(s.compliance))
 	mux.HandleFunc("GET /audit", s.page(s.adminOrAuditor(s.auditPage)))
+	mux.HandleFunc("POST /audit/verify", s.selfPage(s.adminOrAuditor(s.auditVerify)))
+	mux.HandleFunc("GET /compliance/history", s.page(s.complianceHistory))
 	mux.HandleFunc("GET /export/{kind}", s.page(s.adminOrAuditor(s.export)))
+	// W2 governance
+	mux.HandleFunc("GET /approvals", s.page(s.approvalsPage))
+	mux.HandleFunc("POST /approvals/{id}/{op}", s.page(s.approvalDecide))
+	mux.HandleFunc("POST /devices/{id}/delete", s.page(s.deviceDelete))
+	mux.HandleFunc("POST /compliance/exceptions", s.page(s.exceptionAdd))
+	mux.HandleFunc("POST /compliance/exceptions/{id}/revoke", s.page(s.exceptionRevoke))
 }
 
 // ---- devices ----
@@ -309,10 +352,16 @@ func (s *Server) listDevices(ctx context.Context) ([]deviceRow, error) {
 
 // listDevicesWhere lists devices matching a condition on d (devices).
 func (s *Server) listDevicesWhere(ctx context.Context, where string, args ...any) ([]deviceRow, error) {
+	return s.listDevicesQuery(ctx, where, ` ORDER BY d.retired, d.hostname`, args...)
+}
+
+// listDevicesQuery lists devices matching a condition on d; tail orders
+// and pages the result.
+func (s *Server) listDevicesQuery(ctx context.Context, where, tail string, args ...any) ([]deviceRow, error) {
 	rows, err := s.db.Query(ctx, `SELECT d.id, d.hostname, d.os_name, d.agent_version,
 		coalesce(b.name, 'default'), d.tags,
-		d.desktop, d.memory_mb, d.failing, d.checks_count, d.last_seen, d.retired, d.grace_until, d.auto_locked
-		FROM devices d LEFT JOIN blueprints b ON b.id = `+effectiveBlueprintSQL+` WHERE `+where+` ORDER BY d.retired, d.hostname`, args...)
+		d.desktop, d.memory_mb, d.failing, d.checks_count, d.last_seen, d.retired, d.grace_until, d.auto_locked`+
+		deviceFrom+` WHERE `+where+tail, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -336,36 +385,39 @@ var deviceFilters = []struct{ Key, Label, Where string }{
 	{"failing", "Failing check", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.checks, '[]'::jsonb)) c WHERE c->>'id' = $1 AND c->>'status' = 'fail')`},
 }
 
+// devicesPageSize is the number of devices per page of the device list.
+const devicesPageSize = 200
+
 func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
-	where, args := "TRUE", []any{}
-	var filter, filterKey, filterVal string
-	for _, f := range deviceFilters {
-		if v := strings.TrimSpace(r.URL.Query().Get(f.Key)); v != "" && len(v) <= 200 {
-			where, args, filter, filterKey, filterVal = f.Where, []any{v}, f.Label, f.Key, v
-			break
-		}
+	dq, err := parseDeviceQuery(r.URL.Query(), s.staleAfter())
+	if err != nil {
+		s.errorPage(w, r, sess, http.StatusBadRequest, err.Error())
+		return
 	}
-	list, err := s.listDevicesWhere(ctx, where, args...)
+	cond, sargs := scopeCond(sess, 0)
+	dq.filters.add(cond, sargs...)
+	counts, total, err := s.deviceCounts(ctx, dq)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	q, status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q"))), r.URL.Query().Get("status")
-	counts := map[string]int{}
-	var shown []deviceRow
-	for _, d := range list {
-		counts[d.Status]++
-		if status != "" && d.Status != status {
-			continue
-		}
-		if q != "" && !strings.Contains(strings.ToLower(d.Hostname+" "+d.OS+" "+d.ID+" "+d.Blueprints+" "+strings.Join(d.Tags, " ")), q) {
-			continue
-		}
-		shown = append(shown, d)
+	matching := total
+	if dq.Status != "" {
+		matching = counts[dq.Status]
+	}
+	pages := max(1, (matching+devicesPageSize-1)/devicesPageSize)
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	page = min(max(page, 1), pages)
+	where := dq.where()
+	shown, err := s.listDevicesQuery(ctx, where.sql(), fmt.Sprintf(" ORDER BY d.retired, d.hostname, d.id LIMIT %d OFFSET %d", devicesPageSize, (page-1)*devicesPageSize), where.args...)
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
 	var tags []string
-	if err := s.db.QueryRow(ctx, `SELECT coalesce(array_agg(DISTINCT t ORDER BY t), '{}') FROM devices, unnest(tags) t WHERE NOT retired`).Scan(&tags); err != nil {
+	cond, sargs = scopeCond(sess, 0)
+	if err := s.db.QueryRow(ctx, `SELECT coalesce(array_agg(DISTINCT t ORDER BY t), '{}') FROM devices d, unnest(d.tags) t WHERE NOT d.retired AND `+cond, sargs...).Scan(&tags); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -374,49 +426,48 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 		s.fail(w, err)
 		return
 	}
-	keep := url.Values{}
-	if filterKey != "" {
-		keep.Set(filterKey, filterVal)
+	keepURL := template.URL(dq.Keep.Encode()) //nolint:gosec // url.Values.Encode escapes every key and value
+	pageKeep := dq.Keep.Encode()
+	if dq.Status != "" {
+		pageKeep = url.Values{"status": {dq.Status}}.Encode() + "&" + pageKeep
 	}
-	if q != "" {
-		keep.Set("q", q)
-	}
-	keepURL := template.URL(keep.Encode()) //nolint:gosec // url.Values.Encode escapes every key and value
-	s.render(w, r, sess, "devices", map[string]any{"Devices": shown, "Total": len(list), "Counts": counts, "Q": q, "Status": status,
-		"Statuses": []string{"compliant", "in grace", "non-compliant", "stale", "pending", "retired"},
-		"Filter":   filter, "FilterKey": filterKey, "FilterVal": filterVal, "Keep": keepURL, "Tags": tags, "Apps": apps,
+	s.render(w, r, sess, "devices", map[string]any{"Devices": shown, "Total": total, "Counts": counts, "Q": dq.Q, "Status": dq.Status,
+		"Statuses": deviceStatuses, "Chips": dq.Chips, "Tag": dq.Keep.Get("tag"), "Pkg": dq.Keep.Get("pkg"), "Keep": keepURL, "Tags": tags, "Apps": apps,
+		"Page": page, "Pages": pages, "PageKeep": template.URL(pageKeep), //nolint:gosec // url.Values.Encode escapes every key and value
 		"Back": r.URL.RequestURI()})
 }
 
 // devicesBulk runs one action on the selected devices: a command, an
 // agent update, or adding and removing a tag. Destructive commands (lost
-// mode, wipe) and scripts stay single device actions.
+// mode, wipe) stay single device actions; scripts need the admin role
+// (commandPayload).
 func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "bad form")
 		return
 	}
 	ids := slices.Compact(slices.Sorted(slices.Values(r.Form["id"])))
 	if len(ids) == 0 || len(ids) > 1000 {
-		http.Error(w, "select 1 to 1000 devices", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "select 1 to 1000 devices")
 		return
 	}
 	var known int
-	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM devices WHERE id = ANY($1) AND NOT retired`, ids).Scan(&known); err != nil || known != len(ids) {
-		http.Error(w, "unknown or retired device selected", http.StatusBadRequest)
+	cond, sargs := scopeCond(sess, 1)
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM devices d WHERE d.id = ANY($1) AND NOT d.retired AND `+cond, append([]any{ids}, sargs...)...).Scan(&known); err != nil || known != len(ids) {
+		s.errorPage(w, r, sess, http.StatusBadRequest, "unknown or retired device selected")
 		return
 	}
 	op, typ, _ := strings.Cut(r.FormValue("action"), ":")
 	switch op {
 	case "tag-add", "tag-remove":
 		if sess.Role != "admin" {
-			http.Error(w, "this action requires the admin role", http.StatusForbidden)
+			s.errorPage(w, r, sess, http.StatusForbidden, "this action requires the admin role")
 			return
 		}
 		tags, err := parseTags(r.FormValue("tag"))
 		if err != nil || len(tags) != 1 {
-			http.Error(w, "one tag: up to 32 letters, digits, dot, dash, underscore", http.StatusBadRequest)
+			s.errorPage(w, r, sess, http.StatusBadRequest, "one tag: up to 32 letters, digits, dot, dash, underscore")
 			return
 		}
 		sql := `UPDATE devices SET tags = array_append(tags, $2) WHERE id = $1 AND NOT $2 = ANY(tags)`
@@ -434,7 +485,7 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 		}
 	case "agent-update":
 		if sess.Role != "admin" {
-			http.Error(w, "this action requires the admin role", http.StatusForbidden)
+			s.errorPage(w, r, sess, http.StatusForbidden, "this action requires the admin role")
 			return
 		}
 		for _, id := range ids {
@@ -447,13 +498,23 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 			}
 		}
 	case "command":
-		if typ == "lost" || typ == "wipe" || typ == "script" {
-			http.Error(w, "lost mode, wipe and scripts are sent to one device at a time", http.StatusBadRequest)
+		if typ == "lost" || typ == "wipe" {
+			s.errorPage(w, r, sess, http.StatusBadRequest, "lost mode and wipe are sent to one device at a time")
 			return
 		}
 		payload, code, msg := s.commandPayload(r, sess, ids[0], typ)
 		if code != 0 {
-			http.Error(w, msg, code)
+			s.errorPage(w, r, sess, code, msg)
+			return
+		}
+		if s.needsApproval(typ) { // bulk scripts: one four eyes request per device
+			for _, id := range ids {
+				if _, err := s.requestApproval(ctx, sess, "command", id, commandApproval{Type: typ, Payload: payload}, strings.TrimSpace(r.FormValue("reason"))); err != nil {
+					s.fail(w, err)
+					return
+				}
+			}
+			http.Redirect(w, r, "/approvals", http.StatusSeeOther)
 			return
 		}
 		for _, id := range ids {
@@ -461,9 +522,10 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 				s.fail(w, err)
 				return
 			}
+			s.notifyCommand(sess.Email, id, typ)
 		}
 	default:
-		http.Error(w, "unknown action", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "unknown action")
 		return
 	}
 	// back to the list with its filters; only the query is taken over
@@ -477,7 +539,8 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 // overview is the landing page: fleet state, OS mix, weakest controls, recent activity.
 func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
-	list, err := s.listDevices(ctx)
+	cond, sargs := scopeCond(sess, 0)
+	list, err := s.listDevicesWhere(ctx, cond, sargs...)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -502,7 +565,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 	sort.Slice(oses, func(i, j int) bool {
 		return oses[i].Count > oses[j].Count || oses[i].Count == oses[j].Count && oses[i].Name < oses[j].Name
 	})
-	fc, err := s.fleetComplianceCached(ctx)
+	fc, err := s.fleetComplianceFor(ctx, sess)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -519,7 +582,8 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 	}
 	var recent []auditRow
 	if sess.Role != "helpdesk" { // the audit log (script bodies included) is not theirs to read
-		rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log ORDER BY id DESC LIMIT 8`)
+		acond, aargs := auditScope(sess, 0)
+		rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash, tenant_id FROM audit_log WHERE `+acond+` ORDER BY id DESC LIMIT 8`, aargs...)
 		if err != nil {
 			s.fail(w, err)
 			return
@@ -531,12 +595,19 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 	}
 	donut := donutChart([]donutPart{{"compliant", counts["compliant"], "ok"}, {"non-compliant", counts["non-compliant"], "bad"},
 		{"in grace", counts["in grace"], "warn"}, {"stale", counts["stale"], "warn"}, {"pending", counts["pending"], "na"}})
-	trend, err := s.fleetChart(ctx)
-	if err != nil {
-		s.fail(w, err)
-		return
+	var trend template.HTML
+	var steps []onboardingStep
+	if sess.Tenant == 0 { // fleet history and first steps are installation wide
+		if trend, err = s.fleetChart(ctx); err != nil {
+			s.fail(w, err)
+			return
+		}
+		if steps, err = s.onboarding(ctx, r, sess); err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
-	s.render(w, r, sess, "overview", map[string]any{"Trend": trend, "Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
+	s.render(w, r, sess, "overview", map[string]any{"Steps": steps, "Trend": trend, "Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
 		"Recent": recent, "StaleHours": s.settings().StaleHours})
 }
 
@@ -584,6 +655,10 @@ func firstNonEmpty(v ...string) string {
 func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
 	id := r.PathValue("id")
+	if !s.inScope(ctx, sess, id) {
+		http.NotFound(w, r)
+		return
+	}
 	var d deviceRow
 	var inv, checks, decl, users, pkgs []byte
 	var enrolled, certExp time.Time
@@ -594,7 +669,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &pkgs, &enrolled, &certExp, &d.GraceUntil, &d.AutoLocked, &since,
 			&d.UpdateState, &d.UpdateVersion, &d.UpdateRequested, &d.ExternalIP, &d.Geo)
 	if err != nil {
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
 	s.status(&d)
@@ -626,7 +701,20 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		At                       time.Time
 	}
 	var cmds []cmd
+	var scripts []scriptRow
+	var diags []diagRow
 	if tab == "commands" { // outputs can be large; only the commands tab shows them
+		var err error
+		if scripts, err = s.scriptResults(ctx, id); err != nil {
+			s.fail(w, err)
+			return
+		}
+		if sess.Role == "admin" || sess.Role == "helpdesk" {
+			if diags, err = s.diagnosticsList(ctx, id); err != nil {
+				s.fail(w, err)
+				return
+			}
+		}
 		rows, err := s.db.Query(ctx, `SELECT id, type, status, output, created_by, created_at FROM commands WHERE device_id=$1 ORDER BY id DESC LIMIT 50`, id)
 		if err == nil {
 			cmds, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (cmd, error) {
@@ -832,13 +920,31 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 			return
 		}
 	}
-	s.render(w, r, sess, "device", map[string]any{"EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames, "AppBusy": appBusy, "AppNotes": appNotes, "CatalogFlatpaks": catalogFlatpaks,
+	var netCerts []netCertRow
+	if tab == "network" {
+		if netCerts, err = s.networkCerts(ctx, id); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+	bpSrc, err := s.blueprintSource(ctx, id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	// what happens after the grace period: the compliance item of this device
+	comp, _ := api.Compose(want)
+	var lockAt *time.Time
+	if since != nil && comp.Compliance.LockAfterHours > 0 {
+		t := since.Add(time.Duration(comp.Compliance.LockAfterHours) * time.Hour)
+		lockAt = &t
+	}
+	s.render(w, r, sess, "device", map[string]any{"NetCerts": netCerts, "BPSource": bpSrc, "LockAt": lockAt, "Notify": comp.Compliance.Notify, "EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames, "AppBusy": appBusy, "AppNotes": appNotes, "CatalogFlatpaks": catalogFlatpaks,
 		"PwError": pwError(r), "PwMin": s.settings().Rules.Min(),
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
-		"CommandTypes": commandTypesFor(sess.Role),
-		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
+		"Commands": cmds, "Scripts": scripts, "Diagnostics": diags, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
 		"Resolved": res, "Tags": strings.Join(tags, ", "), "TagList": tags, "Protective": protect, "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery, "Tampered": tampered, "Events": events, "EvPage": evPage, "EvPages": evPages, "EvTotal": evTotal, "EvFrom": min((evPage-1)*evSize+1, evTotal), "EvTo": min(evPage*evSize, evTotal),
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"},
 		"Sub": sub, "ShowSystem": r.URL.Query().Get("system") == "1", "NetworkInfo": len(data.Inv.DNS)+len(data.Inv.Routes) > 0 || hasIPs(data.Inv.Interfaces),
@@ -855,19 +961,33 @@ func pwError(r *http.Request) string {
 
 func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess session) {
 	id, typ := r.PathValue("id"), r.FormValue("type")
+	if !s.inScope(r.Context(), sess, id) {
+		http.NotFound(w, r)
+		return
+	}
 	payload, code, msg := s.commandPayload(r, sess, id, typ)
 	if i := slices.Index(passwordErrors, msg); i >= 0 {
 		http.Redirect(w, r, "/devices/"+url.PathEscape(id)+"?tab=accounts&pwerr="+strconv.Itoa(i), http.StatusSeeOther)
 		return
 	}
 	if code != 0 {
-		http.Error(w, msg, code)
+		s.errorPage(w, r, sess, code, msg)
+		return
+	}
+	if s.needsApproval(typ) {
+		_, err := s.requestApproval(r.Context(), sess, "command", id, commandApproval{Type: typ, Payload: payload}, strings.TrimSpace(r.FormValue("reason")))
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
 		return
 	}
 	if err := s.queueCommand(r.Context(), sess.Email, id, typ, payload); err != nil {
 		s.fail(w, err)
 		return
 	}
+	s.notifyCommand(sess.Email, id, typ)
 	back := "/devices/" + id
 	switch {
 	case typ == "app_install" || typ == "app_remove":
@@ -880,8 +1000,15 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 	http.Redirect(w, r, back, http.StatusSeeOther)
 }
 
-// queueCommand stores a command for a device and audits it.
+// queueCommand stores a command for a device and audits it. The entry names
+// the command ID, like the command.result entry of the device later does.
 func (s *Server) queueCommand(ctx context.Context, actor, id, typ, payload string) error {
+	_, err := s.queueCommandID(ctx, actor, id, typ, payload)
+	return err
+}
+
+// queueCommandID is queueCommand returning the new command's id.
+func (s *Server) queueCommandID(ctx context.Context, actor, id, typ, payload string) (int64, error) {
 	detail := payload
 	var u api.UserCommand
 	if strings.HasPrefix(typ, "user_") && json.Unmarshal([]byte(payload), &u) == nil {
@@ -889,16 +1016,24 @@ func (s *Server) queueCommand(ctx context.Context, actor, id, typ, payload strin
 		b, _ := json.Marshal(u) //nolint:gosec // the password was cleared just above
 		detail = string(b)
 	}
-	return s.auditAction(ctx, actor, "command."+typ, id, truncate(detail, 2000), func(tx pgx.Tx) error {
-		if err := s.insertCommand(ctx, tx, id, typ, payload, actor); err != nil {
-			return err
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	cmdID, err := s.insertCommand(ctx, tx, id, typ, payload, actor)
+	if err != nil {
+		return 0, err
+	}
+	if typ == "unlock" || typ == "lock" { // a manual action takes over from the compliance policy
+		if _, err := tx.Exec(ctx, `UPDATE devices SET auto_locked=false WHERE id=$1`, id); err != nil {
+			return 0, err
 		}
-		if typ == "unlock" || typ == "lock" { // a manual action takes over from the compliance policy
-			_, err := tx.Exec(ctx, `UPDATE devices SET auto_locked=false WHERE id=$1`, id)
-			return err
-		}
-		return nil
-	})
+	}
+	if err := audit(ctx, tx, actor, "command."+typ, id, truncate(fmt.Sprintf("command %d %s", cmdID, detail), 2000)); err != nil {
+		return 0, err
+	}
+	return cmdID, tx.Commit(ctx)
 }
 
 // commandPayload checks a command from the form and builds its payload; a
@@ -907,6 +1042,9 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 	payload := r.FormValue("payload")
 	if !slices.Contains(api.CommandTypes, typ) || len(payload) > 64<<10 {
 		return "", http.StatusBadRequest, "invalid command"
+	}
+	if sess.Role != "admin" && !slices.Contains(helpdeskCommands, typ) {
+		return "", http.StatusForbidden, "this action requires the admin role"
 	}
 	switch {
 	case typ == "reboot" || typ == "shutdown":
@@ -921,10 +1059,8 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		}
 		payload = strconv.Itoa(m)
 	case typ == "lost" || typ == "wipe" || typ == "found" || typ == "allow_uninstall":
-		// protective actions: admins only, lost and wipe confirmed by typing the host name
-		if sess.Role != "admin" {
-			return "", http.StatusForbidden, "this action requires the admin role"
-		}
+		// protective actions (admins only, see helpdeskCommands), lost and
+		// wipe confirmed by typing the host name
 		if typ == "lost" || typ == "wipe" {
 			var host string
 			if err := s.db.QueryRow(r.Context(), `SELECT hostname FROM devices WHERE id=$1`, id).Scan(&host); err != nil ||
@@ -949,15 +1085,15 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		b, _ := json.Marshal(api.Message{Title: title, Text: text})
 		payload = string(b)
 	case strings.HasPrefix(typ, "user_"):
-		if sess.Role != "admin" {
-			return "", http.StatusForbidden, "this action requires the admin role"
-		}
 		u := api.UserCommand{Username: strings.TrimSpace(r.FormValue("username")), FullName: strings.TrimSpace(r.FormValue("full_name")),
 			Password: r.FormValue("password"), Admin: r.FormValue("admin") == "on" || r.FormValue("admin") == "1", KeepHome: r.FormValue("keep_home") == "on"}
 		if err := u.Validate(typ); err != nil {
 			return "", http.StatusBadRequest, err.Error()
 		}
 		if typ == "user_create" || typ == "user_password" {
+			if r.Form.Has("password2") && r.FormValue("password2") != u.Password { // the repeat field of the console form
+				return "", http.StatusBadRequest, passwordMismatch
+			}
 			if msg := s.settings().Rules.Check(u.Password, u.Username); msg != "" {
 				return "", http.StatusBadRequest, msg
 			}
@@ -965,9 +1101,6 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		b, _ := json.Marshal(u) //nolint:gosec // signed command payload over mTLS, cleared from the database once applied
 		payload = string(b)
 	case typ == "software_remove":
-		if sess.Role != "admin" {
-			return "", http.StatusForbidden, "this action requires the admin role"
-		}
 		sr := api.SoftwareRemove{Kind: r.FormValue("kind"), Name: r.FormValue("name"), Installation: r.FormValue("installation")}
 		if err := sr.Validate(); err != nil {
 			return "", http.StatusBadRequest, err.Error()
@@ -975,9 +1108,6 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		b, _ := json.Marshal(sr)
 		payload = string(b)
 	case typ == "app_install" || typ == "app_remove":
-		if sess.Role != "admin" {
-			return "", http.StatusForbidden, "this action requires the admin role"
-		}
 		var ok bool
 		app := r.FormValue("app")
 		if err := s.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM catalog_apps WHERE slug=$1)`, app).Scan(&ok); err != nil || !ok {
@@ -986,8 +1116,11 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		payload = app
 	case typ != "script":
 		payload = ""
-	case sess.Role != "admin":
-		return "", http.StatusForbidden, "scripts require the admin role"
+	default:
+		var err error
+		if payload, err = scriptCommandPayload(r); err != nil {
+			return "", http.StatusBadRequest, err.Error()
+		}
 	}
 	return payload, 0, ""
 }
@@ -1036,23 +1169,27 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 	id := r.PathValue("id")
 	users, err := parseUsers(r.FormValue("users"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, err.Error())
 		return
 	}
 	var bpID *int64
 	if v, err := strconv.ParseInt(r.FormValue("blueprint_id"), 10, 64); err == nil && v > 0 {
+		if !s.tenantOwns(r.Context(), sess, "blueprints", v, true) {
+			s.errorPage(w, r, sess, http.StatusBadRequest, "unknown blueprint")
+			return
+		}
 		bpID = &v
 	}
 	tags, err := parseTags(r.FormValue("tags"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, err.Error())
 		return
 	}
 	var primary *int64
 	if email := strings.ToLower(strings.TrimSpace(r.FormValue("primary_user"))); email != "" {
 		var uid int64
 		if err := s.db.QueryRow(r.Context(), `SELECT id FROM dir_users WHERE email=$1`, email).Scan(&uid); err != nil {
-			http.Error(w, "primary user not found in the directory", http.StatusBadRequest)
+			s.errorPage(w, r, sess, http.StatusBadRequest, "primary user not found in the directory")
 			return
 		}
 		primary = &uid
@@ -1072,8 +1209,10 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 func (s *Server) deviceRetire(w http.ResponseWriter, r *http.Request, sess session) {
 	id := r.PathValue("id")
 	err := s.auditAction(r.Context(), sess.Email, "device.retire", id, "client certificate revoked", func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `UPDATE devices SET retired=true, cert_serial='', pending_serial=NULL WHERE id=$1`, id)
-		return err
+		if _, err := tx.Exec(r.Context(), `UPDATE devices SET retired=true, cert_serial='', pending_serial=NULL WHERE id=$1`, id); err != nil {
+			return err
+		}
+		return revokeNetworkCerts(r.Context(), tx, id, "retired")
 	})
 	if err != nil {
 		s.fail(w, err)
@@ -1088,16 +1227,17 @@ func (s *Server) deviceRetire(w http.ResponseWriter, r *http.Request, sess sessi
 func (s *Server) tokenRevoke(w http.ResponseWriter, r *http.Request, sess session) {
 	id, err := hex.DecodeString(r.PathValue("id"))
 	if err != nil || len(id) != sha256.Size {
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
 	err = s.auditActionFn(r.Context(), func(tx pgx.Tx) (string, string, string, string, error) {
 		var note string
-		err := tx.QueryRow(r.Context(), `DELETE FROM enroll_tokens WHERE token_hash=$1 RETURNING note`, id).Scan(&note)
+		tcond, targs := tenantCond(sess, "tenant_id", 1)
+		err := tx.QueryRow(r.Context(), `DELETE FROM enroll_tokens WHERE token_hash=$1 AND `+tcond+` RETURNING note`, append([]any{id}, targs...)...).Scan(&note)
 		return sess.Email, "token.revoke", r.PathValue("id")[:12], note, err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
 	if err != nil {
@@ -1117,8 +1257,9 @@ func (s *Server) tokenPage(w http.ResponseWriter, r *http.Request, sess session,
 		Uses                    int
 		Expires                 time.Time
 	}
+	tcond, targs := tenantCond(sess, "t.tenant_id", 0)
 	rows, err := s.db.Query(r.Context(), `SELECT encode(t.token_hash, 'hex'), t.note, coalesce(b.name,'default'), t.created_by, t.uses_left, t.expires_at
-		FROM enroll_tokens t LEFT JOIN blueprints b ON b.id=t.blueprint_id WHERE t.expires_at > now() AND t.uses_left > 0 ORDER BY t.expires_at`)
+		FROM enroll_tokens t LEFT JOIN blueprints b ON b.id=t.blueprint_id WHERE t.expires_at > now() AND t.uses_left > 0 AND `+tcond+` ORDER BY t.expires_at`, targs...)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -1134,25 +1275,29 @@ func (s *Server) tokenPage(w http.ResponseWriter, r *http.Request, sess session,
 		return
 	}
 	s.render(w, r, sess, "tokens", map[string]any{"Tokens": list, "Blueprints": bps, "Created": created,
-		"AgentURL": s.cfg.AgentURL, "Fingerprint": s.ca.Fingerprint(), "PublicURL": s.cfg.PublicURL, "Repo": s.cfg.ReleaseRepo})
+		"AgentURL": s.cfg.AgentURL, "Fingerprint": s.tlsCA().Fingerprint(), "PublicURL": s.cfg.PublicURL, "Repo": s.cfg.ReleaseRepo})
 }
 
 func (s *Server) tokenCreate(w http.ResponseWriter, r *http.Request, sess session) {
 	uses, err1 := strconv.Atoi(r.FormValue("uses"))
 	days, err2 := strconv.Atoi(r.FormValue("days"))
 	if err1 != nil || err2 != nil || uses < 1 || uses > 10000 || days < 1 || days > 90 {
-		http.Error(w, "uses 1..10000, days 1..90", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "uses 1..10000, days 1..90")
 		return
 	}
 	var bpID *int64
 	if v, err := strconv.ParseInt(r.FormValue("blueprint_id"), 10, 64); err == nil && v > 0 {
+		if !s.tenantOwns(r.Context(), sess, "blueprints", v, true) {
+			s.errorPage(w, r, sess, http.StatusBadRequest, "unknown blueprint")
+			return
+		}
 		bpID = &v
 	}
 	token := "lmt_" + randToken(24)
 	note := truncate(r.FormValue("note"), 200)
 	err := s.auditAction(r.Context(), sess.Email, "token.create", note, fmt.Sprintf("uses=%d days=%d blueprint=%v", uses, days, r.FormValue("blueprint_id")), func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO enroll_tokens(token_hash, note, blueprint_id, uses_left, expires_at, created_by)
-			VALUES ($1,$2,$3,$4, now() + make_interval(days => $5), $6)`, sha(token), note, bpID, uses, days, sess.Email)
+		_, err := tx.Exec(r.Context(), `INSERT INTO enroll_tokens(token_hash, note, blueprint_id, uses_left, expires_at, created_by, tenant_id)
+			VALUES ($1,$2,$3,$4, now() + make_interval(days => $5), $6, $7)`, sha(token), note, bpID, uses, days, sess.Email, ownerTenant(r.Context()))
 		return err
 	})
 	if err != nil {
@@ -1185,7 +1330,12 @@ type fleetStats struct {
 }
 
 func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session) {
-	fc, err := s.fleetComplianceCached(r.Context())
+	fc, err := s.fleetComplianceFor(r.Context(), sess)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	exceptions, err := s.riskExceptions(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -1198,6 +1348,7 @@ func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session
 		"F": f, "Shown": len(checks), "All": len(fc.Checks),
 		"Checks": checks, "Controls": controls, "Total": fc.Total, "Compliant": fc.Compliant, "Stale": fc.Stale,
 		"NonCompliant": fc.Noncompl, "Pending": fc.Pending, "StaleHours": s.settings().StaleHours,
+		"Exceptions": exceptions,
 	})
 }
 
@@ -1256,16 +1407,26 @@ func (s *Server) fleetComplianceCached(ctx context.Context) (fleetStats, error) 
 	if c := s.fleet.Load(); c != nil && time.Since(c.at) < time.Minute {
 		return c.fs, nil
 	}
-	fs, err := s.fleetCompliance(ctx)
+	fs, err := s.fleetCompliance(ctx, "TRUE")
 	if err == nil {
 		s.fleet.Store(&fleetCache{at: time.Now(), fs: fs})
 	}
 	return fs, err
 }
 
-func (s *Server) fleetCompliance(ctx context.Context) (fleetStats, error) {
+// fleetComplianceFor aggregates the devices within the scope of sess
+// (scoped accounts bypass the fleet wide cache).
+func (s *Server) fleetComplianceFor(ctx context.Context, sess session) (fleetStats, error) {
+	if !sess.scoped() && sess.Tenant == 0 {
+		return s.fleetComplianceCached(ctx)
+	}
+	cond, args := scopeCond(sess, 0)
+	return s.fleetCompliance(ctx, cond, args...)
+}
+
+func (s *Server) fleetCompliance(ctx context.Context, where string, args ...any) (fleetStats, error) {
 	var fs fleetStats
-	rows, err := s.db.Query(ctx, `SELECT hostname, checks, last_seen, failing FROM devices WHERE NOT retired`)
+	rows, err := s.db.Query(ctx, `SELECT hostname, checks, last_seen, failing FROM devices d WHERE NOT retired AND `+where, args...)
 	if err != nil {
 		return fs, err
 	}
@@ -1358,37 +1519,27 @@ type auditRow struct {
 	At                            time.Time
 	Actor, Action, Target, Detail string
 	Prev, Hash                    []byte
+	Tenant                        *int64 // nil: a global entry
 }
 
 func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session) {
+	ctx := r.Context()
 	q := r.URL.Query()
-	f := map[string]string{"q": strings.TrimSpace(q.Get("q")), "actor": strings.TrimSpace(q.Get("actor")), "action": strings.TrimSpace(q.Get("action")),
-		"target": strings.TrimSpace(q.Get("target")), "from": q.Get("from"), "to": q.Get("to")}
-	where, args := []string{"true"}, []any{}
-	add := func(cond string, v any) {
-		args = append(args, v)
-		where = append(where, strings.ReplaceAll(cond, "$?", "$"+strconv.Itoa(len(args))))
-	}
-	if f["q"] != "" {
-		add(`(actor || ' ' || action || ' ' || target || ' ' || detail) ILIKE '%' || $? || '%'`, f["q"])
-	}
-	if f["actor"] != "" {
-		add(`actor ILIKE '%' || $? || '%'`, f["actor"])
-	}
-	if f["action"] != "" {
-		add(`action LIKE $? || '%'`, f["action"])
-	}
-	if f["target"] != "" {
-		add(`target = $?`, f["target"])
-	}
-	for k, cond := range map[string]string{"from": `at >= $?::date`, "to": `at < $?::date + 1`} {
-		if _, err := time.Parse("2006-01-02", f[k]); err == nil {
-			add(cond, f[k])
-		} else {
-			f[k] = ""
+	f, where, args := auditFilter(q, sess)
+	filter := url.Values{}
+	for k, v := range f {
+		if v != "" {
+			filter.Set(k, v)
 		}
 	}
-	rows, err := s.db.Query(r.Context(), `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE `+strings.Join(where, " AND ")+` ORDER BY id DESC LIMIT 300`, args...)
+	const pageSize = 100
+	before, _ := strconv.ParseInt(q.Get("before"), 10, 64)
+	if before > 0 {
+		args = append(args, before)
+		where += " AND id < $" + strconv.Itoa(len(args))
+	}
+	rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash, tenant_id FROM audit_log WHERE `+where+
+		` ORDER BY id DESC LIMIT `+strconv.Itoa(pageSize+1), args...)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -1398,8 +1549,22 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session)
 		s.fail(w, err)
 		return
 	}
-	brokenAt, err := s.verifyAudit(r.Context())
-	if full := s.auditBroken.Load(); err == nil && brokenAt == 0 && full != 0 {
+	var older, newest string
+	if len(list) > pageSize {
+		list = list[:pageSize]
+		v := url.Values{}
+		for k := range filter {
+			v.Set(k, filter.Get(k))
+		}
+		v.Set("before", strconv.FormatInt(list[len(list)-1].ID, 10))
+		older = "/audit?" + v.Encode()
+	}
+	if before > 0 {
+		newest = "/audit?" + filter.Encode()
+	}
+	brokenAt, err := s.verifyAudit(ctx)
+	full, verifiedAt := s.auditVerification(ctx)
+	if err == nil && brokenAt == 0 && full != 0 {
 		brokenAt = full
 	}
 	if err != nil {
@@ -1407,33 +1572,37 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session)
 		return
 	}
 	var actions []string
-	if rows, err := s.db.Query(r.Context(), `SELECT DISTINCT action FROM audit_log ORDER BY 1`); err == nil {
+	if rows, err := s.db.Query(ctx, `SELECT DISTINCT action FROM audit_log ORDER BY 1`); err == nil {
 		actions, _ = pgx.CollectRows(rows, pgx.RowTo[string])
 	}
-	s.render(w, r, sess, "audit", map[string]any{"Entries": list, "BrokenAt": brokenAt, "F": f, "Actions": actions})
+	s.render(w, r, sess, "audit", map[string]any{"Entries": list, "BrokenAt": brokenAt, "F": f, "Actions": actions,
+		"Older": older, "Newest": newest, "CSV": "/export/audit.csv?" + filter.Encode(), "JSONL": "/export/audit.jsonl?" + filter.Encode(),
+		"VerifiedAt": verifiedAt, "Keyed": auditKeyedFrom > 0, "KeyedFrom": auditKeyedFrom})
 }
 
-// verifyAudit recomputes the hash chain. Returns the first broken id or 0.
-// ponytail: full scan per page view; checkpoint verified ranges when the log reaches millions of rows.
 // verifyAudit checks the hash chain and returns the first broken entry (0 =
 // intact). The audit page verifies incrementally from the last checkpoint;
-// the daily background run verifies everything from the start.
+// the daily background run and the "verify whole chain" action verify
+// everything from the start.
 func (s *Server) verifyAudit(ctx context.Context) (int64, error) { return s.verifyAuditFrom(ctx, true) }
 
 func (s *Server) verifyAuditFrom(ctx context.Context, incremental bool) (int64, error) {
-	var from int64
-	prev := make([]byte, 32)
+	from, prev, err := s.auditStart(ctx) // behind the last retention cut (retention.go)
+	if err != nil {
+		return 0, err
+	}
 	if incremental {
+		var id int64
 		var hash []byte
-		err := s.db.QueryRow(ctx, `SELECT last_id, last_hash FROM audit_checkpoint`).Scan(&from, &hash)
+		err := s.db.QueryRow(ctx, `SELECT last_id, last_hash FROM audit_checkpoint`).Scan(&id, &hash)
 		switch {
-		case err == nil:
-			prev = hash
-		case !errors.Is(err, pgx.ErrNoRows):
+		case err == nil && id > from:
+			from, prev = id, hash
+		case err != nil && !errors.Is(err, pgx.ErrNoRows):
 			return 0, err
 		}
 	}
-	rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE id > $1 ORDER BY id`, from)
+	rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash, tenant_id FROM audit_log WHERE id > $1 ORDER BY id`, from)
 	if err != nil {
 		return 0, err
 	}
@@ -1441,10 +1610,10 @@ func (s *Server) verifyAuditFrom(ctx context.Context, incremental bool) (int64, 
 	last := from
 	for rows.Next() {
 		var a auditRow
-		if err := rows.Scan(&a.ID, &a.At, &a.Actor, &a.Action, &a.Target, &a.Detail, &a.Prev, &a.Hash); err != nil {
+		if err := rows.Scan(&a.ID, &a.At, &a.Actor, &a.Action, &a.Target, &a.Detail, &a.Prev, &a.Hash, &a.Tenant); err != nil {
 			return 0, err
 		}
-		if !bytes.Equal(a.Prev, prev) || !bytes.Equal(a.Hash, auditHash(a.Prev, a.At, a.Actor, a.Action, a.Target, a.Detail)) {
+		if !auditEntryOK(auditKeys, prev, a) {
 			return a.ID, nil
 		}
 		prev, last = a.Hash, a.ID
@@ -1473,29 +1642,106 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
 	kind := r.PathValue("kind")
 	var q string
+	var args []any
 	var header []string
+	cond, args := scopeCond(sess, 0)
 	switch kind {
 	case "compliance.csv":
-		header = []string{"device_id", "hostname", "last_seen", "check_id", "level", "status", "detail", "bsi", "cis", "iso"}
-		q = `SELECT d.id, d.hostname, coalesce(d.last_seen::text,''), c->>'id', coalesce(c->>'level',''), c->>'status', coalesce(c->>'detail',''),
+		header = []string{"device_id", "hostname", "last_seen", "agent_version", "catalog_version", "check_id", "level", "status", "detail",
+			"bsi", "cis", "cis_benchmark", "iso", "exception_reason", "exception_owner", "exception_approver", "exception_expires", "generated_at"}
+		q = `SELECT d.id, d.hostname, coalesce(d.last_seen::text,''), d.agent_version, d.catalog_version, c->>'id', coalesce(c->>'level',''), c->>'status', coalesce(c->>'detail',''),
 			coalesce((SELECT string_agg(x,'; ') FROM jsonb_array_elements_text(c->'refs'->'bsi') x),''),
 			coalesce((SELECT string_agg(x,'; ') FROM jsonb_array_elements_text(c->'refs'->'cis') x),''),
-			coalesce((SELECT string_agg(x,'; ') FROM jsonb_array_elements_text(c->'refs'->'iso') x),'')
-			FROM devices d, jsonb_array_elements(d.checks) c WHERE NOT d.retired ORDER BY d.hostname, c->>'id'`
+			coalesce(c->'refs'->>'cis_benchmark',''),
+			coalesce((SELECT string_agg(x,'; ') FROM jsonb_array_elements_text(c->'refs'->'iso') x),''),
+			coalesce(e.reason,''), coalesce(e.owner,''), coalesce(e.approver,''), coalesce(e.expires_at::date::text,''), $` + strconv.Itoa(len(args)+1) + `::text
+			FROM devices d CROSS JOIN LATERAL jsonb_array_elements(d.checks) c
+			LEFT JOIN LATERAL (SELECT reason, owner, approver, expires_at FROM risk_exceptions x WHERE x.check_id = c->>'id' AND ` + activeExceptionSQL + `
+				AND x.tenant_id = d.tenant_id AND (x.tag = '' OR x.tag = ANY(d.tags)) ORDER BY x.expires_at DESC LIMIT 1) e ON true
+			WHERE NOT d.retired AND ` + cond + ` ORDER BY d.hostname, c->>'id'`
+		args = append(args, time.Now().UTC().Format(time.RFC3339))
+	case "compliance-history.csv":
+		at, device, ok := historyParams(r.URL.Query())
+		if !ok {
+			s.errorPage(w, r, sess, http.StatusBadRequest, "at must be a date (YYYY-MM-DD)")
+			return
+		}
+		hcond, hargs := scopeCond(sess, 4)
+		header = []string{"state_at", "device_id", "hostname", "check_id", "status", "detail", "since", "catalog_version", "generated_at"}
+		q = `SELECT $4::text, h.device_id, d.hostname, h.check_id, h.status, h.detail, h.at::text, h.catalog_version, $3::text
+			FROM (` + historyStateSQL + `) h JOIN devices d ON d.id = h.device_id WHERE ` + hcond + ` ORDER BY d.hostname, h.check_id`
+		args = append([]any{at, device, time.Now().UTC().Format(time.RFC3339), at.AddDate(0, 0, -1).Format("2006-01-02")}, hargs...)
 	case "inventory.csv":
 		header = []string{"device_id", "hostname", "os", "kernel", "agent", "serial", "vendor", "model", "cpu", "memory_mb", "disk_gb", "last_seen", "enrolled_at", "retired"}
 		q = `SELECT id, hostname, coalesce(inventory->>'os_name',''), coalesce(inventory->>'kernel',''), agent_version,
 			coalesce(inventory->>'serial',''), coalesce(inventory->>'vendor',''), coalesce(inventory->>'model',''), coalesce(inventory->>'cpu',''),
 			coalesce(inventory->>'memory_mb',''), coalesce(inventory->>'disk_gb',''), coalesce(last_seen::text,''), enrolled_at::text, retired::text
-			FROM devices ORDER BY hostname`
+			FROM devices d WHERE ` + cond + ` ORDER BY hostname`
+	case "packages.csv":
+		header = []string{"device_id", "hostname", "package", "version", "arch"}
+		q = `SELECT d.id, d.hostname, coalesce(p->>'n',''), coalesce(p->>'v',''), coalesce(p->>'a','')
+			FROM devices d, jsonb_array_elements(CASE WHEN jsonb_typeof(d.packages) = 'array' THEN d.packages ELSE '[]'::jsonb END) p
+			WHERE NOT d.retired AND ` + cond + ` ORDER BY d.hostname, d.id, p->>'n'`
 	case "audit.csv":
-		header = []string{"id", "at", "actor", "action", "target", "detail", "hash"}
-		q = `SELECT id::text, at::text, actor, action, target, detail, encode(hash,'hex') FROM audit_log ORDER BY id`
+		var where string
+		_, where, args = auditFilter(r.URL.Query(), sess)
+		header = []string{"id", "at", "actor", "action", "target", "detail", "prev", "hash", "tenant_id"}
+		q = `SELECT id::text, at::text, actor, action, target, detail, encode(prev,'hex'), encode(hash,'hex'), coalesce(tenant_id::text, '') FROM audit_log WHERE ` + where + ` ORDER BY id`
+	case "audit.jsonl":
+		s.auditExportJSONL(w, r, sess)
+		return
+	case "exceptions.csv":
+		header = []string{"id", "check_id", "mode", "tag", "reason", "owner", "approver", "expires_at", "created_by", "created_at", "state"}
+		var xcond string
+		xcond, args = tenantCond(sess, "x.tenant_id", 0)
+		q = `SELECT id::text, check_id, mode, tag, reason, owner, approver, expires_at::text, created_by, created_at::text,
+			CASE WHEN revoked_at IS NOT NULL THEN 'revoked' WHEN expires_at <= now() THEN 'expired' ELSE 'active' END
+			FROM risk_exceptions x WHERE ` + xcond + ` ORDER BY id`
 	default:
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
-	if err := s.auditAction(ctx, sess.Email, "export", kind, "", nil); err != nil {
+	s.streamExport(w, r, sess, kind, "text/csv; charset=utf-8", func(tx pgx.Tx, out io.Writer) (int, error) {
+		rows, err := tx.Query(ctx, q, args...)
+		if err != nil {
+			return 0, err
+		}
+		defer rows.Close()
+		cw := csv.NewWriter(out)
+		cw.Write(header)
+		vals := make([]string, len(header))
+		ptrs := make([]any, len(header))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		n := 0
+		for rows.Next() {
+			if err := rows.Scan(ptrs...); err != nil {
+				return n, err
+			}
+			out := make([]string, len(vals))
+			for i, v := range vals {
+				out[i] = csvSafe(v)
+			}
+			cw.Write(out)
+			n++
+		}
+		cw.Flush()
+		if err := rows.Err(); err != nil {
+			return n, err
+		}
+		return n, cw.Error()
+	})
+}
+
+// streamExport sends an export from one transaction and audits it twice:
+// before (who, what, which filter) and after, with the row count and the
+// SHA-256 of exactly the bytes sent, so a file handed to an auditor can be
+// matched to its audit entry.
+func (s *Server) streamExport(w http.ResponseWriter, r *http.Request, sess session, kind, ctype string, write func(pgx.Tx, io.Writer) (int, error)) {
+	ctx := r.Context()
+	filter := truncate(r.URL.RawQuery, 500)
+	if err := s.auditAction(ctx, sess.Email, "export", kind, filter, nil); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -1511,39 +1757,21 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 		s.fail(w, err)
 		return
 	}
-	rows, err := tx.Query(ctx, q)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	defer rows.Close()
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="limdm-%s-%s"`, time.Now().Format("20060102"), kind))
-	cw := csv.NewWriter(w)
-	cw.Write(header)
-	vals := make([]string, len(header))
-	ptrs := make([]any, len(header))
-	for i := range vals {
-		ptrs[i] = &vals[i]
-	}
-	for rows.Next() {
-		if err := rows.Scan(ptrs...); err != nil {
-			s.log.Error("export", "err", err)
-			return
-		}
-		out := make([]string, len(vals))
-		for i, v := range vals {
-			out[i] = csvSafe(v)
-		}
-		cw.Write(out)
-	}
-	if err := rows.Err(); err != nil {
+	h := sha256.New()
+	n, err := write(tx, io.MultiWriter(w, h))
+	detail := fmt.Sprintf("rows=%d sha256=%s", n, hex.EncodeToString(h.Sum(nil)))
+	if err != nil {
 		// the header is sent already: mark the file as incomplete instead of
 		// handing out a truncated export that looks complete
 		s.log.Error("export incomplete", "kind", kind, "err", err)
-		cw.Write([]string{"ERROR: export incomplete, run it again"})
+		_, _ = io.WriteString(w, "\nERROR: export incomplete, run it again\n")
+		detail += " incomplete"
 	}
-	cw.Flush()
+	if err := s.auditAction(context.WithoutCancel(ctx), sess.Email, "export.done", kind, detail, nil); err != nil {
+		s.log.Error("audit export.done", "err", err)
+	}
 }
 
 func hasIPs(nics []api.NIC) bool {
@@ -1555,15 +1783,13 @@ func hasIPs(nics []api.NIC) bool {
 	return false
 }
 
-// commandTypesFor hides scripts and the protective actions from non admins.
-func commandTypesFor(role string) []string {
-	if role == "admin" {
-		return api.CommandTypes
-	}
-	return slices.DeleteFunc(slices.Clone(api.CommandTypes), func(t string) bool {
-		return t == "script" || t == "lost" || t == "found" || t == "wipe" || t == "allow_uninstall"
-	})
-}
+// helpdeskCommands are the device commands the helpdesk role may send, as
+// its role description promises: routine and reversible actions. Scripts,
+// lost mode, wipe, software and account creation, deletion and admin rights
+// stay with admins. Diagnostics (redacted logs) are for the helpdesk too;
+// the remote shell is no command here, its own setting decides (shell.go).
+var helpdeskCommands = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "message",
+	"user_password", "user_lock", "user_unlock", "diagnostics"}
 
 // appNote is the outcome of an install or removal sent from the console.
 type appNote struct {

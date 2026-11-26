@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -22,12 +23,11 @@ import (
 
 // deviceCA is the private CA for agent mTLS. Its key never leaves the server;
 // agents pin its certificate by SHA-256 fingerprint at enrollment, so neither a
-// public CA nor a TLS terminating proxy can sit in the middle.
-//
-// ponytail: CA key is a 0600 file; move it to an HSM / PKCS#11 when the threat model requires.
+// public CA nor a TLS terminating proxy can sit in the middle. The key comes
+// from the key provider (keys.go): a 0600 file or an HSM.
 type deviceCA struct {
 	cert *x509.Certificate
-	key  *ecdsa.PrivateKey
+	key  crypto.Signer
 	pem  []byte
 }
 
@@ -37,30 +37,29 @@ const (
 )
 
 func loadOrCreateCA(dir string) (*deviceCA, error) {
-	certPath, keyPath := filepath.Join(dir, "ca.crt"), filepath.Join(dir, "ca.key")
+	return loadRoot(KeyProvider{}, dir, kindCA, "LiMDM Device CA")
+}
+
+// loadRoot loads the self signed CA <name>.crt from dir with the key of
+// that name from p, creating both on first use (an HSM key must exist).
+func loadRoot(p KeyProvider, dir, name, commonName string) (*deviceCA, error) {
+	certPath := filepath.Join(dir, name+".crt")
 	if _, err := os.Stat(certPath); errors.Is(err, os.ErrNotExist) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, err
 		}
-		key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+		key, err := p.signer(dir, name, genP384)
 		if err != nil {
 			return nil, err
 		}
 		tmpl := &x509.Certificate{
-			SerialNumber: serial(), Subject: pkix.Name{CommonName: "LiMDM Device CA", Organization: []string{"LiMDM"}},
+			SerialNumber: serial(), Subject: pkix.Name{CommonName: commonName, Organization: []string{"LiMDM"}},
 			NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().AddDate(15, 0, 0),
 			IsCA: true, BasicConstraintsValid: true, MaxPathLenZero: true,
 			KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		}
-		der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+		der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
 		if err != nil {
-			return nil, err
-		}
-		kb, err := x509.MarshalECPrivateKey(key)
-		if err != nil {
-			return nil, err
-		}
-		if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb}), 0o600); err != nil {
 			return nil, err
 		}
 		if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil { //nolint:gosec // public certificate
@@ -71,25 +70,20 @@ func loadOrCreateCA(dir string) (*deviceCA, error) {
 	if err != nil {
 		return nil, err
 	}
-	keyPEM, err := os.ReadFile(keyPath)
-	if err != nil {
-		return nil, err
-	}
-	if st, err := os.Stat(keyPath); err == nil && st.Mode().Perm()&0o077 != 0 {
-		return nil, fmt.Errorf("%s must not be readable by group/others", keyPath)
-	}
 	cb, _ := pem.Decode(certPEM)
-	kb, _ := pem.Decode(keyPEM)
-	if cb == nil || kb == nil {
-		return nil, errors.New("invalid CA files")
+	if cb == nil {
+		return nil, fmt.Errorf("%s: invalid certificate", certPath)
 	}
 	cert, err := x509.ParseCertificate(cb.Bytes)
 	if err != nil {
 		return nil, err
 	}
-	key, err := x509.ParseECPrivateKey(kb.Bytes)
+	key, err := p.signer(dir, name, nil)
 	if err != nil {
 		return nil, err
+	}
+	if pub, ok := cert.PublicKey.(interface{ Equal(crypto.PublicKey) bool }); !ok || !pub.Equal(key.Public()) {
+		return nil, fmt.Errorf("%s does not belong to the key %q", certPath, name)
 	}
 	return &deviceCA{cert: cert, key: key, pem: certPEM}, nil
 }
@@ -147,25 +141,9 @@ func (ca *deviceCA) serverCert(hosts []string) (tls.Certificate, error) {
 // signCSR issues a client certificate for deviceID. The subject from the CSR
 // is ignored; only the public key is taken, and only strong key types.
 func (ca *deviceCA) signCSR(csrPEM, deviceID string) (certPEM string, serialHex string, notAfter time.Time, err error) {
-	b, _ := pem.Decode([]byte(csrPEM))
-	if b == nil || b.Type != "CERTIFICATE REQUEST" {
-		return "", "", notAfter, errors.New("invalid CSR")
-	}
-	csr, err := x509.ParseCertificateRequest(b.Bytes)
+	csr, err := parseCSR(csrPEM)
 	if err != nil {
 		return "", "", notAfter, err
-	}
-	if err := csr.CheckSignature(); err != nil {
-		return "", "", notAfter, errors.New("CSR signature invalid")
-	}
-	switch k := csr.PublicKey.(type) {
-	case *ecdsa.PublicKey:
-		if k.Curve != elliptic.P256() && k.Curve != elliptic.P384() {
-			return "", "", notAfter, errors.New("unsupported curve")
-		}
-	case ed25519.PublicKey:
-	default:
-		return "", "", notAfter, errors.New("key type must be ECDSA P-256/P-384 or Ed25519")
 	}
 	sn := serial()
 	notAfter = time.Now().Add(deviceCertTTL)
@@ -181,26 +159,47 @@ func (ca *deviceCA) signCSR(csrPEM, deviceID string) (certPEM string, serialHex 
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})), sn.Text(16), notAfter, nil
 }
 
-// loadOrCreateCommandKey is the Ed25519 key commands are signed with. It
-// lives next to the CA key, never in the database: whoever can only write
-// to the database cannot make devices run commands.
-func loadOrCreateCommandKey(dir string) (ed25519.PrivateKey, error) {
-	path := filepath.Join(dir, "command.key")
-	if b, err := os.ReadFile(path); err == nil {
-		blk, _ := pem.Decode(b)
-		if blk == nil || blk.Type != "ED25519 PRIVATE KEY" || len(blk.Bytes) != ed25519.SeedSize {
-			return nil, errors.New("command.key: not an Ed25519 key")
-		}
-		return ed25519.NewKeyFromSeed(blk.Bytes), nil
-	} else if !os.IsNotExist(err) {
-		return nil, err
+// parseCSR decodes a PEM CSR, checks its signature and accepts only strong
+// key types.
+func parseCSR(csrPEM string) (*x509.CertificateRequest, error) {
+	b, _ := pem.Decode([]byte(csrPEM))
+	if b == nil || b.Type != "CERTIFICATE REQUEST" {
+		return nil, errors.New("invalid CSR")
 	}
-	_, key, err := ed25519.GenerateKey(rand.Reader)
+	csr, err := x509.ParseCertificateRequest(b.Bytes)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "ED25519 PRIVATE KEY", Bytes: key.Seed()}), 0o600); err != nil {
-		return nil, err
+	if err := csr.CheckSignature(); err != nil {
+		return nil, errors.New("CSR signature invalid")
+	}
+	switch k := csr.PublicKey.(type) {
+	case *ecdsa.PublicKey:
+		if k.Curve != elliptic.P256() && k.Curve != elliptic.P384() {
+			return nil, errors.New("unsupported curve")
+		}
+	case ed25519.PublicKey:
+	default:
+		return nil, errors.New("key type must be ECDSA P-256/P-384 or Ed25519")
+	}
+	return csr, nil
+}
+
+// loadCommandKey is the Ed25519 key commands are signed with. It lives next
+// to the CA key (or in the HSM), never in the database: whoever can only
+// write to the database cannot make devices run commands. create makes a
+// missing file key.
+func loadCommandKey(p KeyProvider, dir, name string, create bool) (crypto.Signer, error) {
+	gen := genEd25519
+	if !create {
+		gen = nil
+	}
+	key, err := p.signer(dir, name, gen)
+	if err != nil {
+		return nil, fmt.Errorf("command key %q: %w", name, err)
+	}
+	if _, ok := key.Public().(ed25519.PublicKey); !ok {
+		return nil, fmt.Errorf("command key %q: not an Ed25519 key", name)
 	}
 	return key, nil
 }

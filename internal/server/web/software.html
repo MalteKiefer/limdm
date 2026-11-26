@@ -1,13 +1,13 @@
 {{define "title"}}{{t "Software"}} · LiMDM{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>{{t "Software"}}</h1><div class="meta"><span>{{t "Self service catalog in the LiMDM desktop app; users need no admin rights"}}</span></div></div>
+  <div><h1>{{t "Software"}} {{template "doclink" "software.md"}}</h1><div class="meta"><span>{{t "Self service catalog in the LiMDM desktop app; users need no admin rights"}}</span></div></div>
   {{if eq .Sess.Role "admin"}}<div class="actions"><a class="button" href="/software/new">{{t "Add app"}}</a></div>{{end}}
 </div>
 <nav class="tabs" aria-label="{{t "Software"}}">
   {{range .Tabs}}<a href="/software?tab={{.Key}}" {{if eq $.Tab .Key}}class="on" aria-current="page"{{end}}>{{t .Label}}{{if and (eq .Key "requests") $.Pending}} <span class="n">{{$.Pending}}</span>{{end}}</a>{{end}}
 </nav>
-{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+{{template "err" .Error}}
 {{if .Msg}}<div class="notice ok" role="status">{{t .Msg}}</div>{{end}}
 {{if eq .Tab "catalog"}}
 <div class="filters"><input type="search" data-filter="catalog-table" placeholder="{{t "Filter by name, category or source"}}" aria-label="{{t "Filter apps"}}"></div>
@@ -21,7 +21,7 @@
     <td class="muted">{{appSources .Sources}}</td>
     <td class="num">{{if .Installs}}<a class="count" href="/devices?app={{.ID}}">{{.Installs}}</a>{{else}}<span class="muted">0</span>{{end}}</td>
     <td>{{if .Scope}}{{len .Scope}} {{t "blueprints"}}{{else}}<span class="muted">{{t "all devices"}}</span>{{end}}</td>
-  </tr>{{else}}<tr><td colspan="7" class="empty">{{t "The catalog is empty."}}</td></tr>{{end}}</tbody>
+  </tr>{{else}}<tr><td colspan="7" class="empty">{{t "The catalog is empty."}}{{if eq $.Sess.Role "admin"}}<div class="empty-action"><a class="button" href="/software/new">{{t "Add app"}}</a></div>{{end}}</td></tr>{{end}}</tbody>
 </table></div></section>
 {{if and .Fleet (eq .Sess.Role "admin")}}
 <form class="tablecard" method="post" action="/software/import">
@@ -44,9 +44,9 @@
       <td>{{if .CatalogOnly}}{{t "yes"}}{{else}}<span class="muted">{{t "no"}}</span>{{end}}</td><td class="num">{{if .Devices}}<a class="count" href="/devices?remote={{.Name}}">{{.Devices}}</a>{{else}}<span class="muted">0</span>{{end}}</td>
       {{if eq $.Sess.Role "admin"}}<td class="row-actions inline-actions">
         {{if eq .State "blocked"}}<form method="post" action="/software/remotes/{{.Name}}/allow">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Allow"}}</button></form>
-        {{else}}<form method="post" action="/software/remotes/{{.Name}}/block">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Block"}}</button></form>{{end}}
+        {{else}}<form method="post" action="/software/remotes/{{.Name}}/block">{{template "csrf" $.CSRF}}<button class="secondary small" data-confirm="{{t "Block this remote? It is disabled on every device, in the system and in users' installations."}}">{{t "Block"}}</button></form>{{end}}
         <form method="post" action="/software/remotes/{{.Name}}/filter">{{template "csrf" $.CSRF}}<button class="secondary small">{{if .CatalogOnly}}{{t "Allow all apps"}}{{else}}{{t "Only catalog apps"}}{{end}}</button></form>
-        <form method="post" action="/software/remotes/{{.Name}}/unmanage">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Stop managing"}}</button></form>
+        <form method="post" action="/software/remotes/{{.Name}}/unmanage">{{template "csrf" $.CSRF}}<button class="secondary small" data-confirm="{{t "Stop managing this remote? LiMDM no longer enforces its state and filter on the devices."}}">{{t "Stop managing"}}</button></form>
       </td>{{end}}</tr>{{else}}<tr><td colspan="6" class="empty">{{t "No managed remotes."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
@@ -57,7 +57,7 @@
     <tbody>{{range .Found}}<tr><td>{{.Name}}{{if .Title}}<span class="sub">{{.Title}}</span>{{end}}</td><td class="mono">{{.URL}}</td><td class="num">{{if .Devices}}<a class="count" href="/devices?remote={{.Name}}">{{.Devices}}</a>{{else}}<span class="muted">0</span>{{end}}</td>
       {{if eq $.Sess.Role "admin"}}<td class="row-actions inline-actions">
         <form method="post" action="/software/remotes">{{template "csrf" $.CSRF}}<input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="url" value="{{.URL}}"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="state" value="allowed"><button class="small">{{t "Take over"}}</button></form>
-        <form method="post" action="/software/remotes">{{template "csrf" $.CSRF}}<input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="url" value="{{.URL}}"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="state" value="blocked"><button class="secondary small">{{t "Block"}}</button></form>
+        <form method="post" action="/software/remotes">{{template "csrf" $.CSRF}}<input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="url" value="{{.URL}}"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="state" value="blocked"><button class="secondary small" data-confirm="{{t "Block this remote? It is disabled on every device, in the system and in users' installations."}}">{{t "Block"}}</button></form>
       </td>{{end}}</tr>{{end}}</tbody>
   </table></div>
 </section>{{end}}
@@ -80,7 +80,7 @@
     {{if eq $.Sess.Role "admin"}}<td class="row-actions inline-actions">{{if eq .Status "pending"}}
       <form method="post" action="/software/requests/{{.ID}}/approve">{{template "csrf" $.CSRF}}<button class="small">{{if .Flatpak}}{{t "Approve for this device"}}{{else}}{{t "Approve"}}{{end}}</button></form>
       {{if .Flatpak}}<form method="post" action="/software/requests/{{.ID}}/approve-all">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Approve for everyone"}}</button></form>{{end}}
-      <form method="post" action="/software/requests/{{.ID}}/deny">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Deny"}}</button></form>{{end}}</td>{{end}}
+      <form method="post" action="/software/requests/{{.ID}}/deny">{{template "csrf" $.CSRF}}<button class="secondary small" data-confirm="{{t "Deny this request?"}}">{{t "Deny"}}</button></form>{{end}}</td>{{end}}
   </tr>{{else}}<tr><td colspan="7" class="empty">{{t "No requests yet."}}</td></tr>{{end}}</tbody>
 </table></div></section>
 {{else}}

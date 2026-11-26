@@ -1,4 +1,4 @@
--- Idempotent base schema applied at startup; data conversions live in migrations.go.
+-- Idempotent schema applied at startup under an advisory lock; data conversions run in Go at startup (library.go migrate).
 
 -- Reusable configuration building blocks (one declaration type each).
 CREATE TABLE IF NOT EXISTS library_items (
@@ -172,8 +172,14 @@ CREATE TABLE IF NOT EXISTS audit_log (
     hash    BYTEA NOT NULL
 );
 
+-- UPDATE and TRUNCATE are refused always; DELETE only inside a transaction
+-- that set limdm.retention (the audit retention job, retention.go), which
+-- records a signed cut so the remaining chain stays verifiable.
 CREATE OR REPLACE FUNCTION audit_log_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
+    IF TG_OP = 'DELETE' AND current_setting('limdm.retention', true) = 'on' THEN
+        RETURN NULL;
+    END IF;
     RAISE EXCEPTION 'audit_log is append only';
 END $$;
 
@@ -402,3 +408,320 @@ END $$;
 DROP TRIGGER IF EXISTS dir_users_tombstone ON dir_users;
 CREATE TRIGGER dir_users_tombstone AFTER INSERT OR UPDATE OF email OR DELETE ON dir_users
     FOR EACH ROW EXECUTE FUNCTION dir_users_tombstone();
+
+-- W3
+CREATE OR REPLACE FUNCTION rows_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION '% is append only', TG_TABLE_NAME; END $$;
+-- Catalog version of the device's last check report (evidence export).
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS catalog_version TEXT NOT NULL DEFAULT '';
+
+-- Compliance history: one row per change of a check result (devices report
+-- only changes). Pruned after 365 days like device_events, keeping the last
+-- row before the cutoff so the state at any date stays known.
+CREATE TABLE IF NOT EXISTS compliance_changes (
+    id              BIGSERIAL PRIMARY KEY,
+    device_id       TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    at              TIMESTAMPTZ NOT NULL,
+    check_id        TEXT NOT NULL,
+    status          TEXT NOT NULL, -- pass | fail | na | excepted | advisory | removed
+    detail          TEXT NOT NULL DEFAULT '',
+    catalog_version TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS compliance_changes_device ON compliance_changes(device_id, check_id, id);
+CREATE INDEX IF NOT EXISTS compliance_changes_at ON compliance_changes USING brin(at);
+DROP TRIGGER IF EXISTS compliance_changes_append_only ON compliance_changes;
+CREATE TRIGGER compliance_changes_append_only BEFORE UPDATE ON compliance_changes
+    FOR EACH ROW EXECUTE FUNCTION rows_append_only();
+-- baseline for devices that reported before the history existed
+INSERT INTO compliance_changes(device_id, at, check_id, status, detail, catalog_version)
+    SELECT d.id, coalesce(d.last_seen, now()), c->>'id', coalesce(c->>'status', ''), coalesce(c->>'detail', ''), d.catalog_version
+    FROM devices d, jsonb_array_elements(d.checks) c
+    WHERE c->>'id' IS NOT NULL AND NOT EXISTS (SELECT 1 FROM compliance_changes x WHERE x.device_id = d.id);
+
+-- Versions of library items and blueprints: every save, rollback and delete
+-- (the deleted payload stays). No foreign key, versions outlive the object.
+CREATE TABLE IF NOT EXISTS library_item_versions (
+    id          BIGSERIAL PRIMARY KEY,
+    item_id     BIGINT NOT NULL,
+    version     INT NOT NULL,
+    name        TEXT NOT NULL,
+    type        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    payload     JSONB NOT NULL,
+    signature   TEXT NOT NULL DEFAULT '',
+    deleted     BOOLEAN NOT NULL DEFAULT false,
+    note        TEXT NOT NULL DEFAULT '',
+    created_by  TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (item_id, version)
+);
+CREATE TABLE IF NOT EXISTS blueprint_versions (
+    id           BIGSERIAL PRIMARY KEY,
+    blueprint_id BIGINT NOT NULL,
+    version      INT NOT NULL,
+    name         TEXT NOT NULL,
+    description  TEXT NOT NULL DEFAULT '',
+    parent_id    BIGINT,
+    tree         JSONB NOT NULL,
+    deleted      BOOLEAN NOT NULL DEFAULT false,
+    note         TEXT NOT NULL DEFAULT '',
+    created_by   TEXT NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (blueprint_id, version)
+);
+DROP TRIGGER IF EXISTS library_item_versions_append_only ON library_item_versions;
+CREATE TRIGGER library_item_versions_append_only BEFORE UPDATE OR DELETE ON library_item_versions
+    FOR EACH ROW EXECUTE FUNCTION rows_append_only();
+DROP TRIGGER IF EXISTS blueprint_versions_append_only ON blueprint_versions;
+CREATE TRIGGER blueprint_versions_append_only BEFORE UPDATE OR DELETE ON blueprint_versions
+    FOR EACH ROW EXECUTE FUNCTION rows_append_only();
+-- baseline version of objects saved before versioning existed (library
+-- items: at startup in server.go, after secrets are sealed and items signed)
+INSERT INTO blueprint_versions(blueprint_id, version, name, description, parent_id, tree, note, created_by, created_at)
+    SELECT b.id, 1, b.name, b.description, b.parent_id, b.tree, 'baseline', 'system', b.updated_at FROM blueprints b
+    WHERE NOT EXISTS (SELECT 1 FROM blueprint_versions v WHERE v.blueprint_id = b.id);
+-- W2
+-- Four eyes approvals: a second admin approves wipe, lost mode, scripts, role
+-- changes and (optionally) recovery key views before they run.
+CREATE TABLE IF NOT EXISTS approvals (
+    id           BIGSERIAL PRIMARY KEY,
+    action       TEXT NOT NULL,             -- command | user.update | recovery.view
+    target       TEXT NOT NULL,             -- device id or console login
+    payload      JSONB NOT NULL DEFAULT '{}',
+    reason       TEXT NOT NULL DEFAULT '',
+    requested_by TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected | expired | used
+    decided_by   TEXT,
+    decided_at   TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at   TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS approvals_status ON approvals(status, expires_at);
+-- Role scopes: helpdesk and auditor accounts limited to device tags or
+-- directory group names; empty means every device. Roles taken from
+-- directory groups (from_group) are derived again on every request.
+ALTER TABLE console_users ADD COLUMN IF NOT EXISTS scope_tags TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE console_users ADD COLUMN IF NOT EXISTS scope_groups TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE console_users ADD COLUMN IF NOT EXISTS from_group BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE console_users ADD COLUMN IF NOT EXISTS oidc_groups TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE local_admins ADD COLUMN IF NOT EXISTS scope_tags TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE local_admins ADD COLUMN IF NOT EXISTS scope_groups TEXT[] NOT NULL DEFAULT '{}';
+-- Risk acceptance: exceptions with reason, owner, approver and expiry; only
+-- active ones reach the agents (merged into the compliance declaration).
+CREATE TABLE IF NOT EXISTS risk_exceptions (
+    id         BIGSERIAL PRIMARY KEY,
+    check_id   TEXT NOT NULL,
+    mode       TEXT NOT NULL CHECK (mode IN ('exclude', 'advisory')),
+    tag        TEXT NOT NULL DEFAULT '',   -- '' = every device
+    reason     TEXT NOT NULL,
+    owner      TEXT NOT NULL,
+    approver   TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at TIMESTAMPTZ
+);
+-- Retention: rows of audit_log and device_events are deleted only by the
+-- retention job and the device deletion, which set limdm.retention for their
+-- transaction (audit_log_immutable above). audit_cut records where the chain
+-- starts after a prune, with an HMAC under the audit chain key, so the
+-- remaining chain stays verifiable.
+CREATE OR REPLACE FUNCTION device_events_retention_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('limdm.retention', true) = 'on' THEN
+        RETURN NULL;
+    END IF;
+    RAISE EXCEPTION 'device_events rows are deleted by the retention job only';
+END $$;
+DROP TRIGGER IF EXISTS device_events_retention_only ON device_events;
+CREATE TRIGGER device_events_retention_only BEFORE DELETE OR TRUNCATE ON device_events
+    FOR EACH STATEMENT EXECUTE FUNCTION device_events_retention_only();
+CREATE TABLE IF NOT EXISTS audit_cut (
+    one       BOOLEAN PRIMARY KEY DEFAULT true CHECK (one),
+    last_id   BIGINT NOT NULL,
+    last_hash BYTEA NOT NULL,
+    mac       BYTEA NOT NULL,
+    cut_at    TIMESTAMPTZ NOT NULL
+);
+-- W4
+-- limdm_version_key turns a package version into numbers for comparing:
+-- the epoch is dropped and every run of digits is one element, so
+-- '1:3.0.13-1~deb12u1' becomes {3,0,13,1,12,1}
+CREATE OR REPLACE FUNCTION limdm_version_key(v text) RETURNS numeric[] LANGUAGE sql IMMUTABLE AS $$
+    SELECT coalesce(array_agg(m.x[1]::numeric ORDER BY m.n), '{}')
+    FROM regexp_matches(regexp_replace(coalesce(v, ''), '^[0-9]+:', ''), '[0-9]+', 'g') WITH ORDINALITY AS m(x, n)
+$$;
+-- tokens for the admin REST API and the metrics endpoint; only the hash is stored
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id           BIGSERIAL PRIMARY KEY,
+    name         TEXT NOT NULL,
+    prefix       TEXT NOT NULL,
+    token_hash   BYTEA NOT NULL UNIQUE,
+    role         TEXT NOT NULL CHECK (role IN ('admin', 'helpdesk', 'auditor', 'metrics')),
+    read_only    BOOLEAN NOT NULL DEFAULT false,
+    created_by   TEXT NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at   TIMESTAMPTZ NOT NULL,
+    last_used_at TIMESTAMPTZ,
+    revoked_at   TIMESTAMPTZ
+);
+-- E1
+-- EAP-TLS device certificates issued by the network CA. No foreign key: a
+-- revoked certificate stays on the CRL until it expires, also when the
+-- device record is gone.
+CREATE TABLE IF NOT EXISTS network_certs (
+    serial        TEXT PRIMARY KEY,
+    device_id     TEXT NOT NULL,
+    subject       TEXT NOT NULL,
+    sans          TEXT NOT NULL DEFAULT '',
+    not_before    TIMESTAMPTZ NOT NULL,
+    not_after     TIMESTAMPTZ NOT NULL,
+    revoked_at    TIMESTAMPTZ,
+    revoke_reason TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS network_certs_device ON network_certs(device_id);
+-- integration v0.16.0
+-- device scope of helpdesk and auditor API tokens (tags, as for console users)
+ALTER TABLE api_tokens ADD COLUMN IF NOT EXISTS scope_tags TEXT[] NOT NULL DEFAULT '{}';
+-- W1
+-- Structured results of script commands and recurring scripts (newest 200 per device).
+CREATE TABLE IF NOT EXISTS script_results (
+    id          BIGSERIAL PRIMARY KEY,
+    device_id   TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    command_id  BIGINT,
+    name        TEXT NOT NULL DEFAULT '',
+    exit_code   INTEGER NOT NULL,
+    stdout      TEXT NOT NULL DEFAULT '',
+    stderr      TEXT NOT NULL DEFAULT '',
+    started_at  TIMESTAMPTZ NOT NULL,
+    ended_at    TIMESTAMPTZ NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS script_results_device ON script_results(device_id, id);
+-- Log bundles of the diagnostics command (newest 10 per device), downloaded by admins and helpdesk.
+CREATE TABLE IF NOT EXISTS diagnostics (
+    command_id BIGINT PRIMARY KEY,
+    device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    content    TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS diagnostics_device ON diagnostics(device_id, command_id);
+-- E3
+-- remote shell sessions: who opened which shell on which device, and its output
+CREATE TABLE IF NOT EXISTS shell_sessions (
+    id           TEXT PRIMARY KEY,
+    device_id    TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    command_id   BIGINT,
+    requested_by TEXT NOT NULL,
+    local_user   TEXT NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    connected_at TIMESTAMPTZ,
+    ended_at     TIMESTAMPTZ,
+    end_reason   TEXT NOT NULL DEFAULT '',
+    transcript   BYTEA NOT NULL DEFAULT '',
+    truncated    BOOLEAN NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS shell_sessions_device ON shell_sessions(device_id, created_at DESC);
+-- E4c
+-- running server instances (high availability): heartbeat every 10 s; a
+-- remote shell runs on the instance that started it
+CREATE TABLE IF NOT EXISTS server_instances (
+    id         TEXT PRIMARY KEY,
+    hostname   TEXT NOT NULL DEFAULT '',
+    version    TEXT NOT NULL DEFAULT '',
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    seen_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE shell_sessions ADD COLUMN IF NOT EXISTS instance TEXT NOT NULL DEFAULT '';
+-- every instance reloads the console settings when one of them saves them
+CREATE OR REPLACE FUNCTION settings_notify() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM pg_notify('limdm_settings', NEW.key);
+    RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS settings_notify ON settings;
+CREATE TRIGGER settings_notify AFTER INSERT OR UPDATE ON settings FOR EACH ROW EXECUTE FUNCTION settings_notify();
+-- syslog forwarding position, so a new leader continues where the last one stopped
+CREATE TABLE IF NOT EXISTS syslog_cursor (
+    stream  TEXT PRIMARY KEY,
+    last_id BIGINT NOT NULL
+);
+-- schema versions applied to this database, checked by /readyz
+CREATE TABLE IF NOT EXISTS schema_applied (
+    hash       TEXT PRIMARY KEY,
+    version    TEXT NOT NULL,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- E4a
+-- Multi tenancy: every company of an MSP or a group is a tenant. Tenant 1
+-- ("Default") owns all data from before tenants existed and the global
+-- objects; installs with one company never see more. Console users, API
+-- tokens and notification channels with a NULL tenant are global (super
+-- admins, all tenants). Audit entries with a NULL tenant are global entries.
+CREATE TABLE IF NOT EXISTS tenants (
+    id           BIGSERIAL PRIMARY KEY,
+    name         TEXT NOT NULL UNIQUE,
+    disabled     BOOLEAN NOT NULL DEFAULT false,
+    company_name TEXT NOT NULL DEFAULT '',
+    logo         BYTEA NOT NULL DEFAULT '',
+    color        TEXT NOT NULL DEFAULT '',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO tenants(id, name) VALUES (1, 'Default') ON CONFLICT DO NOTHING;
+SELECT setval(pg_get_serial_sequence('tenants', 'id'), (SELECT max(id) FROM tenants));
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE enroll_tokens ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE library_items ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE library_items ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE blueprints ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE blueprints ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE risk_exceptions ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE approvals ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE network_certs ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE device_events ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE compliance_changes ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE console_users ADD COLUMN IF NOT EXISTS tenant_id BIGINT REFERENCES tenants(id);
+ALTER TABLE local_admins ADD COLUMN IF NOT EXISTS tenant_id BIGINT REFERENCES tenants(id);
+ALTER TABLE api_tokens ADD COLUMN IF NOT EXISTS tenant_id BIGINT REFERENCES tenants(id);
+ALTER TABLE notification_channels ADD COLUMN IF NOT EXISTS tenant_id BIGINT REFERENCES tenants(id);
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS tenant_id BIGINT;
+-- the default blueprint applies to every device without one, in every tenant
+UPDATE blueprints SET shared = true WHERE name = 'default' AND tenant_id = 1 AND NOT shared;
+CREATE INDEX IF NOT EXISTS devices_tenant ON devices(tenant_id);
+CREATE INDEX IF NOT EXISTS audit_log_tenant ON audit_log(tenant_id, id) WHERE tenant_id IS NOT NULL;
+-- rows written per device take the tenant of their device, so no write path
+-- can file them under another tenant
+CREATE OR REPLACE FUNCTION limdm_device_tenant() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.tenant_id := coalesce((SELECT tenant_id FROM devices WHERE id = NEW.device_id), NEW.tenant_id);
+    RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS device_events_tenant ON device_events;
+CREATE TRIGGER device_events_tenant BEFORE INSERT ON device_events FOR EACH ROW EXECUTE FUNCTION limdm_device_tenant();
+DROP TRIGGER IF EXISTS compliance_changes_tenant ON compliance_changes;
+CREATE TRIGGER compliance_changes_tenant BEFORE INSERT ON compliance_changes FOR EACH ROW EXECUTE FUNCTION limdm_device_tenant();
+DROP TRIGGER IF EXISTS network_certs_tenant ON network_certs;
+CREATE TRIGGER network_certs_tenant BEFORE INSERT ON network_certs FOR EACH ROW EXECUTE FUNCTION limdm_device_tenant();
+-- E4b
+-- key rotation (keys.go): how far each device has moved to the active device
+-- CA (set when its certificate is from that CA and it trusts the CA bundle)
+-- and which command key it has pinned; the CA that issued a network certificate
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS cert_ca TEXT;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS command_key TEXT;
+ALTER TABLE network_certs ADD COLUMN IF NOT EXISTS ca TEXT NOT NULL DEFAULT '';
+-- the current audit key (its id): an instance with another key cannot write entries
+CREATE TABLE IF NOT EXISTS audit_key (
+    one    BOOLEAN PRIMARY KEY DEFAULT true CHECK (one),
+    key_id TEXT NOT NULL
+);
+-- the version history stays append only, except that a session key rotation
+-- may seal a login client secret again (payload only, flag set per transaction)
+CREATE OR REPLACE FUNCTION rows_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'UPDATE' AND TG_TABLE_NAME = 'library_item_versions' AND current_setting('limdm.reseal', true) = 'on' THEN
+        IF to_jsonb(NEW) - 'payload' = to_jsonb(OLD) - 'payload' THEN
+            RETURN NEW;
+        END IF;
+    END IF;
+    RAISE EXCEPTION '% is append only', TG_TABLE_NAME;
+END $$;

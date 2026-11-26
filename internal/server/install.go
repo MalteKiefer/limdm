@@ -9,7 +9,7 @@ import (
 	"github.com/maltekiefer/limdm/internal/api"
 )
 
-// /install.sh installs the newest agent release from GitHub (deb or rpm,
+// /install.sh installs the newest agent release from GitHub (deb or rpm for dnf and zypper,
 // checksum verified, osquery repository with pinned key) and enrolls the
 // device. It contains no secret: the token comes from LIMDM_TOKEN or from an
 // existing /etc/limdm/enroll.conf, so the same script serves mass deployment.
@@ -41,14 +41,17 @@ case "$(uname -m)" in
 esac
 if command -v apt-get >/dev/null 2>&1; then ext=deb
 elif command -v dnf >/dev/null 2>&1; then ext=rpm
+elif command -v zypper >/dev/null 2>&1; then ext=rpm # openSUSE, SLES
 elif command -v pacman >/dev/null 2>&1; then ext=pkg.tar.zst
 elif command -v apk >/dev/null 2>&1; then ext=apk
-else echo "needs apt-get, dnf, pacman or apk; other systems: install the tar.gz release manually" >&2; exit 1
+else echo "needs apt-get, dnf, zypper, pacman or apk; other systems: install the tar.gz release manually" >&2; exit 1
 fi
 
 install -d -m 0700 /etc/limdm
 allow=false
 [ "${LIMDM_ALLOW_SCRIPTS:-}" = true ] && allow=true
+shell=false
+[ "${LIMDM_ALLOW_REMOTE_SHELL:-}" = true ] && shell=true
 if [ -n "${LIMDM_TOKEN:-}" ]; then
     case "$LIMDM_TOKEN" in *[!A-Za-z0-9_-]*) echo "invalid token" >&2; exit 1 ;; esac
     umask 077
@@ -57,6 +60,7 @@ server = "$SERVER"
 fingerprint = "$FINGERPRINT"
 token = "$LIMDM_TOKEN"
 allow_scripts = $allow
+allow_remote_shell = $shell
 CONF
 elif [ ! -f /etc/limdm/enroll.conf ] && [ ! -f /etc/limdm/device.pem ]; then
     echo "set LIMDM_TOKEN or place /etc/limdm/enroll.conf" >&2; exit 1
@@ -96,6 +100,24 @@ Signed-By: /etc/apt/keyrings/limdm-osquery.asc
 SRC
     apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o Dpkg::Options::=--force-confold osquery "$tmp/$pkg"
+elif command -v zypper >/dev/null 2>&1 && ! command -v dnf >/dev/null 2>&1; then
+    # SUSE: rpm trusts the key first, so zypper does not ask; the agent rpm is
+    # unsigned, its SHA-256 was checked against the release sums above
+    install -d -m 0755 /etc/pki/rpm-gpg
+    printf '%s\n' "$key" > /etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery
+    rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery
+    cat > /etc/zypp/repos.d/limdm-osquery.repo <<'REPO'
+# Managed by LiMDM. Local changes are overwritten.
+[limdm-osquery]
+name=osquery
+baseurl=https://pkg.osquerypackages.com/rpm/$basearch/
+enabled=1
+autorefresh=1
+type=rpm-md
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery
+REPO
+    zypper --non-interactive install --allow-unsigned-rpm osquery "$tmp/$pkg"
 else
     install -d -m 0755 /etc/pki/rpm-gpg
     printf '%s\n' "$key" > /etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery
@@ -126,7 +148,7 @@ func (s *Server) installScript(w http.ResponseWriter, r *http.Request) {
 	}
 	var b strings.Builder
 	err := installTmpl.Execute(&b, map[string]string{"Console": s.cfg.PublicURL, "Server": s.cfg.AgentURL,
-		"Fingerprint": s.ca.Fingerprint(), "Repo": repo, "OsqueryKey": strings.TrimSpace(api.OsqueryKey)})
+		"Fingerprint": s.tlsCA().Fingerprint(), "Repo": repo, "OsqueryKey": strings.TrimSpace(api.OsqueryKey)})
 	if err != nil {
 		s.fail(w, err)
 		return

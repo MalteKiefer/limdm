@@ -53,12 +53,17 @@ const (
 	stateDir     = "/var/lib/limdm"
 	stateFile    = stateDir + "/state.json"
 	renewBefore  = 30 * 24 * time.Hour
+	// commandKeyGrace: how long commands signed with the previous command
+	// key are still accepted after a rollover (commands expire after 7 days)
+	commandKeyGrace = 14 * 24 * time.Hour
 )
 
 type Config struct {
 	Server       string `json:"server"`
 	DeviceID     string `json:"device_id"`
 	AllowScripts bool   `json:"allow_scripts"` // remote scripts are opt in per device
+	// AllowRemoteShell lets IT open an interactive support shell (opt in per device).
+	AllowRemoteShell bool `json:"allow_remote_shell,omitempty"`
 	// NoFallbackDNS turns off asking Cloudflare and Google (DNS over HTTPS)
 	// when the system resolver cannot reach the server.
 	NoFallbackDNS bool `json:"no_fallback_dns,omitempty"`
@@ -71,26 +76,41 @@ type State struct {
 	Users         []api.User           `json:"users"`
 	LastUpdateRun time.Time            `json:"last_update_run"`
 	RebootSince   time.Time            `json:"reboot_since"`
-	RebootPlanned time.Time            `json:"reboot_planned"`        // when a post update reboot was scheduled
+	RebootPlanned time.Time            `json:"reboot_planned"`     // when a post update reboot was scheduled
+	RebootAt      time.Time            `json:"reboot_at,omitzero"` // when it happens, deferrals included (guarded by evMu)
+	RebootDefers  int                  `json:"reboot_defers,omitempty"`
 	ScriptRuns    map[string]time.Time `json:"script_runs,omitempty"` // last run of recurring scripts
 	Results       []api.CommandResult  `json:"results"`               // not yet reported
 	Events        []string             `json:"events"`
 
-	PendingKeys    []pendingKey         `json:"pending_keys,omitempty"` // recovery keys not yet escrowed
-	Escrowed       map[string]time.Time `json:"escrowed,omitempty"`     // LUKS UUID: escrowed at
-	CommandKey     string               `json:"command_key,omitempty"`  // pinned public key commands are signed with
-	Enrollment     string               `json:"enrollment,omitempty"`   // server and device ID this state belongs to
-	EscrowNotified time.Time            `json:"escrow_notified"`
-	Company        string               `json:"company,omitempty"`
-	BrandingHash   string               `json:"branding_hash,omitempty"`
-	Catalog        *api.Catalog         `json:"catalog,omitempty"`      // software catalog for the desktop app
-	AppRequests    []api.AppRequest     `json:"app_requests,omitempty"` // requests not yet sent
-	LastContact    time.Time            `json:"last_contact"`
-	DoneCommands   map[int64]time.Time  `json:"done_commands,omitempty"`  // executed command IDs: the server redelivers until it has the result
-	RemovePending  map[string]bool      `json:"remove_pending,omitempty"` // removed users whose account lock still has to succeed
-	UserLocked     map[string]bool      `json:"user_locked,omitempty"`    // accounts IT locked with user_lock; the SSO rules leave them locked
-	UpdateResult   *api.UpdateResult    `json:"update_result,omitempty"`  // agent update outcome not yet reported
-	OfflineLocked  bool                 `json:"offline_locked,omitempty"`
+	PendingKeys         []pendingKey              `json:"pending_keys,omitempty"`     // recovery keys not yet escrowed
+	Escrowed            map[string]time.Time      `json:"escrowed,omitempty"`         // LUKS UUID: escrowed at
+	CommandKey          string                    `json:"command_key,omitempty"`      // pinned public key commands are signed with
+	CommandKeyPrev      string                    `json:"command_key_prev,omitempty"` // key before the last rollover, accepted until CommandKeyPrevUntil
+	CommandKeyPrevUntil time.Time                 `json:"command_key_prev_until,omitzero"`
+	Enrollment          string                    `json:"enrollment,omitempty"` // server and device ID this state belongs to
+	EscrowNotified      time.Time                 `json:"escrow_notified"`
+	Company             string                    `json:"company,omitempty"`
+	BrandingHash        string                    `json:"branding_hash,omitempty"`
+	Catalog             *api.Catalog              `json:"catalog,omitempty"`      // software catalog for the desktop app
+	AppRequests         []api.AppRequest          `json:"app_requests,omitempty"` // requests not yet sent
+	LastContact         time.Time                 `json:"last_contact"`
+	DoneCommands        map[int64]time.Time       `json:"done_commands,omitempty"`  // executed command IDs: the server redelivers until it has the result
+	RemovePending       map[string]bool           `json:"remove_pending,omitempty"` // removed users whose account lock still has to succeed
+	UserLocked          map[string]bool           `json:"user_locked,omitempty"`    // accounts IT locked with user_lock; the SSO rules leave them locked
+	UpdateResult        *api.UpdateResult         `json:"update_result,omitempty"`  // agent update outcome not yet reported
+	OfflineLocked       bool                      `json:"offline_locked,omitempty"`
+	FallbackDNS         bool                      `json:"fallback_dns,omitempty"` // server allows the DNS over HTTPS fallback
+	DNFProxy            string                    `json:"dnf_proxy,omitempty"`    // proxy= value LiMDM wrote to dnf.conf (dnf4)
+	SUSEProxy           *sysconfigOwned           `json:"suse_proxy,omitempty"`   // keys LiMDM manages in /etc/sysconfig/proxy
+	Held                []string                  `json:"held,omitempty"`         // packages LiMDM put on apt hold
+	DNFExclude          string                    `json:"dnf_exclude,omitempty"`  // excludepkgs= value LiMDM wrote to dnf.conf
+	PacmanIgnore        string                    `json:"pacman_ignore,omitempty"`
+	SnapRefresh         string                    `json:"snap_refresh,omitempty"`   // "hold" or "timer=..." LiMDM set in snapd
+	ScriptResults       []api.ScriptResult        `json:"script_results,omitempty"` // recurring script runs not yet reported
+	ManagedFiles        []string                  `json:"managed_files,omitempty"`  // paths written for com.limdm.files, removed when undeclared
+	FirewallRules       []api.FirewallRule        `json:"firewall_rules,omitempty"` // allow rules LiMDM added
+	LocalUsers          map[string]localUserState `json:"local_users,omitempty"`    // accounts com.limdm.localusers manages
 }
 
 type Agent struct {
@@ -115,12 +135,15 @@ type Agent struct {
 	failedUpdate                string    // release version whose update already failed, reported once
 	osqueryTried                time.Time // last osquery install attempt
 	syncNow                     bool
+	renewNow, renewNetNow       bool // the server asked for new certificates (CA rotation)
+	proxySet                    bool // a proxy declaration set the environment of this process
 	// for the desktop tray
 	lastCheckin  *time.Time
 	lastError    string
 	lastChecks   []api.CheckResult
 	lastFlatpaks []api.FlatpakApp // from the last inventory, for the desktop catalog
 	lastSystem   DesktopSystem    // from the last inventory, for limdm info
+	shell        atomic.Pointer[runningShell]
 }
 
 func validServerURL(s string) error {
@@ -132,14 +155,15 @@ func validServerURL(s string) error {
 }
 
 // pinnedTLS trusts only the device CA, never system roots, and presents the
-// device identity when one exists.
-func pinnedTLS(caPEM []byte, withIdentity bool) (*tls.Config, error) {
+// device identity when enrolled (server set). New trust anchors from the
+// server apply through swapTransport.setRoots without a restart.
+func pinnedTLS(caPEM []byte, server string) (*tls.Config, error) {
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caPEM) {
 		return nil, errors.New("invalid CA certificate")
 	}
 	tc := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: pool}
-	if withIdentity {
+	if server != "" {
 		tc.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 			b, err := os.ReadFile(identityFile)
 			if err != nil {
@@ -152,9 +176,39 @@ func pinnedTLS(caPEM []byte, withIdentity bool) (*tls.Config, error) {
 	return tc, nil
 }
 
+// swapTransport sends through the current transport; setRoots replaces it
+// with one that trusts a new CA pool (standard verification, no skipping).
+type swapTransport struct {
+	tc  *tls.Config
+	cur atomic.Pointer[http.Transport]
+}
+
+func newSwapTransport(tc *tls.Config) *swapTransport {
+	st := &swapTransport{tc: tc}
+	st.cur.Store(st.transport(tc))
+	return st
+}
+
+func (st *swapTransport) transport(tc *tls.Config) *http.Transport {
+	return &http.Transport{TLSClientConfig: tc, Proxy: agentProxy, ForceAttemptHTTP2: true, DialContext: fallbackDial()}
+}
+
+func (st *swapTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return st.cur.Load().RoundTrip(r)
+}
+
+func (st *swapTransport) CloseIdleConnections() { st.cur.Load().CloseIdleConnections() }
+
+// setRoots makes new connections verify the server against pool.
+func (st *swapTransport) setRoots(pool *x509.CertPool) {
+	tc := st.tc.Clone()
+	tc.RootCAs = pool
+	old := st.cur.Swap(st.transport(tc))
+	old.CloseIdleConnections()
+}
+
 func newClient(tc *tls.Config) *http.Client {
-	return &http.Client{Timeout: 2 * time.Minute, Transport: &http.Transport{
-		TLSClientConfig: tc, Proxy: http.ProxyFromEnvironment, ForceAttemptHTTP2: true, DialContext: fallbackDial()}}
+	return &http.Client{Timeout: 2 * time.Minute, Transport: newSwapTransport(tc)}
 }
 
 func newCSR() (keyPEM []byte, csrPEM string, err error) {
@@ -239,7 +293,7 @@ func verifyByFingerprint(fingerprint string) *tls.Config {
 
 // Enroll registers the device: the key is created locally and never leaves
 // the device, the server signs a CSR after checking the one time token.
-func Enroll(server, token, fingerprint string, allowScripts bool) error {
+func Enroll(server, token, fingerprint string, allowScripts, allowShell bool) error {
 	server = strings.TrimRight(server, "/")
 	if err := validServerURL(server); err != nil {
 		return err
@@ -251,7 +305,7 @@ func Enroll(server, token, fingerprint string, allowScripts bool) error {
 	if err != nil {
 		return err
 	}
-	tc, err := pinnedTLS(caPEM, false)
+	tc, err := pinnedTLS(caPEM, "")
 	if err != nil {
 		return err
 	}
@@ -290,7 +344,7 @@ func Enroll(server, token, fingerprint string, allowScripts bool) error {
 	if _, err := writeIfChanged(identityFile, string(keyPEM)+er.Cert, 0o600); err != nil {
 		return err
 	}
-	cfg, _ := json.MarshalIndent(Config{Server: server, DeviceID: er.DeviceID, AllowScripts: allowScripts}, "", "  ")
+	cfg, _ := json.MarshalIndent(Config{Server: server, DeviceID: er.DeviceID, AllowScripts: allowScripts, AllowRemoteShell: allowShell}, "", "  ")
 	if _, err = writeIfChanged(configFile, string(cfg)+"\n", 0o600); err != nil {
 		return err
 	}
@@ -309,7 +363,7 @@ func forgetServerState() error {
 	if json.Unmarshal(b, &st) != nil {
 		return os.Remove(stateFile)
 	}
-	for _, k := range []string{"command_key", "done_commands"} {
+	for _, k := range []string{"command_key", "command_key_prev", "command_key_prev_until", "done_commands"} {
 		delete(st, k)
 	}
 	out, _ := json.Marshal(st)
@@ -333,7 +387,7 @@ func New(log *slog.Logger) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	tc, err := pinnedTLS(caPEM, true)
+	tc, err := pinnedTLS(caPEM, cfg.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +398,6 @@ func New(log *slog.Logger) (*Agent, error) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, err
 	}
-	fallbackDNS = !cfg.NoFallbackDNS
 	a := &Agent{cfg: cfg, client: newClient(tc), host: h, log: log}
 	if b, err := os.ReadFile(stateFile); err == nil {
 		if err := json.Unmarshal(b, &a.state); err != nil {
@@ -359,13 +412,14 @@ func New(log *slog.Logger) (*Agent, error) {
 	if enr := cfg.Server + " " + cfg.DeviceID; a.state.Enrollment != enr {
 		if a.state.Enrollment != "" {
 			log.Info("new enrollment: forgetting the previous server's command key and command IDs")
-			a.state.CommandKey, a.state.DoneCommands, a.state.Results = "", nil, nil
+			a.state.CommandKey, a.state.CommandKeyPrev, a.state.DoneCommands, a.state.Results = "", "", nil, nil
 		}
 		a.state.Enrollment = enr
 	}
 	if a.state.DeclToken == "" { // never synced: start from the built in baseline
 		a.state.Declarations = api.DefaultDeclarations()
 	}
+	fallbackDNS.Store(a.state.FallbackDNS && !cfg.NoFallbackDNS)
 	a.compose()
 	return a, nil
 }
@@ -499,7 +553,7 @@ func (a *Agent) Run(ctx context.Context) error {
 
 // checkToDecl links compliance checks to the declaration whose goal they verify.
 var checkToDecl = map[string]string{
-	"disk.recovery": api.TypeDiskEncryption, "boot.password": api.TypeBootloader,
+	"disk.recovery": api.TypeDiskEncryption, "disk.tpm": api.TypeDiskEncryption, "boot.password": api.TypeBootloader,
 	"desktop.screenlock": api.TypeScreenLock, "firewall.active": api.TypeFirewall, "os.supported": api.TypeOSVersion,
 	"updates.auto": api.TypeUpdates, "updates.security": api.TypeUpdates, "updates.reboot": api.TypeUpdates, "auth.sso": api.TypeLogin,
 	"agent.osquery": api.TypeAgent,
@@ -537,6 +591,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	defer a.saveState()
 	defer a.publishDesktop()
 	a.renewIdentity(ctx)
+	a.ensureNetworkCert(ctx)
 	a.takeEscrowRequests()
 	a.checkUpdateOutcome()
 	a.collectTamper()
@@ -547,18 +602,23 @@ func (a *Agent) cycle(ctx context.Context) {
 
 	inv := a.host.inventory(a.pol.Privacy)
 	inv.Certificates = certInfo(a.pol.Extra.Certificates)
+	inv.WireGuardKeys = wireguardKeys(a.pol.Extra.Network)
 	a.applyCatalog(inv.Flatpaks)
 	inv.Apps = a.catalogStates(inv.Flatpaks)
 	a.lastFlatpaks = inv.Flatpaks
 	a.lastSystem = DesktopSystem{OS: strings.TrimSpace(inv.OSName + " " + inv.OSVersion), Kernel: inv.Kernel, Arch: inv.Arch,
 		Inventory: inv.Source, Vendor: inv.Vendor, Model: inv.Model, Serial: inv.Serial}
-	status := api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus()}
+	status := api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus(), CatalogVersion: CatalogVersion}
 	sb, _ := json.Marshal(status)
 	sum := sha256.Sum256(sb)
 	statusHash := hex.EncodeToString(sum[:])
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
 		StatusHash: statusHash, Results: a.state.Results, Events: a.pendingEvents(), Metrics: metrics(), BrandingHash: a.state.BrandingHash,
-		UpdateResult: a.state.UpdateResult}
+		UpdateResult: a.state.UpdateResult, ScriptResults: a.state.ScriptResults, CommandKey: a.state.CommandKey}
+	if b, err := os.ReadFile(caFile); err == nil {
+		sum := sha256.Sum256(b)
+		req.CAHash = hex.EncodeToString(sum[:])
+	}
 	if a.state.Catalog != nil {
 		req.CatalogHash = a.state.Catalog.Hash
 	}
@@ -595,6 +655,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	a.enforceOffline(true)
 	// drop only what was sent: entries added meanwhile (unlock events, desktop) stay
 	a.state.Results = a.state.Results[len(req.Results):]
+	a.state.ScriptResults = a.state.ScriptResults[len(req.ScriptResults):]
 	a.evMu.Lock()
 	// by content, not by count: a full queue drops its oldest routine line
 	// while the check in runs, so the sent lines are no longer a prefix
@@ -612,6 +673,8 @@ func (a *Agent) cycle(ctx context.Context) {
 		a.state.UpdateResult = nil // reported
 	}
 	a.applyBranding(resp.Branding)
+	a.state.FallbackDNS = resp.FallbackDNS
+	fallbackDNS.Store(resp.FallbackDNS && !a.cfg.NoFallbackDNS)
 	if resp.Catalog != nil {
 		a.state.Catalog = resp.Catalog
 	}
@@ -641,7 +704,11 @@ func (a *Agent) cycle(ctx context.Context) {
 		a.syncNow = true
 	}
 	a.compose()
-	a.pinCommandKey(resp.CommandKey)
+	a.pinCommandKey(resp.CommandKey, resp.CommandKeyRollover)
+	if resp.DeviceCAs != "" {
+		a.updateTrustAnchors(resp.DeviceCAs)
+	}
+	a.renewNow, a.renewNetNow = a.renewNow || resp.RenewCert, a.renewNetNow || resp.RenewNetworkCert
 	a.runCommands(resp.Commands)
 	if u := resp.AgentUpdate; u != nil && u.Version != a.failedUpdate {
 		if err := a.installUpdate(ctx, *u); err != nil {
@@ -677,14 +744,7 @@ func (a *Agent) enforce() {
 	} else if len(present) > 0 {
 		a.event("removed %v", present)
 	}
-	for _, f := range p.Files {
-		mode, _ := f.FileMode()
-		if changed, err := writeIfChanged(f.Path, f.Content, os.FileMode(mode)); err != nil {
-			a.problem(api.TypeFiles, "file %s: %v", f.Path, err)
-		} else if changed {
-			a.event("wrote %s", f.Path)
-		}
-	}
+	a.applyFiles(p.Files)
 	for _, s := range p.Services.Enable {
 		if !unitActive(s) {
 			if err := svc("enable-now", s); err != nil {
@@ -704,14 +764,27 @@ func (a *Agent) enforce() {
 		}
 	}
 	if p.Firewall.Enforce {
+		var err error
 		if st, _ := runFirewall(a); st != pass {
-			if err := a.applyFirewall(); err != nil {
-				a.problem(api.TypeFirewall, "firewall: %v", err)
-			}
+			err = a.applyFirewall()
+		} else {
+			err = a.syncFirewallRules() // active: keep its rules in line with the declaration
+		}
+		if err != nil {
+			a.problem(api.TypeFirewall, "firewall: %v", err)
 		}
 	}
 	if err := a.applyUsers(); err != nil {
 		a.problem(api.TypeLogin, "users: %v", err)
+	}
+	if err := a.applyLocalUsers(p.Extra.LocalUsers); err != nil {
+		a.problem(api.TypeLocalUsers, "local users: %v", err)
+	}
+	if err := a.applyHolds(p.Updates.Hold); err != nil {
+		a.problem(api.TypeUpdates, "hold: %v", err)
+	}
+	if err := a.applySnapRefresh(p.Updates); err != nil {
+		a.problem(api.TypeUpdates, "snap refresh: %v", err)
 	}
 	a.applyExtra()
 	// osquery is mandatory as inventory source; retry hourly, not every cycle
@@ -752,7 +825,7 @@ func inWindow(now time.Time, window string) bool {
 // maintenance installs updates once per window and reboots if declared.
 func (a *Agent) maintenance(now time.Time) {
 	u := a.pol.Updates
-	if u.Mode == "" || u.Mode == "off" || !inWindow(now, u.Window) {
+	if u.Mode == "" || u.Mode == "off" || !inWindow(now, u.Window) || !updateDay(now, u.Window, u.Days) {
 		return
 	}
 	if now.Sub(a.state.LastUpdateRun) > 20*time.Hour {
@@ -762,13 +835,19 @@ func (a *Agent) maintenance(now time.Time) {
 			a.problem(api.TypeUpdates, "updates (%s) failed: %v", u.Mode, err)
 		} else {
 			a.event("updates (%s) installed: %s", u.Mode, lastLines(out, 3))
+			if u.Autoremove {
+				if out, err := a.host.autoremove(); err != nil {
+					a.problem(api.TypeUpdates, "autoremove failed: %v", err)
+				} else if strings.TrimSpace(out) != "" {
+					a.event("autoremove: %s", lastLines(out, 3))
+				}
+			}
 		}
 	}
 	// Schedule once: a new shutdown call would replace and postpone the pending one.
-	if u.Reboot && now.Sub(a.state.RebootPlanned) > time.Hour && a.host.rebootRequired() {
-		if _, err := sh("shutdown", "-r", "+5", "LiMDM: rebooting in 5 minutes to finish updates"); err == nil {
-			a.state.RebootPlanned = now.Round(0)
-			a.event("reboot scheduled after updates")
+	if u.Reboot && !a.rebootPending(now) && a.host.rebootRequired() {
+		if err := a.scheduleReboot(now, u.RebootDefer); err != nil {
+			a.problem(api.TypeUpdates, "reboot after updates: %v", err)
 		}
 	}
 }
@@ -804,22 +883,37 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = a.showMessage(c.Payload)
 	case "software_remove":
 		out, err = a.removeSoftware(c.Payload)
+	case "diagnostics":
+		r.Diagnostics = a.collectDiagnostics()
+		out = fmt.Sprintf("diagnostics collected (%d bytes)", len(r.Diagnostics))
 	case "user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete":
 		out, err = a.userCommand(c.Type, c.Payload)
 	case "app_install", "app_remove":
 		out, err = a.appCommand(strings.TrimPrefix(c.Type, "app_"), c.Payload)
+	case "shell":
+		out, err = a.startShell(c)
 	case "script":
 		if !a.cfg.AllowScripts {
 			err = errors.New("remote scripts are disabled on this device (allow_scripts)")
 			break
 		}
-		out, err = runScript(c.Payload)
+		var sc api.ScriptCommand
+		if sc, err = parseScriptCommand(c.Payload); err != nil {
+			break
+		}
+		var res api.ScriptResult
+		res, err = runScript(sc.Body, sc.Params, sc.TimeoutMinutes)
+		res.CommandID = c.ID
+		r.Script, out = &res, scriptOutput(res)
 	default:
 		err = fmt.Errorf("unknown command %q", c.Type)
 	}
 	a.event("command %d (%s) executed, error=%v", c.ID, c.Type, err)
 	r.OK = err == nil
 	r.Output = lastLines(out, 200)
+	if r.Script != nil {
+		r.Output = out
+	}
 	if err != nil {
 		r.Output += "\n" + err.Error()
 	}
@@ -831,25 +925,6 @@ const (
 	nologinFile = "/etc/nologin"
 	nologinText = "This device is locked by IT (LiMDM). Contact your administrator.\n"
 )
-
-// runScript runs a script IT sent. A shebang line picks the interpreter
-// (bash, python …); without one it runs with /bin/sh.
-func runScript(body string) (string, error) {
-	f, err := os.CreateTemp(stateDir, "script-*")
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(f.Name())
-	_, err = f.WriteString(strings.ReplaceAll(body, "\r\n", "\n")) // pasted from Windows editors
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return "", err
-	}
-	argv := append(scriptInterpreter(body), f.Name())
-	return run(30*time.Minute, argv[0], argv[1:]...)
-}
 
 // scriptInterpreter reads the shebang ("#!/usr/bin/env python3",
 // "#!/bin/bash -e"); the file itself is never executed, so a noexec
@@ -968,7 +1043,7 @@ func (a *Agent) renewIdentity(ctx context.Context) {
 		return
 	}
 	c, err := tls.X509KeyPair(b, b)
-	if err != nil || c.Leaf == nil || time.Until(c.Leaf.NotAfter) > renewBefore {
+	if err != nil || c.Leaf == nil || (time.Until(c.Leaf.NotAfter) > renewBefore && !a.renewNow) {
 		return
 	}
 	expired := time.Now().After(c.Leaf.NotAfter)
@@ -997,6 +1072,7 @@ func (a *Agent) renewIdentity(ctx context.Context) {
 		return
 	}
 	a.client.CloseIdleConnections()
+	a.renewNow = false
 	a.event("client certificate renewed")
 }
 
@@ -1036,7 +1112,8 @@ func Enrolled() bool {
 }
 
 // EnrollFromConfig enrolls with a key = value file (server, fingerprint, token,
-// allow_scripts) and removes it afterwards: the token must not stay on disk.
+// allow_scripts, allow_remote_shell) and removes it afterwards: the token must
+// not stay on disk.
 func EnrollFromConfig(path string) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -1059,7 +1136,7 @@ func EnrollFromConfig(path string) error {
 			return fmt.Errorf("%s: %s is missing", path, k)
 		}
 	}
-	if err := Enroll(kv["server"], kv["token"], kv["fingerprint"], kv["allow_scripts"] == "true"); err != nil {
+	if err := Enroll(kv["server"], kv["token"], kv["fingerprint"], kv["allow_scripts"] == "true", kv["allow_remote_shell"] == "true"); err != nil {
 		return err
 	}
 	return os.Remove(path)
@@ -1159,8 +1236,10 @@ func (a *Agent) getBytes(path string, limit int64, out *[]byte) error {
 }
 
 // pinCommandKey keeps the first command key the server sends (over the
-// pinned CA and mTLS). A different key later is refused, not adopted.
-func (a *Agent) pinCommandKey(hexKey string) {
+// pinned CA and mTLS). A different key later is adopted only with a
+// rollover record signed by the pinned key; the old key stays accepted for
+// commandKeyGrace. Any other different key is refused.
+func (a *Agent) pinCommandKey(hexKey string, ro *api.KeyRollover) {
 	switch {
 	case hexKey == "" || hexKey == a.state.CommandKey:
 	case a.state.CommandKey == "":
@@ -1168,6 +1247,18 @@ func (a *Agent) pinCommandKey(hexKey string) {
 			a.state.CommandKey = hexKey
 			a.event("command signing key pinned; unsigned commands are refused from now on")
 		}
+	case ro != nil && ro.Key == hexKey:
+		pinned, err := hex.DecodeString(a.state.CommandKey)
+		if err == nil {
+			err = api.VerifyRollover(ed25519.PublicKey(pinned), *ro)
+		}
+		if err != nil {
+			a.event("refused a command key rollover: %v; keeping the pinned key", err)
+			return
+		}
+		a.state.CommandKeyPrev, a.state.CommandKeyPrevUntil = a.state.CommandKey, time.Now().Add(commandKeyGrace)
+		a.state.CommandKey = hexKey
+		a.event("command signing key rolled over to the key announced by the pinned one")
 	default:
 		a.event("the server sent a different command signing key; keeping the pinned one")
 	}
@@ -1184,7 +1275,11 @@ func (a *Agent) verifyCommand(c api.Command) error {
 		return err
 	}
 	if err := api.VerifyCommand(ed25519.PublicKey(pub), a.cfg.DeviceID, c); err != nil {
-		return err
+		prev, perr := hex.DecodeString(a.state.CommandKeyPrev)
+		if a.state.CommandKeyPrev == "" || perr != nil || time.Now().After(a.state.CommandKeyPrevUntil) ||
+			api.VerifyCommand(ed25519.PublicKey(prev), a.cfg.DeviceID, c) != nil {
+			return err
+		}
 	}
 	// the server expires commands after 7 days: an older one, signed or not,
 	// is a replay (a row set back to pending in the database)
@@ -1192,6 +1287,61 @@ func (a *Agent) verifyCommand(c api.Command) error {
 		return errors.New("command older than 8 days")
 	}
 	return nil
+}
+
+// updateTrustAnchors stores the device CAs the server sent over the pinned
+// channel. The new set must share a CA with the current one, so a broken
+// answer cannot cut the agent off; ca.crt and the running client change.
+func (a *Agent) updateTrustAnchors(bundle string) {
+	cur, err := os.ReadFile(caFile)
+	if err != nil {
+		a.log.Error("trust anchors", "err", err)
+		return
+	}
+	certs, err := parseCAs([]byte(bundle))
+	if err != nil {
+		a.event("refused new device CAs from the server: %v", err)
+		return
+	}
+	old, _ := parseCAs(cur)
+	if !slices.ContainsFunc(certs, func(c *x509.Certificate) bool {
+		return slices.ContainsFunc(old, func(o *x509.Certificate) bool { return o.Equal(c) })
+	}) {
+		a.event("refused new device CAs from the server: none of them is trusted now")
+		return
+	}
+	pool := x509.NewCertPool()
+	for _, c := range certs {
+		pool.AddCert(c)
+	}
+	if _, err := writeIfChanged(caFile, bundle, 0o644); err != nil {
+		a.event("storing the device CAs failed: %v", err)
+		return
+	}
+	if st, ok := a.client.Transport.(*swapTransport); ok {
+		st.setRoots(pool)
+	}
+	a.event("trusted device CAs updated (%d)", len(certs))
+}
+
+// parseCAs reads PEM CA certificates; every block must be one.
+func parseCAs(b []byte) ([]*x509.Certificate, error) {
+	var out []*x509.Certificate
+	for {
+		var blk *pem.Block
+		if blk, b = pem.Decode(b); blk == nil {
+			break
+		}
+		c, err := x509.ParseCertificate(blk.Bytes)
+		if err != nil || blk.Type != "CERTIFICATE" || !c.IsCA {
+			return nil, errors.New("not a CA certificate")
+		}
+		out = append(out, c)
+	}
+	if len(out) == 0 {
+		return nil, errors.New("no certificate")
+	}
+	return out, nil
 }
 
 // apiError reads the server's RFC 9457 problem details, if any.

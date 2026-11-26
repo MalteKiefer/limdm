@@ -50,15 +50,56 @@
       }
       return;
     }
+    const navToggle = t.closest('[data-nav-toggle]');
+    if (navToggle) {
+      const side = document.getElementById(navToggle.getAttribute('aria-controls'));
+      navToggle.setAttribute('aria-expanded', String(side.classList.toggle('open')));
+      return;
+    }
     const close = t.closest('[data-close]');
     if (close) { close.closest('dialog')?.close(); return; }
 
-    const copy = t.closest('[data-copy]');
+    // [data-pwgen="min length"] fills the password and its repeat field with
+    // a generated password and shows it once with a copy button
+    const gen = t.closest('[data-pwgen]');
+    if (gen) {
+      const pw = genPassword(Number(gen.dataset.pwgen) || 12);
+      const scope = gen.closest('form');
+      for (const f of scope.querySelectorAll('input[name=password], input[name=password2]')) { f.value = pw; f.setCustomValidity(''); }
+      const out = gen.parentElement.querySelector('[data-pwgen-out]');
+      const cp = gen.parentElement.querySelector('[data-copy]');
+      out.textContent = pw; out.hidden = false;
+      cp.dataset.copy = pw; cp.hidden = false;
+      return;
+    }
+
+    // [data-copy] copies its value, [data-copy-from] the text of the element it names
+    const copy = t.closest('[data-copy], [data-copy-from]');
     if (copy && navigator.clipboard) {
-      await navigator.clipboard.writeText(copy.dataset.copy);
+      const src = copy.dataset.copyFrom && document.getElementById(copy.dataset.copyFrom);
+      await navigator.clipboard.writeText(src ? src.textContent.trim() : copy.dataset.copy);
+      const label = copy.textContent;
       copy.textContent = copy.dataset.copied || '✓';
+      setTimeout(() => { copy.textContent = label; }, 2000);
     }
   });
+
+  // genPassword returns a random password of at least 16 characters with an
+  // uppercase and a lowercase letter, a digit and a symbol, so it meets every
+  // combination of the password policy's character classes
+  const genPassword = (min) => {
+    const sets = ['ABCDEFGHJKLMNPQRSTUVWXYZ', 'abcdefghijkmnopqrstuvwxyz', '23456789', '-_.!#%+=?'];
+    const all = sets.join('');
+    const rnd = (n) => { // uniform in [0, n) without modulo bias
+      const lim = Math.floor(0x100000000 / n) * n, buf = new Uint32Array(1);
+      do crypto.getRandomValues(buf); while (buf[0] >= lim);
+      return buf[0] % n;
+    };
+    const chars = sets.map((s) => s[rnd(s.length)]);
+    while (chars.length < Math.max(min, 16)) chars.push(all[rnd(all.length)]);
+    for (let i = chars.length - 1; i > 0; i--) { const j = rnd(i + 1); [chars[i], chars[j]] = [chars[j], chars[i]]; }
+    return chars.join('');
+  };
 
   // ---- live filter: <input data-filter="table-id"> ----
   // Hides rows (tr[data-row]) without the text and groups (tbody) without
@@ -82,6 +123,15 @@
       body.hidden = rows > 0 && shown === 0;
     }
   };
+  // a repeat field ([data-match="name"]) must equal the field it names
+  document.addEventListener('input', (e) => {
+    const form = e.target.form;
+    const rep = form && form.querySelector('[data-match]');
+    if (rep && (e.target === rep || e.target.name === rep.dataset.match)) {
+      const orig = form.querySelector(`[name="${CSS.escape(rep.dataset.match)}"]`);
+      rep.setCustomValidity(rep.value && orig && rep.value !== orig.value ? rep.dataset.mismatch : '');
+    }
+  });
   document.addEventListener('input', (e) => {
     const input = e.target.closest('[data-filter]');
     if (!input) return;
@@ -121,6 +171,51 @@
     sel.dataset.prevExample = ex;
   };
 
+  // library item editor: description, documentation link and field
+  // reference follow the type picker
+  const swapMeta = (sel) => {
+    let meta;
+    try { meta = JSON.parse(document.getElementById(sel.dataset.meta).textContent)[sel.value]; } catch { return; }
+    if (!meta) return;
+    const form = sel.closest('form').parentElement;
+    const desc = form.querySelector('[data-type-desc]'), doc = form.querySelector('[data-type-doc]'), body = form.querySelector('[data-type-fields]');
+    if (desc) desc.textContent = meta.desc;
+    if (doc) doc.href = meta.doc;
+    if (body) body.replaceChildren(...(meta.fields || []).map(([p, k]) => {
+      const tr = el('tr'); tr.append(el('td', 'mono', p), el('td', 'muted', k)); return tr;
+    }));
+  };
+
+  // JSON settings: live syntax check and a format button
+  const jsonCheck = (area) => {
+    const state = area.form && area.form.querySelector('[data-json-state]');
+    if (!state) return null;
+    try {
+      const v = area.value.trim() === '' ? null : JSON.parse(area.value);
+      state.textContent = v === null ? '' : state.dataset.ok;
+      state.classList.remove('bad');
+      area.setCustomValidity('');
+      return v;
+    } catch (err) {
+      state.textContent = state.dataset.bad + ' ' + err.message;
+      state.classList.add('bad');
+      return undefined;
+    }
+  };
+  let jsonTimer = null;
+  document.addEventListener('input', (e) => {
+    if (!e.target.matches('textarea[data-json-check]')) return;
+    clearTimeout(jsonTimer);
+    jsonTimer = setTimeout(() => jsonCheck(e.target), 250);
+  });
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-json-format]');
+    const area = b && b.form && b.form.querySelector('textarea[data-json-check]');
+    if (!area) return;
+    const v = jsonCheck(area);
+    if (v !== undefined && v !== null) area.value = JSON.stringify(v, null, 2);
+  });
+
   // ---- change ----
   document.addEventListener('change', (e) => {
     const t = e.target;
@@ -134,6 +229,7 @@
       t.form.submit();
     } else if (t.matches('select[data-examples]')) {
       swapExample(t);
+      if (t.dataset.meta) swapMeta(t);
     }
   });
 
@@ -186,6 +282,36 @@
     }
     out.append(frag);
   };
+
+  // action menus: arrow keys move between the entries of one level, Right
+  // opens a submenu, Left returns from it, Home and End jump, Escape closes
+  // the menu and returns to its button
+  const levelItems = (list) => [...list.querySelectorAll(':scope > [role=menuitem], :scope > form > [role=menuitem], :scope > .sub > .sub-head')];
+  document.addEventListener('keydown', (e) => {
+    const menu = e.target.closest && e.target.closest('details.menu');
+    if (!menu || !['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Escape'].includes(e.key)) return;
+    if (e.target.matches('input, textarea, select')) return;
+    const summary = menu.querySelector('summary');
+    if (e.key === 'Escape') {
+      if (menu.open) { e.preventDefault(); menu.removeAttribute('open'); summary.focus(); }
+      return;
+    }
+    e.preventDefault();
+    if (!menu.open) menu.setAttribute('open', '');
+    const cur = document.activeElement;
+    if (e.key === 'ArrowRight' && cur.matches('.sub-head')) { levelItems(cur.nextElementSibling)[0]?.focus(); return; }
+    if (e.key === 'ArrowLeft') { cur.closest('.sub')?.querySelector('.sub-head')?.focus(); return; }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') return;
+    const list = (cur !== summary && cur.closest('.sub-list, .menu-list')) || menu.querySelector('.menu-list');
+    const items = levelItems(list);
+    if (!items.length) return;
+    const i = items.indexOf(cur);
+    let n = 0;
+    if (e.key === 'End') n = items.length - 1;
+    else if (e.key === 'ArrowDown') n = i < 0 ? 0 : (i + 1) % items.length;
+    else if (e.key === 'ArrowUp') n = i < 0 ? items.length - 1 : (i - 1 + items.length) % items.length;
+    items[n].focus();
+  });
 
   // Enter in a field with data-enter submits with that field's own button,
   // not with the form's first one ("Sync now" in the bulk bar)

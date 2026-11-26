@@ -1,0 +1,39 @@
+{{define "title"}}{{t "Help · LiMDM"}}{{end}}
+{{define "content"}}
+<div class="page-head">
+  <div><h1>{{t "Help"}}</h1><div class="meta"><span>{{t "Terms used in the console, the roles and where to read more"}}</span></div></div>
+  <div class="actions"><a class="button secondary" href="{{docs "concepts.md"}}" rel="noopener" target="_blank">{{t "Documentation"}}</a></div>
+</div>
+<div class="grid side-right">
+  <section class="card">
+    <h2>{{t "Glossary"}}</h2>
+    <dl class="glossary">{{range .Terms}}
+      <dt id="{{.ID}}">{{.Term}}</dt>
+      <dd>{{.Text}}{{with .Doc}} <a href="{{.}}" rel="noopener" target="_blank">{{t "More"}}</a>{{end}}</dd>{{end}}
+    </dl>
+  </section>
+  <div>
+    <section class="card" id="status">
+      <h2>{{t "Device status"}}</h2>
+      <dl class="glossary">{{range .Statuses}}<dt><span class="pill {{if eq . "compliant"}}ok{{else if eq . "non-compliant"}}bad{{else if eq . "retired"}}na{{else}}warn{{end}}">{{t .}}</span></dt><dd>{{statusHelp .}}</dd>{{end}}</dl>
+    </section>
+    <section class="card" id="roles">
+      <h2>{{t "Roles"}}</h2>
+      <dl class="glossary">
+        <dt>{{t "admin"}}</dt><dd>{{t "Admin: everything."}}</dd>
+        <dt>{{t "helpdesk"}}</dt><dd>{{t "Helpdesk: sees devices (within its scope, if one is set); sync, updates, restart, shut down, lock, message, password reset and lock of local accounts, collect logs, disk recovery keys; a remote shell only when the setting allows it. No scripts, wipe, lost mode or configuration."}}</dd>
+        <dt>{{t "auditor"}}</dt><dd>{{t "Auditor: reads everything including the audit log, changes nothing."}}</dd>
+      </dl>
+    </section>
+    <section class="card">
+      <h2>{{t "Device actions by impact"}}</h2>
+      <ol class="impact">
+        <li><strong>{{t "Lock device"}}</strong> {{t "Blocks logins until unlocked; data stays"}}</li>
+        <li><strong>{{t "Lost mode"}}</strong> {{t "Lock plus message; only IT can open the disk after power off"}}</li>
+        <li><strong>{{t "Retire device"}}</strong> {{t "Ends management, revokes the certificate; data stays"}}</li>
+        <li><strong>{{t "Wipe device"}}</strong> {{t "Erases all data for good"}}</li>
+      </ol>
+    </section>
+  </div>
+</div>
+{{end}}

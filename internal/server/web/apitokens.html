@@ -1,0 +1,43 @@
+{{define "title"}}{{t "API tokens · LiMDM"}}{{end}}
+{{define "content"}}
+<div class="page-head"><div><h1>{{t "API tokens"}} {{template "doclink" "admin-api.md"}}</h1><div class="meta"><span>{{t "Bearer tokens for the admin REST API and the metrics endpoint"}}</span></div></div>
+  <div class="actions"><a class="button secondary" href="/api/v1/openapi.json">{{t "OpenAPI document"}}</a></div></div>
+{{if .Created}}
+<div class="notice ok" role="status">
+  <strong>{{t "Token created."}}</strong> {{t "It is shown only once."}}
+  <pre>{{.Created}}</pre>
+  <pre>curl -H "Authorization: Bearer {{.Created}}" {{.PublicURL}}/api/v1/devices</pre>
+</div>
+{{end}}
+<div class="grid side-right">
+  <section class="tablecard">
+    <div class="card-head"><h2>{{t "Tokens"}}</h2></div>
+    <div class="scroll"><table>
+      <thead><tr><th>{{t "Name"}}</th><th>{{t "Role"}}</th><th>{{t "Status"}}</th><th>{{t "Expires"}}</th><th>{{t "Last used"}}</th><th>{{t "Created by"}}</th>{{if eq $.Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
+      <tbody>{{range .Tokens}}<tr>
+        <td>{{.Name}}<span class="sub mono">{{.Prefix}}…</span></td>
+        <td>{{t .Role}}{{if and .ReadOnly (ne .Role "auditor") (ne .Role "metrics")}}<span class="sub">{{t "read only"}}</span>{{end}}{{if .Scope}}<span class="sub">{{t "Scope tags"}}: {{join .Scope ", "}}</span>{{end}}</td>
+        <td><span class="pill {{if eq .State "active"}}ok{{else}}na{{end}}">{{t .State}}</span></td>
+        <td>{{fmtTime .Expires}}</td>
+        <td>{{ago .LastUsed}}</td>
+        <td>{{.CreatedBy}}<span class="sub">{{fmtTime .Created}}</span></td>
+        {{if eq $.Sess.Role "admin"}}<td class="row-actions">{{if eq .State "active"}}<form method="post" action="/settings/api/{{.ID}}/revoke">{{template "csrf" $.CSRF}}<button class="secondary small" data-confirm="{{t "Revoke this API token?"}}">{{t "Revoke"}}</button></form>{{end}}</td>{{end}}
+      </tr>{{else}}<tr><td colspan="7" class="empty">{{t "No API tokens yet."}}</td></tr>{{end}}</tbody>
+    </table></div>
+  </section>
+  {{if eq .Sess.Role "admin"}}
+  <form class="card" method="post" action="/settings/api">
+    <h2>{{t "New token"}}</h2>
+    {{template "csrf" .CSRF}}
+    <label>{{t "Name"}}<input name="name" maxlength="100" required placeholder="{{t "e.g. ticket system"}}"></label>
+    <label>{{t "Role"}}<select name="role">{{range .Roles}}<option value="{{.}}">{{t .}}</option>{{end}}</select></label>
+    <label class="check"><input type="checkbox" name="read_only"> {{t "Read only"}}</label>
+    <label>{{t "Valid for days"}}<input name="days" type="number" value="90" min="1" max="365"></label>
+    <label>{{t "Scope tags"}}<input name="scope_tags" maxlength="500" placeholder="{{t "Empty: every device"}}"></label>
+    <p class="muted">{{t "Helpdesk and auditor tokens with device tags see and act on those devices only; they get no metrics. Commands that need four eyes approval return 202 with the approval ID."}}</p>
+    <p class="muted">{{t "Admin and helpdesk tokens can do what the role can do in the console. Auditor and metrics tokens only read; metrics tokens only read /metrics."}}</p>
+    <button>{{t "Create token"}}</button>
+  </form>
+  {{end}}
+</div>
+{{end}}

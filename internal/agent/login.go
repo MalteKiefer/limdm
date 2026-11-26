@@ -467,11 +467,16 @@ func localService(service, rhost string) bool {
 
 // pamStackFile is the shared auth stack edited directly on families without
 // pam-auth-update or authselect: Arch's system-auth, Alpine's base-auth
-// (with linux-pam). "" elsewhere.
+// (with linux-pam), SUSE's common-auth. "" elsewhere. On SUSE common-auth
+// links to pam-config's common-auth-pc; the target is edited so the link
+// stays, and a pam-config run that drops the line is caught by pamActive.
 func pamStackFile(family string) string {
-	f := map[string]string{"arch": "/etc/pam.d/system-auth", "alpine": "/etc/pam.d/base-auth"}[family]
+	f := map[string]string{"arch": "/etc/pam.d/system-auth", "alpine": "/etc/pam.d/base-auth", "suse": "/etc/pam.d/common-auth"}[family]
 	if f == "" || !exists(f) {
 		return ""
+	}
+	if t, err := filepath.EvalSymlinks(f); err == nil {
+		return t
 	}
 	return f
 }

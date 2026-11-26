@@ -16,10 +16,15 @@ import (
 // prefix*suffix: missing ones are written, stale ones removed. keep lists names
 // owned by other parts of the agent (e.g. the osquery repository).
 func syncManaged(dir, prefix, suffix string, desired map[string]string, keep ...string) (bool, error) {
+	return syncManagedMode(dir, prefix, suffix, 0o644, desired, keep...) // public config and keys
+}
+
+// syncManagedMode is syncManaged with the file mode of the written files.
+func syncManagedMode(dir, prefix, suffix string, mode os.FileMode, desired map[string]string, keep ...string) (bool, error) {
 	changed := false
 	var errs []error
 	for name, content := range desired {
-		c, err := writeIfChanged(filepath.Join(dir, name), content, 0o644) // public config and keys
+		c, err := writeIfChanged(filepath.Join(dir, name), content, mode)
 		changed = changed || c
 		errs = append(errs, err)
 	}
@@ -67,9 +72,12 @@ func (a *Agent) applyExtra() {
 	run(api.TypeProxy, a.applyProxy(x.Proxy))
 	run(api.TypeFlatpak, a.applyFlatpak(x.Flatpak))
 	run(api.TypeScripts, a.applyScripts(x.Scripts))
+	run(api.TypeDconf, applyDconf(x.Dconf))
 	run(api.TypePolkit, applyPolkit(x.Polkit))
 	run(api.TypeSudo, applySudo(x.Sudo))
 	run(api.TypeBootloader, a.applyBootloader(x.Bootloader))
+	run(api.TypeNetwork, a.applyNetwork(x.Network))
+	run(api.TypePrinters, a.applyPrinters(x.Printers))
 	a.ensureDependencies()
 	a.notifyEscrow()
 }
@@ -96,6 +104,9 @@ func (h *host) repoFiles(prefix string, r api.Repository) (keyName, key, srcName
 	if r.SignedMetadata {
 		check = "gpgcheck=0\nrepo_gpgcheck=1"
 	}
+	if h.family == "suse" {
+		check += "\nautorefresh=1\ntype=rpm-md"
+	}
 	return keyName, key, prefix + r.Name + ".repo", managedHeader + "[" + prefix + r.Name + "]\nname=" + r.Name + "\nbaseurl=" + r.URL +
 		"\nenabled=1\n" + check + "\ngpgkey=file://" + keyPath + "\n"
 }
@@ -104,6 +115,9 @@ func (h *host) repoFiles(prefix string, r api.Repository) (keyName, key, srcName
 func (h *host) repoDirs() (keyDir, srcDir string) {
 	if h.family == "debian" {
 		return "/etc/apt/keyrings", "/etc/apt/sources.list.d"
+	}
+	if h.family == "suse" {
+		return "/etc/pki/rpm-gpg", "/etc/zypp/repos.d"
 	}
 	return "/etc/pki/rpm-gpg", "/etc/yum.repos.d"
 }
@@ -132,11 +146,19 @@ func (a *Agent) applyRepositories(repos []api.Repository) error {
 		c1, err1 = syncManaged(keyDir, "RPM-GPG-KEY-limdm-", "", keys, append(keyKeep, "RPM-GPG-KEY-limdm-osquery")...)
 		c2, err2 = syncManaged(srcDir, "limdm-", ".repo", sources, append(srcKeep, "limdm-osquery.repo")...)
 	}
+	var err3 error
+	if c1 {
+		var paths []string
+		for kn := range keys {
+			paths = append(paths, filepath.Join(keyDir, kn))
+		}
+		err3 = a.host.trustKeys(paths...)
+	}
 	if c1 || c2 {
 		a.host.aptStale.Store(true) // refresh package lists with the new sources
 		a.event("package sources updated")
 	}
-	return errors.Join(err1, err2)
+	return errors.Join(err1, err2, err3)
 }
 
 // appRepoFiles lists the catalog apps' repository files in dir.
@@ -157,7 +179,8 @@ func (a *Agent) setAppRepos(src api.AppSource, remove bool) error {
 	keyDir, srcDir := a.host.repoDirs()
 	var errs []error
 	for _, r := range src.Repos {
-		if r.Family != a.host.family {
+		// the catalog has Debian and Fedora sources; an rpm-md repository works with zypper too
+		if r.Family != a.host.family && (r.Family != "fedora" || a.host.family != "suse") {
 			continue
 		}
 		kn, k, sn, s := a.host.repoFiles("limdm-app-", r)
@@ -165,8 +188,11 @@ func (a *Agent) setAppRepos(src api.AppSource, remove bool) error {
 			k, s = "", ""
 		}
 		if kn != "" {
-			_, err := writeOrRemove(filepath.Join(keyDir, kn), k, 0o644)
+			c, err := writeOrRemove(filepath.Join(keyDir, kn), k, 0o644)
 			errs = append(errs, err)
+			if c && !remove {
+				errs = append(errs, a.host.trustKeys(filepath.Join(keyDir, kn)))
+			}
 		}
 		c, err := writeOrRemove(filepath.Join(srcDir, sn), s, 0o644)
 		errs = append(errs, err)
@@ -178,15 +204,23 @@ func (a *Agent) setAppRepos(src api.AppSource, remove bool) error {
 	return errors.Join(errs...)
 }
 
+// caAnchors is where this family keeps local CA certificates and the
+// command that rebuilds the trust store.
+func (h *host) caAnchors() (dir, ext, update string) {
+	switch h.family {
+	case "fedora":
+		return "/etc/pki/ca-trust/source/anchors", ".pem", "update-ca-trust"
+	case "suse":
+		return "/etc/pki/trust/anchors", ".pem", "update-ca-certificates"
+	case "arch":
+		return "/etc/ca-certificates/trust-source/anchors", ".crt", "update-ca-trust"
+	}
+	return "/usr/local/share/ca-certificates", ".crt", "update-ca-certificates" // Debian family, Alpine
+}
+
 func (a *Agent) applyCertificates(certs []api.Certificate) error {
 	desired := map[string]string{}
-	dir, ext, update := "/usr/local/share/ca-certificates", ".crt", "update-ca-certificates" // Debian family, Alpine
-	switch a.host.family {
-	case "fedora":
-		dir, ext, update = "/etc/pki/ca-trust/source/anchors", ".pem", "update-ca-trust"
-	case "arch":
-		dir, ext, update = "/etc/ca-certificates/trust-source/anchors", ".crt", "update-ca-trust"
-	}
+	dir, ext, update := a.host.caAnchors()
 	for _, c := range certs {
 		desired["limdm-"+c.Name+ext] = strings.TrimSpace(c.PEM) + "\n"
 	}
@@ -344,44 +378,6 @@ func applyNTP(n *api.NTP) error {
 	return errors.New("no supported time service (systemd-timesyncd, or chrony with /etc/chrony/sources.d)")
 }
 
-func (a *Agent) applyProxy(p *api.Proxy) error {
-	var profile, envd, apt, dnf string
-	if p != nil {
-		var b, e strings.Builder
-		b.WriteString(managedHeader)
-		e.WriteString(managedHeader)
-		for k, v := range map[string]string{"http_proxy": p.HTTP, "https_proxy": p.HTTPS, "no_proxy": p.NoProxy} {
-			if v != "" {
-				q := "'" + strings.ReplaceAll(v, "'", `'\''`) + "'" // single quotes: no shell expansion
-				fmt.Fprintf(&b, "export %s=%s\nexport %s=%s\n", k, q, strings.ToUpper(k), q)
-				fmt.Fprintf(&e, "%s=%s\n%s=%s\n", k, v, strings.ToUpper(k), v)
-			}
-		}
-		profile, envd = b.String(), e.String()
-		if a.host.family == "debian" {
-			apt = managedHeader
-			if p.HTTP != "" {
-				apt += fmt.Sprintf("Acquire::http::Proxy %q;\n", p.HTTP)
-			}
-			if p.HTTPS != "" {
-				apt += fmt.Sprintf("Acquire::https::Proxy %q;\n", p.HTTPS)
-			}
-		} else if proxy := firstNonEmpty(p.HTTPS, p.HTTP); proxy != "" {
-			dnf = managedHeader + "[main]\nproxy=" + proxy + "\n"
-		}
-	}
-	_, e1 := writeOrRemove("/etc/profile.d/limdm-proxy.sh", profile, 0o644)
-	_, e2 := writeOrRemove("/etc/environment.d/60-limdm-proxy.conf", envd, 0o644)
-	var e3 error
-	switch a.host.family { // pacman and apk read http_proxy from the environment
-	case "debian":
-		_, e3 = writeOrRemove("/etc/apt/apt.conf.d/60limdm-proxy", apt, 0o644)
-	case "fedora":
-		_, e3 = writeOrRemove("/etc/dnf/libdnf5.conf.d/60-limdm-proxy.conf", dnf, 0o644)
-	}
-	return errors.Join(e1, e2, e3)
-}
-
 func (a *Agent) applyFlatpak(f *api.Flatpak) error {
 	if f == nil || (len(f.Remotes) == 0 && len(f.Install) == 0 && len(f.Remove) == 0) {
 		return nil
@@ -461,12 +457,15 @@ func (a *Agent) applyScripts(scripts []api.Script) error {
 			continue
 		}
 		a.state.ScriptRuns[sc.Name] = time.Now().Round(0) // wall clock, suspend included
-		out, err := runScript(sc.Body)
+		res, err := runScript(sc.Body, sc.Params, sc.TimeoutMinutes)
+		res.Name = sc.Name
+		if len(a.state.ScriptResults) >= 50 { // bounded while offline: the oldest go first
+			a.state.ScriptResults = a.state.ScriptResults[1:]
+		}
+		a.state.ScriptResults = append(a.state.ScriptResults, res)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", sc.Name, err))
-			continue
 		}
-		a.event("script %s ran: %s", sc.Name, lastLines(out, 2))
 	}
 	return errors.Join(errs...)
 }

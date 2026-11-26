@@ -18,6 +18,57 @@ Two ports are public:
 
 Port 80 is needed for the ACME HTTP challenge.
 
+## Supported systems
+
+| Component | Systems | Packages | Init |
+|---|---|---|---|
+| Server | Debian, Ubuntu | `limdm-server_<version>_linux_<arch>.deb` | systemd |
+| Server | Fedora, CentOS Stream, RHEL and rebuilds (Rocky, Alma), openSUSE Leap, openSUSE Tumbleweed, SLES | `limdm-server_<version>_linux_<arch>.rpm` | systemd |
+| Server | any Linux with Docker | container image `ghcr.io/maltekiefer/limdm-server` | Docker Compose |
+| Server | other Linux (Arch, Alpine, ...) | `limdm-server_<version>_linux_<arch>.tar.gz` (binary, unit file, `server.env.example`), or the image | systemd unit included; write your own for other init systems |
+| Agent | Debian, Ubuntu, Fedora, CentOS Stream, RHEL rebuilds, openSUSE Leap and Tumbleweed, SLES, SLED, Arch, Alpine | deb, rpm, `.pkg.tar.zst`, `.apk` | systemd; OpenRC on Alpine |
+
+Architectures: amd64 and arm64. Feature differences per device family:
+[agent.md](agent.md#supported-distributions).
+
+## Ports
+
+| Port | Listener | Reachable from |
+|---|---|---|
+| 443 | Caddy (or another reverse proxy), console | users, devices (`/install.sh`), identity provider (SCIM) |
+| 80 | Caddy, ACME HTTP challenge and redirect | internet |
+| 8444 | `limdm-server`, agent API (`LIMDM_AGENT_LISTEN`), mTLS | devices, directly or through TCP passthrough |
+| 8080 | `limdm-server`, console without TLS (`LIMDM_LISTEN` default) | loopback only |
+| 8443 | `limdm-server`, console with `LIMDM_TLS_CERT` (default then) | the load balancer or users |
+| 5432 | PostgreSQL | the server only; prefer the unix socket |
+
+Outbound: HTTPS to the OIDC provider, Google Directory API (if used), GitHub
+(`LIMDM_RELEASE_REPO`, agent releases), the geolocation service (only if turned on),
+notification targets, and the syslog target (`LIMDM_SYSLOG`).
+
+## Files
+
+Server (package):
+
+| Path | Content |
+|---|---|
+| `/usr/bin/limdm-server` | binary |
+| `/usr/lib/systemd/system/limdm-server.service` | unit, runs as `limdm`, sandboxed, sets `LIMDM_CA_DIR=/var/lib/limdm-server/ca` |
+| `/usr/lib/sysusers.d/limdm-server.conf` | creates the system user `limdm` |
+| `/etc/limdm-server/server.env` | environment (`root:limdm`, 0640, kept on upgrades) |
+| `/var/lib/limdm-server/` | state directory (0700, `limdm`) |
+| `/var/lib/limdm-server/ca/` | CA directory: CA certificates and keys, command key, `keys.json`, `audit-keys`, `audit-keyed-from` |
+| `/var/lib/limdm-server/agent-releases/` | verified agent packages (`LIMDM_RELEASE_DIR`; the packaged `server.env` sets `/var/lib/limdm-server/releases`) |
+
+The container keeps the same state under the volume `/var/lib/limdm-server` and runs as
+user 65532.
+
+Devices (agent package): binaries `limdm-agent`, `limdm` (command line for users) and
+`limdm-desktop`; units `limdm-agent.service`, `limdm-watchdog.service` and
+`limdm-watchdog.timer`, the user unit `limdm-desktop.service` and XDG autostart, or
+`/etc/init.d/limdm-agent` with OpenRC; configuration in `/etc/limdm` (0700), state in
+`/var/lib/limdm` (0700). Details: [agent.md](agent.md#files).
+
 ## Security model in short
 
 | Asset | Protection | What you must do |
@@ -27,7 +78,7 @@ Port 80 is needed for the ACME HTTP challenge.
 | Device CA (`/var/lib/limdm-server/ca`) | 0600, owned by `limdm`, systemd sandbox | back it up encrypted and offline; whoever has the key can impersonate the server |
 | `LIMDM_SESSION_KEY` | derives every key for stored secrets and sessions | 32 random bytes, root only file, backed up apart from the database |
 | Database | unix socket and peer authentication, or `sslmode=verify-full` | no TCP listener on public interfaces |
-| Audit log | append only, hash chained, verified daily | ship it to your SIEM ([compliance.md](compliance.md)) |
+| Audit log | append only, keyed hash chain (HMAC-SHA256), verified daily | ship it to your SIEM with `LIMDM_SYSLOG` ([operations.md](operations.md#syslog)) |
 
 Default stance: deny everything, open 80, 443, 8444 and SSH (preferably only from your
 admin network), run the server as an unprivileged sandboxed service, keep the host patched.
@@ -38,6 +89,9 @@ admin network), run the server as an unprivileged sandboxed service, keep the ho
 * PostgreSQL 15 or newer. Local via unix socket, or remote with `sslmode=verify-full`
   (the server refuses remote connections without certificate verification).
 * Outbound HTTPS for the OIDC provider and, if used, the Google Directory API.
+
+One instance is enough for most fleets. For several instances behind a load balancer see
+[high-availability.md](high-availability.md).
 
 ## Option A: Docker Compose
 
@@ -56,11 +110,11 @@ Fill in `.env`:
 | Variable | Value |
 |---|---|
 | `LIMDM_DOMAIN` | DNS name of the server, for example `mdm.example.com` |
-| `LIMDM_VERSION` | image tag, for example `0.8.2` (`latest` for the newest release) |
+| `LIMDM_VERSION` | image tag, for example `0.16.0` (default `latest`, the newest release) |
 | `LIMDM_SESSION_KEY` | `openssl rand -hex 32`; also derives the keys for stored secrets, keep it safe |
 | `POSTGRES_PASSWORD` | `openssl rand -hex 32` (hex only, it is part of the database URL) |
 | `LIMDM_LOCAL_LOGIN` | `true` to allow local accounts (password and TOTP) |
-| `LIMDM_OIDC_*`, `LIMDM_ADMINS` | optional, OIDC can also be configured later in the console |
+| `LIMDM_OIDC_*`, `LIMDM_ADMINS`, `LIMDM_AUDITORS` | optional, OIDC can also be configured later in the console |
 
 Start and create the first account:
 
@@ -76,7 +130,7 @@ The last command prints the user name, a generated password and a TOTP secret
 Verify the image provenance of a release:
 
 ```sh
-gh attestation verify oci://ghcr.io/maltekiefer/limdm-server:0.8.2 --repo MalteKiefer/limdm
+gh attestation verify oci://ghcr.io/maltekiefer/limdm-server:0.16.0 --repo MalteKiefer/limdm
 ```
 
 ## Option B: deb or rpm package behind Caddy
@@ -85,13 +139,15 @@ Download `limdm-server_<version>_linux_<arch>.deb` or `.rpm` and `limdm_<version
 from the [releases](https://github.com/MalteKiefer/limdm/releases/latest) and verify:
 
 ```sh
-sha256sum -c --ignore-missing limdm_0.8.2_SHA256SUMS
-sudo apt install ./limdm-server_0.8.2_linux_amd64.deb      # Debian, Ubuntu
-sudo dnf install ./limdm-server_0.8.2_linux_amd64.rpm      # Fedora
+sha256sum -c --ignore-missing limdm_0.16.0_SHA256SUMS
+sudo apt install ./limdm-server_0.16.0_linux_amd64.deb      # Debian, Ubuntu
+sudo dnf install ./limdm-server_0.16.0_linux_amd64.rpm      # Fedora, CentOS Stream, RHEL rebuilds
+sudo zypper install --allow-unsigned-rpm ./limdm-server_0.16.0_linux_amd64.rpm   # openSUSE, SLES (verified by the checksum)
 ```
 
 The package installs the binary, a systemd unit (`limdm-server.service`, runs as user
-`limdm`) and `/etc/limdm-server/server.env`.
+`limdm`), the sysusers entry and `/etc/limdm-server/server.env` ([files](#files)). An
+upgrade restarts a running service.
 
 ### PostgreSQL
 
@@ -111,8 +167,9 @@ Remote database: `postgres://limdm@db.example.com/limdm?sslmode=verify-full`.
 
 ### server.env
 
-Edit `/etc/limdm-server/server.env` (owner `root:limdm`, mode `0640`). Minimal setup behind
-Caddy:
+Edit `/etc/limdm-server/server.env` (owner `root:limdm`, mode `0640`). The packaged file is
+an example for a console with its own certificate; remove `LIMDM_TLS_CERT` and
+`LIMDM_TLS_KEY` when Caddy runs on the same host. Minimal setup behind Caddy:
 
 ```sh
 LIMDM_DATABASE_URL=postgres:///limdm?host=/var/run/postgresql
@@ -124,8 +181,9 @@ LIMDM_SESSION_KEY=<openssl rand -hex 32>
 LIMDM_LOCAL_LOGIN=true
 ```
 
-Without `LIMDM_TLS_CERT` the console only listens on loopback; Caddy provides HTTPS. All
-variables: [configuration.md](configuration.md).
+Without `LIMDM_TLS_CERT` the console only listens on loopback; Caddy provides HTTPS. A proxy
+on another host needs `LIMDM_TRUSTED_PROXIES`. All variables:
+[configuration.md](configuration.md#environment-variables).
 
 ### Caddy
 
@@ -153,8 +211,9 @@ sudo systemctl enable --now limdm-server
 sudo sh -c 'umask 077; sudo -u limdm limdm-server local-admin -env /etc/limdm-server/server.env add admin > /root/limdm-admin.txt'
 ```
 
-The file contains the password and the TOTP secret. `reset`, `disable`, `enable` and `list`
-manage existing local accounts; `-role helpdesk|auditor` sets another role.
+The file contains the password and the TOTP secret (`-out FILE` writes a new 0600 file
+instead). `reset`, `disable`, `enable` and `list` manage existing local accounts;
+`-role helpdesk|auditor` sets another role ([configuration.md](configuration.md#local-admins)).
 
 ## Hardening the host
 
@@ -201,7 +260,7 @@ sudo ufw delete allow 8444/tcp
 sudo ufw allow from 10.8.0.0/16 to any port 8444 proto tcp
 ```
 
-Fedora with firewalld:
+Fedora, RHEL rebuilds and SUSE with firewalld:
 
 ```sh
 sudo firewall-cmd --permanent --add-service=http --add-service=https
@@ -302,14 +361,17 @@ restore regularly.
 - [ ] fail2ban or CrowdSec active, `ignoreip` or whitelist set
 - [ ] unattended security updates on the server
 - [ ] backups of database, CA and session key, restore tested
+      ([restore test](high-availability.md#restore-test))
 - [ ] audit log exported or monitored, compliance webhook set
 
 ## After the first sign in
 
-1. **Settings:** configure OIDC (for example Google Workspace), branding (company name and
-   logo), the stale threshold and the compliance webhook. See
-   [configuration.md](configuration.md).
-2. **Users:** add console users with their role.
+1. **Settings:** configure OIDC (for example Google Workspace) under SSO, branding (company
+   name and logo), the stale threshold, notification channels and the compliance webhook,
+   and under Security the password policy, four eyes approval and the privacy opt ins. See
+   [configuration.md](configuration.md#console-settings).
+2. **Users:** add console users with their role and scope, or map directory groups to
+   roles ([configuration.md](configuration.md#console-users-and-roles)).
 3. **Library and Blueprints:** the `default` blueprint already contains a CIS Level 1
    baseline. See [concepts.md](concepts.md).
 4. **Enrollment:** create a token and roll out the agent ([agent.md](agent.md)).
@@ -321,7 +383,12 @@ local account disabled but present as break glass access.
 
 * **Docker:** set `LIMDM_VERSION` to the new tag, `docker compose pull && docker compose up -d`.
 * **Packages:** install the new package. The service restarts, database migrations run
-  automatically at start (versioned, guarded by an advisory lock).
+  automatically at start (versioned, guarded by an advisory lock, so instances starting
+  at once wait for each other).
+* **Several instances:** one after the other, waiting for `/readyz` on each; some releases
+  need a full stop ([high-availability.md](high-availability.md#upgrades)).
+* **0.15 to 0.16:** stop every instance first, check health checks, proxies and the release
+  key: [operations.md](operations.md#upgrading-from-015-to-016).
 
 Back up the database before upgrading ([operations.md](operations.md)). Agents are updated from the console
 ([agent.md](agent.md#updates)).

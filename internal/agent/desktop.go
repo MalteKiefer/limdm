@@ -81,6 +81,7 @@ type DesktopStatus struct {
 	DesktopLogin  string        `json:"desktop_login,omitempty"` // off | session | login
 	QueuedEvents  int           `json:"queued_events"`
 	QueuedResults int           `json:"queued_results"`
+	RemoteShell   string        `json:"remote_shell,omitempty"` // running support session: who, user, since
 }
 
 // DesktopSystem is the device as the last inventory saw it.
@@ -96,7 +97,7 @@ type DesktopSystem struct {
 
 // DesktopRequest and DesktopResponse are the socket protocol (one JSON line each).
 type DesktopRequest struct {
-	Op         string `json:"op"` // status | info | sync | escrow | catalog | app-install | app-remove | app-request | search | app-request-new
+	Op         string `json:"op"` // status | info | sync | escrow | catalog | app-install | app-remove | app-request | search | app-request-new | reboot-defer | shell-end
 	App        string `json:"app,omitempty"`
 	Query      string `json:"query,omitempty"`   // search
 	Flatpak    string `json:"flatpak,omitempty"` // app-request-new
@@ -125,9 +126,10 @@ type DesktopResponse struct {
 	Certs    []api.CertInfo     `json:"certificates,omitempty"`
 	Apps     []DesktopApp       `json:"apps,omitempty"` // catalog
 	Store    *StoreInfo         `json:"store,omitempty"`
-	Requests []api.RequestState `json:"requests,omitempty"` // catalog: requests for apps outside it
-	Hits     []DesktopHit       `json:"hits,omitempty"`     // search
-	SSO      *SSOStatus         `json:"sso,omitempty"`      // sso-status, sso-confirm
+	Requests []api.RequestState `json:"requests,omitempty"`  // catalog: requests for apps outside it
+	Hits     []DesktopHit       `json:"hits,omitempty"`      // search
+	SSO      *SSOStatus         `json:"sso,omitempty"`       // sso-status, sso-confirm
+	RebootAt string             `json:"reboot_at,omitempty"` // reboot-defer: the new restart time
 }
 
 // SSOStatus tells the desktop app whether the user's company account needs a
@@ -342,6 +344,7 @@ func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 		return DesktopResponse{Company: info.Company, Logo: info.Logo, Need: need}
 	case "info":
 		st := info.Status
+		st.RemoteShell = d.a.shellInfo() // live, not from the last cycle
 		return DesktopResponse{Company: info.Company, Logo: info.Logo, Need: need, Status: &st, Log: agentLog(),
 			LogLines: agentJournal(200), Profiles: info.Profiles, Certs: info.Certs}
 	case "catalog":
@@ -369,6 +372,16 @@ func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 			return DesktopResponse{Error: "too many searches, wait a minute"}
 		}
 		return d.a.searchApps(req.Query)
+	case "reboot-defer":
+		name := itoa(uid)
+		if u, err := user.LookupId(name); err == nil {
+			name = u.Username
+		}
+		at, err := d.a.deferReboot(name, time.Now())
+		if err != nil {
+			return DesktopResponse{Error: err.Error()}
+		}
+		return DesktopResponse{OK: true, RebootAt: at.Format("15:04")}
 	case "sso-status", "sso-confirm":
 		name := itoa(uid)
 		u, err := user.LookupId(name)
@@ -388,6 +401,11 @@ func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 			name = u.Username
 		}
 		return d.a.storeAction(strings.TrimPrefix(req.Op, "app-"), req.App, name, req.Note)
+	case "shell-end":
+		if !d.a.endShell("ended on the device by uid " + itoa(uid)) {
+			return DesktopResponse{Error: "no remote support session is running"}
+		}
+		return DesktopResponse{OK: true}
 	case "sync":
 		d.mu.Lock()
 		recent := time.Since(d.lastSync) < 30*time.Second

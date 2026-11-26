@@ -1,24 +1,28 @@
 {{define "title"}}{{t "Users · LiMDM"}}{{end}}
 {{define "content"}}
-<div class="page-head"><div><h1>{{t "Users"}}</h1><div class="meta"><span>{{t "Console access: OIDC identities and local accounts"}}</span></div></div></div>
-{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
-{{if .Creds}}<div class="notice ok" role="status"><strong>{{t "Credentials created."}}</strong> Shown only once; hand them over securely and add the TOTP secret to an authenticator app.<pre>{{.Creds}}</pre></div>{{end}}
+<div class="page-head"><div><h1>{{t "Users"}} {{template "doclink" "configuration.md#console-users-and-roles"}}</h1><div class="meta"><span>{{t "Console access: OIDC identities and local accounts"}}</span></div></div></div>
+{{template "err" .Error}}
+{{if .Creds}}<div class="notice ok" role="status"><strong>{{t "Credentials created."}}</strong> {{t "Shown only once; hand them over securely and add the TOTP secret to an authenticator app."}}<div class="copy-block"><pre id="creds">{{.Creds}}</pre><button type="button" class="secondary small js-only" data-copy-from="creds" data-copied="{{t "Copied"}}">{{t "Copy"}}</button></div></div>{{end}}
 <div class="grid side-right">
   <section class="tablecard">
-    <div class="card-head"><h2>{{t "Accounts"}}</h2><span class="muted">{{t "admin: everything · helpdesk: devices and commands except scripts · auditor: read only"}}</span></div>
+    <div class="card-head"><h2>{{t "Accounts"}}</h2><a class="muted" href="/help#roles">{{t "What the roles may do"}}</a></div>
+    <p class="muted">{{t "Scope: helpdesk and auditor accounts with device tags or directory groups (comma separated) see only those devices; empty means every device."}}{{if .FourEyes}} {{t "Four eyes approval is on: role changes wait for a second administrator."}}{{end}}</p>
     <div class="scroll"><table>
       <thead><tr><th>{{t "Login"}}</th><th>{{t "Type"}}</th><th>{{t "Role"}}</th><th>{{t "Last sign in"}}</th>{{if eq .Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
       <tbody>{{$s := .}}{{range .Users}}{{$login := .Login}}{{if .Local}}{{$login = printf "local:%s" .Login}}{{end}}<tr>
-        <td class="mono">{{.Login}}{{if .Disabled}} <span class="pill">{{t "disabled"}}</span>{{end}}</td>
+        <td class="mono">{{.Login}}{{if .Disabled}} <span class="pill">{{t "disabled"}}</span>{{end}}{{if .FromGroup}} <span class="pill">{{t "from directory group"}}</span>{{end}}{{if $s.MultiTenant}} <span class="pill">{{with .Tenant}}{{.}}{{else}}{{t "global"}}{{end}}</span>{{end}}
+          {{if or .Tags .Groups}}<span class="sub">{{t "Scope"}}: {{join .Tags ", "}}{{if and .Tags .Groups}} · {{end}}{{join .Groups ", "}}</span>{{end}}</td>
         <td>{{if .Local}}{{t "local (password + TOTP)"}}{{else}}{{t "OIDC"}}{{end}}</td>
         <td>{{if eq $login $s.Sess.Email}}{{t .Role}} <a class="muted" href="/profile">({{t "you"}})</a>{{else if eq $s.Sess.Role "admin"}}
           <form class="inline-form" method="post" action="/users/update"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="login" value="{{$login}}">
             <select name="role" aria-label="{{t "Role"}}">{{$r := .Role}}{{range $s.Roles}}<option value="{{.}}" {{if eq . $r}}selected{{end}}>{{t .}}</option>{{end}}</select>
             <label class="check"><input type="checkbox" name="disabled" {{if .Disabled}}checked{{end}}> {{t "Disabled"}}</label>
-            <button class="secondary small">{{t "Save"}}</button></form>
+            <input name="scope_tags" value="{{join .Tags ", "}}" placeholder="{{t "Scope tags"}}" aria-label="{{t "Scope tags"}}" size="12" spellcheck="false">
+            <input name="scope_groups" value="{{join .Groups ", "}}" placeholder="{{t "Scope groups"}}" aria-label="{{t "Scope groups"}}" size="12" spellcheck="false">
+            <button class="secondary small" aria-label="{{t "Save"}} {{.Login}}">{{t "Save"}}</button></form>
           {{else}}{{t .Role}}{{end}}</td>
         <td>{{ago .LastLogin}}</td>
-        {{if eq $s.Sess.Role "admin"}}<td>{{if and .Local (ne $login $s.Sess.Email)}}<form method="post" action="/users/reset"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="login" value="{{$login}}"><button class="secondary small">{{t "Reset credentials"}}</button></form>{{end}}</td>{{end}}
+        {{if eq $s.Sess.Role "admin"}}<td>{{if and .Local (ne $login $s.Sess.Email)}}<form method="post" action="/users/reset"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="login" value="{{$login}}"><button class="secondary small" data-confirm="{{t "Reset password and TOTP of this account? The old ones stop working at once."}}">{{t "Reset credentials"}}</button></form>{{end}}</td>{{end}}
       </tr>{{end}}</tbody>
     </table></div>
   </section>
@@ -28,7 +32,10 @@
     {{template "csrf" .CSRF}}
     <label>{{t "Type"}}<select name="kind"><option value="oidc" {{if not .OIDC}}disabled{{end}}>{{t "OIDC (email)"}}</option><option value="local" {{if not .OIDC}}selected{{end}}>{{t "Local account"}}</option></select></label>
     <label>{{t "Email or local name"}}<input name="login" required autocomplete="off" spellcheck="false"></label>
-    <label>{{t "Role"}}<select name="role">{{range .Roles}}<option value="{{.}}">{{t .}}</option>{{end}}</select></label>
+    <label>{{t "Role"}}<select name="role">{{range .Roles}}<option value="{{.}}">{{t .}}</option>{{end}}</select>
+      <small class="field-hint">{{t "Admin: everything."}}</small>
+      <small class="field-hint">{{t "Helpdesk: sees devices (within its scope, if one is set); sync, updates, restart, shut down, lock, message, password reset and lock of local accounts, collect logs, disk recovery keys; a remote shell only when the setting allows it. No scripts, wipe, lost mode or configuration."}}</small>
+      <small class="field-hint">{{t "Auditor: reads everything including the audit log, changes nothing."}}</small></label>
     <button>{{t "Add user"}}</button>
     <p class="muted">{{t "Local accounts get a generated password and TOTP secret."}}{{if not .LocalLogin}} {{t "Local login is currently disabled in the settings."}}{{end}}</p>
   </form>

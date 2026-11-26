@@ -29,11 +29,32 @@ const (
 	TypeProxy         = "com.limdm.proxy"
 	TypeFlatpak       = "com.limdm.flatpak"
 	TypeScripts       = "com.limdm.scripts"
+	TypeDconf         = "com.limdm.dconf"
+	TypeLocalUsers    = "com.limdm.localusers"
 )
+
+// LocalUser is a local account that must exist. Accounts dropped from the
+// declaration are locked, never deleted.
+type LocalUser struct {
+	Name           string   `json:"name"`
+	UID            int      `json:"uid,omitempty"` // only used when the account is created
+	FullName       string   `json:"full_name,omitempty"`
+	Groups         []string `json:"groups,omitempty"` // supplementary groups, must exist
+	Shell          string   `json:"shell,omitempty"`  // default /bin/bash
+	Locked         bool     `json:"locked,omitempty"`
+	AuthorizedKeys []string `json:"authorized_keys,omitempty"` // SSH public keys, one per entry, no options
+}
+
+// Dconf are GNOME (dconf) defaults for every user: key paths with GVariant
+// values, and keys or directories users cannot change.
+type Dconf struct {
+	Settings map[string]string `json:"settings"`
+	Locks    []string          `json:"locks,omitempty"`
+}
 
 type Repository struct {
 	Name       string `json:"name"`
-	Family     string `json:"family"` // debian | fedora
+	Family     string `json:"family"` // debian | fedora | suse
 	URL        string `json:"url"`
 	Suites     string `json:"suites,omitempty"`     // apt
 	Components string `json:"components,omitempty"` // apt
@@ -46,15 +67,15 @@ type Repository struct {
 
 // Validate checks a package repository; unsigned ones are not allowed.
 func (r Repository) Validate() error {
-	if !nameRe.MatchString(r.Name) || (r.Family != "debian" && r.Family != "fedora") || !httpsURL(r.URL) {
-		return fmt.Errorf("repository %q: name, family (debian|fedora) and an https URL are required", r.Name)
+	if !nameRe.MatchString(r.Name) || (r.Family != "debian" && r.Family != "fedora" && r.Family != "suse") || !httpsURL(r.URL) {
+		return fmt.Errorf("repository %q: name, family (debian|fedora|suse) and an https URL are required", r.Name)
 	}
 	if !suiteRe.MatchString(r.Suites) || !suiteRe.MatchString(r.Components) || (r.Family == "debian" && r.Suites == "") {
 		return fmt.Errorf("repository %q: invalid suites or components", r.Name)
 	}
 	armored := strings.Contains(r.Key, "BEGIN PGP PUBLIC KEY BLOCK") && len(r.Key) <= 64<<10
 	if armored == (r.KeyFile != "") || (r.KeyFile != "" && !keyFileRe.MatchString(r.KeyFile)) {
-		return fmt.Errorf("repository %q: either an armored signing key or a key_file in /usr/share/keyrings, /etc/apt/keyrings or /etc/pki/rpm-gpg is required; unsigned repositories are not allowed", r.Name)
+		return fmt.Errorf("repository %q: either an armored signing key or a key_file in /usr/share/keyrings, /etc/apt/keyrings, /etc/pki/rpm-gpg or /usr/lib/rpm/gnupg/keys is required; unsigned repositories are not allowed", r.Name)
 	}
 	return nil
 }
@@ -96,9 +117,67 @@ type Flatpak struct {
 }
 
 type Script struct {
-	Name          string `json:"name"`
-	IntervalHours int    `json:"interval_hours"`
-	Body          string `json:"body"`
+	Name           string            `json:"name"`
+	IntervalHours  int               `json:"interval_hours"`
+	Body           string            `json:"body"`
+	Params         map[string]string `json:"params,omitempty"`          // environment variables for the script
+	TimeoutMinutes int               `json:"timeout_minutes,omitempty"` // 1..240, default 30
+}
+
+// ScriptCommand is the payload of the "script" command when it carries
+// parameters or a timeout; a plain body is still accepted.
+type ScriptCommand struct {
+	Body           string            `json:"body"`
+	Params         map[string]string `json:"params,omitempty"`
+	TimeoutMinutes int               `json:"timeout_minutes,omitempty"`
+}
+
+// ScriptResult is the structured outcome of a script run. Output is
+// truncated to its last MaxScriptOutput bytes per stream.
+type ScriptResult struct {
+	Name      string    `json:"name,omitempty"`       // recurring script, empty for a command
+	CommandID int64     `json:"command_id,omitempty"` // script command
+	ExitCode  int       `json:"exit_code"`            // -1: did not start or timed out
+	Stdout    string    `json:"stdout,omitempty"`
+	Stderr    string    `json:"stderr,omitempty"`
+	Start     time.Time `json:"start"`
+	End       time.Time `json:"end"`
+}
+
+// MaxScriptOutput bounds stdout and stderr of one script result.
+const MaxScriptOutput = 16 << 10
+
+var (
+	scriptParamRe   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
+	reservedEnvVars = []string{"PATH", "IFS", "HOME", "SHELL", "ENV", "BASH_ENV", "SHELLOPTS", "BASHOPTS", "PS4", "CDPATH", "GLOBIGNORE",
+		"PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PERL5LIB", "PERL5OPT", "PERLLIB", "RUBYLIB", "RUBYOPT", "NODE_OPTIONS", "NODE_PATH", "TMPDIR"}
+)
+
+// ValidateScriptParams checks parameter names and values and the timeout.
+// Names are environment variable names that do not change how an
+// interpreter or the dynamic linker loads code.
+func ValidateScriptParams(params map[string]string, timeout int) error {
+	if len(params) > 50 {
+		return errors.New("at most 50 parameters")
+	}
+	size := 0
+	for k, v := range params {
+		up := strings.ToUpper(k)
+		if !scriptParamRe.MatchString(k) || slices.Contains(reservedEnvVars, up) || strings.HasPrefix(up, "LD_") || strings.HasPrefix(up, "LC_") || strings.HasPrefix(up, "DYLD_") {
+			return fmt.Errorf("parameter %q: letters, digits and underscore, not a reserved variable (PATH, LD_*, BASH_ENV …)", k)
+		}
+		if strings.ContainsRune(v, 0) || len(v) > 4096 {
+			return fmt.Errorf("parameter %s: up to 4096 characters, no NUL", k)
+		}
+		size += len(k) + len(v)
+	}
+	if size > 32<<10 {
+		return errors.New("parameters up to 32 KiB in total")
+	}
+	if timeout < 0 || timeout > 240 {
+		return errors.New("timeout_minutes must be 1..240 (0 for the default of 30)")
+	}
+	return nil
 }
 
 type Banner struct {
@@ -136,12 +215,18 @@ type ExtraPolicy struct {
 	Proxy         *Proxy            `json:"proxy,omitempty"`
 	Flatpak       *Flatpak          `json:"flatpak,omitempty"`
 	Scripts       []Script          `json:"scripts,omitempty"`
+	Dconf         *Dconf            `json:"dconf,omitempty"`
+	LocalUsers    []LocalUser       `json:"local_users,omitempty"`
 
 	DiskEncryption *DiskEncryption `json:"disk_encryption,omitempty"`
 	Polkit         []PolkitRule    `json:"polkit,omitempty"`
 	Sudo           *Sudo           `json:"sudo,omitempty"`
 	Bootloader     *Bootloader     `json:"bootloader,omitempty"`
 	SoftwareStore  *SoftwareStore  `json:"software_store,omitempty"`
+	Printers       *Printers       `json:"printers,omitempty"`
+	CustomChecks   []CustomCheck   `json:"custom_checks,omitempty"`
+
+	Network []NetworkProfile `json:"network,omitempty"`
 }
 
 var extraExamples = map[string]string{
@@ -156,6 +241,8 @@ var extraExamples = map[string]string{
 	TypeProxy:         `{"http": "http://proxy.example.com:3128", "https": "http://proxy.example.com:3128", "no_proxy": "localhost,127.0.0.1,.example.com"}`,
 	TypeFlatpak:       `{"remotes": [{"name": "flathub", "url": "https://dl.flathub.org/repo/flathub.flatpakrepo"}], "install": ["org.mozilla.firefox"], "remove": []}`,
 	TypeScripts:       `{"scripts": [{"name": "cleanup", "interval_hours": 24, "body": "#!/bin/sh\njournalctl --vacuum-time=30d"}]}`,
+	TypeDconf:         `{"settings": {"/org/gnome/desktop/interface/clock-show-seconds": "true"}, "locks": ["/org/gnome/desktop/interface/clock-show-seconds"]}`,
+	TypeLocalUsers:    `{"users": [{"name": "svc-backup", "groups": ["backup"], "shell": "/bin/bash", "locked": false, "authorized_keys": ["ssh-ed25519 AAAA... backup@example.com"]}]}`,
 }
 
 var (
@@ -168,7 +255,7 @@ func init() {
 	for t, ex := range extraExamples {
 		Types[t] = ex
 	}
-	for _, t := range []string{TypeRepositories, TypeCertificates, TypeSysctl, TypeKernelModules, TypeSSH, TypeFlatpak, TypeScripts} {
+	for _, t := range []string{TypeRepositories, TypeCertificates, TypeSysctl, TypeKernelModules, TypeSSH, TypeFlatpak, TypeScripts, TypeDconf, TypeLocalUsers} {
 		listTypes[t] = true
 	}
 }
@@ -183,7 +270,10 @@ var (
 	suiteRe    = regexp.MustCompile(`^[A-Za-z0-9._/ -]{0,200}$`)
 	sshValRe   = regexp.MustCompile(`^[A-Za-z0-9 ,@._:/*-]{1,200}$`)
 	repoFileRe = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9._-]{0,100}\.(list|sources|repo)|sources\.list)$`)
-	keyFileRe  = regexp.MustCompile(`^(/usr/share/keyrings|/etc/apt/keyrings|/etc/pki/rpm-gpg)/[A-Za-z0-9][A-Za-z0-9._-]{0,100}$`)
+	shellRe    = regexp.MustCompile(`^/[A-Za-z0-9/_.+-]{1,100}$`)
+	sshKeyRe   = regexp.MustCompile(`^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp(256|384|521)|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com) [A-Za-z0-9+/]+={0,3}( [^\x00-\x1f]{0,200})?$`)
+	dconfKeyRe = regexp.MustCompile(`^(/[A-Za-z0-9_.-]+)+$`)
+	keyFileRe  = regexp.MustCompile(`^(/usr/share/keyrings|/etc/apt/keyrings|/etc/pki/rpm-gpg|/usr/lib/rpm/gnupg/keys)/[A-Za-z0-9][A-Za-z0-9._-]{0,100}$`)
 )
 
 // sshAllowed are sshd options that cannot weaken the compliance baseline.
@@ -387,8 +477,63 @@ func (d Declaration) applyExtra(p *Policy) (bool, error) {
 			if !nameRe.MatchString(sc.Name) || sc.IntervalHours < 1 || sc.IntervalHours > 24*30 || sc.Body == "" || len(sc.Body) > 64<<10 {
 				bad("script %q: name, interval 1..720 hours and a body up to 64 KiB are required", sc.Name)
 			}
+			if err := ValidateScriptParams(sc.Params, sc.TimeoutMinutes); err != nil {
+				bad("script %q: %v", sc.Name, err)
+			}
 		}
 		p.Extra.Scripts = v.Scripts
+	case TypeLocalUsers:
+		var v struct {
+			Users []LocalUser `json:"users"`
+		}
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		for i, u := range v.Users {
+			if !localUserRe.MatchString(u.Name) || u.Name == "root" || slices.ContainsFunc(v.Users[:i], func(o LocalUser) bool { return o.Name == u.Name }) {
+				bad("local user %q: lower case name, not root, each once", u.Name)
+			}
+			if u.UID < 0 || u.UID > 60000 || u.UID != 0 && u.UID < 1000 {
+				bad("local user %s: uid 1000..60000 or unset", u.Name)
+			}
+			if len(u.FullName) > 100 || strings.ContainsAny(u.FullName, ":\n\r\x00,") {
+				bad("local user %s: full name up to 100 characters, no colon or comma", u.Name)
+			}
+			if u.Shell != "" && (!shellRe.MatchString(u.Shell) || strings.Contains(u.Shell, "..")) {
+				bad("local user %s: shell must be an absolute path", u.Name)
+			}
+			if len(u.Groups) > 32 || len(u.AuthorizedKeys) > 100 {
+				bad("local user %s: at most 32 groups and 100 keys", u.Name)
+			}
+			for _, g := range u.Groups {
+				if !userRe.MatchString(g) || g == "root" {
+					bad("local user %s: invalid group %q", u.Name, g)
+				}
+			}
+			for _, k := range u.AuthorizedKeys {
+				if len(k) > 16<<10 || !sshKeyRe.MatchString(k) {
+					bad("local user %s: authorized key must be \"type base64 [comment]\" without options", u.Name)
+				}
+			}
+		}
+		p.Extra.LocalUsers = v.Users
+	case TypeDconf:
+		var v Dconf
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		for k, val := range v.Settings {
+			// a key needs a directory: /dir/key; values are GVariant text on one line
+			if !dconfKeyRe.MatchString(k) || strings.Count(k, "/") < 2 || val == "" || !noControl(val, 1024) || strings.ContainsAny(val, "\n\t") {
+				bad("dconf %q: key path /dir/key and a one line GVariant value up to 1024 characters", k)
+			}
+		}
+		for _, l := range v.Locks {
+			if !dconfKeyRe.MatchString(strings.TrimSuffix(l, "/")) {
+				bad("dconf lock %q: a key path or a directory ending in /", l)
+			}
+		}
+		p.Extra.Dconf = &v
 	default:
 		return d.applySecurity(p)
 	}
@@ -467,10 +612,24 @@ func mergeExtra(typ string, a, b json.RawMessage) (json.RawMessage, bool, error)
 		out, err = byName("certificates")
 	case TypeScripts:
 		out, err = byName("scripts")
+	case TypeLocalUsers:
+		out, err = byName("users")
 	case TypeSysctl:
 		out, err = mergeMap("settings")
 	case TypeSSH:
 		out, err = mergeMap("options")
+	case TypeDconf:
+		var x, y Dconf
+		if err = errors.Join(json.Unmarshal(a, &x), json.Unmarshal(b, &y)); err == nil {
+			m := map[string]string{}
+			for k, v := range x.Settings {
+				m[k] = v
+			}
+			for k, v := range y.Settings {
+				m[k] = v
+			}
+			out, err = json.Marshal(Dconf{Settings: m, Locks: union(x.Locks, y.Locks)})
+		}
 	case TypeKernelModules:
 		var x, y struct {
 			Block []string `json:"block"`

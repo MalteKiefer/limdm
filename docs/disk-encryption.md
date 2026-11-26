@@ -10,10 +10,13 @@ existing disk.
 Library item `com.limdm.diskencryption`, assigned in a blueprint:
 
 ```json
-{"escrow": true, "rotate_after_view": true}
+{"escrow": true, "rotate_after_view": true, "require_all": true, "exclude": ["/boot"]}
 ```
 
-The compliance check `disk.recovery` fails while a LUKS volume has no escrowed key.
+The compliance check `disk.recovery` fails while a LUKS volume has no escrowed key. With
+`require_all` the check `disk.encryption` needs every local volume on LUKS except the mount
+points in `exclude` (an entry covers everything below it); without it only `/` counts. Every
+field with its limits: [declarations.md](declarations.md#comlimdmdiskencryption).
 
 ## How the key is created
 
@@ -39,15 +42,41 @@ desktop notification once a day pointing to the menu entry.
 
 ## Storage and access
 
-* The server seals each key with AES-256-GCM. The key is derived from
-  `LIMDM_SESSION_KEY`; device ID and volume UUID are bound as additional data, so a sealed
-  key cannot be moved to another device.
-* Admins and helpdesk see the volumes on the device page (Hardware tab) and reveal a key
-  with **Show key** (a POST request with CSRF protection, the page is not cached). Auditors
-  cannot reveal keys.
-* Every escrow and every view is written to the audit log with the person who viewed it.
+* The server seals each key with AES-256-GCM under a key derived from `LIMDM_SESSION_KEY`;
+  device ID and volume UUID are bound as additional data, so a sealed key cannot be moved to
+  another device or volume. A session key rotation seals every key again with the new key
+  ([keys.md](keys.md#session-key)).
+* Admins and helpdesk accounts (within their device scope) see the volumes on the device page
+  (**Hardware**, **Recovery keys**) and reveal a key with **Show key** (a POST request with
+  CSRF protection, the answer is not cached). Auditors cannot reveal keys.
+* Every escrow (`recovery.escrow`) and every view (`recovery.view`, with the viewer, the
+  reason and the approval) is written to the audit log.
 
 Enter the recovery key at the boot prompt instead of the passphrase.
+
+### Four eyes approval for key views
+
+With **Settings**, **Security**, **Four eyes approval** on, the option "Also for recovery key
+views" makes every view wait for a second administrator
+([security.md](security.md#four-eyes-approval)):
+
+1. **Show key** opens **Request access to the recovery key**. The viewer enters a reason or
+   ticket reference (required, one line up to 500 characters) and sends **Request approval**.
+2. The request appears under **Approvals** and is announced as `approval.request`. Another
+   administrator approves or rejects it; the requester can never decide their own request.
+   Requests nobody decides expire after 24 hours.
+3. After approval the requester opens the key with **Show key** again, once, within one hour.
+   The audit entry names the approval number, the approver and the reason.
+
+While a request is pending, **Show key** shows "Waiting for approval". With the option off,
+admins and helpdesk see the key directly.
+
+### Notification on every view
+
+Every view raises the notification event `recovery.view` ("Recovery key viewed", severity
+warning) with the viewer, the volume, the reason (or "none given") and a link to the device.
+Subscribe a channel to it under **Settings**, **Notifications**
+([notifications.md](notifications.md#channels)) to learn about each view at once.
 
 ## Rotation after view
 
@@ -60,11 +89,58 @@ With `rotate_after_view` a key is replaced after someone viewed it:
 The device page shows "rotation pending" until then. If the device is offline, the viewed
 key keeps working until the device checks in again.
 
+## TPM unlock
+
+With a `tpm2` entry the agent binds LUKS volumes to the TPM 2.0, so the disk opens at boot
+without a passphrase as long as the measured boot state is unchanged:
+
+```json
+{"escrow": true, "rotate_after_view": true, "tpm2": {"pcrs": [7], "pin": false, "require": true}}
+```
+
+* `pcrs`: the PCRs the key is sealed to, default 7 (Secure Boot state and its certificates).
+  Add 0, 2 or 4 for firmware and boot loader measurements; every firmware or boot loader
+  update then needs the recovery key once and a new binding.
+* `pin`: the TPM also needs a PIN at boot.
+* `require`: the compliance check `disk.tpm` fails while a volume is not bound. Without it the
+  check only reports the state.
+
+How it works:
+
+1. Binding needs a current key of the volume. The agent holds one only right after a recovery
+   key was created or rotated, so a volume is bound when the server confirmed its new
+   recovery key: `systemd-cryptenroll --unlock-key-file=<recovery key> --tpm2-device=auto
+   --tpm2-pcrs=7 --wipe-slot=tpm2`. The key file lives in a private tmpfs directory and is
+   removed right after.
+2. The recovery key slot stays; only an earlier TPM2 slot is replaced, so a changed PCR list
+   applies with the next binding.
+3. Volumes escrowed before the `tpm2` entry are bound with their next key rotation: view the
+   key in the console with `rotate_after_view`, or run `sudo limdm-agent recovery-key --all`.
+4. With `pin` the agent never binds by itself, because only the user may know the PIN.
+   `sudo limdm-agent recovery-key --all` asks for the passphrase, adds a new recovery key,
+   asks for a PIN (at least 6 characters, twice) and binds the volume. The PIN goes to
+   `systemd-cryptenroll` in its environment, never on the command line.
+5. Where dracut builds the initrd (Fedora, SUSE, Arch with dracut) the agent adds
+   `/etc/dracut.conf.d/60-limdm-tpm2.conf` with the `tpm2-tss` module and runs
+   `dracut -f --regenerate-all` once. Debian and Ubuntu with initramfs-tools cannot unseal a
+   TPM2 key at boot; there the binding exists but the passphrase prompt stays until the
+   initrd uses dracut or systemd.
+
+Requirements: a TPM 2.0 (`/sys/class/tpm/tpm0`), LUKS2 and systemd 252 or newer
+(`--unlock-key-file`). The device page shows the TPM version and the bound volumes in the
+Hardware tab; the inventory reports them as `tpm`.
+
+Lost mode removes every key slot except the recovery key, the TPM slot included; the agent
+binds again only with the next escrowed recovery key.
+
 ## Lost or stolen devices
 
 Two admin actions on the device page (Actions menu), each confirmed by typing the host name
-and written to the audit log. They run when the device checks in the next time; a device
-that stays offline is covered by `offline_lock_hours` ([desktop-login.md](desktop-login.md#offline-lock)).
+and written to the audit log. With four eyes approval on, both wait for a second
+administrator under **Approvals** first ([security.md](security.md#four-eyes-approval)).
+Sending either one raises the notification event `command.wipe_lost`. They run when the
+device checks in the next time; a device that stays offline is covered by
+`offline_lock_hours` ([desktop-login.md](desktop-login.md#offline-lock)).
 
 **Lost mode** blocks every login (`/etc/nologin` with your message, local passwords locked),
 ends running sessions and, for every LUKS volume with an escrowed recovery key, removes every
@@ -73,7 +149,7 @@ never stored in the command. After the next power off only IT can open the disk,
 recovery key from the console. Volumes without an escrowed key keep their slots; the result
 on the device page says so.
 
-**End lost mode** lifts the login block. The user's passphrase was removed: unlock the disk
+**End lost mode** lifts the login block; it needs no approval. The user's passphrase was removed: unlock the disk
 with the recovery key at boot and set a new passphrase, for example with
 `cryptsetup luksAddKey` using the recovery key, then rotate the viewed recovery key.
 
@@ -84,6 +160,9 @@ without LUKS are refused, because there is no fast way to guarantee deletion; us
 ## Limits
 
 * Only volumes visible to `lsblk` as `crypto_LUKS` are handled.
-* TPM or FIDO2 unlock (`systemd-cryptenroll`) is not managed; such slots are left alone,
-  except in lost mode, which removes every slot but the recovery key.
-* Changing `LIMDM_SESSION_KEY` makes stored keys unreadable. Escrow again after a change.
+* FIDO2 unlock is not managed; such slots are left alone, except in lost mode, which
+  removes every slot but the recovery key.
+* The agent device key stays a file (`/etc/limdm/device.pem`); it is not kept in the TPM.
+* Replacing `LIMDM_SESSION_KEY` outright makes stored keys unreadable. Rotate it as
+  described in [keys.md](keys.md#session-key) instead: the old key stays listed until every
+  recovery key is sealed again.

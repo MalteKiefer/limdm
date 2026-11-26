@@ -88,6 +88,29 @@ func VerifyCommand(pub ed25519.PublicKey, deviceID string, c Command) error {
 	return nil
 }
 
+// KeyRollover announces a new command signing key, signed with the key the
+// agent has pinned, so an agent moves to the new key without re-enrolling.
+type KeyRollover struct {
+	Key       string `json:"key"`       // new public key (hex)
+	Signature string `json:"signature"` // hex Ed25519 signature of the pinned key over RolloverSigned(Key)
+}
+
+// RolloverSigned is the byte string a rollover signature covers.
+func RolloverSigned(newKeyHex string) []byte {
+	return []byte("limdm-command-key-rollover-v1\n" + strings.ToLower(newKeyHex))
+}
+
+// VerifyRollover checks that pinned signed the announcement of r.Key.
+func VerifyRollover(pinned ed25519.PublicKey, r KeyRollover) error {
+	sig, err := hex.DecodeString(r.Signature)
+	key, kerr := hex.DecodeString(r.Key)
+	if err != nil || kerr != nil || len(key) != ed25519.PublicKeySize || len(pinned) != ed25519.PublicKeySize ||
+		!ed25519.Verify(pinned, RolloverSigned(r.Key), sig) {
+		return errors.New("command key rollover not signed by the pinned key")
+	}
+	return nil
+}
+
 // ItemSigned is what a library item signature covers: name, type and the
 // compact payload. The server signs at saving and checks before delivery.
 func ItemSigned(name, typ string, payload []byte) []byte {

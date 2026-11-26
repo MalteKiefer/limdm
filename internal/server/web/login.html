@@ -1,11 +1,11 @@
 {{define "title"}}{{t "Sign in · LiMDM"}}{{end}}
 {{define "content"}}
 <div class="login-card">
-  <div class="brand-row">{{if .Brand.Logo}}<img src="/branding/logo.png?v={{.Brand.V}}" alt="">{{else}}<img src="/static/logo.svg" alt="">{{end}} {{if .Brand.Name}}{{.Brand.Name}}{{else}}{{t "LiMDM"}}{{end}}</div>
+  <div class="brand-row">{{if .Brand.Logo}}<img src="{{.Brand.LogoURL}}" alt="">{{else}}<img src="/static/logo.svg" alt="">{{end}} {{if .Brand.Name}}{{.Brand.Name}}{{else}}{{t "LiMDM"}}{{end}}</div>
   <div class="card">
     <h1>{{t "Sign in"}}</h1>
     <p class="sub">{{t "Device management console"}}</p>
-    {{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+    {{template "err" .Error}}
     {{if .OIDC}}<a class="button" href="/login/oidc">{{t "Continue with single sign on"}}</a>{{end}}
     {{if and .OIDC .Local}}<div class="or">{{t "or local administrator"}}</div>{{end}}
     {{if .Local}}

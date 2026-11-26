@@ -39,9 +39,15 @@ func main() {
 		err = sign(os.Args[2:])
 	case "local-admin":
 		err = localAdmin(os.Args[2:])
+	case "audit":
+		err = auditCmd(os.Args[2:])
+	case "keys":
+		err = keysCmd(log, os.Args[2:])
 	default:
-		err = errors.New(`usage: limdm-server [serve | keygen -out FILE | sign -key FILE SHA256SUMS
-                     | local-admin [-env FILE] [-role admin|auditor] [-out FILE] add|reset|disable|enable|list [NAME]]`)
+		err = errors.New(`usage: limdm-server [serve | keygen -out FILE | sign -key FILE|-key-env VAR|-pkcs11 LABEL SHA256SUMS
+                     | local-admin [-env FILE] [-role admin|auditor] [-out FILE] add|reset|disable|enable|list [NAME]
+                     | audit [-ca DIR] [-key HEX -keyed-from ID] verify FILE.jsonl | audit [-ca DIR] key
+                     | keys [-env FILE] status | rotate KIND [-name NAME] | finish KIND [-force]]`)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -90,6 +96,9 @@ func serve(log *slog.Logger) error {
 	}()
 	select {
 	case <-ctx.Done():
+		// background loops stopped with ctx and released their locks to the
+		// other instances; now leave the load balancer, then close connections
+		srv.Drain(cfg.DrainDelay)
 	case err = <-errc:
 	}
 	sctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -103,6 +112,60 @@ func serve(log *slog.Logger) error {
 
 // localAdmin manages fallback admin accounts. Generated credentials go to
 // stdout or, with -out, to a new 0600 file so they do not end up in logs.
+// auditCmd verifies a JSON Lines audit export outside the server, or prints
+// the audit key for an auditor who verifies on another machine.
+func auditCmd(args []string) error {
+	fs := flag.NewFlagSet("audit", flag.ExitOnError)
+	def := os.Getenv("LIMDM_CA_DIR")
+	if def == "" {
+		def = "/var/lib/limdm-server/ca"
+	}
+	caDir := fs.String("ca", def, "CA directory with command.key")
+	keyHex := fs.String("key", "", "audit key (hex) instead of the CA directory; one segment")
+	keyedFrom := fs.Int64("keyed-from", 0, "first keyed entry, with -key")
+	fs.Parse(args)
+	var keys server.AuditKeys
+	if *keyHex != "" {
+		key, err := hex.DecodeString(*keyHex)
+		if err != nil || len(key) != 32 {
+			return errors.New("-key must be 64 hex characters")
+		}
+		keys = server.AuditKeys{{From: *keyedFrom, Key: key}}
+	} else {
+		var err error
+		if keys, err = server.AuditKeysFromDir(*caDir, server.KeyProviderFromEnv()); err != nil {
+			return fmt.Errorf("audit key: %w", err)
+		}
+	}
+	switch {
+	case fs.Arg(0) == "key":
+		// one line per segment: a command key rotation starts a new one
+		for _, k := range keys {
+			fmt.Printf("key=%s keyed_from=%d\n", hex.EncodeToString(k.Key), k.From)
+		}
+		return nil
+	case fs.Arg(0) == "verify" && fs.NArg() == 2:
+		f, err := os.Open(fs.Arg(1))
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		n, first, last, broken, err := server.VerifyAuditExport(f, keys)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return errors.New("no entries in the file")
+		}
+		if broken != 0 {
+			return fmt.Errorf("chain broken at entry %d (%d entries read)", broken, n)
+		}
+		fmt.Printf("%d entries, %d to %d: chain intact\n", n, first, last)
+		return nil
+	}
+	return errors.New("usage: limdm-server audit [-ca DIR] [-key HEX -keyed-from ID] verify FILE.jsonl | key")
+}
+
 func localAdmin(args []string) error {
 	fs := flag.NewFlagSet("local-admin", flag.ExitOnError)
 	envFile := fs.String("env", "", "read LIMDM_* settings from this env file (e.g. /etc/limdm-server/server.env)")
@@ -184,9 +247,22 @@ func sign(args []string) error {
 	fs := flag.NewFlagSet("sign", flag.ExitOnError)
 	keyFile := fs.String("key", "", "private key file (limdm-server keygen)")
 	keyEnv := fs.String("key-env", "", "environment variable holding the hex private key")
+	label := fs.String("pkcs11", "", "label of an Ed25519 key in the PKCS#11 token (LIMDM_PKCS11_MODULE, LIMDM_PKCS11_TOKEN, LIMDM_PKCS11_PIN)")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
-		return errors.New("usage: limdm-server sign -key FILE|-key-env VAR SHA256SUMS")
+		return errors.New("usage: limdm-server sign -key FILE|-key-env VAR|-pkcs11 LABEL SHA256SUMS")
+	}
+	if *label != "" {
+		sums, err := os.ReadFile(fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		sig, err := server.SignWithHSM(server.KeyProviderFromEnv(), *label, api.SumsSigned(string(sums)))
+		if err != nil {
+			return err
+		}
+		fmt.Println(hex.EncodeToString(sig))
+		return nil
 	}
 	raw := os.Getenv(*keyEnv)
 	if *keyFile != "" {
@@ -205,5 +281,70 @@ func sign(args []string) error {
 		return err
 	}
 	fmt.Println(api.SignSums(key, string(sums)))
+	return nil
+}
+
+// keysCmd shows and rotates the server keys (docs/keys.md). It works on the
+// CA directory and the database of the server environment; running servers
+// apply a step when they restart.
+func keysCmd(log *slog.Logger, args []string) error {
+	fs := flag.NewFlagSet("keys", flag.ExitOnError)
+	envFile := fs.String("env", "", "read LIMDM_* settings from this env file (e.g. /etc/limdm-server/server.env)")
+	fs.Parse(args)
+	if *envFile != "" {
+		if err := loadEnvFile(*envFile); err != nil {
+			return err
+		}
+	}
+	op, kind := fs.Arg(0), fs.Arg(1)
+	sub := flag.NewFlagSet("keys "+op, flag.ExitOnError)
+	name := sub.String("name", "", "name of the new key (required with an HSM: the key labeled limdm-NAME)")
+	force := sub.Bool("force", false, "finish although devices still use the old key (they must enroll again)")
+	if fs.NArg() > 2 {
+		sub.Parse(fs.Args()[2:])
+	}
+	if op != "status" && (kind == "" || (op != "rotate" && op != "finish")) {
+		return errors.New("usage: limdm-server keys [-env FILE] status | rotate ca|network-ca|command|session|webhook [-name NAME] | finish KIND [-force]")
+	}
+	cfg, err := server.ConfigFromEnv()
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	srv, err := server.OpenKeys(ctx, cfg, log)
+	if err != nil {
+		return err
+	}
+	defer srv.Close()
+	actor := "cli:" + os.Getenv("USER")
+	var msg string
+	switch op {
+	case "status":
+		list, err := srv.KeysStatus(ctx)
+		if err != nil {
+			return err
+		}
+		for _, k := range list {
+			line := fmt.Sprintf("%-11s active=%s", k.Kind, k.Active)
+			if k.Previous != "" {
+				line += " retiring=" + k.Previous
+				if k.Kind == "session" {
+					line += fmt.Sprintf(" left=%d", k.Total)
+				} else {
+					line += fmt.Sprintf(" moved=%d/%d", k.Done, k.Total)
+				}
+			}
+			fmt.Println(line + " (" + k.Location + ")")
+		}
+		return nil
+	case "rotate":
+		msg, err = srv.RotateKey(ctx, actor, kind, *name)
+	case "finish":
+		msg, err = srv.FinishKey(ctx, actor, kind, *force)
+	}
+	if err != nil {
+		return err
+	}
+	fmt.Println(msg)
 	return nil
 }

@@ -265,7 +265,10 @@ func (s *Server) fetchReleases(ctx context.Context) (int, error) {
 		if err := s.db.QueryRow(ctx, `SELECT sums_sig FROM agent_releases WHERE version=$1`, version).Scan(&sig); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return n, err
 		}
-		if sig != nil {
+		// imported by another instance but not here yet: every instance
+		// keeps its own copy of the packages it serves
+		_, statErr := os.Stat(filepath.Join(s.cfg.ReleaseDir, version, api.PackageName(version, "amd64", "deb")))
+		if sig != nil && statErr == nil {
 			if *sig == "" { // fetched before the signature was uploaded
 				if err := s.addReleaseSignature(ctx, version, rel); err != nil {
 					s.log.Warn("release signature", "version", version, "err", err)
@@ -560,7 +563,7 @@ func (s *Server) deviceAgentUpdate(w http.ResponseWriter, r *http.Request, sess 
 	if target != "" {
 		var ok bool
 		if err := s.db.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM agent_releases WHERE version=$1 AND NOT blocked)`, target).Scan(&ok); err != nil || !ok {
-			http.Error(w, "unknown or blocked version", http.StatusBadRequest)
+			s.errorPage(w, r, sess, http.StatusBadRequest, "unknown or blocked version")
 			return
 		}
 	}

@@ -14,7 +14,7 @@ import (
 // Location of a device's public address. The agent port is never behind a
 // proxy, so the TCP peer of a check in is the device's external address. The
 // lookup goes to LIMDM_GEOIP_URL (default ipwho.is) only when the address
-// changed; "off" disables it.
+// changed and the geolocation setting is on (default off); "off" disables it.
 type Geo struct {
 	IP          string `json:"ip"`
 	Country     string `json:"country,omitempty"`
@@ -55,7 +55,7 @@ func publicAddr(ip string) bool {
 // locate looks up ip and stores the result. At most one lookup runs at a
 // time; a skipped or failed lookup is retried after an hour.
 func (s *Server) locate(id, ip string) {
-	if s.cfg.GeoIPURL == "" || !publicAddr(ip) {
+	if s.cfg.GeoIPURL == "" || !s.settings().Geolocation || !publicAddr(ip) {
 		return
 	}
 	select {

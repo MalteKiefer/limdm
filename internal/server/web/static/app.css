@@ -580,3 +580,66 @@ td.row-actions .menu-list form { display: block; }
 td.row-actions .menu-list { text-align: left; }
 .inline:has(.field-hint) { align-items: flex-start; }
 legend .hint, summary .hint { display: block; margin-top: 2px; font-size: 12px; font-weight: 400; color: var(--text-3); }
+/* W3: version diff and save preview */
+pre.diff { white-space: pre-wrap; word-break: break-word; margin: 0; }
+pre.diff span { display: block; }
+pre.diff .d-add { background: var(--ok-soft); color: var(--ok); }
+pre.diff .d-del { background: var(--bad-soft); color: var(--bad); }
+pre.diff .d-same { color: var(--text-3); }
+/* E3: remote shell */
+.terminal-card .terminal { height: 60vh; min-height: 320px; background: #111; border-radius: var(--radius); padding: 6px; }
+pre.transcript { max-height: 70vh; overflow: auto; white-space: pre-wrap; font-family: var(--mono); font-size: 12px; }
+
+/* ---- W5: hints in menus, JS only controls, password generator ---- */
+.menu-hint { display: block; font-size: 12px; color: var(--text-3); font-weight: 400; margin-top: 1px; }
+.js-only { display: none; }
+.js .js-only { display: revert; }
+.js .pwgen { display: flex; }
+.pwgen { align-items: center; gap: 8px; flex-wrap: wrap; margin: -4px 0 12px; }
+.pwgen code { font-size: 13px; padding: 3px 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; user-select: all; overflow-wrap: anywhere; }
+.err-detail { margin-top: 6px; color: var(--text-3); font-size: 12px; }
+.err-detail summary { cursor: pointer; }
+.err-detail code { display: block; margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); }
+.copy-block { position: relative; }
+.copy-block > pre { padding-right: 84px; }
+.copy-block > button { position: absolute; top: 6px; right: 6px; }
+.doclink { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-left: 6px; vertical-align: 2px; border-radius: 50%;
+  border: 1px solid var(--line-strong); color: var(--text-3); font-size: 12px; font-weight: 600; text-decoration: none; }
+.doclink:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
+.nav .nav-help { margin-top: auto; }
+.glossary { margin: 0; display: grid; grid-template-columns: minmax(120px, max-content) minmax(0, 1fr); gap: 10px 18px; }
+.glossary dt { font-weight: 600; scroll-margin-top: 16px; }
+.glossary dt:target { color: var(--accent); }
+.glossary dd { margin: 0; color: var(--text-2); }
+.impact { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.impact strong { display: block; }
+@media (max-width: 860px) { .glossary { grid-template-columns: 1fr; gap: 2px; } .glossary dd { margin-bottom: 10px; } }
+.json-tools { align-items: center; gap: 10px; margin: -4px 0 12px; }
+.js .json-tools { display: flex; }
+.json-state { font-size: 12px; color: var(--ok); }
+.json-state.bad { color: var(--bad); }
+table.fieldref { margin-bottom: 10px; }
+table.fieldref th, table.fieldref td { padding: 5px 8px; font-size: 12.5px; }
+table.fieldref td.mono { overflow-wrap: anywhere; }
+.dh-facts dd .fact-sub { display: block; font-weight: 400; font-size: 12px; color: var(--text-3); }
+a.lvl { color: inherit; text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; }
+.onboarding .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.onboarding .steps li { display: flex; gap: 10px; align-items: flex-start; }
+.onboarding .step-mark { flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--line-strong); display: grid; place-items: center; font-size: 12px; margin-top: 1px; }
+.onboarding li.done .step-mark { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+.onboarding li.done a { color: var(--text-2); }
+.onboarding form { margin: 0; }
+.empty-action { margin-top: 10px; }
+/* ---- phones: the sidebar opens from a menu button (without JavaScript it stays open) ---- */
+.nav-toggle { display: none; }
+@media (max-width: 860px) {
+  .js .nav-toggle { display: inline-grid; place-items: center; width: 36px; height: 36px; padding: 0; margin-right: 4px; font-size: 18px;
+    background: transparent; border: 1px solid var(--nav-line); color: var(--nav-active); }
+  .js .side:not(.open) .nav, .js .side:not(.open) .who { display: none; }
+  .js .side.open .nav { flex-direction: column; }
+  .js .side.open .nav .group { display: block; }
+  .brand { padding: 12px 16px; }
+  .wide-only { display: none; }
+}
+.grid.side-right > div .glossary { grid-template-columns: 1fr; gap: 2px; }
+.grid.side-right > div .glossary dd { margin-bottom: 10px; }

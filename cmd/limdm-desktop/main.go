@@ -376,9 +376,16 @@ func main() {
 	noTray := flag.Bool("no-tray", false, "only the reminders, no tray icon")
 	msg := flag.String("message", "", "show a message from IT (started by the agent)")
 	msgTitle := flag.String("message-title", "", "title of -message")
+	rebootAt := flag.String("reboot-at", "", "offer to postpone the restart planned at this time (started by the agent)")
+	rebootDefers := flag.Int("reboot-defers", 0, "postponements left")
+	rebootMinutes := flag.Int("reboot-defer-minutes", 60, "minutes one postponement adds")
 	flag.Parse()
 	if *msg != "" {
 		showMessage(*msgTitle, *msg)
+		return
+	}
+	if *rebootAt != "" {
+		offerRebootDefer(*rebootAt, *rebootDefers, *rebootMinutes)
 		return
 	}
 	if *now {

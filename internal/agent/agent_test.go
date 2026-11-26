@@ -811,6 +811,117 @@ func TestVerifyCommand(t *testing.T) {
 	}
 }
 
+// A rollover signed by the pinned key moves the agent to the new key and
+// keeps the old one for the grace period; a forged one changes nothing.
+func TestCommandKeyRollover(t *testing.T) {
+	oldPub, oldKey, _ := ed25519.GenerateKey(nil)
+	newPub, newKey, _ := ed25519.GenerateKey(nil)
+	_, evilKey, _ := ed25519.GenerateKey(nil)
+	newHex := hex.EncodeToString(newPub)
+	a := &Agent{cfg: Config{DeviceID: "d1"}, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	a.state.CommandKey = hex.EncodeToString(oldPub)
+	sign := func(k ed25519.PrivateKey) *api.KeyRollover {
+		return &api.KeyRollover{Key: newHex, Signature: hex.EncodeToString(ed25519.Sign(k, api.RolloverSigned(newHex)))}
+	}
+
+	a.pinCommandKey(newHex, nil) // no rollover record
+	a.pinCommandKey(newHex, sign(evilKey))
+	forged := sign(oldKey)
+	forged.Key = hex.EncodeToString(make([]byte, 32)) // record for another key than offered
+	a.pinCommandKey(newHex, forged)
+	if a.state.CommandKey != hex.EncodeToString(oldPub) || a.state.CommandKeyPrev != "" {
+		t.Fatal("a forged rollover changed the pinned key")
+	}
+
+	a.pinCommandKey(newHex, sign(oldKey))
+	if a.state.CommandKey != newHex || a.state.CommandKeyPrev != hex.EncodeToString(oldPub) {
+		t.Fatal("valid rollover not adopted")
+	}
+	c := api.Command{ID: 1, Type: "lock", CreatedAt: time.Now().Truncate(time.Microsecond)}
+	c.Signature = api.SignCommand(newKey, "d1", c)
+	if err := a.verifyCommand(c); err != nil {
+		t.Fatal(err)
+	}
+	c.Signature = api.SignCommand(oldKey, "d1", c)
+	if err := a.verifyCommand(c); err != nil {
+		t.Fatalf("old key refused during the grace period: %v", err)
+	}
+	a.state.CommandKeyPrevUntil = time.Now().Add(-time.Minute)
+	if a.verifyCommand(c) == nil {
+		t.Fatal("old key accepted after the grace period")
+	}
+	c.Signature = api.SignCommand(evilKey, "d1", c)
+	a.state.CommandKeyPrevUntil = time.Now().Add(time.Hour)
+	if a.verifyCommand(c) == nil {
+		t.Fatal("command of an unknown key accepted")
+	}
+}
+
+// The enrolled agent verifies the server with standard TLS verification
+// against the device CAs, host included, and new CAs apply at once.
+func TestSwapTransportRoots(t *testing.T) {
+	mkCA := func() (*x509.Certificate, *ecdsa.PrivateKey) {
+		key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "ca"}, NotAfter: time.Now().Add(time.Hour),
+			IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+		der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+		c, _ := x509.ParseCertificate(der)
+		return c, key
+	}
+	oldCA, _ := mkCA()
+	newCA, newKey := mkCA()
+	k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), NotAfter: time.Now().Add(time.Hour),
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, _ := x509.CreateCertificate(rand.Reader, tmpl, newCA, &k.PublicKey, newKey)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: k}}}
+	srv.StartTLS()
+	defer srv.Close()
+
+	tc, err := pinnedTLS(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: oldCA.Raw}), srv.URL)
+	if err != nil || tc.InsecureSkipVerify || tc.RootCAs == nil {
+		t.Fatalf("pinnedTLS: %v skip=%v", err, tc.InsecureSkipVerify)
+	}
+	c := newClient(tc)
+	if resp, err := c.Get(srv.URL); err == nil {
+		resp.Body.Close()
+		t.Fatal("certificate of an untrusted CA accepted")
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(oldCA)
+	pool.AddCert(newCA)
+	c.Transport.(*swapTransport).setRoots(pool)
+	resp, err := c.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("new CA after the swap: %v", err)
+	}
+	resp.Body.Close()
+	if resp, err := c.Get(strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)); err == nil {
+		resp.Body.Close()
+		t.Fatal("wrong host accepted")
+	}
+}
+
+func TestParseCAs(t *testing.T) {
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	mk := func(isCA bool) string {
+		tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "x"}, NotAfter: time.Now().Add(time.Hour),
+			IsCA: isCA, BasicConstraintsValid: true}
+		der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+		return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	}
+	if certs, err := parseCAs([]byte(mk(true) + mk(true))); err != nil || len(certs) != 2 {
+		t.Fatalf("two CAs: %d %v", len(certs), err)
+	}
+	if _, err := parseCAs([]byte(mk(true) + mk(false))); err == nil {
+		t.Fatal("a leaf certificate in the bundle was accepted")
+	}
+	if _, err := parseCAs([]byte("junk")); err == nil {
+		t.Fatal("empty bundle accepted")
+	}
+}
+
 func TestInventoryHelpers(t *testing.T) {
 	for in, want := range map[string]string{"To be filled by O.E.M.": "", "Default string": "", " LENOVO ": "LENOVO", "0123456789": "", "PF47M7M1": "PF47M7M1"} {
 		if got := cleanDMI(in); got != want {

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,6 +43,26 @@ type Settings struct {
 	// Password rules for passwords chosen in the console: local accounts on
 	// devices (create, reset) and local console accounts.
 	Rules PasswordPolicy `json:"password_policy"` // password rules
+	// FourEyes: wipe, lost mode, scripts and console role changes need a
+	// second admin's approval; FourEyesRecovery adds recovery key views.
+	FourEyes         bool `json:"four_eyes,omitempty"`
+	FourEyesRecovery bool `json:"four_eyes_recovery,omitempty"`
+	FourEyesShell    bool `json:"four_eyes_shell,omitempty"` // remote shell sessions
+	// RequireMFA refuses OIDC sign ins whose id token shows no second factor
+	// (amr), or, with MFAACR set, whose acr is not one of these values.
+	RequireMFA bool     `json:"require_mfa,omitempty"`
+	MFAACR     []string `json:"mfa_acr,omitempty"`
+	// AuditRetentionDays deletes audit entries older than this (0 keeps them).
+	AuditRetentionDays int `json:"audit_retention_days,omitempty"`
+	// RoleGroups give console roles to members of directory groups or OIDC
+	// group claims.
+	RoleGroups []RoleGroup `json:"role_groups,omitempty"`
+	// Privacy opt ins, both off by default: Geolocation sends device public
+	// addresses to LIMDM_GEOIP_URL, FallbackDNS lets agents ask public DNS
+	// over HTTPS resolvers when the system resolver fails.
+	Geolocation bool                `json:"geolocation,omitempty"`
+	FallbackDNS bool                `json:"fallback_dns,omitempty"`
+	RemoteShell RemoteShellSettings `json:"remote_shell,omitzero"`
 }
 
 // PasswordPolicy: the minimum length (12..128, 12 when unset) and the
@@ -68,7 +89,10 @@ var passwordErrors = []string{
 	"The password needs a digit.",
 	"The password needs a special character.",
 	"The password must not contain the user name.",
+	passwordMismatch, // not from Check: the repeat field of a console form differs
 }
+
+const passwordMismatch = "The passwords do not match."
 
 // Check returns the first rule pw breaks, as a message for the console.
 func (p PasswordPolicy) Check(pw, user string) string {
@@ -132,12 +156,14 @@ func envSettings(c Config) Settings {
 func (s *Server) loadSettings(ctx context.Context) error {
 	set := envSettings(s.cfg)
 	var raw []byte
-	err := s.db.QueryRow(ctx, `SELECT value FROM settings WHERE key='server'`).Scan(&raw)
+	var at time.Time
+	err := s.db.QueryRow(ctx, `SELECT value, updated_at FROM settings WHERE key='server'`).Scan(&raw, &at)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 	case err != nil:
 		return err
 	default:
+		s.ha.settingsAt.Store(at.UnixMicro())
 		var st storedSettings
 		if err := json.Unmarshal(raw, &st); err != nil {
 			return err
@@ -225,10 +251,24 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 	if n := set.Rules.MinLength; n != 0 && (n < 12 || n > 128) {
 		return nil, errors.New("minimum password length: 12 to 128")
 	}
+	if d := set.AuditRetentionDays; d != 0 && (d < 365 || d > 36500) {
+		return nil, errors.New("audit log retention: 0 (keep forever) or 365 to 36500 days")
+	}
+	if len(set.MFAACR) > 10 {
+		return nil, errors.New("accepted acr values: at most 10")
+	}
+	for _, v := range set.MFAACR {
+		if len(v) > 200 || strings.ContainsFunc(v, unicode.IsControl) {
+			return nil, errors.New("accepted acr values: up to 200 printable characters each")
+		}
+	}
 	if len(set.CompanyName) > 80 || strings.ContainsAny(set.CompanyName, "\x00\n\r\t") {
 		return nil, errors.New("company name: up to 80 characters on one line")
 	}
 	if err := validLogo(set.Logo); err != nil {
+		return nil, err
+	}
+	if err := set.RemoteShell.validate(); err != nil {
 		return nil, err
 	}
 	allow, err := parseNets(set.ConsoleAllow)
@@ -328,11 +368,19 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 	if tab == "" {
 		tab = r.URL.Query().Get("tab")
 	}
+	if tab == "monitoring" || tab == "integrations" { // both forms live on the notifications tab
+		tab = "notifications"
+	}
 	if !slices.Contains(settingsTabs, tab) {
 		tab = "general"
 	}
+	tabs := settingsTabLabels
+	if sess.TenantOnly() { // tenant accounts manage their notification channels only
+		tab, set = "notifications", Settings{}
+		tabs = slices.DeleteFunc(slices.Clone(tabs), func(t struct{ Key, Label string }) bool { return t.Key != tab })
+	}
 	data := map[string]any{}
-	if tab == "integrations" {
+	if tab == "notifications" {
 		views, err := s.channelViews(r.Context())
 		if err != nil {
 			s.fail(w, err)
@@ -340,17 +388,25 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 		}
 		data["Channels"], data["NotifyEvents"] = views, notifyEvents
 	}
+	if tab == "security" && keysAllowed(sess) {
+		if keys, err := s.KeysStatus(r.Context()); err != nil {
+			s.log.Error("key status", "err", err)
+		} else {
+			data["Keys"] = keys
+		}
+	}
 	s.render(w, r, sess, "settings", map[string]any{"Set": set, "ClientIP": clientIP(r), "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
-		"Tab": tab, "Tabs": settingsTabLabels, "Channels": data["Channels"], "NotifyEvents": data["NotifyEvents"],
-		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": s.webhookSecretHex()})
+		"Tab": tab, "Tabs": tabs, "Channels": data["Channels"], "NotifyEvents": data["NotifyEvents"], "Keys": data["Keys"], "TenantOnly": sess.TenantOnly(),
+		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": map[bool]string{false: hex.EncodeToString(s.whKey)}[sess.TenantOnly()],
+		"RoleGroupsText": roleGroupsText(set.RoleGroups)})
 }
 
 // settingsTabs are the sections of the settings page; each tab saves only
 // its own fields.
-var settingsTabs = []string{"general", "security", "sso", "monitoring", "branding", "integrations"}
+var settingsTabs = []string{"general", "security", "sso", "notifications", "branding"}
 
 var settingsTabLabels = []struct{ Key, Label string }{
-	{"general", "General"}, {"security", "Security"}, {"sso", "SSO"}, {"monitoring", "Monitoring"}, {"branding", "Branding"}, {"integrations", "Integrations"},
+	{"general", "General"}, {"security", "Security"}, {"sso", "SSO"}, {"notifications", "Notifications"}, {"branding", "Branding"},
 }
 
 func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess session) {
@@ -359,6 +415,21 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 	// at once must not overwrite each other, nor leave runtime and database apart
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
+	// and across instances; a change another instance saved a moment ago
+	// is loaded first, so this save does not undo it
+	unlock, err := clusterLock(ctx, s.db, lockSettings, 30*time.Second)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer unlock()
+	var at time.Time
+	if err := s.db.QueryRow(ctx, `SELECT updated_at FROM settings WHERE key='server'`).Scan(&at); err == nil && at.UnixMicro() != s.ha.settingsAt.Load() {
+		if err := s.loadSettings(ctx); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
 	cur := s.settings()
 	set := cur
 	switch r.FormValue("section") {
@@ -369,6 +440,14 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		set.OIDCIssuer = strings.TrimRight(strings.TrimSpace(r.FormValue("oidc_issuer")), "/")
 		set.OIDCClientID = strings.TrimSpace(r.FormValue("oidc_client_id"))
 		set.AllowedDomain = strings.ToLower(strings.TrimSpace(r.FormValue("allowed_domain")))
+		set.RequireMFA = r.FormValue("require_mfa") == "on"
+		set.MFAACR = strings.Fields(r.FormValue("mfa_acr"))
+		groups, err := parseRoleGroups(r.FormValue("role_groups"))
+		if err != nil {
+			s.renderSettings(w, r, sess, set, "", err.Error())
+			return
+		}
+		set.RoleGroups = groups
 	case "monitoring":
 		set.WebhookURL = strings.TrimSpace(r.FormValue("webhook_url"))
 	case "network":
@@ -379,8 +458,26 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		n, _ := strconv.Atoi(r.FormValue("min_length"))
 		set.Rules = PasswordPolicy{MinLength: n, Upper: r.FormValue("upper") == "on", Lower: r.FormValue("lower") == "on",
 			Digit: r.FormValue("digit") == "on", Symbol: r.FormValue("symbol") == "on", NoName: r.FormValue("no_name") == "on"}
+		set.FourEyes = r.FormValue("four_eyes") == "on"
+		set.FourEyesRecovery = set.FourEyes && r.FormValue("four_eyes_recovery") == "on"
+		set.FourEyesShell = set.FourEyes && r.FormValue("four_eyes_shell") == "on"
+		set.AuditRetentionDays, _ = strconv.Atoi(r.FormValue("audit_retention_days"))
+		if set.FourEyes && !cur.FourEyes {
+			n, err := s.activeAdmins(ctx)
+			if err != nil {
+				s.fail(w, err)
+				return
+			}
+			if n < 2 {
+				s.renderSettings(w, r, sess, set, "", "Four eyes approval needs at least two active administrators: with one, nobody could approve a request.")
+				return
+			}
+		}
+		set.Geolocation, set.FallbackDNS = r.FormValue("geolocation") == "on", r.FormValue("fallback_dns") == "on"
+	case "remote_shell":
+		set.RemoteShell = remoteShellForm(r)
 	default:
-		http.Error(w, "unknown settings section", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "unknown settings section")
 		return
 	}
 	if f, _, err := r.FormFile("logo"); err == nil {
@@ -433,18 +530,20 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		return
 	}
 	doc, _ := json.Marshal(storedSettings{Settings: set, SecretEnc: enc})
-	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d allow=%q block=%q rules=%+v",
+	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d allow=%q block=%q rules=%+v four_eyes=%v four_eyes_recovery=%v four_eyes_shell=%v require_mfa=%v acr=%q audit_retention_days=%d role_groups=%+v geolocation=%v fallback_dns=%v",
 		set.OIDCIssuer, set.AllowedDomain, set.LocalLogin, set.StaleHours, set.WebhookURL != "", set.OIDCClientSecret != cur.OIDCClientSecret,
-		set.CompanyName, len(set.Logo), set.ConsoleAllow, set.ConsoleBlock, set.Rules)
+		set.CompanyName, len(set.Logo), set.ConsoleAllow, set.ConsoleBlock, set.Rules,
+		set.FourEyes, set.FourEyesRecovery, set.FourEyesShell, set.RequireMFA, set.MFAACR, set.AuditRetentionDays, set.RoleGroups, set.Geolocation, set.FallbackDNS) + fmt.Sprintf(" remote_shell=%+v", set.RemoteShell)
 	err = s.auditAction(ctx, sess.Email, "settings.save", "server", detail, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
-		return err
+		return tx.QueryRow(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()
+			RETURNING updated_at`, string(doc)).Scan(&at)
 	})
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	s.rt.Store(rt) // only what is stored and audited becomes active
+	s.ha.settingsAt.Store(at.UnixMicro())
 	s.renderSettings(w, r, sess, set, "Settings saved and active.", "")
 }
 

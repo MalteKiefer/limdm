@@ -330,6 +330,49 @@ func TestIntegration(t *testing.T) {
 	call(dev, "/api/v1/checkin", api.CheckinRequest{DeclarationsToken: cr.DeclarationsToken, StatusHash: "s1", PackagesHash: "p1",
 		Results: []api.CommandResult{{ID: cr.Commands[0].ID, OK: true, Output: "ok"}}, Events: []string{"remediated kernel.aslr"}}, nil)
 
+	// script results and diagnostics bundles are stored per device; bundles download for admins
+	ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"diagnostics"}}, adminSess)
+	if code, body := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"script"}, "payload": {"echo $A"}, "params": {"A=1"}}, adminSess); code != http.StatusSeeOther {
+		t.Fatalf("script with parameters: %d %s", code, body)
+	}
+	cr = api.CheckinResponse{}
+	call(dev, "/api/v1/checkin", api.CheckinRequest{DeclarationsToken: firstToken, StatusHash: "s1", PackagesHash: "p1"}, &cr)
+	var res []api.CommandResult
+	for _, c := range cr.Commands {
+		switch c.Type {
+		case "diagnostics":
+			res = append(res, api.CommandResult{ID: c.ID, OK: true, Output: "collected", Diagnostics: "journal line\x00 one"})
+		case "script":
+			if !strings.Contains(c.Payload, `"A":"1"`) {
+				t.Fatalf("script payload %q", c.Payload)
+			}
+			res = append(res, api.CommandResult{ID: c.ID, Output: "1", Script: &api.ScriptResult{ExitCode: 2, Stdout: "1\n", Start: time.Now(), End: time.Now()}})
+		}
+	}
+	if code := call(dev, "/api/v1/checkin", api.CheckinRequest{DeclarationsToken: cr.DeclarationsToken, StatusHash: "s1", PackagesHash: "p1", Results: res,
+		ScriptResults: []api.ScriptResult{{Name: "cleanup", ExitCode: 0, Start: time.Now(), End: time.Now()}}}, nil); code != 200 || len(res) != 2 {
+		t.Fatalf("results checkin: %d %d", code, len(res))
+	}
+	var nScripts, nDiag int
+	db.QueryRow(ctx, `SELECT count(*) FROM script_results WHERE device_id=$1`, er.DeviceID).Scan(&nScripts)
+	db.QueryRow(ctx, `SELECT count(*) FROM diagnostics WHERE device_id=$1`, er.DeviceID).Scan(&nDiag)
+	if nScripts != 2 || nDiag != 1 {
+		t.Fatalf("stored %d script results, %d bundles", nScripts, nDiag)
+	}
+	diagPath := "/devices/" + er.DeviceID + "/diagnostics/" + fmt.Sprint(res[0].ID)
+	if res[0].Diagnostics == "" {
+		diagPath = "/devices/" + er.DeviceID + "/diagnostics/" + fmt.Sprint(res[1].ID)
+	}
+	if code, body := ui("GET", diagPath, nil, adminSess); code != 200 || !strings.Contains(body, "journal line one") {
+		t.Fatalf("diagnostics download: %d %q", code, body)
+	}
+	if code, _ := ui("GET", diagPath, nil, auditor); code != http.StatusForbidden {
+		t.Fatalf("auditor downloaded diagnostics: %d", code)
+	}
+	if code, body := ui("GET", "/devices/"+er.DeviceID+"?tab=commands", nil, adminSess); code != 200 || !strings.Contains(body, "cleanup") {
+		t.Fatalf("commands tab: %d", code)
+	}
+
 	// every admin page renders
 	pages := []string{"/", "/devices", "/devices?status=non-compliant&q=laptop", "/compliance", "/compliance?state=failing&level=1&framework=iso&sort=fail&q=luks", "/blueprints", "/blueprints/" + bpID, "/blueprints/new", "/library", "/library/new?type=com.limdm.packages", "/library/" + itemID("Debian tools"), "/tokens", "/audit"}
 	for _, tab := range []string{"overview", "hardware", "network", "software", "software&sub=sources", "accounts", "accounts&sub=groups&system=1", "compliance", "declarations", "commands&type=reboot"} {
@@ -642,8 +685,9 @@ func TestIntegration(t *testing.T) {
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"reboot"}}, help); code != http.StatusSeeOther {
 		t.Fatalf("helpdesk command: %d", code)
 	}
-	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"shutdown"}, "minutes": {"5000"}}, help); code != http.StatusBadRequest {
-		t.Fatalf("delay out of range accepted: %d", code)
+	if code, body := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"shutdown"}, "minutes": {"5000"}}, help); code != http.StatusBadRequest ||
+		!strings.Contains(body, `class="notice error"`) || !strings.Contains(body, "delay must be 0..1440 minutes") {
+		t.Fatalf("delay out of range accepted or not shown in the console layout: %d", code)
 	}
 	// lost mode and wipe: admins only, confirmed with the host name
 	var host string
@@ -665,6 +709,37 @@ func TestIntegration(t *testing.T) {
 	}
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"script"}, "payload": {"id"}}, help); code != http.StatusForbidden {
 		t.Fatalf("helpdesk script must be refused: %d", code)
+	}
+	// the helpdesk role description: lock, message and local password resets yes, account removal and software no
+	for typ, want := range map[string]int{"lock": http.StatusSeeOther, "user_lock": http.StatusSeeOther, "user_delete": http.StatusForbidden,
+		"app_install": http.StatusForbidden, "allow_uninstall": http.StatusForbidden} {
+		if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {typ}, "username": {"jdoe"}, "app": {"x"}}, help); code != want {
+			t.Fatalf("helpdesk %s: %d, want %d", typ, code, want)
+		}
+	}
+	// the device page (retired by now) says where the blueprint comes from and hides admin dialogs
+	if code, body := ui("GET", "/devices/"+er.DeviceID, nil, help); code != 200 || strings.Contains(body, "dlg-wipe") || !strings.Contains(body, "/help#blueprint-source") {
+		t.Fatalf("helpdesk device page: %d", code)
+	}
+	for _, p := range []string{"/help", "/blueprints", "/library/new?type=com.limdm.screenlock"} {
+		if code, body := ui("GET", p, nil, adminSess); code != 200 || !strings.Contains(body, `class="doclink"`) && !strings.Contains(body, "Field reference") && !strings.Contains(body, "Glossary") {
+			t.Fatalf("GET %s: %d", p, code)
+		}
+	}
+	if code, body := ui("GET", "/", nil, adminSess); code != 200 || !strings.Contains(body, "First steps") {
+		t.Fatalf("overview without company settings must show the first steps: %d", code)
+	}
+	if code, _ := ui("POST", "/onboarding/dismiss", url.Values{}, adminSess); code != http.StatusSeeOther {
+		t.Fatalf("dismiss first steps: %d", code)
+	}
+	var cmdsBefore, cmdsAfter int
+	db.QueryRow(ctx, `SELECT count(*) FROM commands`).Scan(&cmdsBefore)
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"user_password"}, "username": {"jdoe"},
+		"password": {"Correct-horse-99x"}, "password2": {"other"}}, help); code != http.StatusSeeOther {
+		t.Fatalf("password mismatch must return to the form: %d", code)
+	}
+	if db.QueryRow(ctx, `SELECT count(*) FROM commands`).Scan(&cmdsAfter); cmdsAfter != cmdsBefore {
+		t.Fatal("a password reset with a different repeat field was queued")
 	}
 	if code, _ := ui("POST", "/tokens", url.Values{"uses": {"1"}, "days": {"1"}}, help); code != http.StatusForbidden {
 		t.Fatalf("helpdesk configuration must be refused: %d", code)
@@ -884,7 +959,7 @@ func TestWebhookSignature(t *testing.T) {
 		bodies <- b
 	}))
 	defer ts.Close()
-	s := &Server{cfg: Config{SessionKey: bytes.Repeat([]byte{2}, 32)}, hooks: ts.Client(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s := &Server{cfg: Config{SessionKey: bytes.Repeat([]byte{2}, 32)}, whKey: bytes.Repeat([]byte{3}, 32), hooks: ts.Client(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	s.rt.Store(&runtimeState{set: Settings{WebhookURL: ts.URL}})
 	s.sendWebhook(&webhookEvent{Type: "device.noncompliant", DeviceID: "d1"})
 	select {
@@ -1026,7 +1101,7 @@ func TestRecoveryEscrow(t *testing.T) {
 	}
 	// commands are signed with the command key over what was created
 	tx, _ = db.Begin(ctx)
-	if err := s.insertCommand(ctx, tx, "d1", "lock", "", "admin@firma.de"); err != nil {
+	if _, err := s.insertCommand(ctx, tx, "d1", "lock", "", "admin@firma.de"); err != nil {
 		t.Fatal(err)
 	}
 	var signed api.Command
@@ -1170,6 +1245,7 @@ func TestAgentUpdates(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Server{db: db, cmdKey: testCmdKey, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s.rt.Store(&runtimeState{set: Settings{StaleHours: 24}, auth: &oidcAuth{}})
 	for i, id := range []string{"d1", "d2", "d3", "d4"} {
 		tags := "{}"
 		if i == 0 {

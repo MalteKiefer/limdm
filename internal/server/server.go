@@ -5,6 +5,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -12,7 +13,6 @@ import (
 	"crypto/x509"
 	_ "embed"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -43,27 +43,34 @@ import (
 var schema string
 
 type Config struct {
-	DatabaseURL   string
-	Listen        string // admin UI
-	PublicURL     string // admin UI URL, used for the OIDC redirect
-	TLSCert       string // admin UI certificate (public CA); without it the UI binds to loopback only
-	TLSKey        string
-	AgentListen   string   // agent API, mTLS terminated here, never by a proxy
-	AgentURL      string   // URL agents use, its host goes into the server certificate
-	AgentHosts    []string // additional names/IPs for the agent certificate, e.g. the IP older agents enrolled with
-	ReleaseRepo   string   // GitHub owner/name the install script downloads agent packages from
-	GeoIPURL      string   // location lookup for device addresses, the IP is appended; "" disables
-	CADir         string
-	LocalLogin    bool // local admin accounts with password and TOTP
-	OIDCIssuer    string
-	OIDCClientID  string
-	OIDCSecret    string
-	AllowedDomain string
-	Admins        []string
-	Auditors      []string
-	SessionKey    []byte
-	ReleaseDir    string
-	StaleAfter    time.Duration
+	DatabaseURL    string
+	Listen         string // admin UI
+	PublicURL      string // admin UI URL, used for the OIDC redirect
+	TLSCert        string // admin UI certificate (public CA); without it the UI binds to loopback only
+	TLSKey         string
+	AgentListen    string   // agent API, mTLS terminated here, never by a proxy
+	AgentURL       string   // URL agents use, its host goes into the server certificate
+	AgentHosts     []string // additional names/IPs for the agent certificate, e.g. the IP older agents enrolled with
+	ReleaseRepo    string   // GitHub owner/name the install script downloads agent packages from
+	GeoIPURL       string   // location lookup for device addresses, the IP is appended; "" disables
+	CADir          string
+	LocalLogin     bool // local admin accounts with password and TOTP
+	OIDCIssuer     string
+	OIDCClientID   string
+	OIDCSecret     string
+	AllowedDomain  string
+	Admins         []string
+	Auditors       []string
+	SessionKey     []byte   // the first key of LIMDM_SESSION_KEY: seals and signs
+	OldSessionKeys [][]byte // further keys during a rotation: open only (keys.go)
+	Keys           KeyProvider
+	ReleaseDir     string
+	StaleAfter     time.Duration
+	Syslog         string // udp://host:port or tcp://host:port: audit entries and device events as RFC 5424
+	// proxies (load balancers) whose X-Forwarded-For is trusted for the client address, besides loopback
+	TrustedProxies []netip.Prefix
+	DrainDelay     time.Duration // between failing /readyz and closing connections at shutdown
+	MultiTenant    bool          // tenant pages and switcher (tenant.go); isolation applies always
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -95,6 +102,8 @@ func ConfigFromEnv() (Config, error) {
 		AgentHosts:    split(os.Getenv("LIMDM_AGENT_HOSTS")),
 		ReleaseRepo:   os.Getenv("LIMDM_RELEASE_REPO"),
 		GeoIPURL:      envOr("LIMDM_GEOIP_URL", "https://ipwho.is/"),
+		Syslog:        os.Getenv("LIMDM_SYSLOG"),
+		MultiTenant:   os.Getenv("LIMDM_MULTI_TENANT") == "true",
 	}
 	if c.GeoIPURL == "off" {
 		c.GeoIPURL = ""
@@ -114,6 +123,14 @@ func ConfigFromEnv() (Config, error) {
 		return c, errors.New("LIMDM_STALE_HOURS must be a positive integer")
 	}
 	c.StaleAfter = time.Duration(hours) * time.Hour
+	if c.TrustedProxies, err = parseProxies(os.Getenv("LIMDM_TRUSTED_PROXIES")); err != nil {
+		return c, err
+	}
+	drain, err := strconv.Atoi(envOr("LIMDM_DRAIN_SECONDS", "5"))
+	if err != nil || drain < 0 || drain > 300 {
+		return c, errors.New("LIMDM_DRAIN_SECONDS must be 0 to 300")
+	}
+	c.DrainDelay = time.Duration(drain) * time.Second
 	var missing []string
 	required := map[string]string{
 		"LIMDM_DATABASE_URL": c.DatabaseURL, "LIMDM_PUBLIC_URL": c.PublicURL, "LIMDM_AGENT_URL": c.AgentURL,
@@ -129,9 +146,14 @@ func ConfigFromEnv() (Config, error) {
 	if len(missing) > 0 {
 		return c, fmt.Errorf("missing env: %s", strings.Join(missing, ", "))
 	}
-	c.SessionKey, err = hex.DecodeString(os.Getenv("LIMDM_SESSION_KEY"))
-	if err != nil || len(c.SessionKey) < 32 {
-		return c, errors.New("LIMDM_SESSION_KEY must be at least 32 bytes hex (openssl rand -hex 32)")
+	keys, err := parseSessionKeys(os.Getenv("LIMDM_SESSION_KEY"))
+	if err != nil {
+		return c, err
+	}
+	c.SessionKey, c.OldSessionKeys = keys[0], keys[1:]
+	c.Keys = KeyProviderFromEnv()
+	if err := c.Keys.validate(); err != nil {
+		return c, err
 	}
 	if c.OIDCIssuer == "" && !c.LocalLogin {
 		return c, errors.New("enable at least one login method: LIMDM_OIDC_ISSUER or LIMDM_LOCAL_LOGIN=true")
@@ -189,20 +211,22 @@ type Server struct {
 	cfg    Config
 	db     *pgxpool.Pool
 	ca     *deviceCA
-	cmdKey ed25519.PrivateKey // signs commands (command.key next to the CA)
+	netCA  *deviceCA     // issues EAP-TLS device certificates (devicecerts.go)
+	cmdKey crypto.Signer // signs commands (command.key next to the CA, or in the HSM)
+	kr     keyring       // keys of running rotations (keys.go)
 	log    *slog.Logger
 	limit  limiter
 	rt     atomic.Pointer[runtimeState] // settings editable in the UI and the OIDC client built from them
 	hooks  *http.Client                 // webhook client; nil uses http.DefaultClient (tests inject one)
+	whKey  []byte                       // webhook signing secret, loaded at startup (webhooksecret.go)
 	geoSem chan struct{}                // one location lookup at a time
 
-	saveMu     sync.Mutex  // serializes settings saves
+	saveMu     sync.Mutex  // serializes settings saves in this instance (clusterLock across instances)
 	rediscover atomic.Bool // OIDC discovery failed at startup and is retried
-	// ponytail: per process; a database row lock when SCIM runs on several instances
-	scimMu sync.Mutex // serializes SCIM PATCH read-modify-write
-	fleet  atomic.Pointer[fleetCache]
-	// first broken audit entry found by the last full verification, 0 = intact
-	auditBroken atomic.Int64
+	fleet      atomic.Pointer[fleetCache]
+	shells     shellHub // remote shell sessions this instance holds
+	ha         cluster  // instance identity, notifications, relay (cluster.go)
+	brands     sync.Map // tenant id -> brandEntry (tenant.go)
 }
 
 func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
@@ -243,46 +267,130 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	if err := migrate(ctx, db); err != nil {
 		return nil, err
 	}
-	ca, err := loadOrCreateCA(cfg.CADir)
+	trustedProxies = cfg.TrustedProxies
+	// instances starting at once must not each create keys or migrate data
+	unlock, err := clusterLock(ctx, db, lockStartup, 5*time.Minute)
 	if err != nil {
-		return nil, fmt.Errorf("device CA: %w", err)
+		return nil, fmt.Errorf("startup lock: %w", err)
 	}
-
-	log.Info("device CA ready", "fingerprint", ca.Fingerprint())
-	cmdKey, err := loadOrCreateCommandKey(cfg.CADir)
+	defer unlock()
+	s, err := openCore(ctx, cfg, log, db)
 	if err != nil {
-		return nil, fmt.Errorf("command key: %w", err)
+		return nil, err
 	}
-	itemKey = cmdKey
+	log.Info("device CA ready", "fingerprint", s.tlsCA().Fingerprint())
 	if err := signExistingItems(ctx, db, cfg.CADir); err != nil {
 		return nil, fmt.Errorf("signing library items: %w", err)
 	}
-	s := &Server{cfg: cfg, db: db, ca: ca, cmdKey: cmdKey, log: log, geoSem: make(chan struct{}, 1)}
+	if err := s.resignItems(ctx); err != nil {
+		return nil, fmt.Errorf("signing library items with the new command key: %w", err)
+	}
+	if err := s.sealLoginSecrets(ctx); err != nil {
+		return nil, fmt.Errorf("sealing login client secrets: %w", err)
+	}
+	// baseline version of items saved before versioning existed; here and not
+	// in schema.sql, so it holds the signed payload with secrets sealed.
+	// Network items get theirs masked at their first change (versions.go).
+	if _, err := db.Exec(ctx, `INSERT INTO library_item_versions(item_id, version, name, type, description, payload, signature, note, created_by, created_at)
+		SELECT i.id, 1, i.name, i.type, i.description, i.payload, i.signature, 'baseline', 'system', i.updated_at FROM library_items i
+		WHERE i.type <> $1 AND NOT EXISTS (SELECT 1 FROM library_item_versions v WHERE v.item_id = i.id)`, api.TypeNetwork); err != nil {
+		return nil, fmt.Errorf("library baseline versions: %w", err)
+	}
 	if err := s.seedConsoleUsers(ctx); err != nil {
 		return nil, err
 	}
 	if err := s.loadSettings(ctx); err != nil {
 		return nil, fmt.Errorf("settings: %w", err)
 	}
+	if err := s.startCluster(); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
-func (s *Server) Close() { s.db.Close() }
+// openCore loads the keys and the audit chain state: what the server and
+// limdm-server keys need.
+func openCore(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Pool) (*Server, error) {
+	s := &Server{cfg: cfg, db: db, log: log, geoSem: make(chan struct{}, 1)}
+	if err := s.loadKeys(); err != nil {
+		return nil, err
+	}
+	itemKey = s.cmdKey
+	if s.kr.cmdPrev != nil {
+		itemPrevKey = s.kr.cmdPrev.Public().(ed25519.PublicKey)
+	}
+	if err := s.checkSharedKeys(ctx); err != nil {
+		return nil, err
+	}
+	if err := checkAuditSwitch(ctx, db, cfg.CADir); err != nil {
+		return nil, err
+	}
+	if err := initAuditKey(ctx, db, cfg.CADir, s.cmdKey, s.kr.cmdPrev); err != nil {
+		return nil, fmt.Errorf("audit key: %w", err)
+	}
+	var err error
+	if itemSecrets, err = s.aead(infoItems); err != nil {
+		return nil, err
+	}
+	if s.whKey, err = s.loadWebhookSecret(ctx); err != nil {
+		return nil, fmt.Errorf("webhook secret: %w", err)
+	}
+	return s, nil
+}
+
+// OpenKeys opens the database and the keys for limdm-server keys.
+func OpenKeys(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
+	pc, err := pgxPoolConfig(cfg.DatabaseURL)
+	if err != nil {
+		return nil, err
+	}
+	db, err := newPool(ctx, pc)
+	if err != nil {
+		return nil, err
+	}
+	if err := migrate(ctx, db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	s, err := openCore(ctx, cfg, log, db)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	s.kr.cli = true
+	return s, nil
+}
+
+// Close stops heartbeat and listener, deregisters the instance and closes
+// the database pool.
+func (s *Server) Close() {
+	if s.ha.cancel != nil {
+		s.ha.cancel()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, _ = s.db.Exec(ctx, `DELETE FROM server_instances WHERE id=$1`, s.ha.id)
+		cancel()
+	}
+	s.db.Close()
+}
 
 // Background runs periodic jobs until ctx ends.
 func (s *Server) Background(ctx context.Context) {
 	for name, loop := range map[string]func(context.Context){"google sync": s.googleSyncLoop, "history": s.historyLoop,
-		"releases": s.releaseLoop, "catalog icons": s.iconLoop} {
-		go s.background(ctx, name, loop)
+		"catalog icons": s.iconLoop, "syslog": s.syslogLoop, "reseal": s.resealLoop} {
+		go s.background(ctx, name, loop, true)
 	}
+	// every instance serves agent packages from its own release directory
+	go s.background(ctx, "releases", s.releaseLoop, false)
 	go s.rediscoverLoop(ctx)
 }
 
 // background runs a loop for the life of the server: a panic is logged and
 // the loop restarts after a minute instead of taking the server down. With
 // several server instances only the one holding the loop's advisory lock
-// runs it, so syncs and downloads do not happen twice.
-func (s *Server) background(ctx context.Context, name string, loop func(context.Context)) {
+// runs it (leader), so syncs and downloads do not happen twice. The leader
+// checks its lock connection; when the connection breaks the lock is gone
+// and the loop stops, so another instance can take over without overlap.
+func (s *Server) background(ctx context.Context, name string, loop func(context.Context), leader bool) {
 	key := int64(crc32.ChecksumIEEE([]byte("limdm-loop:" + name)))
 	for ctx.Err() == nil {
 		func() {
@@ -291,21 +399,61 @@ func (s *Server) background(ctx context.Context, name string, loop func(context.
 					s.log.Error("background loop panicked", "loop", name, "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
 				}
 			}()
+			if !leader {
+				loop(ctx)
+				return
+			}
+			// an instance with an outdated audit key cannot write the
+			// entries its jobs record: it leaves them to the others
+			if stale, err := auditKeyStale(ctx, s.db); err != nil || stale {
+				return
+			}
 			conn, err := s.db.Acquire(ctx)
 			if err != nil {
 				return
 			}
 			defer conn.Release()
-			var leader bool
-			if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&leader); err != nil || !leader {
+			var got bool
+			if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&got); err != nil || !got {
 				return // another instance runs it
 			}
-			defer func() { _, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, key) }()
-			loop(ctx)
+			s.log.Info("leading background loop", "loop", name, "instance", s.ha.id)
+			lctx, cancel := context.WithCancel(ctx)
+			watched := make(chan struct{})
+			go func() { // the lock lives as long as this session
+				defer close(watched)
+				t := time.NewTicker(leaderRetry)
+				defer t.Stop()
+				for {
+					select {
+					case <-lctx.Done():
+						return
+					case <-t.C:
+						if _, err := conn.Exec(lctx, `SELECT 1`); err != nil && lctx.Err() == nil {
+							s.log.Error("lost the background loop lock", "loop", name, "err", err)
+							cancel()
+							return
+						}
+						if stale, _ := auditKeyStale(lctx, s.db); stale {
+							s.log.Warn("audit key outdated: handing the background loop over", "loop", name)
+							cancel()
+							return
+						}
+					}
+				}
+			}()
+			defer func() {
+				cancel()
+				<-watched // the connection is free again
+				if _, err := conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, key); err != nil {
+					_ = conn.Conn().Close(context.WithoutCancel(ctx))
+				}
+			}()
+			loop(lctx)
 		}()
 		select {
 		case <-ctx.Done():
-		case <-time.After(time.Minute):
+		case <-time.After(leaderRetry):
 		}
 	}
 }
@@ -313,13 +461,12 @@ func (s *Server) background(ctx context.Context, name string, loop func(context.
 // AdminHandler serves the web UI.
 func (s *Server) AdminHandler() http.Handler {
 	mux := http.NewServeMux()
+	// liveness: the process serves requests; readiness (database, schema,
+	// keys, notifications) is /readyz
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		if err := s.db.Ping(r.Context()); err != nil {
-			http.Error(w, "db down", http.StatusServiceUnavailable)
-			return
-		}
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
+	mux.HandleFunc("GET /readyz", s.readyz)
 	s.scimRoutes(mux)
 	mux.HandleFunc("GET /login", s.loginPage)
 	mux.HandleFunc("GET /lang/{lang}", s.setLang)
@@ -332,7 +479,8 @@ func (s *Server) AdminHandler() http.Handler {
 	mux.HandleFunc("POST /logout", s.logout)
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	s.webRoutes(mux)
-	return securityHeaders(s.consoleFilter(mux))
+	s.apiRoutes(mux)
+	return countRequests("console", securityHeaders(s.consoleFilter(mux)))
 }
 
 // AgentHandler serves the agent API. Everything except fetching the CA and
@@ -341,17 +489,19 @@ func (s *Server) AgentHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/ca", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-pem-file")
-		w.Write(s.ca.pem)
+		w.Write(s.tlsCA().pem)
 	})
 	mux.HandleFunc("POST /api/v1/enroll", s.enroll)
 	mux.HandleFunc("POST /api/v1/renew", s.deviceAuth(s.renew, true))
 	mux.HandleFunc("POST /api/v1/checkin", s.deviceAuth(s.checkin, false))
 	mux.HandleFunc("POST /api/v1/poll", s.deviceAuth(s.poll, false))
+	mux.HandleFunc("POST /api/v1/network-cert", s.deviceAuth(s.deviceLimit(5, s.networkCert), false))
 	mux.HandleFunc("GET /api/v1/agent-packages/{version}/{file}", s.deviceAuth(s.agentPackage, false))
 	mux.HandleFunc("GET /api/v1/catalog/icons/{id}", s.deviceAuth(s.catalogIcon, false))
 	mux.HandleFunc("GET /api/v1/catalog/search", s.deviceAuth(s.deviceLimit(30, s.flathubSearchJSON), false))
 	mux.HandleFunc("GET /api/v1/catalog/flathub-icon", s.deviceAuth(s.deviceLimit(300, s.flathubIcon), false))
-	return securityHeaders(mux)
+	s.shellAgentRoutes(mux)
+	return countRequests("agent", securityHeaders(mux))
 }
 
 // AgentTLSConfig: TLS 1.3 only, server certificate from the device CA. The
@@ -361,7 +511,7 @@ func (s *Server) AgentHandler() http.Handler {
 func (s *Server) AgentTLSConfig() (*tls.Config, error) {
 	u, _ := url.Parse(s.cfg.AgentURL)
 	names := append([]string{u.Hostname()}, s.cfg.AgentHosts...)
-	cert, err := s.ca.serverCert(names)
+	cert, err := s.tlsCA().serverCert(names)
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +524,7 @@ func (s *Server) AgentTLSConfig() (*tls.Config, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			if time.Until(cert.Leaf.NotAfter) < 30*24*time.Hour {
-				if next, err := s.ca.serverCert(names); err == nil {
+				if next, err := s.tlsCA().serverCert(names); err == nil {
 					cert = next
 				} else {
 					s.log.Error("renew agent TLS certificate", "err", err)
@@ -384,7 +534,7 @@ func (s *Server) AgentTLSConfig() (*tls.Config, error) {
 			return &c, nil
 		},
 		ClientAuth: tls.RequestClientCert,
-		ClientCAs:  s.ca.pool(),
+		ClientCAs:  s.devicePool(),
 	}, nil
 }
 
@@ -458,7 +608,7 @@ func (s *Server) verifyDevice(r *http.Request, allowExpired bool) (*x509.Certifi
 		return nil, errors.New("client certificate required")
 	}
 	leaf := r.TLS.PeerCertificates[0]
-	opts := x509.VerifyOptions{Roots: s.ca.pool(), KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}
+	opts := x509.VerifyOptions{Roots: s.devicePool(), KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}
 	if now := time.Now(); allowExpired && now.After(leaf.NotAfter) && now.Sub(leaf.NotAfter) < expiredRenewGrace {
 		opts.CurrentTime = leaf.NotAfter.Add(-time.Minute)
 	}
@@ -525,8 +675,10 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(ctx)
 	var blueprintID *int64
+	var tenantID int64 // the device joins the tenant of its token
 	err = tx.QueryRow(ctx, `UPDATE enroll_tokens SET uses_left = uses_left - 1
-		WHERE token_hash=$1 AND uses_left > 0 AND expires_at > now() RETURNING blueprint_id`, sha(req.Token)).Scan(&blueprintID)
+		WHERE token_hash=$1 AND uses_left > 0 AND expires_at > now()
+		AND tenant_id IN (SELECT id FROM tenants WHERE NOT disabled) RETURNING blueprint_id, tenant_id`, sha(req.Token)).Scan(&blueprintID, &tenantID)
 	if err != nil {
 		s.limit.allow("enroll:"+rateKey(r), 20, 5*time.Minute) // counts the failure
 		s.log.Warn("enroll rejected", "remote", clientIP(r))
@@ -539,8 +691,8 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid certificate signing request")
 		return
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, machine_id, blueprint_id) VALUES ($1,$2,$3,$4,$5,$6)`,
-		id, serial, notAfter, truncate(req.Hostname, 255), truncate(req.MachineID, 64), blueprintID); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, machine_id, blueprint_id, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		id, serial, notAfter, truncate(req.Hostname, 255), truncate(req.MachineID, 64), blueprintID, tenantID); err != nil {
 		s.failAPI(w, err)
 		return
 	}
@@ -552,7 +704,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	// The ID is readable by every user and cannot prove anything, so retiring
 	// the older record stays an admin decision in the console.
 	if mid := strings.TrimSpace(req.MachineID); mid != "" {
-		rows, err := tx.Query(ctx, `SELECT id FROM devices WHERE machine_id=$1 AND id<>$2 AND NOT retired`, truncate(mid, 64), id)
+		rows, err := tx.Query(ctx, `SELECT id FROM devices WHERE machine_id=$1 AND id<>$2 AND NOT retired AND tenant_id=$3`, truncate(mid, 64), id, tenantID)
 		if err != nil {
 			s.failAPI(w, err)
 			return
@@ -688,8 +840,13 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st := req.Status; st != nil {
-		if _, err := tx.Exec(ctx, `UPDATE devices SET hostname=$2, inventory=$3, checks=$4, decl_status=$5, failing=$6, status_hash=$7 WHERE id=$1`,
-			id, truncate(st.Inventory.Hostname, 255), jsonb(st.Inventory), jsonb(st.Checks), jsonb(st.Declarations), countFailing(st.Checks), truncate(req.StatusHash, 128)); err != nil {
+		if err := recordCheckChanges(ctx, tx, id, st.Checks, st.CatalogVersion); err != nil {
+			s.failAPI(w, err)
+			return
+		}
+		if _, err := tx.Exec(ctx, `UPDATE devices SET hostname=$2, inventory=$3, checks=$4, decl_status=$5, failing=$6, status_hash=$7, catalog_version=$8 WHERE id=$1`,
+			id, truncate(st.Inventory.Hostname, 255), jsonb(st.Inventory), jsonb(st.Checks), jsonb(st.Declarations), countFailing(st.Checks), truncate(req.StatusHash, 128),
+			truncate(st.CatalogVersion, 32)); err != nil {
 			s.failAPI(w, err)
 			return
 		}
@@ -718,20 +875,39 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		}
 		var typ string
 		err := tx.QueryRow(ctx, `UPDATE commands SET status=$3, output=$4, updated_at=now(),
-			payload=CASE WHEN type IN ('user_create','user_password') THEN '' ELSE payload END WHERE id=$1 AND device_id=$2 AND status='sent'
-			RETURNING type`, res.ID, id, status, truncate(res.Output, 64<<10)).Scan(&typ)
+			payload=CASE WHEN type = ANY($5) THEN '' ELSE payload END WHERE id=$1 AND device_id=$2 AND status='sent'
+			RETURNING type`, res.ID, id, status, truncate(res.Output, 64<<10), secretCommands).Scan(&typ)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			s.failAPI(w, err)
 			return
+		}
+		if typ == "shell" && !res.OK {
+			s.shellRefused(ctx, res.ID, res.Output)
 		}
 		if !res.OK && slices.Contains([]string{"lock", "unlock", "lost", "found", "wipe", "script"}, typ) {
 			notices = append(notices, notice{Type: "command.failed", Severity: "critical", Title: "Command failed: " + typ,
 				Text: truncate(strings.TrimSpace(res.Output), 500)})
 		}
-		if err := audit(ctx, tx, "device:"+id, "command.result", strconv.FormatInt(res.ID, 10), status); err != nil {
+		// target is the device like the entry of the enqueue; both name the
+		// command ID, so the chain alone links who sent what with its result
+		detail := fmt.Sprintf("command %d %s %s", res.ID, firstNonEmpty(typ, "unknown"), status)
+		// the reason of a failure only: script output can hold anything, and
+		// the chain cannot forget it
+		if out := strings.TrimSpace(res.Output); out != "" && !res.OK {
+			detail += ": " + truncate(lastLine(out), 200)
+		}
+		if err := audit(ctx, tx, "device:"+id, "command.result", id, detail); err != nil {
 			s.failAPI(w, err)
 			return
 		}
+	}
+	if err := storeDiagnostics(ctx, tx, id, req.Results); err != nil {
+		s.failAPI(w, err)
+		return
+	}
+	if err := storeScriptResults(ctx, tx, id, req); err != nil {
+		s.failAPI(w, err)
+		return
 	}
 	tamperEvent, err := s.storeEvents(ctx, tx, id, req.Events)
 	if err != nil {
@@ -739,8 +915,12 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := api.CheckinResponse{ServerTime: time.Now().UTC(), CommandKey: hex.EncodeToString(s.cmdKey.Public().(ed25519.PublicKey)),
-		NeedStatus: statusHash != req.StatusHash, NeedPackages: pkgHash != req.PackagesHash}
+	resp := api.CheckinResponse{ServerTime: time.Now().UTC(),
+		NeedStatus: statusHash != req.StatusHash, NeedPackages: pkgHash != req.PackagesHash, FallbackDNS: s.settings().FallbackDNS}
+	if err := s.keyCheckin(ctx, tx, id, r, req, &resp); err != nil {
+		s.failAPI(w, err)
+		return
+	}
 	res, err := resolveDevice(ctx, tx, id)
 	if err != nil {
 		s.failAPI(w, err)
@@ -831,7 +1011,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		notices = append(notices, notice{Type: "agent.update_failed", Severity: "warning", Title: "Agent update failed: " + u.To,
 			Text: fmt.Sprintf("%s to %s failed (rolled back: %v). %s", u.From, u.To, u.RolledBack, truncate(u.Detail, 300))})
 	}
-	if b := s.branding(); b.Hash != req.BrandingHash {
+	if b := s.deviceBranding(ctx, id); b.Hash != req.BrandingHash {
 		resp.Branding = &b
 	}
 	if err := s.recordUpdateResult(ctx, tx, id, req.UpdateResult); err != nil {
@@ -871,30 +1051,53 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 // ---- audit ----
 
 // audit appends a hash chained entry. Each hash covers the previous hash, so
-// any later modification of a row breaks verification of every following row.
+// any later modification of a row breaks verification of every following row;
+// the hash is keyed (audit.go), so it cannot be recomputed from the database.
 func audit(ctx context.Context, tx pgx.Tx, actor, action, target, detail string) error {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7363)`); err != nil {
 		return err
 	}
-	prev := make([]byte, 32)
-	if err := tx.QueryRow(ctx, `SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1`).Scan(&prev); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	var prev []byte
+	var keyID *string
+	if err := tx.QueryRow(ctx, `SELECT (SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1), (SELECT key_id FROM audit_key)`).Scan(&prev, &keyID); err != nil {
+		return err
+	}
+	if prev == nil {
+		prev = make([]byte, 32)
+	}
+	// another instance started with a new command key: entries keyed with
+	// the old one would break the chain
+	if auditKey != nil && keyID != nil && *keyID != auditKeyCur {
+		return errAuditKeyStale
+	}
+	tenant, err := auditTenant(ctx, tx, target)
+	if err != nil {
 		return err
 	}
 	at := time.Now().UTC().Truncate(time.Microsecond)
-	_, err := tx.Exec(ctx, `INSERT INTO audit_log(at, actor, action, target, detail, prev, hash) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		at, actor, action, target, detail, prev, auditHash(prev, at, actor, action, target, detail))
+	_, err = tx.Exec(ctx, `INSERT INTO audit_log(at, actor, action, target, detail, prev, hash, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		at, actor, action, target, detail, prev, auditHash(auditKey, prev, at, auditFields(actor, action, target, detail, tenant)...), tenant)
 	return err
 }
 
-func auditHash(prev []byte, at time.Time, fields ...string) []byte {
-	h := sha256.New()
-	h.Write(prev)
-	h.Write(binary.BigEndian.AppendUint64(nil, uint64(at.UnixMicro())))
-	for _, f := range fields {
-		h.Write(binary.BigEndian.AppendUint64(nil, uint64(len(f))))
-		h.Write([]byte(f))
+// auditTenant is the tenant of an entry: the tenant the request acts for,
+// else the tenant of the device it is about, else none (a global entry).
+func auditTenant(ctx context.Context, tx pgx.Tx, target string) (*int64, error) {
+	if t := ctxTenant(ctx); t != 0 {
+		return &t, nil
 	}
-	return h.Sum(nil)
+	if target == "" {
+		return nil, nil
+	}
+	var t int64
+	err := tx.QueryRow(ctx, `SELECT tenant_id FROM devices WHERE id=$1`, target).Scan(&t)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil, nil
+	case err != nil:
+		return nil, err
+	}
+	return &t, nil
 }
 
 // auditAction runs an admin change and its audit entry in one transaction.
@@ -998,7 +1201,7 @@ func jsonb(v any) string {
 func (s *Server) consoleFilter(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if p == "/healthz" || p == "/install.sh" || strings.HasPrefix(p, "/scim/") {
+		if p == "/healthz" || p == "/readyz" || p == "/install.sh" || strings.HasPrefix(p, "/scim/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -1008,7 +1211,7 @@ func (s *Server) consoleFilter(next http.Handler) http.Handler {
 				ip = a.String() // parsed, never the raw header text
 			}
 			s.log.Warn("console request refused by network list", "ip", ip)
-			http.Error(w, "access from this network is not allowed", http.StatusForbidden)
+			s.errorPage(w, r, session{}, http.StatusForbidden, "access from this network is not allowed")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -1103,9 +1306,10 @@ func (s *Server) notifyDevice(id string, notices []notice) {
 		return
 	}
 	var host string
-	_ = s.db.QueryRow(context.Background(), `SELECT hostname FROM devices WHERE id=$1`, id).Scan(&host)
+	var tenantID int64
+	_ = s.db.QueryRow(context.Background(), `SELECT hostname, tenant_id FROM devices WHERE id=$1`, id).Scan(&host, &tenantID)
 	for _, n := range notices {
-		n.DeviceID, n.Hostname = id, firstNonEmpty(n.Hostname, host)
+		n.DeviceID, n.Hostname, n.Tenant = id, firstNonEmpty(n.Hostname, host), tenantID
 		if n.URL == "" {
 			n.URL = s.cfg.PublicURL + "/devices/" + id
 		}
@@ -1114,4 +1318,13 @@ func (s *Server) notifyDevice(id string, notices []notice) {
 		}
 		s.notify(n)
 	}
+}
+
+// secretCommands carry a credential in their payload, cleared once the
+// device answered.
+var secretCommands = []string{"user_create", "user_password"}
+
+// logSafe keeps a value on one log line.
+func logSafe(v string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(v, "\n", ""), "\r", "")
 }

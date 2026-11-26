@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
@@ -58,6 +59,9 @@ func migrate(ctx context.Context, db *pgxpool.Pool) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations(version) VALUES ($1)`, m.version); err != nil {
 			return err
 		}
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO schema_applied(hash, version) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING`, schemaHash(), Version); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }
@@ -177,7 +181,7 @@ func seedDefaultBlueprint(ctx context.Context, tx pgx.Tx) error {
 		ids = append(ids, id)
 	}
 	tree, _ := json.Marshal([]api.Node{{Kind: "assign", Items: ids}})
-	_, err := tx.Exec(ctx, `INSERT INTO blueprints(name, description, tree) VALUES ('default', 'Baseline for every device', $1)`, string(tree))
+	_, err := tx.Exec(ctx, `INSERT INTO blueprints(name, description, tree, shared) VALUES ('default', 'Baseline for every device', $1, true)`, string(tree))
 	return err
 }
 
@@ -280,19 +284,25 @@ func resolveDevice(ctx context.Context, q pgx.Tx, deviceID string) (resolved, er
 		maps[i] = b.Tree
 	}
 	ids := api.Resolve(maps, facts)
-	if res.Items, err = libraryItems(ctx, q, ids); err != nil {
+	if res.Items, err = libraryItems(ctx, q, deviceID, ids); err != nil {
 		return res, err
 	}
-	res.Decls, err = api.Merge(res.Items)
-	return res, err
+	if res.Decls, err = api.Merge(res.Items); err != nil {
+		return res, err
+	}
+	return res, applyExceptions(ctx, q, deviceID, res.Decls) // risk exceptions (exceptions.go)
 }
 
-// libraryItems loads items and returns them in the order of ids.
-func libraryItems(ctx context.Context, q pgx.Tx, ids []int64) ([]api.LibraryItem, error) {
+// libraryItems loads the items of a device and returns them in the order
+// of ids. Only items of the device's tenant and of the default tenant
+// (kept by global admins) resolve, so a reference across tenants that got
+// past validation never delivers another tenant's item.
+func libraryItems(ctx context.Context, q pgx.Tx, deviceID string, ids []int64) ([]api.LibraryItem, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	rows, err := q.Query(ctx, `SELECT id, name, type, description, payload, signature FROM library_items WHERE id = ANY($1)`, ids)
+	rows, err := q.Query(ctx, `SELECT id, name, type, description, payload, signature FROM library_items
+		WHERE id = ANY($1) AND tenant_id IN (1, (SELECT tenant_id FROM devices WHERE id=$2))`, ids, deviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -310,6 +320,11 @@ func libraryItems(ctx context.Context, q pgx.Tx, ids []int64) ([]api.LibraryItem
 			// changed outside the console (database write, restore of a foreign
 			// backup): never delivered, and loud in the log
 			slog.Error("library item signature invalid, item not delivered", "item", it.ID, "name", it.Name)
+			continue
+		}
+		var err error
+		if it.Payload, err = openItemSecrets(it.Type, raw); err != nil { // sealed client secret (loginsecret.go)
+			slog.Error("library item secret cannot be opened, item not delivered", "item", it.ID, "name", it.Name, "err", err)
 			continue
 		}
 		byID[it.ID] = it
@@ -344,7 +359,8 @@ func effectiveDeclarations(ctx context.Context, q pgx.Tx, deviceID string) ([]ap
 // ---- web: library ----
 
 func (s *Server) allItems(ctx context.Context) ([]api.LibraryItem, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, name, type, description, payload FROM library_items ORDER BY type, name`)
+	cond, args := visibleCond(ctx, "i", 0)
+	rows, err := s.db.Query(ctx, `SELECT id, name, type, description, payload FROM library_items i WHERE `+cond+` ORDER BY type, name`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -426,7 +442,12 @@ func (s *Server) library(w http.ResponseWriter, r *http.Request, sess session) {
 	for _, g := range groups {
 		sort.Slice(g, func(i, j int) bool { return strings.ToLower(g[i].Name) < strings.ToLower(g[j].Name) })
 	}
-	s.render(w, r, sess, "library", map[string]any{"Groups": groups, "Types": types, "AllTypes": sortedTypes()})
+	deleted, err := s.deletedObjects(r.Context(), "library_item_versions", "item_id")
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.render(w, r, sess, "library", map[string]any{"Groups": groups, "Types": types, "AllTypes": sortedTypes(), "Deleted": deleted})
 }
 
 func sortedTypes() []string {
@@ -442,6 +463,9 @@ func (s *Server) libraryEdit(w http.ResponseWriter, r *http.Request, sess sessio
 	it := api.LibraryItem{Type: r.URL.Query().Get("type")}
 	if v := r.PathValue("id"); v != "new" {
 		id, err := strconv.ParseInt(v, 10, 64)
+		if err == nil && !s.tenantOwns(r.Context(), sess, "library_items", id, true) {
+			err = pgx.ErrNoRows
+		}
 		if err == nil {
 			rows, qerr := s.db.Query(r.Context(), `SELECT id, name, type, description, payload FROM library_items WHERE id=$1`, id)
 			if qerr == nil {
@@ -451,25 +475,28 @@ func (s *Server) libraryEdit(w http.ResponseWriter, r *http.Request, sess sessio
 			}
 		}
 		if err != nil {
-			http.NotFound(w, r)
+			s.notFound(w, r, sess)
 			return
 		}
 	} else if q := r.URL.Query(); q.Get("from") != "" && q.Get("remote") != "" {
 		var err error
 		if it, err = s.flatpakTemplate(r.Context(), q.Get("from"), q.Get("remote"), q.Get("inst"), q.Get("mode")); err != nil {
-			http.NotFound(w, r)
+			s.notFound(w, r, sess)
 			return
 		}
 	} else if q.Get("from") != "" {
 		var err error
 		if it, err = s.sourceTemplate(r.Context(), q.Get("from"), q.Get("file"), q.Get("mode")); err != nil {
-			http.NotFound(w, r)
+			s.notFound(w, r, sess)
 			return
 		}
 	} else if ex, ok := api.Types[it.Type]; ok {
 		it.Payload = json.RawMessage(ex)
 	} else {
 		it.Type, it.Payload = api.TypePackages, json.RawMessage(api.Types[api.TypePackages])
+	}
+	if it.ID > 0 && it.Type == api.TypeNetwork { // secrets stay on the server
+		it.Payload = api.MaskNetworkSecrets(it.Payload)
 	}
 	var pretty bytes.Buffer
 	if err := json.Indent(&pretty, it.Payload, "", "  "); err != nil {
@@ -488,10 +515,15 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 	id, _ := strconv.ParseInt(r.FormValue("id"), 10, 64)
 	it := api.LibraryItem{ID: id, Name: strings.TrimSpace(r.FormValue("name")), Type: r.FormValue("type"),
 		Description: strings.TrimSpace(r.FormValue("description")), Payload: json.RawMessage(r.FormValue("payload"))}
-	fail := func(err error) {
-		s.render(w, r, sess, "item", map[string]any{"It": it, "Payload": r.FormValue("payload"), "AllTypes": sortedTypes(),
-			"Example": prettyJSON(api.Types[it.Type]), "Examples": itemExamples(), "Error": err.Error()})
+	render := func(payload string, extra map[string]any) {
+		data := map[string]any{"It": it, "Payload": payload, "AllTypes": sortedTypes(),
+			"Example": prettyJSON(api.Types[it.Type]), "Examples": itemExamples()}
+		for k, v := range extra {
+			data[k] = v
+		}
+		s.render(w, r, sess, "item", data)
 	}
+	fail := func(err error) { render(r.FormValue("payload"), map[string]any{"Error": err.Error()}) }
 	if it.Type == api.TypeCertificates {
 		p, err := addUploadedCerts(r, it.Payload)
 		if err != nil {
@@ -508,60 +540,178 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		}
 		it.Payload = p
 	}
-	if err := it.Validate(); err != nil {
-		fail(err)
-		return
-	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, it.Payload); err != nil {
-		fail(err)
-		return
-	}
-	sig := signItem(it.Name, it.Type, compact.Bytes())
-	err := s.auditAction(r.Context(), sess.Email, "library.save", it.Name, it.Type+" "+compact.String(), func(tx pgx.Tx) error {
-		if id > 0 {
-			tag, err := tx.Exec(r.Context(), `UPDATE library_items SET name=$2, type=$3, description=$4, payload=$5, signature=$6, updated_at=now() WHERE id=$1`,
-				id, it.Name, it.Type, it.Description, compact.String(), sig)
-			if err == nil && tag.RowsAffected() == 0 {
-				err = errors.New("library item not found")
-			}
-			return err
+	if r.FormValue("preview") != "" {
+		if err := s.restoreNetworkSecrets(r.Context(), &it); err != nil {
+			fail(err)
+			return
 		}
-		_, err := tx.Exec(r.Context(), `INSERT INTO library_items(name, type, description, payload, signature) VALUES ($1,$2,$3,$4,$5)`,
-			it.Name, it.Type, it.Description, compact.String(), sig)
-		return err
-	})
-	if err != nil {
+		if err := it.Validate(); err != nil {
+			fail(err)
+			return
+		}
+		p, err := s.itemPreview(r.Context(), it)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		// the form goes back with the processed settings (uploaded
+		// certificates added, a boot loader password hashed), network
+		// secrets masked again
+		if it.Type == api.TypeNetwork {
+			it.Payload = api.MaskNetworkSecrets(it.Payload)
+		}
+		render(prettyJSON(string(it.Payload)), map[string]any{"Preview": p})
+		return
+	}
+	if err := s.saveLibraryItem(r.Context(), sess.Email, &it); err != nil {
 		fail(err)
 		return
 	}
 	http.Redirect(w, r, "/library", http.StatusSeeOther)
 }
 
+// restoreNetworkSecrets puts the stored secrets of a network item back where
+// the edited payload (console editor, admin API, a masked version) still
+// holds the mask; masks with nothing stored stay and fail validation.
+func (s *Server) restoreNetworkSecrets(ctx context.Context, it *api.LibraryItem) error {
+	if it.Type != api.TypeNetwork {
+		return nil
+	}
+	var stored []byte
+	if it.ID > 0 {
+		if err := tenantGuard(ctx, s.db, "library_items", it.ID); err != nil {
+			return err
+		}
+		if err := s.db.QueryRow(ctx, `SELECT payload FROM library_items WHERE id=$1 AND type=$2`, it.ID, it.Type).Scan(&stored); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+	}
+	p, err := api.RestoreNetworkSecrets(it.Payload, stored)
+	if err != nil {
+		return invalid(err)
+	}
+	it.Payload = p
+	return nil
+}
+
+// saveLibraryItem prepares, validates, signs and stores a library item with
+// its new version and audit entry; ID 0 creates one and sets it.ID. The
+// console and the admin API both save through here.
+func (s *Server) saveLibraryItem(ctx context.Context, actor string, it *api.LibraryItem) error {
+	if it.Type == api.TypeBootloader { // hash a plain password before it is validated and stored
+		p, err := api.PrepareBootloader(it.Payload)
+		if err != nil {
+			return invalid(err)
+		}
+		it.Payload = p
+	}
+	return s.storeItem(ctx, actor, "library.save", "save", it, false)
+}
+
+// storeItem validates, signs and saves an item with its new version and
+// audit entry in one transaction and sets it.ID. restore lets a rollback
+// recreate a deleted item under its old ID.
+func (s *Server) storeItem(ctx context.Context, actor, action, note string, it *api.LibraryItem, restore bool) error {
+	if it.ID > 0 && !restore { // ownership before anything else, so validation reveals nothing
+		if err := tenantGuard(ctx, s.db, "library_items", it.ID); err != nil {
+			return err
+		}
+	}
+	if err := s.restoreNetworkSecrets(ctx, it); err != nil {
+		return err
+	}
+	if err := it.Validate(); err != nil {
+		return invalid(err)
+	}
+	sealed, _, err := sealItemSecrets(it.Type, it.Payload) // never stored, signed, versioned or audited in clear
+	if err != nil {
+		return err
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, sealed); err != nil {
+		return invalid(err)
+	}
+	it.Payload = compact.Bytes()
+	sig := signItem(it.Name, it.Type, compact.Bytes())
+	detail := it.Type + " " + compact.String()
+	if it.Type == api.TypeNetwork {
+		detail = it.Type + " " + string(api.MaskNetworkSecrets(compact.Bytes())) // no secrets in the audit log
+	}
+	if note != "save" {
+		detail = note + ": " + detail
+	}
+	return s.auditAction(ctx, actor, action, it.Name, detail, func(tx pgx.Tx) error {
+		id := it.ID
+		if id > 0 {
+			if err := tenantGuard(ctx, tx, "library_items", id); err != nil {
+				return err
+			}
+			if err := ensureItemBaseline(ctx, tx, id); err != nil {
+				return err
+			}
+			tag, err := tx.Exec(ctx, `UPDATE library_items SET name=$2, type=$3, description=$4, payload=$5, signature=$6, updated_at=now() WHERE id=$1`,
+				id, it.Name, it.Type, it.Description, compact.String(), sig)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() == 0 {
+				if !restore {
+					return &userError{http.StatusNotFound, "library item not found"}
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO library_items(id, name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+					id, it.Name, it.Type, it.Description, compact.String(), sig, ownerTenant(ctx)); err != nil {
+					return err
+				}
+			}
+		} else if err := tx.QueryRow(ctx, `INSERT INTO library_items(name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+			it.Name, it.Type, it.Description, compact.String(), sig, ownerTenant(ctx)).Scan(&id); err != nil {
+			return err
+		}
+		it.ID = id
+		return recordItemVersion(ctx, tx, id, actor, note, false)
+	})
+}
+
 func (s *Server) libraryDelete(w http.ResponseWriter, r *http.Request, sess session) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
-	use, err := s.itemUsage(r.Context())
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if len(use[id]) > 0 {
-		http.Error(w, "item is used by blueprints: "+strings.Join(use[id], ", "), http.StatusConflict)
-		return
-	}
-	err = s.auditAction(r.Context(), sess.Email, "library.delete", strconv.FormatInt(id, 10), "", func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `DELETE FROM library_items WHERE id=$1`, id)
-		return err
-	})
-	if err != nil {
-		s.fail(w, err)
+	if err := s.deleteLibraryItem(r.Context(), sess.Email, id); err != nil {
+		s.failUser(w, r, sess, err)
 		return
 	}
 	http.Redirect(w, r, "/library", http.StatusSeeOther)
+}
+
+// deleteLibraryItem removes an item no blueprint uses, with its audit entry
+// and a deleted version that keeps the last payload.
+func (s *Server) deleteLibraryItem(ctx context.Context, actor string, id int64) error {
+	if err := tenantGuard(ctx, s.db, "library_items", id); err != nil {
+		return err
+	}
+	use, err := s.itemUsage(ctx)
+	if err != nil {
+		return err
+	}
+	if len(use[id]) > 0 {
+		return &userError{http.StatusConflict, "item is used by blueprints: " + strings.Join(use[id], ", ")}
+	}
+	return s.auditAction(ctx, actor, "library.delete", strconv.FormatInt(id, 10), "", func(tx pgx.Tx) error {
+		// the last payload stays in the version history
+		if err := ensureItemBaseline(ctx, tx, id); err != nil {
+			return err
+		}
+		if err := recordItemVersion(ctx, tx, id, actor, "delete", true); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `DELETE FROM library_items WHERE id=$1`, id)
+		if err == nil && tag.RowsAffected() == 0 {
+			err = &userError{http.StatusNotFound, "library item not found"}
+		}
+		return err
+	})
 }
 
 // ---- web: blueprints ----
@@ -574,11 +724,13 @@ const effectiveBlueprintSQL = `coalesce(d.blueprint_id,
 	(SELECT id FROM blueprints WHERE name='default'))`
 
 func (s *Server) allBlueprints(ctx context.Context, deviceID string) ([]blueprintRec, error) {
+	cond, args := visibleCond(ctx, "b", 1)
+	dcond, dargs := tenantDevices(ctx, 1+len(args))
 	rows, err := s.db.Query(ctx, `SELECT b.id, b.name, b.parent_id, b.tree, b.description, b.updated_at,
-		(SELECT count(*) FROM devices d WHERE NOT d.retired AND `+effectiveBlueprintSQL+` = b.id),
+		(SELECT count(*) FROM devices d WHERE NOT d.retired AND `+dcond+` AND `+effectiveBlueprintSQL+` = b.id),
 		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND (d.blueprint_id=b.id OR (d.blueprint_id IS NULL AND b.name='default'))),
 		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND `+effectiveBlueprintSQL+` = b.id)
-		FROM blueprints b ORDER BY b.name='default' DESC, b.name`, deviceID)
+		FROM blueprints b WHERE `+cond+` ORDER BY b.name='default' DESC, b.name`, append(append([]any{deviceID}, args...), dargs...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -602,18 +754,31 @@ func (s *Server) blueprints(w http.ResponseWriter, r *http.Request, sess session
 	for _, b := range bps {
 		names[b.ID] = b.Name
 	}
-	s.render(w, r, sess, "blueprints", map[string]any{"Blueprints": bps, "Names": names})
+	deleted, err := s.deletedObjects(r.Context(), "blueprint_versions", "blueprint_id")
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	assign, err := s.blueprintAssignments(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.render(w, r, sess, "blueprints", map[string]any{"Blueprints": bps, "Names": names, "Deleted": deleted, "Assign": assign})
 }
 
 func (s *Server) blueprintEdit(w http.ResponseWriter, r *http.Request, sess session) {
 	bp := blueprintRec{Tree: []api.Node{}}
 	if v := r.PathValue("id"); v != "new" {
 		id, err := strconv.ParseInt(v, 10, 64)
+		if err == nil && !s.tenantOwns(r.Context(), sess, "blueprints", id, true) {
+			err = pgx.ErrNoRows
+		}
 		if err == nil {
 			bp, err = scanBlueprint(s.db.QueryRow(r.Context(), `SELECT `+blueprintCols+` FROM blueprints WHERE id=$1`, id))
 		}
 		if err != nil {
-			http.NotFound(w, r)
+			s.notFound(w, r, sess)
 			return
 		}
 	} else {
@@ -627,6 +792,11 @@ func (s *Server) blueprintEdit(w http.ResponseWriter, r *http.Request, sess sess
 }
 
 func (s *Server) renderBlueprint(w http.ResponseWriter, r *http.Request, sess session, bp blueprintRec, tree, errMsg string) {
+	s.renderBlueprintWith(w, r, sess, bp, tree, errMsg, nil)
+}
+
+// renderBlueprintWith shows the editor, with the preview of a change when p is set.
+func (s *Server) renderBlueprintWith(w http.ResponseWriter, r *http.Request, sess session, bp blueprintRec, tree, errMsg string, p *preview) {
 	items, err := s.allItems(r.Context())
 	if err != nil {
 		s.fail(w, err)
@@ -642,7 +812,7 @@ func (s *Server) renderBlueprint(w http.ResponseWriter, r *http.Request, sess se
 		parent = *bp.Parent
 	}
 	s.render(w, r, sess, "blueprint", map[string]any{"BP": bp, "Tree": tree, "Error": errMsg, "Items": items, "Blueprints": bps,
-		"ParentID": parent, "ItemsJSON": items, "FieldsJSON": api.RuleFields})
+		"ParentID": parent, "ItemsJSON": items, "FieldsJSON": api.RuleFields, "Preview": p})
 }
 
 func (s *Server) blueprintSave(w http.ResponseWriter, r *http.Request, sess session) {
@@ -653,47 +823,126 @@ func (s *Server) blueprintSave(w http.ResponseWriter, r *http.Request, sess sess
 		bp.Parent = &p
 	}
 	err := json.Unmarshal([]byte(r.FormValue("tree")), &bp.Tree)
-	if err == nil && !identOK(bp.Name) {
-		err = errors.New("name must be 1..64 characters: letters, digits, dot, dash, underscore")
-	}
 	if err == nil {
-		items, ierr := s.allItems(ctx)
-		if ierr != nil {
-			s.fail(w, ierr)
+		err = s.validateBlueprint(ctx, bp)
+	}
+	if err == nil && r.FormValue("preview") != "" {
+		p, perr := s.blueprintPreview(ctx, bp)
+		if perr != nil {
+			s.fail(w, perr)
 			return
 		}
-		ids := map[int64]bool{}
-		for _, it := range items {
-			ids[it.ID] = true
-		}
-		err = api.ValidateTree(bp.Tree, func(i int64) bool { return ids[i] })
-	}
-	if err == nil && bp.Parent != nil && id > 0 {
-		err = s.checkNoCycle(ctx, id, *bp.Parent)
-	}
-	if err != nil {
-		s.renderBlueprint(w, r, sess, bp, r.FormValue("tree"), err.Error())
+		s.renderBlueprintWith(w, r, sess, bp, r.FormValue("tree"), "", p)
 		return
 	}
-	tree, _ := json.Marshal(bp.Tree)
-	err = s.auditAction(ctx, sess.Email, "blueprint.save", bp.Name, string(tree), func(tx pgx.Tx) error {
-		if id > 0 {
-			// the default blueprint applies by name and cannot inherit
-			tag, err := tx.Exec(ctx, `UPDATE blueprints SET name=$2, description=$3, parent_id=CASE WHEN name='default' THEN NULL ELSE $4::bigint END, tree=$5, updated_at=now()
-				WHERE id=$1 AND (name <> 'default' OR $2 = 'default')`, id, bp.Name, bp.Desc, bp.Parent, string(tree))
-			if err == nil && tag.RowsAffected() == 0 {
-				err = errors.New("blueprint not found, or default cannot be renamed")
-			}
-			return err
-		}
-		_, err := tx.Exec(ctx, `INSERT INTO blueprints(name, description, parent_id, tree) VALUES ($1,$2,$3,$4)`, bp.Name, bp.Desc, bp.Parent, string(tree))
-		return err
-	})
+	if err == nil {
+		err = s.saveBlueprint(ctx, sess.Email, &bp)
+	}
 	if err != nil {
 		s.renderBlueprint(w, r, sess, bp, r.FormValue("tree"), err.Error())
 		return
 	}
 	http.Redirect(w, r, "/blueprints", http.StatusSeeOther)
+}
+
+// saveBlueprint validates and stores a blueprint with its new version and
+// audit entry; ID 0 creates one and sets bp.ID. The console and the admin
+// API both save through here.
+func (s *Server) saveBlueprint(ctx context.Context, actor string, bp *blueprintRec) error {
+	if bp.Tree == nil {
+		bp.Tree = []api.Node{}
+	}
+	if err := s.validateBlueprint(ctx, *bp); err != nil {
+		return err
+	}
+	return s.storeBlueprint(ctx, actor, "blueprint.save", "save", bp, false)
+}
+
+// validateBlueprint checks name, items and inheritance before a save.
+func (s *Server) validateBlueprint(ctx context.Context, bp blueprintRec) error {
+	if !identOK(bp.Name) {
+		return invalid(errors.New("name must be 1..64 characters: letters, digits, dot, dash, underscore"))
+	}
+	items, err := s.allItems(ctx)
+	if err != nil {
+		return err
+	}
+	ids := map[int64]bool{}
+	for _, it := range items {
+		ids[it.ID] = true
+	}
+	if err := api.ValidateTree(bp.Tree, func(i int64) bool { return ids[i] }); err != nil {
+		return invalid(err)
+	}
+	if bp.Parent == nil {
+		return nil
+	}
+	var ok bool
+	pcond, pargs := visibleCond(ctx, "b", 1)
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blueprints b WHERE b.id=$1 AND `+pcond+`)`, append([]any{*bp.Parent}, pargs...)...).Scan(&ok); err != nil {
+		return err
+	}
+	if !ok {
+		return invalid(errors.New("the parent blueprint does not exist"))
+	}
+	if bp.ID > 0 {
+		if err := s.checkNoCycle(ctx, bp.ID, *bp.Parent); err != nil {
+			return invalid(err)
+		}
+	}
+	return nil
+}
+
+// storeBlueprint saves a validated blueprint with its new version and audit
+// entry in one transaction and sets bp.ID; restore lets a rollback recreate
+// a deleted one.
+func (s *Server) storeBlueprint(ctx context.Context, actor, action, note string, bp *blueprintRec, restore bool) error {
+	tree, _ := json.Marshal(bp.Tree)
+	detail := string(tree)
+	if note != "save" {
+		detail = note + ": " + detail
+	}
+	return s.auditAction(ctx, actor, action, bp.Name, detail, func(tx pgx.Tx) error {
+		id := bp.ID
+		var exists bool
+		if id > 0 {
+			if err := tenantGuard(ctx, tx, "blueprints", id); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blueprints WHERE id=$1)`, id).Scan(&exists); err != nil {
+				return err
+			}
+		}
+		switch {
+		case exists:
+			if err := ensureBlueprintBaseline(ctx, tx, id); err != nil {
+				return err
+			}
+			// the default blueprint applies by name and cannot inherit
+			tag, err := tx.Exec(ctx, `UPDATE blueprints SET name=$2, description=$3, parent_id=CASE WHEN name='default' THEN NULL ELSE $4::bigint END, tree=$5, updated_at=now()
+				WHERE id=$1 AND (name <> 'default' OR $2 = 'default')`, id, bp.Name, bp.Desc, bp.Parent, string(tree))
+			if err == nil && tag.RowsAffected() == 0 {
+				err = &userError{http.StatusNotFound, "blueprint not found, or default cannot be renamed"}
+			}
+			if err != nil {
+				return err
+			}
+		case id > 0 && restore:
+			if _, err := tx.Exec(ctx, `INSERT INTO blueprints(id, name, description, parent_id, tree, tenant_id) VALUES ($1,$2,$3,$4,$5,$6)`,
+				id, bp.Name, bp.Desc, bp.Parent, string(tree), ownerTenant(ctx)); err != nil {
+				return err
+			}
+		case id > 0:
+			return &userError{http.StatusNotFound, "blueprint not found, or default cannot be renamed"}
+		default:
+			if err := tx.QueryRow(ctx, `INSERT INTO blueprints(name, description, parent_id, tree, tenant_id) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+				bp.Name, bp.Desc, bp.Parent, string(tree), ownerTenant(ctx)).Scan(&id); err != nil {
+				return err
+			}
+		}
+		bp.ID = id
+		return recordBlueprintVersion(ctx, tx, id, actor, note, false)
+	})
 }
 
 func identOK(s string) bool {
@@ -727,21 +976,40 @@ func (s *Server) checkNoCycle(ctx context.Context, id, parent int64) error {
 func (s *Server) blueprintDelete(w http.ResponseWriter, r *http.Request, sess session) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
-	err = s.auditAction(r.Context(), sess.Email, "blueprint.delete", strconv.FormatInt(id, 10), "devices fall back to default", func(tx pgx.Tx) error {
-		tag, err := tx.Exec(r.Context(), `DELETE FROM blueprints WHERE id=$1 AND name <> 'default'`, id)
-		if err == nil && tag.RowsAffected() == 0 {
-			err = errors.New("blueprint not found or is the default")
-		}
-		return err
-	})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+	if err := s.deleteBlueprint(r.Context(), sess.Email, id); err != nil {
+		s.failUser(w, r, sess, err)
 		return
 	}
 	http.Redirect(w, r, "/blueprints", http.StatusSeeOther)
+}
+
+// deleteBlueprint removes a blueprint other than default, with its audit
+// entry; its devices fall back to default.
+func (s *Server) deleteBlueprint(ctx context.Context, actor string, id int64) error {
+	if err := tenantGuard(ctx, s.db, "blueprints", id); err != nil {
+		return err
+	}
+	return s.auditAction(ctx, actor, "blueprint.delete", strconv.FormatInt(id, 10), "devices fall back to default", func(tx pgx.Tx) error {
+		// the last version stays in the history (rolled back for default below)
+		if err := ensureBlueprintBaseline(ctx, tx, id); err != nil {
+			return err
+		}
+		if err := recordBlueprintVersion(ctx, tx, id, actor, "delete", true); err != nil {
+			return err
+		}
+		var name string
+		err := tx.QueryRow(ctx, `DELETE FROM blueprints WHERE id=$1 RETURNING name`, id).Scan(&name)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return &userError{http.StatusNotFound, "blueprint not found"}
+		case err == nil && name == "default":
+			return &userError{http.StatusConflict, "the default blueprint cannot be deleted"} // rolls the delete back
+		}
+		return err
+	})
 }
 
 // prettyJSON indents an example payload for display.
@@ -813,14 +1081,24 @@ func itemExamples() map[string]string {
 	return m
 }
 
-// itemKey signs library items; it is command.key, set when the server starts.
-var itemKey ed25519.PrivateKey
+// itemKey signs library items; it is the command key, set when the server
+// starts. itemPrevKey is the previous command key while a rotation runs:
+// items signed with it stay valid until they are signed again (keys_reseal.go).
+var (
+	itemKey     crypto.Signer
+	itemPrevKey ed25519.PublicKey
+)
 
 func signItem(name, typ string, payload []byte) string {
 	if itemKey == nil {
 		return ""
 	}
-	return hex.EncodeToString(ed25519.Sign(itemKey, api.ItemSigned(name, typ, canonicalJSON(payload))))
+	sig, err := signEd25519(itemKey, api.ItemSigned(name, typ, canonicalJSON(payload)))
+	if err != nil {
+		slog.Error("signing library item", "item", logSafe(name), "err", err) // unsigned: withheld from devices
+		return ""
+	}
+	return hex.EncodeToString(sig)
 }
 
 // canonicalJSON is the form a signature covers: decoded and encoded again, so
@@ -841,11 +1119,15 @@ func itemSignatureOK(name, typ string, payload []byte, sig string) bool {
 	if itemKey == nil {
 		return true // no key (tools without the CA directory)
 	}
+	return itemSigValid(itemKey.Public().(ed25519.PublicKey), name, typ, payload, sig) ||
+		(itemPrevKey != nil && itemSigValid(itemPrevKey, name, typ, payload, sig))
+}
+
+func itemSigValid(pub ed25519.PublicKey, name, typ string, payload []byte, sig string) bool {
 	b, err := hex.DecodeString(sig)
 	if err != nil {
 		return false
 	}
-	pub := itemKey.Public().(ed25519.PublicKey)
 	if ed25519.Verify(pub, api.ItemSigned(name, typ, canonicalJSON(payload)), b) {
 		return true
 	}

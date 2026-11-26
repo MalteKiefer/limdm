@@ -30,8 +30,8 @@ Per app:
 | Field | Meaning |
 |---|---|
 | Mode | **available**: users install and remove it; **on request**: users ask, an admin approves under **Requests**, then the device installs it by itself; **required**: installed on every device that gets it |
-| Sources | Flatpak ID from Flathub and Debian/Ubuntu or Fedora package names; **Install from** sets which comes first, the other is the fallback |
-| Vendor package repository | for packages the distribution does not ship: repository URL (Debian: suite and components) and the vendor's ASCII armored signing key, per family |
+| Sources | Flatpak ID (from Flathub or another managed remote) and Debian/Ubuntu or Fedora package names; SUSE devices use the Fedora names. **Install from** sets which comes first, the other is the fallback |
+| Vendor package repository | for packages the distribution does not ship: repository URL (Debian: suite and components) and the vendor's ASCII armored signing key, for Debian and for Fedora (also used on SUSE) |
 | Also installed when | further package names that count as installed (`firefox-esr`, `code`) |
 | Blueprints | none: every device; otherwise only devices whose blueprint (or a parent) is listed |
 | Icon | Flatpak apps get theirs from Flathub; upload a PNG for others |
@@ -40,13 +40,21 @@ Per app:
 
 Software that needs a system service (VPN clients, endpoint agents) does not work as a
 Flatpak; it comes as a package from the vendor's own repository. An app can carry one
-repository per family. The agent adds it (`/etc/apt/sources.list.d/limdm-app-<name>.sources`
-with the key in `/etc/apt/keyrings`, or `/etc/yum.repos.d/limdm-app-<name>.repo` with the key
-in `/etc/pki/rpm-gpg`) right before installing the packages, keeps it for updates while the
-app is installed, and removes it with the app. Unsigned repositories are refused. For
+repository per family. The agent adds it right before installing the packages:
+
+| Device | Source file | Key |
+|---|---|---|
+| Debian, Ubuntu | `/etc/apt/sources.list.d/limdm-app-<name>.sources` | `/etc/apt/keyrings/limdm-app-<name>.asc` |
+| Fedora, RHEL family | `/etc/yum.repos.d/limdm-app-<name>.repo` | `/etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-app-<name>` |
+| SUSE (the Fedora repository) | `/etc/zypp/repos.d/limdm-app-<name>.repo` | as for Fedora, also imported with `rpm --import` |
+
+The agent keeps the repository for updates while the app is installed and removes it with
+the app. Unsigned repositories are refused. For
 repositories that sign their metadata instead of each package (NetBird's RPM repository),
-tick **the repository signs its metadata**; dnf then checks `repo_gpgcheck`. Package
-sources declared with a **Package sources** profile are separate and never touch these files.
+tick **the repository signs its metadata**; dnf and zypper then check `repo_gpgcheck`.
+Package sources declared with a **Package sources** library item
+([declarations.md](declarations.md#comlimdmrepositories-list)) are separate and never touch
+these files.
 
 ## Installed is installed
 

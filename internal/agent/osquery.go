@@ -50,25 +50,35 @@ func (h *host) ensureOsquery() error {
 			return err
 		}
 		h.aptStale.Store(true) // pick up the new repository
-	} else {
+	} else { // Fedora and SUSE family: the osquery rpm repository works with dnf and zypper
 		const key = "/etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery"
 		if _, err := writeIfChanged(key, osqueryKey, 0o644); err != nil {
 			return err
 		}
+		if err := h.trustKeys(key); err != nil {
+			return err
+		}
+		_, dir := h.repoDirs()
 		repo := managedHeader + "[limdm-osquery]\nname=osquery\nbaseurl=" + osqueryRepoURL + "/rpm/$basearch/\n" +
 			"enabled=1\ngpgcheck=1\ngpgkey=file://" + key + "\n"
-		if _, err := writeIfChanged("/etc/yum.repos.d/limdm-osquery.repo", repo, 0o644); err != nil {
+		changed, err := writeIfChanged(dir+"/limdm-osquery.repo", repo, 0o644)
+		if err != nil {
 			return err
+		}
+		if changed {
+			h.aptStale.Store(true)
 		}
 	}
 	return h.install("osquery")
 }
 
 // osq runs one query; osquery returns every column as a string.
-func osq(query string) ([]map[string]string, error) {
+func osq(query string) ([]map[string]string, error) { return osqWithin(time.Minute, query) }
+
+func osqWithin(timeout time.Duration, query string) ([]map[string]string, error) {
 	// an explicit database path: osqueryi otherwise writes below $HOME, which
 	// is unset or / for a service; events are not needed for single queries
-	out, err := run(time.Minute, osqueryi, "--json", "--database_path="+stateDir+"/osqueryi.db", "--disable_events", query)
+	out, err := run(timeout, osqueryi, "--json", "--database_path="+stateDir+"/osqueryi.db", "--disable_events", "--disable_extensions", query)
 	if err != nil {
 		return nil, err
 	}
@@ -456,7 +466,7 @@ func displayManager() string {
 
 // osqueryPackages returns installed packages from osquery.
 func (h *host) osqueryPackages() ([]api.Package, error) {
-	if !hasOsquery() || (h.family != "debian" && h.family != "fedora") {
+	if !hasOsquery() || (h.family != "debian" && h.family != "fedora" && h.family != "suse") {
 		return nil, errors.New("osquery packages unavailable") // pacman and apk lists come from the native collector
 	}
 	q := "SELECT name, version, arch FROM deb_packages WHERE status LIKE '%installed'"

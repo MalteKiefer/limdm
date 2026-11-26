@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -52,6 +53,13 @@ type session struct {
 	IAT   time.Time `json:"i"`
 	Last  time.Time `json:"l"`
 	Gen   int64     `json:"g"` // session generation of the account at sign in
+	// Tenant the session acts for, 0 for the global view; tenant accounts
+	// get theirs from the account on every request, super admins switch.
+	Tenant int64 `json:"t,omitempty"`
+	Super  bool  `json:"-"` // global account (tenant.go)
+	// device scope, loaded from the account on every request (scope.go)
+	Tags   []string `json:"-"`
+	Groups []string `json:"-"`
 }
 
 type flow struct {
@@ -68,7 +76,7 @@ func (s *Server) seal(v any) string {
 
 func (s *Server) unseal(raw string, v any) error {
 	p, m, ok := strings.Cut(raw, ".")
-	if !ok || !hmac.Equal([]byte(m), []byte(s.mac(p))) {
+	if !ok || !s.macOK(p, m) {
 		return errors.New("bad signature")
 	}
 	b, err := base64.RawURLEncoding.DecodeString(p)
@@ -78,10 +86,23 @@ func (s *Server) unseal(raw string, v any) error {
 	return json.Unmarshal(b, v)
 }
 
-func (s *Server) mac(p string) string {
-	h := hmac.New(sha256.New, s.cfg.SessionKey)
+func (s *Server) mac(p string) string { return macWith(s.cfg.SessionKey, p) }
+
+func macWith(key []byte, p string) string {
+	h := hmac.New(sha256.New, key)
 	h.Write([]byte(p))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// macOK accepts a MAC by any session key, so a session key rotation does
+// not sign everybody out.
+func (s *Server) macOK(p, m string) bool {
+	for _, k := range append([][]byte{s.cfg.SessionKey}, s.cfg.OldSessionKeys...) {
+		if hmac.Equal([]byte(m), []byte(macWith(k, p))) {
+			return true
+		}
+	}
+	return false
 }
 
 // setCookie sets a cookie for maxAge; maxAge <= 0 deletes it (Max-Age=0 on
@@ -109,6 +130,9 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if d := s.settings().AllowedDomain; d != "" {
 		opts = append(opts, oauth2.SetAuthURLParam("hd", d)) // Google account chooser hint, enforced below
 	}
+	if set := s.settings(); set.RequireMFA && len(set.MFAACR) > 0 {
+		opts = append(opts, oauth2.SetAuthURLParam("acr_values", strings.Join(set.MFAACR, " "))) // a request; the callback checks the result
+	}
 	http.Redirect(w, r, auth.oauth.AuthCodeURL(f.State, opts...), http.StatusFound)
 }
 
@@ -123,42 +147,60 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	c, err := r.Cookie(flowCookie)
 	if err != nil || s.unseal(c.Value, &f) != nil || time.Now().After(f.Exp) ||
 		!hmac.Equal([]byte(r.URL.Query().Get("state")), []byte(f.State)) {
-		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "state")
-		http.Error(w, "login expired, start again", http.StatusBadRequest)
+		s.auditLoginFailure(ctx, r, "state")
+		s.errorPage(w, r, session{}, http.StatusBadRequest, "login expired, start again")
 		return
 	}
 	s.setCookie(w, flowCookie, "", -1)
 	tok, err := auth.oauth.Exchange(ctx, r.URL.Query().Get("code"), oauth2.VerifierOption(f.Verifier))
 	if err != nil {
-		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "code exchange")
-		http.Error(w, "login failed", http.StatusUnauthorized)
+		s.auditLoginFailure(ctx, r, "code exchange")
+		s.errorPage(w, r, session{}, http.StatusUnauthorized, "login failed")
 		return
 	}
 	raw, _ := tok.Extra("id_token").(string)
 	idt, err := auth.verifier.Verify(ctx, raw)
 	if err != nil || idt.Nonce != f.Nonce {
-		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "id token")
-		http.Error(w, "login failed", http.StatusUnauthorized)
+		s.auditLoginFailure(ctx, r, "id token")
+		s.errorPage(w, r, session{}, http.StatusUnauthorized, "login failed")
 		return
 	}
 	var claims struct {
 		Email         string `json:"email"`
 		EmailVerified bool   `json:"email_verified"`
 		HD            string `json:"hd"`
+		// optional; read leniently so a provider's own shape cannot break sign in
+		AMR    json.RawMessage `json:"amr"`
+		ACR    json.RawMessage `json:"acr"`
+		Groups json.RawMessage `json:"groups"`
 	}
 	if err := idt.Claims(&claims); err != nil {
-		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "claims")
-		http.Error(w, "login failed", http.StatusUnauthorized)
+		s.auditLoginFailure(ctx, r, "claims")
+		s.errorPage(w, r, session{}, http.StatusUnauthorized, "login failed")
 		return
 	}
 	email := strings.ToLower(claims.Email)
-	role := s.roleFor(ctx, email, claims.EmailVerified, claims.HD)
+	role := s.roleFor(ctx, email, claims.EmailVerified, claims.HD, claimGroups(claims.Groups))
+	if role != "" && s.settings().RequireMFA {
+		var amr []string
+		var acr string
+		_ = json.Unmarshal(claims.AMR, &amr)
+		_ = json.Unmarshal(claims.ACR, &acr)
+		if !mfaSatisfied(s.settings().MFAACR, amr, acr) {
+			if err := s.auditAction(ctx, email, "login.denied", "", fmt.Sprintf("multi factor authentication required: amr=%q acr=%q", amr, acr), nil); err != nil {
+				s.log.Error("audit login.denied", "err", err)
+			}
+			s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "no mfa")
+			s.errorPage(w, r, session{}, http.StatusForbidden, "access denied: sign in with multi factor authentication")
+			return
+		}
+	}
 	if role == "" {
 		if err := s.auditAction(ctx, email, "login.denied", "", "not an admin or auditor", nil); err != nil {
 			s.log.Error("audit login.denied", "err", err)
 		}
 		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "not a console user")
-		http.Error(w, "access denied", http.StatusForbidden)
+		s.errorPage(w, r, session{}, http.StatusForbidden, "access denied")
 		return
 	}
 	now := time.Now()
@@ -174,14 +216,34 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-func (s *Server) roleFor(ctx context.Context, email string, verified bool, hd string) string {
+func (s *Server) roleFor(ctx context.Context, email string, verified bool, hd string, groups []string) string {
 	if !verified || email == "" {
 		return ""
 	}
 	if set := s.settings(); !api.DomainAllowed(set.OIDCIssuer, email, hd, set.AllowedDomain) {
 		return ""
 	}
+	if err := s.syncGroupUser(ctx, email, groups); err != nil {
+		s.log.Error("role from directory group", "err", err)
+	}
 	return s.oidcRole(ctx, email)
+}
+
+// secondFactors are RFC 8176 amr values for a possession or inherence factor.
+var secondFactors = []string{"otp", "hwk", "swk", "sms", "tel", "sc", "pop", "fpt", "face", "iris", "retina", "vbm"}
+
+// mfaSatisfied checks the id token: with accepted acr values configured the
+// acr must be one of them; otherwise amr must name mfa (or mca), or two
+// distinct methods one of which is a second factor.
+func mfaSatisfied(acrAllowed, amr []string, acr string) bool {
+	if len(acrAllowed) > 0 {
+		return acr != "" && slices.Contains(acrAllowed, acr)
+	}
+	if slices.Contains(amr, "mfa") || slices.Contains(amr, "mca") {
+		return true
+	}
+	distinct := slices.Compact(slices.Sorted(slices.Values(amr)))
+	return len(distinct) >= 2 && slices.ContainsFunc(distinct, func(m string) bool { return slices.Contains(secondFactors, m) })
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
@@ -219,6 +281,14 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) (session, bool)
 		return sess, false
 	}
 	sess.Role = role
+	if err := s.loadScope(r.Context(), &sess); err != nil { // fail closed
+		s.log.Error("load scope", "err", err)
+		return sess, false
+	}
+	if err := s.loadTenant(r.Context(), &sess); err != nil { // fail closed
+		s.log.Warn("load tenant", "login", logSafe(sess.Email), "err", err)
+		return sess, false
+	}
 	sess.Last = now
 	s.setCookie(w, sessionCookie, s.seal(sess), maxSession-now.Sub(sess.IAT))
 	return sess, true
@@ -232,5 +302,5 @@ func (s *Server) csrfOK(r *http.Request, sess session) bool {
 	if o := r.Header.Get("Origin"); o != "" && o != s.cfg.PublicURL {
 		return false
 	}
-	return hmac.Equal([]byte(r.FormValue("csrf")), []byte(s.csrfToken(sess)))
+	return s.macOK(fmt.Sprintf("csrf|%s|%d", sess.Email, sess.IAT.UnixNano()), r.FormValue("csrf"))
 }

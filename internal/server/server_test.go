@@ -31,15 +31,15 @@ import (
 
 func TestAuditHashChain(t *testing.T) {
 	at := time.Unix(1700000000, 0)
-	h1 := auditHash(make([]byte, 32), at, "admin@x", "policy.save", "p", "doc")
-	h2 := auditHash(h1, at, "admin@x", "login", "", "admin")
-	if bytes.Equal(auditHash(make([]byte, 32), at, "admin@x", "policy.save", "p", "doc!"), h1) {
+	h1 := auditHash(nil, make([]byte, 32), at, "admin@x", "policy.save", "p", "doc")
+	h2 := auditHash(nil, h1, at, "admin@x", "login", "", "admin")
+	if bytes.Equal(auditHash(nil, make([]byte, 32), at, "admin@x", "policy.save", "p", "doc!"), h1) {
 		t.Fatal("detail change not detected")
 	}
-	if bytes.Equal(auditHash(make([]byte, 32), at, "admin@xp", "olicy.save", "p", "doc"), h1) {
+	if bytes.Equal(auditHash(nil, make([]byte, 32), at, "admin@xp", "olicy.save", "p", "doc"), h1) {
 		t.Fatal("field boundaries must be part of the hash")
 	}
-	if bytes.Equal(auditHash(h2, at, "a", "b", "c", "d"), auditHash(h1, at, "a", "b", "c", "d")) {
+	if bytes.Equal(auditHash(nil, h2, at, "a", "b", "c", "d"), auditHash(nil, h1, at, "a", "b", "c", "d")) {
 		t.Fatal("prev hash must be chained")
 	}
 }

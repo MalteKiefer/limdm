@@ -101,14 +101,17 @@ func (a *Agent) installUpdate(ctx context.Context, u api.AgentUpdate) error {
 	if exists(updateMarker) {
 		return nil // an update is in progress
 	}
-	if UpdatePubKey != "" {
-		pub, err := hex.DecodeString(UpdatePubKey)
-		if err != nil {
-			return err
-		}
-		if err := api.VerifySums(ed25519.PublicKey(pub), u.Sums, u.SumsSig); err != nil {
-			return err
-		}
+	// fail closed: without a compiled in release key the checksums would only
+	// be as trustworthy as the server, so a self update is refused
+	if UpdatePubKey == "" {
+		return errors.New("this agent was built without a release signing key (UpdatePubKey); self updates are refused, update the package by hand")
+	}
+	pub, err := hex.DecodeString(UpdatePubKey)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return fmt.Errorf("invalid compiled in release signing key")
+	}
+	if err := api.VerifySums(ed25519.PublicKey(pub), u.Sums, u.SumsSig); err != nil {
+		return err
 	}
 	file := api.PackageName(u.Version, runtime.GOARCH, packageFormat(a.host.family))
 	if !api.PackageRe.MatchString(file) {
@@ -152,6 +155,8 @@ func (a *Agent) installUpdate(ctx context.Context, u api.AgentUpdate) error {
 	case "alpine":
 		// apk sees an unsigned package; its SHA-256 from the signed sums was checked above
 		install = []string{"apk", "add", "--allow-untrusted", "--no-interactive", pkg}
+	case "suse": // the same for zypper, which refuses unsigned local rpms otherwise
+		install = []string{"zypper", "--non-interactive", "install", "--allow-unsigned-rpm", pkg}
 	default:
 		install = []string{"dnf", "install", "-y", "-q", pkg}
 	}

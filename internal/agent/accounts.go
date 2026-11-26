@@ -10,7 +10,7 @@ import (
 // adminGroups grant root via sudo on Debian, Ubuntu (sudo, admin) and Fedora (wheel).
 var adminGroups = []string{"sudo", "wheel", "admin"}
 
-// repos reads apt sources (one line .list and deb822 .sources) or dnf .repo files.
+// repos reads apt sources (one line .list and deb822 .sources) or dnf and zypper .repo files.
 func (h *host) repos() []api.Repo {
 	if h.family == "debian" {
 		var out []api.Repo
@@ -25,7 +25,8 @@ func (h *host) repos() []api.Repo {
 		}
 		return out
 	}
-	files, _ := filepath.Glob("/etc/yum.repos.d/*.repo")
+	_, dir := h.repoDirs()
+	files, _ := filepath.Glob(dir + "/*.repo")
 	var out []api.Repo
 	for _, f := range files {
 		out = append(out, parseYumRepo(readFile(f), f)...)
