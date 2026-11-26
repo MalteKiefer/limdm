@@ -124,7 +124,8 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 `q` (text in host name, OS, id, blueprint, tags), `status` (`compliant`, `in grace`,
 `non-compliant`, `stale`, `pending`, `retired`), `tag`, `app`, `flatpak`, `remote`,
 `blueprint`, `agent`, `failing` (check id) and `pkg`. All given filters apply together;
-values above 200 characters are ignored. `pkg` is a package name with an optional version
+a value above 200 characters or an unknown `status` is answered with 400, never with the
+unfiltered fleet. `pkg` is a package name with an optional version
 comparison:
 
 ```sh

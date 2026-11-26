@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"html/template"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -95,16 +97,21 @@ type deviceQuery struct {
 	Keep    url.Values // filters and search, without status and page
 }
 
-// parseDeviceQuery reads the device filters from a query string. Values
-// longer than 200 characters are ignored, as before.
+// parseDeviceQuery reads the device filters from a query string. A value
+// longer than 200 characters or an unknown status is an error: ignoring the
+// filter would hand a client the whole fleet instead of the devices it meant.
 func parseDeviceQuery(q url.Values, stale time.Duration) (deviceQuery, error) {
 	dq := deviceQuery{stale: stale.Seconds(), Keep: url.Values{}}
-	get := func(k string) string {
-		if v := strings.TrimSpace(q.Get(k)); len(v) <= 200 {
-			return v
-		}
-		return ""
+	keys := []string{"pkg", "q"}
+	for _, f := range deviceFilters {
+		keys = append(keys, f.Key)
 	}
+	for _, k := range keys {
+		if len(strings.TrimSpace(q.Get(k))) > 200 {
+			return dq, fmt.Errorf("filter %s: at most 200 characters", k)
+		}
+	}
+	get := func(k string) string { return strings.TrimSpace(q.Get(k)) }
 	for _, f := range deviceFilters {
 		if v := get(f.Key); v != "" {
 			dq.filters.add(f.Where, v)
@@ -127,11 +134,10 @@ func parseDeviceQuery(q url.Values, stale time.Duration) (deviceQuery, error) {
 		dq.Keep.Set("q", v)
 	}
 	if v := q.Get("status"); v != "" {
-		for _, st := range deviceStatuses {
-			if v == st {
-				dq.Status = v
-			}
+		if !slices.Contains(deviceStatuses, v) {
+			return dq, errors.New("status: one of " + strings.Join(deviceStatuses, ", "))
 		}
+		dq.Status = v
 	}
 	for i := range dq.Chips {
 		u := url.Values{}
