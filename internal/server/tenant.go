@@ -426,7 +426,7 @@ func (s *Server) tenantLogo(w http.ResponseWriter, r *http.Request, sess session
 		s.notFound(w, r, sess)
 		return
 	}
-	b, _ := s.tenantBrand(r.Context(), id)
+	b, _ := s.tenantBrand(r.Context(), s.db, id)
 	if len(b.Logo) == 0 {
 		s.notFound(w, r, sess)
 		return
@@ -439,7 +439,7 @@ func (s *Server) tenantLogo(w http.ResponseWriter, r *http.Request, sess session
 // tenantCSS overrides the accent color with the tenant's color (a file, so
 // the CSP needs no inline styles).
 func (s *Server) tenantCSS(w http.ResponseWriter, r *http.Request, sess session) {
-	_, color := s.tenantBrand(r.Context(), sess.Tenant)
+	_, color := s.tenantBrand(r.Context(), s.db, sess.Tenant)
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	if colorRe.MatchString(color) {
@@ -456,7 +456,7 @@ type brandEntry struct {
 // tenantBrand is the branding of a tenant with the global branding as
 // fallback for name and logo; tenant 0 is the global branding. Cached for
 // a minute: devices ask on every check in.
-func (s *Server) tenantBrand(ctx context.Context, id int64) (api.Branding, string) {
+func (s *Server) tenantBrand(ctx context.Context, q rowQuerier, id int64) (api.Branding, string) {
 	global := s.branding()
 	if id == 0 {
 		return global, ""
@@ -467,7 +467,7 @@ func (s *Server) tenantBrand(ctx context.Context, id int64) (api.Branding, strin
 	}
 	var name, color string
 	var logo []byte
-	if err := s.db.QueryRow(ctx, `SELECT company_name, logo, color FROM tenants WHERE id=$1`, id).Scan(&name, &logo, &color); err != nil {
+	if err := q.QueryRow(ctx, `SELECT company_name, logo, color FROM tenants WHERE id=$1`, id).Scan(&name, &logo, &color); err != nil {
 		return global, ""
 	}
 	if name == "" && len(logo) == 0 {
@@ -487,18 +487,18 @@ func (s *Server) tenantBrand(ctx context.Context, id int64) (api.Branding, strin
 }
 
 // deviceBranding is what a device receives: the branding of its tenant.
-func (s *Server) deviceBranding(ctx context.Context, deviceID string) api.Branding {
+func (s *Server) deviceBranding(ctx context.Context, q rowQuerier, deviceID string) api.Branding {
 	var id int64
-	if err := s.db.QueryRow(ctx, `SELECT tenant_id FROM devices WHERE id=$1`, deviceID).Scan(&id); err != nil {
+	if err := q.QueryRow(ctx, `SELECT tenant_id FROM devices WHERE id=$1`, deviceID).Scan(&id); err != nil {
 		return s.branding()
 	}
-	b, _ := s.tenantBrand(ctx, id)
+	b, _ := s.tenantBrand(ctx, q, id)
 	return b
 }
 
 // consoleBrand fills the layout's branding and tenant switcher.
 func (s *Server) consoleBrand(ctx context.Context, sess session, data map[string]any) {
-	b, color := s.tenantBrand(ctx, sess.Tenant)
+	b, color := s.tenantBrand(ctx, s.db, sess.Tenant)
 	logo := ""
 	if len(b.Logo) > 0 {
 		logo = "/branding/logo.png?v=" + b.Hash

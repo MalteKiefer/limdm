@@ -868,6 +868,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		pkgHash = req.PackagesHash
 	}
 	var notices []notice // sent after the commit
+	var refused []api.CommandResult
 	for _, res := range req.Results {
 		status := "failed"
 		if res.OK {
@@ -882,7 +883,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if typ == "shell" && !res.OK {
-			s.shellRefused(ctx, res.ID, res.Output)
+			refused = append(refused, res) // after the commit: it needs its own connection
 		}
 		if !res.OK && slices.Contains([]string{"lock", "unlock", "lost", "found", "wipe", "script"}, typ) {
 			notices = append(notices, notice{Type: "command.failed", Severity: "critical", Title: "Command failed: " + typ,
@@ -1011,7 +1012,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		notices = append(notices, notice{Type: "agent.update_failed", Severity: "warning", Title: "Agent update failed: " + u.To,
 			Text: fmt.Sprintf("%s to %s failed (rolled back: %v). %s", u.From, u.To, u.RolledBack, truncate(u.Detail, 300))})
 	}
-	if b := s.deviceBranding(ctx, id); b.Hash != req.BrandingHash {
+	if b := s.deviceBranding(ctx, tx, id); b.Hash != req.BrandingHash {
 		resp.Branding = &b
 	}
 	if err := s.recordUpdateResult(ctx, tx, id, req.UpdateResult); err != nil {
@@ -1033,6 +1034,9 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	if err := tx.Commit(ctx); err != nil {
 		s.failAPI(w, err)
 		return
+	}
+	for _, res := range refused {
+		s.shellRefused(ctx, res.ID, res.Output)
 	}
 	if relocate {
 		go s.locate(id, ip) //nolint:gosec // G118: the lookup outlives the request on purpose

@@ -1769,6 +1769,7 @@ func (s *Server) streamExport(w http.ResponseWriter, r *http.Request, sess sessi
 		_, _ = io.WriteString(w, "\nERROR: export incomplete, run it again\n")
 		detail += " incomplete"
 	}
+	_ = tx.Rollback(ctx) // the audit entry takes a connection of its own
 	if err := s.auditAction(context.WithoutCancel(ctx), sess.Email, "export.done", kind, detail, nil); err != nil {
 		s.log.Error("audit export.done", "err", err)
 	}
