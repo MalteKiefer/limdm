@@ -56,9 +56,11 @@ func (s *Server) requestApproval(ctx context.Context, sess session, action, targ
 	}
 	var id int64
 	err = s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
-		err := tx.QueryRow(ctx, `INSERT INTO approvals(action, target, payload, reason, requested_by, expires_at)
-			VALUES ($1,$2,$3,$4,$5, now() + make_interval(secs => $6)) RETURNING id`,
-			action, target, b, reason, sess.Email, approvalTTL.Seconds()).Scan(&id)
+		// the tenant that decides: the requester's, else the target device's or user's
+		err := tx.QueryRow(ctx, `INSERT INTO approvals(action, target, payload, reason, requested_by, expires_at, tenant_id)
+			VALUES ($1,$2,$3,$4,$5, now() + make_interval(secs => $6), coalesce(nullif($7::bigint, 0), (SELECT tenant_id FROM devices WHERE id=$2),
+				(SELECT tenant_id FROM console_users WHERE email=$2), (SELECT tenant_id FROM local_admins WHERE 'local:' || name = $2), 1)) RETURNING id`,
+			action, target, b, reason, sess.Email, approvalTTL.Seconds(), sess.Tenant).Scan(&id)
 		return sess.Email, "approval.request", target, fmt.Sprintf("#%d %s %s reason=%q", id, action, truncate(string(b), 2000), reason), err
 	})
 	if err != nil {
@@ -75,13 +77,14 @@ func (s *Server) approvalsPage(w http.ResponseWriter, r *http.Request, sess sess
 }
 
 func (s *Server) renderApprovals(w http.ResponseWriter, r *http.Request, sess session, errMsg string) {
+	tcond, targs := tenantCond(sess, "tenant_id", 1)
 	q := `SELECT id, action, target, payload, reason, requested_by, status, decided_by, decided_at, created_at, expires_at
-		FROM approvals WHERE ($1 = '' OR requested_by = $1) ORDER BY status <> 'pending', id DESC LIMIT 200`
+		FROM approvals WHERE ($1 = '' OR requested_by = $1) AND ` + tcond + ` ORDER BY status <> 'pending', id DESC LIMIT 200`
 	own := ""
 	if sess.Role == "helpdesk" { // sees the state of their own requests only
 		own = sess.Email
 	}
-	rows, err := s.db.Query(r.Context(), q, own)
+	rows, err := s.db.Query(r.Context(), q, append([]any{own}, targs...)...)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -113,8 +116,9 @@ func (s *Server) approvalDecide(w http.ResponseWriter, r *http.Request, sess ses
 		}
 		defer tx.Rollback(ctx)
 		var a approval
+		tcond, targs := tenantCond(sess, "tenant_id", 1)
 		err = tx.QueryRow(ctx, `SELECT id, action, target, payload, reason, requested_by, status, decided_by, decided_at, created_at, expires_at
-			FROM approvals WHERE id=$1 FOR UPDATE`, id).Scan(&a.ID, &a.Action, &a.Target, &a.Payload, &a.Reason, &a.RequestedBy, &a.Status,
+			FROM approvals WHERE id=$1 AND `+tcond+` FOR UPDATE`, append([]any{id}, targs...)...).Scan(&a.ID, &a.Action, &a.Target, &a.Payload, &a.Reason, &a.RequestedBy, &a.Status,
 			&a.DecidedBy, &a.DecidedAt, &a.CreatedAt, &a.ExpiresAt)
 		if err != nil {
 			return err

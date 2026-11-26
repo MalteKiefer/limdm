@@ -455,6 +455,10 @@ func (s *Server) shellEnd(w http.ResponseWriter, r *http.Request, sess session) 
 		http.Redirect(w, r, "/shell/"+sid, http.StatusSeeOther)
 		return
 	}
+	if !s.inScope(r.Context(), sess, l.device) {
+		s.notFound(w, r, sess)
+		return
+	}
 	if l.owner != sess.Email && sess.Role != "admin" {
 		s.errorPage(w, r, sess, http.StatusForbidden, "only the user who started the session or an admin can end it")
 		return

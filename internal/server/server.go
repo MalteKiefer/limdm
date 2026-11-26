@@ -64,6 +64,7 @@ type Config struct {
 	ReleaseDir    string
 	StaleAfter    time.Duration
 	Syslog        string // udp://host:port or tcp://host:port: audit entries and device events as RFC 5424
+	MultiTenant   bool   // tenant pages and switcher (tenant.go); isolation applies always
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -96,6 +97,7 @@ func ConfigFromEnv() (Config, error) {
 		ReleaseRepo:   os.Getenv("LIMDM_RELEASE_REPO"),
 		GeoIPURL:      envOr("LIMDM_GEOIP_URL", "https://ipwho.is/"),
 		Syslog:        os.Getenv("LIMDM_SYSLOG"),
+		MultiTenant:   os.Getenv("LIMDM_MULTI_TENANT") == "true",
 	}
 	if c.GeoIPURL == "off" {
 		c.GeoIPURL = ""
@@ -208,6 +210,7 @@ type Server struct {
 	// when the last full verification ran (Unix seconds), 0 = not yet
 	auditVerifiedAt atomic.Int64
 	shells          shellHub // running remote shell sessions
+	brands          sync.Map // tenant id -> brandEntry (tenant.go)
 }
 
 func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
@@ -554,8 +557,10 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(ctx)
 	var blueprintID *int64
+	var tenantID int64 // the device joins the tenant of its token
 	err = tx.QueryRow(ctx, `UPDATE enroll_tokens SET uses_left = uses_left - 1
-		WHERE token_hash=$1 AND uses_left > 0 AND expires_at > now() RETURNING blueprint_id`, sha(req.Token)).Scan(&blueprintID)
+		WHERE token_hash=$1 AND uses_left > 0 AND expires_at > now()
+		AND tenant_id IN (SELECT id FROM tenants WHERE NOT disabled) RETURNING blueprint_id, tenant_id`, sha(req.Token)).Scan(&blueprintID, &tenantID)
 	if err != nil {
 		s.limit.allow("enroll:"+rateKey(r), 20, 5*time.Minute) // counts the failure
 		s.log.Warn("enroll rejected", "remote", clientIP(r))
@@ -568,8 +573,8 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid certificate signing request")
 		return
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, machine_id, blueprint_id) VALUES ($1,$2,$3,$4,$5,$6)`,
-		id, serial, notAfter, truncate(req.Hostname, 255), truncate(req.MachineID, 64), blueprintID); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, machine_id, blueprint_id, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		id, serial, notAfter, truncate(req.Hostname, 255), truncate(req.MachineID, 64), blueprintID, tenantID); err != nil {
 		s.failAPI(w, err)
 		return
 	}
@@ -581,7 +586,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	// The ID is readable by every user and cannot prove anything, so retiring
 	// the older record stays an admin decision in the console.
 	if mid := strings.TrimSpace(req.MachineID); mid != "" {
-		rows, err := tx.Query(ctx, `SELECT id FROM devices WHERE machine_id=$1 AND id<>$2 AND NOT retired`, truncate(mid, 64), id)
+		rows, err := tx.Query(ctx, `SELECT id FROM devices WHERE machine_id=$1 AND id<>$2 AND NOT retired AND tenant_id=$3`, truncate(mid, 64), id, tenantID)
 		if err != nil {
 			s.failAPI(w, err)
 			return
@@ -884,7 +889,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		notices = append(notices, notice{Type: "agent.update_failed", Severity: "warning", Title: "Agent update failed: " + u.To,
 			Text: fmt.Sprintf("%s to %s failed (rolled back: %v). %s", u.From, u.To, u.RolledBack, truncate(u.Detail, 300))})
 	}
-	if b := s.branding(); b.Hash != req.BrandingHash {
+	if b := s.deviceBranding(ctx, id); b.Hash != req.BrandingHash {
 		resp.Branding = &b
 	}
 	if err := s.recordUpdateResult(ctx, tx, id, req.UpdateResult); err != nil {
@@ -934,10 +939,34 @@ func audit(ctx context.Context, tx pgx.Tx, actor, action, target, detail string)
 	if err := tx.QueryRow(ctx, `SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1`).Scan(&prev); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
+	tenant, err := auditTenant(ctx, tx, target)
+	if err != nil {
+		return err
+	}
 	at := time.Now().UTC().Truncate(time.Microsecond)
-	_, err := tx.Exec(ctx, `INSERT INTO audit_log(at, actor, action, target, detail, prev, hash) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		at, actor, action, target, detail, prev, auditHash(auditKey, prev, at, actor, action, target, detail))
+	_, err = tx.Exec(ctx, `INSERT INTO audit_log(at, actor, action, target, detail, prev, hash, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		at, actor, action, target, detail, prev, auditHash(auditKey, prev, at, auditFields(actor, action, target, detail, tenant)...), tenant)
 	return err
+}
+
+// auditTenant is the tenant of an entry: the tenant the request acts for,
+// else the tenant of the device it is about, else none (a global entry).
+func auditTenant(ctx context.Context, tx pgx.Tx, target string) (*int64, error) {
+	if t := ctxTenant(ctx); t != 0 {
+		return &t, nil
+	}
+	if target == "" {
+		return nil, nil
+	}
+	var t int64
+	err := tx.QueryRow(ctx, `SELECT tenant_id FROM devices WHERE id=$1`, target).Scan(&t)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil, nil
+	case err != nil:
+		return nil, err
+	}
+	return &t, nil
 }
 
 // auditAction runs an admin change and its audit entry in one transaction.
@@ -1146,9 +1175,10 @@ func (s *Server) notifyDevice(id string, notices []notice) {
 		return
 	}
 	var host string
-	_ = s.db.QueryRow(context.Background(), `SELECT hostname FROM devices WHERE id=$1`, id).Scan(&host)
+	var tenantID int64
+	_ = s.db.QueryRow(context.Background(), `SELECT hostname, tenant_id FROM devices WHERE id=$1`, id).Scan(&host, &tenantID)
 	for _, n := range notices {
-		n.DeviceID, n.Hostname = id, firstNonEmpty(n.Hostname, host)
+		n.DeviceID, n.Hostname, n.Tenant = id, firstNonEmpty(n.Hostname, host), tenantID
 		if n.URL == "" {
 			n.URL = s.cfg.PublicURL + "/devices/" + id
 		}

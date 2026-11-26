@@ -177,7 +177,7 @@ func seedDefaultBlueprint(ctx context.Context, tx pgx.Tx) error {
 		ids = append(ids, id)
 	}
 	tree, _ := json.Marshal([]api.Node{{Kind: "assign", Items: ids}})
-	_, err := tx.Exec(ctx, `INSERT INTO blueprints(name, description, tree) VALUES ('default', 'Baseline for every device', $1)`, string(tree))
+	_, err := tx.Exec(ctx, `INSERT INTO blueprints(name, description, tree, shared) VALUES ('default', 'Baseline for every device', $1, true)`, string(tree))
 	return err
 }
 
@@ -351,7 +351,8 @@ func effectiveDeclarations(ctx context.Context, q pgx.Tx, deviceID string) ([]ap
 // ---- web: library ----
 
 func (s *Server) allItems(ctx context.Context) ([]api.LibraryItem, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, name, type, description, payload FROM library_items ORDER BY type, name`)
+	cond, args := visibleCond(ctx, "i", 0)
+	rows, err := s.db.Query(ctx, `SELECT id, name, type, description, payload FROM library_items i WHERE `+cond+` ORDER BY type, name`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -454,6 +455,9 @@ func (s *Server) libraryEdit(w http.ResponseWriter, r *http.Request, sess sessio
 	it := api.LibraryItem{Type: r.URL.Query().Get("type")}
 	if v := r.PathValue("id"); v != "new" {
 		id, err := strconv.ParseInt(v, 10, 64)
+		if err == nil && !s.tenantOwns(r.Context(), sess, "library_items", id, true) {
+			err = pgx.ErrNoRows
+		}
 		if err == nil {
 			rows, qerr := s.db.Query(r.Context(), `SELECT id, name, type, description, payload FROM library_items WHERE id=$1`, id)
 			if qerr == nil {
@@ -567,6 +571,9 @@ func (s *Server) restoreNetworkSecrets(ctx context.Context, it *api.LibraryItem)
 	}
 	var stored []byte
 	if it.ID > 0 {
+		if err := tenantGuard(ctx, s.db, "library_items", it.ID); err != nil {
+			return err
+		}
 		if err := s.db.QueryRow(ctx, `SELECT payload FROM library_items WHERE id=$1 AND type=$2`, it.ID, it.Type).Scan(&stored); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
@@ -623,6 +630,9 @@ func (s *Server) storeItem(ctx context.Context, actor, action, note string, it *
 	return s.auditAction(ctx, actor, action, it.Name, detail, func(tx pgx.Tx) error {
 		id := it.ID
 		if id > 0 {
+			if err := tenantGuard(ctx, tx, "library_items", id); err != nil {
+				return err
+			}
 			if err := ensureItemBaseline(ctx, tx, id); err != nil {
 				return err
 			}
@@ -635,13 +645,13 @@ func (s *Server) storeItem(ctx context.Context, actor, action, note string, it *
 				if !restore {
 					return &userError{http.StatusNotFound, "library item not found"}
 				}
-				if _, err := tx.Exec(ctx, `INSERT INTO library_items(id, name, type, description, payload, signature) VALUES ($1,$2,$3,$4,$5,$6)`,
-					id, it.Name, it.Type, it.Description, compact.String(), sig); err != nil {
+				if _, err := tx.Exec(ctx, `INSERT INTO library_items(id, name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+					id, it.Name, it.Type, it.Description, compact.String(), sig, ownerTenant(ctx)); err != nil {
 					return err
 				}
 			}
-		} else if err := tx.QueryRow(ctx, `INSERT INTO library_items(name, type, description, payload, signature) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-			it.Name, it.Type, it.Description, compact.String(), sig).Scan(&id); err != nil {
+		} else if err := tx.QueryRow(ctx, `INSERT INTO library_items(name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+			it.Name, it.Type, it.Description, compact.String(), sig, ownerTenant(ctx)).Scan(&id); err != nil {
 			return err
 		}
 		it.ID = id
@@ -665,6 +675,9 @@ func (s *Server) libraryDelete(w http.ResponseWriter, r *http.Request, sess sess
 // deleteLibraryItem removes an item no blueprint uses, with its audit entry
 // and a deleted version that keeps the last payload.
 func (s *Server) deleteLibraryItem(ctx context.Context, actor string, id int64) error {
+	if err := tenantGuard(ctx, s.db, "library_items", id); err != nil {
+		return err
+	}
 	use, err := s.itemUsage(ctx)
 	if err != nil {
 		return err
@@ -698,11 +711,13 @@ const effectiveBlueprintSQL = `coalesce(d.blueprint_id,
 	(SELECT id FROM blueprints WHERE name='default'))`
 
 func (s *Server) allBlueprints(ctx context.Context, deviceID string) ([]blueprintRec, error) {
+	cond, args := visibleCond(ctx, "b", 1)
+	dcond, dargs := tenantDevices(ctx, 1+len(args))
 	rows, err := s.db.Query(ctx, `SELECT b.id, b.name, b.parent_id, b.tree, b.description, b.updated_at,
-		(SELECT count(*) FROM devices d WHERE NOT d.retired AND `+effectiveBlueprintSQL+` = b.id),
+		(SELECT count(*) FROM devices d WHERE NOT d.retired AND `+dcond+` AND `+effectiveBlueprintSQL+` = b.id),
 		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND (d.blueprint_id=b.id OR (d.blueprint_id IS NULL AND b.name='default'))),
 		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND `+effectiveBlueprintSQL+` = b.id)
-		FROM blueprints b ORDER BY b.name='default' DESC, b.name`, deviceID)
+		FROM blueprints b WHERE `+cond+` ORDER BY b.name='default' DESC, b.name`, append(append([]any{deviceID}, args...), dargs...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -743,6 +758,9 @@ func (s *Server) blueprintEdit(w http.ResponseWriter, r *http.Request, sess sess
 	bp := blueprintRec{Tree: []api.Node{}}
 	if v := r.PathValue("id"); v != "new" {
 		id, err := strconv.ParseInt(v, 10, 64)
+		if err == nil && !s.tenantOwns(r.Context(), sess, "blueprints", id, true) {
+			err = pgx.ErrNoRows
+		}
 		if err == nil {
 			bp, err = scanBlueprint(s.db.QueryRow(r.Context(), `SELECT `+blueprintCols+` FROM blueprints WHERE id=$1`, id))
 		}
@@ -847,7 +865,8 @@ func (s *Server) validateBlueprint(ctx context.Context, bp blueprintRec) error {
 		return nil
 	}
 	var ok bool
-	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blueprints WHERE id=$1)`, *bp.Parent).Scan(&ok); err != nil {
+	pcond, pargs := visibleCond(ctx, "b", 1)
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blueprints b WHERE b.id=$1 AND `+pcond+`)`, append([]any{*bp.Parent}, pargs...)...).Scan(&ok); err != nil {
 		return err
 	}
 	if !ok {
@@ -874,6 +893,9 @@ func (s *Server) storeBlueprint(ctx context.Context, actor, action, note string,
 		id := bp.ID
 		var exists bool
 		if id > 0 {
+			if err := tenantGuard(ctx, tx, "blueprints", id); err != nil {
+				return err
+			}
 			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blueprints WHERE id=$1)`, id).Scan(&exists); err != nil {
 				return err
 			}
@@ -893,15 +915,15 @@ func (s *Server) storeBlueprint(ctx context.Context, actor, action, note string,
 				return err
 			}
 		case id > 0 && restore:
-			if _, err := tx.Exec(ctx, `INSERT INTO blueprints(id, name, description, parent_id, tree) VALUES ($1,$2,$3,$4,$5)`,
-				id, bp.Name, bp.Desc, bp.Parent, string(tree)); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO blueprints(id, name, description, parent_id, tree, tenant_id) VALUES ($1,$2,$3,$4,$5,$6)`,
+				id, bp.Name, bp.Desc, bp.Parent, string(tree), ownerTenant(ctx)); err != nil {
 				return err
 			}
 		case id > 0:
 			return &userError{http.StatusNotFound, "blueprint not found, or default cannot be renamed"}
 		default:
-			if err := tx.QueryRow(ctx, `INSERT INTO blueprints(name, description, parent_id, tree) VALUES ($1,$2,$3,$4) RETURNING id`,
-				bp.Name, bp.Desc, bp.Parent, string(tree)).Scan(&id); err != nil {
+			if err := tx.QueryRow(ctx, `INSERT INTO blueprints(name, description, parent_id, tree, tenant_id) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+				bp.Name, bp.Desc, bp.Parent, string(tree), ownerTenant(ctx)).Scan(&id); err != nil {
 				return err
 			}
 		}
@@ -954,6 +976,9 @@ func (s *Server) blueprintDelete(w http.ResponseWriter, r *http.Request, sess se
 // deleteBlueprint removes a blueprint other than default, with its audit
 // entry; its devices fall back to default.
 func (s *Server) deleteBlueprint(ctx context.Context, actor string, id int64) error {
+	if err := tenantGuard(ctx, s.db, "blueprints", id); err != nil {
+		return err
+	}
 	return s.auditAction(ctx, actor, "blueprint.delete", strconv.FormatInt(id, 10), "devices fall back to default", func(tx pgx.Tx) error {
 		// the last version stays in the history (rolled back for default below)
 		if err := ensureBlueprintBaseline(ctx, tx, id); err != nil {

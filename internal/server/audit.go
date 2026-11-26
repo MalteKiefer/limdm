@@ -135,7 +135,18 @@ func auditEntryOK(key []byte, keyedFrom int64, prev []byte, a auditRow) bool {
 	if keyedFrom > 0 && a.ID >= keyedFrom {
 		k = key
 	}
-	return bytes.Equal(a.Prev, prev) && hmac.Equal(a.Hash, auditHash(k, a.Prev, a.At, a.Actor, a.Action, a.Target, a.Detail))
+	return bytes.Equal(a.Prev, prev) && hmac.Equal(a.Hash, auditHash(k, a.Prev, a.At, auditFields(a.Actor, a.Action, a.Target, a.Detail, a.Tenant)...))
+}
+
+// auditFields are the hashed fields of an entry: the tenant, when set, is
+// a fifth field, so entries without one (all before tenants existed) keep
+// their hashes and moving an entry to another tenant breaks the chain.
+func auditFields(actor, action, target, detail string, tenant *int64) []string {
+	f := []string{actor, action, target, detail}
+	if tenant != nil {
+		f = append(f, strconv.FormatInt(*tenant, 10))
+	}
+	return f
 }
 
 // auditLine is one line of the JSON Lines export: the raw values the hash
@@ -151,6 +162,7 @@ type auditLine struct {
 	Prev   string `json:"prev"` // hex
 	Hash   string `json:"hash"` // hex
 	Scheme string `json:"scheme"`
+	Tenant *int64 `json:"tenant_id,omitempty"` // hashed as a fifth field when set
 }
 
 func auditScheme(id int64) string {
@@ -176,7 +188,7 @@ func VerifyAuditExport(r io.Reader, key []byte, keyedFrom int64) (n int, first, 
 		if err := json.Unmarshal(sc.Bytes(), &l); err != nil {
 			return n, first, last, 0, fmt.Errorf("line %d: %w", n+1, err)
 		}
-		a := auditRow{ID: l.ID, At: time.UnixMicro(l.AtUS).UTC(), Actor: l.Actor, Action: l.Action, Target: l.Target, Detail: l.Detail}
+		a := auditRow{ID: l.ID, At: time.UnixMicro(l.AtUS).UTC(), Actor: l.Actor, Action: l.Action, Target: l.Target, Detail: l.Detail, Tenant: l.Tenant}
 		if a.Prev, err = hex.DecodeString(l.Prev); err != nil {
 			return n, first, last, 0, fmt.Errorf("entry %d: prev: %w", l.ID, err)
 		}
@@ -229,10 +241,8 @@ func auditFilter(q url.Values, sess session) (f map[string]string, where string,
 			add(`at < $?::date + 1`, f[k])
 		}
 	}
-	if sess.scoped() {
-		cond, sargs := auditScope(sess, len(args))
-		conds, args = append(conds, cond), append(args, sargs...)
-	}
+	cond, sargs := auditScope(sess, len(args))
+	conds, args = append(conds, cond), append(args, sargs...)
 	return f, strings.Join(conds, " AND "), args
 }
 
@@ -243,7 +253,7 @@ func (s *Server) auditExportJSONL(w http.ResponseWriter, r *http.Request, sess s
 	ctx := r.Context()
 	_, where, args := auditFilter(r.URL.Query(), sess)
 	s.streamExport(w, r, sess, "audit.jsonl", "application/x-ndjson", func(tx pgx.Tx, out io.Writer) (int, error) {
-		rows, err := tx.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE `+where+` ORDER BY id`, args...)
+		rows, err := tx.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash, tenant_id FROM audit_log WHERE `+where+` ORDER BY id`, args...)
 		if err != nil {
 			return 0, err
 		}
@@ -252,11 +262,11 @@ func (s *Server) auditExportJSONL(w http.ResponseWriter, r *http.Request, sess s
 		n := 0
 		for rows.Next() {
 			var a auditRow
-			if err := rows.Scan(&a.ID, &a.At, &a.Actor, &a.Action, &a.Target, &a.Detail, &a.Prev, &a.Hash); err != nil {
+			if err := rows.Scan(&a.ID, &a.At, &a.Actor, &a.Action, &a.Target, &a.Detail, &a.Prev, &a.Hash, &a.Tenant); err != nil {
 				return n, err
 			}
 			if err := enc.Encode(auditLine{ID: a.ID, At: a.At.UTC().Format("2006-01-02T15:04:05.000000Z"), AtUS: a.At.UnixMicro(), Actor: a.Actor,
-				Action: a.Action, Target: a.Target, Detail: a.Detail, Prev: hex.EncodeToString(a.Prev), Hash: hex.EncodeToString(a.Hash), Scheme: auditScheme(a.ID)}); err != nil {
+				Action: a.Action, Target: a.Target, Detail: a.Detail, Prev: hex.EncodeToString(a.Prev), Hash: hex.EncodeToString(a.Hash), Scheme: auditScheme(a.ID), Tenant: a.Tenant}); err != nil {
 				return n, err
 			}
 			n++

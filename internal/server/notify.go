@@ -83,6 +83,7 @@ type notice struct {
 	Hostname string    `json:"hostname,omitempty"`
 	URL      string    `json:"console_url,omitempty"`
 	At       time.Time `json:"at"`
+	Tenant   int64     `json:"-"` // tenant of the device; 0 reaches global channels only
 }
 
 type channel struct {
@@ -93,6 +94,7 @@ type channel struct {
 	Secret  string // opened: webhook URL, or the SMTP password
 	Events  []string
 	Enabled bool
+	Tenant  *int64 // nil: a global channel that gets the events of every tenant
 }
 
 // channelConfig holds what is not secret; Slack, Discord and webhook URLs
@@ -414,7 +416,7 @@ func (s *Server) notify(n notice) {
 		}
 		_, _ = s.db.Exec(ctx, `DELETE FROM notification_log WHERE at < now() - interval '30 days'`) // retention
 		for _, c := range chans {
-			if len(c.Events) > 0 && !slices.Contains(c.Events, n.Type) {
+			if len(c.Events) > 0 && !slices.Contains(c.Events, n.Type) || c.Tenant != nil && *c.Tenant != n.Tenant {
 				continue
 			}
 			go s.deliverWithRetry(c, n)
@@ -446,7 +448,7 @@ func (s *Server) deliverWithRetry(c channel, n notice) {
 
 // loadChannels reads channels with their secrets opened.
 func (s *Server) loadChannels(ctx context.Context, enabledOnly bool) ([]channel, error) {
-	q := `SELECT id, name, kind, config, secret, events, enabled FROM notification_channels`
+	q := `SELECT id, name, kind, config, secret, events, enabled, tenant_id FROM notification_channels`
 	if enabledOnly {
 		q += ` WHERE enabled`
 	}
@@ -458,7 +460,7 @@ func (s *Server) loadChannels(ctx context.Context, enabledOnly bool) ([]channel,
 		var c channel
 		var cfg []byte
 		var sealed string
-		if err := row.Scan(&c.ID, &c.Name, &c.Kind, &cfg, &sealed, &c.Events, &c.Enabled); err != nil {
+		if err := row.Scan(&c.ID, &c.Name, &c.Kind, &cfg, &sealed, &c.Events, &c.Enabled, &c.Tenant); err != nil {
 			return c, err
 		}
 		if err := json.Unmarshal(cfg, &c.Config); err != nil {
@@ -486,6 +488,13 @@ type channelView struct {
 	LastAt             *time.Time
 }
 
+// channelOwned reports whether the tenant a request acts for owns c (the
+// global view owns every channel).
+func channelOwned(ctx context.Context, c channel) bool {
+	t := ctxTenant(ctx)
+	return t == 0 || c.Tenant != nil && *c.Tenant == t
+}
+
 func (s *Server) channelViews(ctx context.Context) ([]channelView, error) {
 	chans, err := s.loadChannels(ctx, false)
 	if err != nil {
@@ -493,6 +502,9 @@ func (s *Server) channelViews(ctx context.Context) ([]channelView, error) {
 	}
 	var out []channelView
 	for _, c := range chans {
+		if !channelOwned(ctx, c) {
+			continue
+		}
 		v := channelView{ID: c.ID, Name: c.Name, Kind: c.Kind, Enabled: c.Enabled}
 		for _, e := range c.Events {
 			label := e
@@ -543,8 +555,8 @@ func (s *Server) channelSave(w http.ResponseWriter, r *http.Request, sess sessio
 	events := append([]string{}, c.Events...)
 	err := s.auditAction(ctx, sess.Email, "notification.channel_add", c.Name, c.Kind, func(tx pgx.Tx) error {
 		var id int64
-		if err := tx.QueryRow(ctx, `INSERT INTO notification_channels(name, kind, config, events) VALUES ($1,$2,$3,$4) RETURNING id`,
-			c.Name, c.Kind, cfg, events).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO notification_channels(name, kind, config, events, tenant_id) VALUES ($1,$2,$3,$4,nullif($5::bigint, 0)) RETURNING id`,
+			c.Name, c.Kind, cfg, events, ctxTenant(ctx)).Scan(&id); err != nil {
 			return err
 		}
 		sealed, err := s.sealField(channelField(id), c.Secret)
@@ -580,7 +592,7 @@ func (s *Server) channelOp(w http.ResponseWriter, r *http.Request, sess session)
 			s.fail(w, err)
 			return
 		}
-		i := slices.IndexFunc(chans, func(c channel) bool { return c.ID == id })
+		i := slices.IndexFunc(chans, func(c channel) bool { return c.ID == id && channelOwned(ctx, c) })
 		if i < 0 {
 			http.NotFound(w, r)
 			return
@@ -603,6 +615,9 @@ func (s *Server) channelOp(w http.ResponseWriter, r *http.Request, sess session)
 		return
 	}
 	err = s.auditAction(ctx, sess.Email, "notification.channel_"+op, strconv.FormatInt(id, 10), "", func(tx pgx.Tx) error {
+		if err := tenantGuard(ctx, tx, "notification_channels", id); err != nil {
+			return err
+		}
 		var err error
 		if op == "delete" {
 			_, err = tx.Exec(ctx, `DELETE FROM notification_channels WHERE id=$1`, id)
@@ -611,6 +626,10 @@ func (s *Server) channelOp(w http.ResponseWriter, r *http.Request, sess session)
 		}
 		return err
 	})
+	if ue := (*userError)(nil); errors.As(err, &ue) {
+		http.NotFound(w, r)
+		return
+	}
 	if err != nil {
 		s.fail(w, err)
 		return

@@ -55,6 +55,7 @@ type apiCaller struct {
 	Role     string
 	ReadOnly bool
 	Tags     []string // device scope of a helpdesk or auditor token; empty: every device
+	Tenant   int64    // tenant of the token, 0 for global tokens (tenant.go)
 }
 
 // actor names the token in the audit log and as creator of commands.
@@ -62,7 +63,9 @@ func (c apiCaller) actor() string { return fmt.Sprintf("api:%s#%d", c.Name, c.ID
 
 // sess is the session the shared console functions check roles against.
 // It carries the token's device scope, so the W2 scope rules apply.
-func (c apiCaller) sess() session { return session{Email: c.actor(), Role: c.Role, Tags: c.Tags} }
+func (c apiCaller) sess() session {
+	return session{Email: c.actor(), Role: c.Role, Tags: c.Tags, Tenant: c.Tenant, Super: c.Tenant == 0}
+}
 
 const apiCallerKey ctxKey = 2
 
@@ -92,8 +95,10 @@ func (s *Server) bearer(w http.ResponseWriter, r *http.Request) (apiCaller, bool
 	if ok && tok != "" {
 		var expires time.Time
 		var revoked *time.Time
-		err := s.db.QueryRow(ctx, `SELECT id, name, role, read_only, scope_tags, expires_at, revoked_at FROM api_tokens WHERE token_hash=$1`, sha(tok)).
-			Scan(&c.ID, &c.Name, &c.Role, &c.ReadOnly, &c.Tags, &expires, &revoked)
+		var tenantOff bool
+		err := s.db.QueryRow(ctx, `SELECT k.id, k.name, k.role, k.read_only, k.scope_tags, coalesce(k.tenant_id, 0), coalesce(t.disabled, false), k.expires_at, k.revoked_at
+			FROM api_tokens k LEFT JOIN tenants t ON t.id=k.tenant_id WHERE k.token_hash=$1`, sha(tok)).
+			Scan(&c.ID, &c.Name, &c.Role, &c.ReadOnly, &c.Tags, &c.Tenant, &tenantOff, &expires, &revoked)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			reason = "unknown token"
@@ -104,6 +109,8 @@ func (s *Server) bearer(w http.ResponseWriter, r *http.Request) (apiCaller, bool
 			reason = "revoked token"
 		case time.Now().After(expires):
 			reason = "expired token"
+		case tenantOff:
+			reason = "tenant disabled"
 		default:
 			reason = ""
 		}
@@ -160,6 +167,9 @@ func (s *Server) need(level string, h apiHandlerFunc) http.HandlerFunc {
 		if !ok {
 			s.deny(w, r, c, "the token's role cannot do this")
 			return
+		}
+		if c.Tenant != 0 {
+			r = r.WithContext(withTenant(r.Context(), c.Tenant))
 		}
 		h(w, r, c)
 	}
@@ -254,8 +264,9 @@ func (s *Server) apiTokensPage(w http.ResponseWriter, r *http.Request, sess sess
 }
 
 func (s *Server) renderAPITokens(w http.ResponseWriter, r *http.Request, sess session, created string) {
+	tcond, targs := tenantCond(sess, "tenant_id", 0)
 	rows, err := s.db.Query(r.Context(), `SELECT id, name, prefix, role, read_only, created_by, created_at, expires_at, last_used_at, revoked_at, '', scope_tags
-		FROM api_tokens ORDER BY revoked_at IS NOT NULL, expires_at < now(), created_at DESC`)
+		FROM api_tokens WHERE `+tcond+` ORDER BY revoked_at IS NOT NULL, expires_at < now(), created_at DESC`, targs...)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -296,11 +307,19 @@ func (s *Server) apiTokenCreate(w http.ResponseWriter, r *http.Request, sess ses
 		s.errorPage(w, r, sess, http.StatusBadRequest, "a device scope applies to helpdesk and auditor tokens only")
 		return
 	}
+	if role == "metrics" && sess.Tenant != 0 {
+		s.errorPage(w, r, sess, http.StatusBadRequest, "metrics tokens are global: switch to the global view")
+		return
+	}
+	var tenantID *int64 // NULL: a global token
+	if sess.Tenant != 0 {
+		tenantID = &sess.Tenant
+	}
 	token := "lma_" + randToken(32)
 	prefix := token[:12]
 	err = s.auditAction(r.Context(), sess.Email, "api_token.create", name, fmt.Sprintf("role=%s read_only=%t days=%d prefix=%s scope_tags=%s", role, readOnly, days, prefix, strings.Join(scope, ",")), func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO api_tokens(name, prefix, token_hash, role, read_only, created_by, expires_at, scope_tags)
-			VALUES ($1,$2,$3,$4,$5,$6, now() + make_interval(days => $7), $8)`, name, prefix, sha(token), role, readOnly, sess.Email, days, scope)
+		_, err := tx.Exec(r.Context(), `INSERT INTO api_tokens(name, prefix, token_hash, role, read_only, created_by, expires_at, scope_tags, tenant_id)
+			VALUES ($1,$2,$3,$4,$5,$6, now() + make_interval(days => $7), $8, $9)`, name, prefix, sha(token), role, readOnly, sess.Email, days, scope, tenantID)
 		return err
 	})
 	if err != nil {
@@ -318,7 +337,8 @@ func (s *Server) apiTokenRevoke(w http.ResponseWriter, r *http.Request, sess ses
 	}
 	err = s.auditActionFn(r.Context(), func(tx pgx.Tx) (string, string, string, string, error) {
 		var name, prefix string
-		err := tx.QueryRow(r.Context(), `UPDATE api_tokens SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL RETURNING name, prefix`, id).Scan(&name, &prefix)
+		tcond, targs := tenantCond(sess, "tenant_id", 1)
+		err := tx.QueryRow(r.Context(), `UPDATE api_tokens SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL AND `+tcond+` RETURNING name, prefix`, append([]any{id}, targs...)...).Scan(&name, &prefix)
 		return sess.Email, "api_token.revoke", name, "prefix=" + prefix, err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -533,9 +553,17 @@ func (s *Server) apiDevicePatch(w http.ResponseWriter, r *http.Request, c apiCal
 	}
 	setBP := len(body.BlueprintID) > 0
 	var bpID *int64
+	if !s.inScope(ctx, c.sess(), id) {
+		problem(w, http.StatusNotFound, "device not found")
+		return
+	}
 	if setBP && string(body.BlueprintID) != "null" {
 		if err := json.Unmarshal(body.BlueprintID, &bpID); err != nil {
 			problem(w, http.StatusUnprocessableEntity, "blueprint_id must be a number or null")
+			return
+		}
+		if !s.tenantOwns(ctx, c.sess(), "blueprints", *bpID, true) {
+			problem(w, http.StatusUnprocessableEntity, "unknown blueprint")
 			return
 		}
 		var ok bool
@@ -732,7 +760,7 @@ func (s *Server) apiDeviceCommands(w http.ResponseWriter, r *http.Request, c api
 
 // ---- library items ----
 
-func (s *Server) apiItems(w http.ResponseWriter, r *http.Request, _ apiCaller) {
+func (s *Server) apiItems(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	limit, cur, ok := pageArgs(w, r)
 	if !ok {
 		return
@@ -741,7 +769,8 @@ func (s *Server) apiItems(w http.ResponseWriter, r *http.Request, _ apiCaller) {
 	if !ok {
 		return
 	}
-	list, err := collect(r.Context(), s.db, scanItem, `SELECT id, name, type, description, payload FROM library_items WHERE id > $1 ORDER BY id LIMIT $2`, after, limit+1)
+	cond, args := sharedCond(c.sess(), "i", 2)
+	list, err := collect(r.Context(), s.db, scanItem, `SELECT id, name, type, description, payload FROM library_items i WHERE id > $1 AND `+cond+` ORDER BY id LIMIT $2`, append([]any{after, limit + 1}, args...)...)
 	if err != nil {
 		s.apiFail(w, err)
 		return
@@ -766,9 +795,13 @@ func maskItem(it *api.LibraryItem) {
 	}
 }
 
-func (s *Server) apiItemGet(w http.ResponseWriter, r *http.Request, _ apiCaller) {
+func (s *Server) apiItemGet(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	id, ok := pathID(w, r)
 	if !ok {
+		return
+	}
+	if !s.tenantOwns(r.Context(), c.sess(), "library_items", id, true) {
+		problem(w, http.StatusNotFound, "library item not found")
 		return
 	}
 	it, err := collectOne(r.Context(), s.db, scanItem, `SELECT id, name, type, description, payload FROM library_items WHERE id=$1`, id)
@@ -843,7 +876,7 @@ func toAPIBlueprint(b blueprintRec) apiBlueprint {
 	return apiBlueprint{ID: b.ID, Name: b.Name, Description: b.Desc, ParentID: b.Parent, Tree: b.Tree, UpdatedAt: b.Updated}
 }
 
-func (s *Server) apiBlueprints(w http.ResponseWriter, r *http.Request, _ apiCaller) {
+func (s *Server) apiBlueprints(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	limit, cur, ok := pageArgs(w, r)
 	if !ok {
 		return
@@ -852,10 +885,11 @@ func (s *Server) apiBlueprints(w http.ResponseWriter, r *http.Request, _ apiCall
 	if !ok {
 		return
 	}
+	bcond, bargs := sharedCond(c.sess(), "b", 2)
 	list, err := collect(r.Context(), s.db, func(row pgx.CollectableRow) (apiBlueprint, error) {
 		b, err := scanBlueprint(row)
 		return toAPIBlueprint(b), err
-	}, `SELECT `+blueprintCols+` FROM blueprints WHERE id > $1 ORDER BY id LIMIT $2`, after, limit+1)
+	}, `SELECT `+blueprintCols+` FROM blueprints b WHERE id > $1 AND `+bcond+` ORDER BY id LIMIT $2`, append([]any{after, limit + 1}, bargs...)...)
 	if err != nil {
 		s.apiFail(w, err)
 		return
@@ -869,9 +903,13 @@ func (s *Server) apiBlueprints(w http.ResponseWriter, r *http.Request, _ apiCall
 	writeJSON(w, page)
 }
 
-func (s *Server) apiBlueprintGet(w http.ResponseWriter, r *http.Request, _ apiCaller) {
+func (s *Server) apiBlueprintGet(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	id, ok := pathID(w, r)
 	if !ok {
+		return
+	}
+	if !s.tenantOwns(r.Context(), c.sess(), "blueprints", id, true) {
+		problem(w, http.StatusNotFound, "blueprint not found")
 		return
 	}
 	b, err := scanBlueprint(s.db.QueryRow(r.Context(), `SELECT `+blueprintCols+` FROM blueprints WHERE id=$1`, id))
@@ -986,7 +1024,7 @@ func (s *Server) apiAudit(w http.ResponseWriter, r *http.Request, c apiCaller) {
 		where += " AND id < $" + strconv.Itoa(len(args))
 	}
 	args = append(args, limit+1)
-	list, err := collect(r.Context(), s.db, pgx.RowToStructByPos[auditRow], `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE `+
+	list, err := collect(r.Context(), s.db, pgx.RowToStructByPos[auditRow], `SELECT id, at, actor, action, target, detail, prev, hash, tenant_id FROM audit_log WHERE `+
 		where+` ORDER BY id DESC LIMIT $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
 		s.apiFail(w, err)

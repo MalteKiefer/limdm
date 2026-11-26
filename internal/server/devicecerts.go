@@ -282,9 +282,10 @@ func (s *Server) renderNetwork(w http.ResponseWriter, r *http.Request, sess sess
 // networkCerts lists issued certificates, newest first: of one device, or
 // the latest 500 of the fleet.
 func (s *Server) networkCerts(ctx context.Context, deviceID string) ([]netCertRow, error) {
+	tcond, targs := tenantCond(session{Tenant: ctxTenant(ctx)}, "c.tenant_id", 1)
 	rows, err := s.db.Query(ctx, `SELECT c.serial, c.device_id, COALESCE(d.hostname, ''), c.subject, c.sans, c.not_before, c.not_after, c.revoked_at, c.revoke_reason
 		FROM network_certs c LEFT JOIN devices d ON d.id=c.device_id
-		WHERE $1='' OR c.device_id=$1 ORDER BY c.not_before DESC LIMIT 500`, deviceID)
+		WHERE ($1='' OR c.device_id=$1) AND `+tcond+` ORDER BY c.not_before DESC LIMIT 500`, append([]any{deviceID}, targs...)...)
 	if err != nil {
 		return nil, err
 	}

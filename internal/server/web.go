@@ -169,6 +169,19 @@ func (s *Server) pageFor(h handler, postRole string) http.HandlerFunc {
 			http.Redirect(w, r, "/login", http.StatusFound)
 			return
 		}
+		if !tenantAllowed(sess, r.Pattern) { // deny by default (tenant.go)
+			s.errorPage(w, r, sess, http.StatusForbidden, "not available for tenant accounts")
+			return
+		}
+		if sess.Tenant != 0 && tenantRoutes[r.Pattern] {
+			r = r.WithContext(withTenant(r.Context(), sess.Tenant))
+		}
+		// every device route checks the device against tenant and scope here,
+		// so a handler cannot forget it
+		if strings.Contains(r.Pattern, "/devices/{id}") && (sess.Tenant != 0 || sess.scoped()) && !s.inScope(r.Context(), sess, r.PathValue("id")) {
+			s.notFound(w, r, sess)
+			return
+		}
 		if r.Method == http.MethodPost {
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 			if sess.Role != "admin" && postRole != "self" && (postRole != "helpdesk" || sess.Role != "helpdesk") {
@@ -206,8 +219,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, na
 	data["Sess"] = sess
 	data["CSRF"] = s.csrfToken(sess)
 	data["Page"] = name
-	b := s.branding()
-	data["Brand"] = map[string]any{"Name": b.Name, "Logo": len(b.Logo) > 0, "V": b.Hash}
+	s.consoleBrand(r.Context(), sess, data)
 	var buf bytes.Buffer
 	if err := pages[requestLang(r)+"/"+requestDateFormat(r)][name].Execute(&buf, data); err != nil {
 		s.fail(w, err)
@@ -219,6 +231,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, na
 
 func (s *Server) webRoutes(mux *http.ServeMux) {
 	s.networkRoutes(mux)
+	s.tenantPages(mux)
 	s.shellRoutes(mux)
 	mux.HandleFunc("GET /{$}", s.page(s.overview))
 	mux.HandleFunc("GET /help", s.page(s.helpPage))
@@ -569,7 +582,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 	var recent []auditRow
 	if sess.Role != "helpdesk" { // the audit log (script bodies included) is not theirs to read
 		acond, aargs := auditScope(sess, 0)
-		rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE `+acond+` ORDER BY id DESC LIMIT 8`, aargs...)
+		rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash, tenant_id FROM audit_log WHERE `+acond+` ORDER BY id DESC LIMIT 8`, aargs...)
 		if err != nil {
 			s.fail(w, err)
 			return
@@ -581,15 +594,17 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 	}
 	donut := donutChart([]donutPart{{"compliant", counts["compliant"], "ok"}, {"non-compliant", counts["non-compliant"], "bad"},
 		{"in grace", counts["in grace"], "warn"}, {"stale", counts["stale"], "warn"}, {"pending", counts["pending"], "na"}})
-	trend, err := s.fleetChart(ctx)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	steps, err := s.onboarding(ctx, r, sess)
-	if err != nil {
-		s.fail(w, err)
-		return
+	var trend template.HTML
+	var steps []onboardingStep
+	if sess.Tenant == 0 { // fleet history and first steps are installation wide
+		if trend, err = s.fleetChart(ctx); err != nil {
+			s.fail(w, err)
+			return
+		}
+		if steps, err = s.onboarding(ctx, r, sess); err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
 	s.render(w, r, sess, "overview", map[string]any{"Steps": steps, "Trend": trend, "Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
 		"Recent": recent, "StaleHours": s.settings().StaleHours})
@@ -1158,6 +1173,10 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 	}
 	var bpID *int64
 	if v, err := strconv.ParseInt(r.FormValue("blueprint_id"), 10, 64); err == nil && v > 0 {
+		if !s.tenantOwns(r.Context(), sess, "blueprints", v, true) {
+			s.errorPage(w, r, sess, http.StatusBadRequest, "unknown blueprint")
+			return
+		}
 		bpID = &v
 	}
 	tags, err := parseTags(r.FormValue("tags"))
@@ -1212,7 +1231,8 @@ func (s *Server) tokenRevoke(w http.ResponseWriter, r *http.Request, sess sessio
 	}
 	err = s.auditActionFn(r.Context(), func(tx pgx.Tx) (string, string, string, string, error) {
 		var note string
-		err := tx.QueryRow(r.Context(), `DELETE FROM enroll_tokens WHERE token_hash=$1 RETURNING note`, id).Scan(&note)
+		tcond, targs := tenantCond(sess, "tenant_id", 1)
+		err := tx.QueryRow(r.Context(), `DELETE FROM enroll_tokens WHERE token_hash=$1 AND `+tcond+` RETURNING note`, append([]any{id}, targs...)...).Scan(&note)
 		return sess.Email, "token.revoke", r.PathValue("id")[:12], note, err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1236,8 +1256,9 @@ func (s *Server) tokenPage(w http.ResponseWriter, r *http.Request, sess session,
 		Uses                    int
 		Expires                 time.Time
 	}
+	tcond, targs := tenantCond(sess, "t.tenant_id", 0)
 	rows, err := s.db.Query(r.Context(), `SELECT encode(t.token_hash, 'hex'), t.note, coalesce(b.name,'default'), t.created_by, t.uses_left, t.expires_at
-		FROM enroll_tokens t LEFT JOIN blueprints b ON b.id=t.blueprint_id WHERE t.expires_at > now() AND t.uses_left > 0 ORDER BY t.expires_at`)
+		FROM enroll_tokens t LEFT JOIN blueprints b ON b.id=t.blueprint_id WHERE t.expires_at > now() AND t.uses_left > 0 AND `+tcond+` ORDER BY t.expires_at`, targs...)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -1265,13 +1286,17 @@ func (s *Server) tokenCreate(w http.ResponseWriter, r *http.Request, sess sessio
 	}
 	var bpID *int64
 	if v, err := strconv.ParseInt(r.FormValue("blueprint_id"), 10, 64); err == nil && v > 0 {
+		if !s.tenantOwns(r.Context(), sess, "blueprints", v, true) {
+			s.errorPage(w, r, sess, http.StatusBadRequest, "unknown blueprint")
+			return
+		}
 		bpID = &v
 	}
 	token := "lmt_" + randToken(24)
 	note := truncate(r.FormValue("note"), 200)
 	err := s.auditAction(r.Context(), sess.Email, "token.create", note, fmt.Sprintf("uses=%d days=%d blueprint=%v", uses, days, r.FormValue("blueprint_id")), func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO enroll_tokens(token_hash, note, blueprint_id, uses_left, expires_at, created_by)
-			VALUES ($1,$2,$3,$4, now() + make_interval(days => $5), $6)`, sha(token), note, bpID, uses, days, sess.Email)
+		_, err := tx.Exec(r.Context(), `INSERT INTO enroll_tokens(token_hash, note, blueprint_id, uses_left, expires_at, created_by, tenant_id)
+			VALUES ($1,$2,$3,$4, now() + make_interval(days => $5), $6, $7)`, sha(token), note, bpID, uses, days, sess.Email, ownerTenant(r.Context()))
 		return err
 	})
 	if err != nil {
@@ -1391,7 +1416,7 @@ func (s *Server) fleetComplianceCached(ctx context.Context) (fleetStats, error) 
 // fleetComplianceFor aggregates the devices within the scope of sess
 // (scoped accounts bypass the fleet wide cache).
 func (s *Server) fleetComplianceFor(ctx context.Context, sess session) (fleetStats, error) {
-	if !sess.scoped() {
+	if !sess.scoped() && sess.Tenant == 0 {
 		return s.fleetComplianceCached(ctx)
 	}
 	cond, args := scopeCond(sess, 0)
@@ -1493,6 +1518,7 @@ type auditRow struct {
 	At                            time.Time
 	Actor, Action, Target, Detail string
 	Prev, Hash                    []byte
+	Tenant                        *int64 // nil: a global entry
 }
 
 func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session) {
@@ -1511,7 +1537,7 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session)
 		args = append(args, before)
 		where += " AND id < $" + strconv.Itoa(len(args))
 	}
-	rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE `+where+
+	rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash, tenant_id FROM audit_log WHERE `+where+
 		` ORDER BY id DESC LIMIT `+strconv.Itoa(pageSize+1), args...)
 	if err != nil {
 		s.fail(w, err)
@@ -1579,7 +1605,7 @@ func (s *Server) verifyAuditFrom(ctx context.Context, incremental bool) (int64, 
 			return 0, err
 		}
 	}
-	rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash FROM audit_log WHERE id > $1 ORDER BY id`, from)
+	rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash, tenant_id FROM audit_log WHERE id > $1 ORDER BY id`, from)
 	if err != nil {
 		return 0, err
 	}
@@ -1587,7 +1613,7 @@ func (s *Server) verifyAuditFrom(ctx context.Context, incremental bool) (int64, 
 	last := from
 	for rows.Next() {
 		var a auditRow
-		if err := rows.Scan(&a.ID, &a.At, &a.Actor, &a.Action, &a.Target, &a.Detail, &a.Prev, &a.Hash); err != nil {
+		if err := rows.Scan(&a.ID, &a.At, &a.Actor, &a.Action, &a.Target, &a.Detail, &a.Prev, &a.Hash, &a.Tenant); err != nil {
 			return 0, err
 		}
 		if !auditEntryOK(auditKey, auditKeyedFrom, prev, a) {
@@ -1634,7 +1660,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 			coalesce(e.reason,''), coalesce(e.owner,''), coalesce(e.approver,''), coalesce(e.expires_at::date::text,''), $` + strconv.Itoa(len(args)+1) + `::text
 			FROM devices d CROSS JOIN LATERAL jsonb_array_elements(d.checks) c
 			LEFT JOIN LATERAL (SELECT reason, owner, approver, expires_at FROM risk_exceptions x WHERE x.check_id = c->>'id' AND ` + activeExceptionSQL + `
-				AND (x.tag = '' OR x.tag = ANY(d.tags)) ORDER BY x.expires_at DESC LIMIT 1) e ON true
+				AND x.tenant_id = d.tenant_id AND (x.tag = '' OR x.tag = ANY(d.tags)) ORDER BY x.expires_at DESC LIMIT 1) e ON true
 			WHERE NOT d.retired AND ` + cond + ` ORDER BY d.hostname, c->>'id'`
 		args = append(args, time.Now().UTC().Format(time.RFC3339))
 	case "compliance-history.csv":
@@ -1662,17 +1688,18 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 	case "audit.csv":
 		var where string
 		_, where, args = auditFilter(r.URL.Query(), sess)
-		header = []string{"id", "at", "actor", "action", "target", "detail", "prev", "hash"}
-		q = `SELECT id::text, at::text, actor, action, target, detail, encode(prev,'hex'), encode(hash,'hex') FROM audit_log WHERE ` + where + ` ORDER BY id`
+		header = []string{"id", "at", "actor", "action", "target", "detail", "prev", "hash", "tenant_id"}
+		q = `SELECT id::text, at::text, actor, action, target, detail, encode(prev,'hex'), encode(hash,'hex'), coalesce(tenant_id::text, '') FROM audit_log WHERE ` + where + ` ORDER BY id`
 	case "audit.jsonl":
 		s.auditExportJSONL(w, r, sess)
 		return
 	case "exceptions.csv":
 		header = []string{"id", "check_id", "mode", "tag", "reason", "owner", "approver", "expires_at", "created_by", "created_at", "state"}
-		args = nil
+		var xcond string
+		xcond, args = tenantCond(sess, "x.tenant_id", 0)
 		q = `SELECT id::text, check_id, mode, tag, reason, owner, approver, expires_at::text, created_by, created_at::text,
 			CASE WHEN revoked_at IS NOT NULL THEN 'revoked' WHEN expires_at <= now() THEN 'expired' ELSE 'active' END
-			FROM risk_exceptions x ORDER BY id`
+			FROM risk_exceptions x WHERE ` + xcond + ` ORDER BY id`
 	default:
 		s.notFound(w, r, sess)
 		return

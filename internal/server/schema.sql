@@ -622,3 +622,53 @@ CREATE TABLE IF NOT EXISTS shell_sessions (
     truncated    BOOLEAN NOT NULL DEFAULT false
 );
 CREATE INDEX IF NOT EXISTS shell_sessions_device ON shell_sessions(device_id, created_at DESC);
+-- E4a
+-- Multi tenancy: every company of an MSP or a group is a tenant. Tenant 1
+-- ("Default") owns all data from before tenants existed and the global
+-- objects; installs with one company never see more. Console users, API
+-- tokens and notification channels with a NULL tenant are global (super
+-- admins, all tenants). Audit entries with a NULL tenant are global entries.
+CREATE TABLE IF NOT EXISTS tenants (
+    id           BIGSERIAL PRIMARY KEY,
+    name         TEXT NOT NULL UNIQUE,
+    disabled     BOOLEAN NOT NULL DEFAULT false,
+    company_name TEXT NOT NULL DEFAULT '',
+    logo         BYTEA NOT NULL DEFAULT '',
+    color        TEXT NOT NULL DEFAULT '',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO tenants(id, name) VALUES (1, 'Default') ON CONFLICT DO NOTHING;
+SELECT setval(pg_get_serial_sequence('tenants', 'id'), (SELECT max(id) FROM tenants));
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE enroll_tokens ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE library_items ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE library_items ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE blueprints ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE blueprints ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE risk_exceptions ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE approvals ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE network_certs ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE device_events ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE compliance_changes ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE console_users ADD COLUMN IF NOT EXISTS tenant_id BIGINT REFERENCES tenants(id);
+ALTER TABLE local_admins ADD COLUMN IF NOT EXISTS tenant_id BIGINT REFERENCES tenants(id);
+ALTER TABLE api_tokens ADD COLUMN IF NOT EXISTS tenant_id BIGINT REFERENCES tenants(id);
+ALTER TABLE notification_channels ADD COLUMN IF NOT EXISTS tenant_id BIGINT REFERENCES tenants(id);
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS tenant_id BIGINT;
+-- the default blueprint applies to every device without one, in every tenant
+UPDATE blueprints SET shared = true WHERE name = 'default' AND tenant_id = 1 AND NOT shared;
+CREATE INDEX IF NOT EXISTS devices_tenant ON devices(tenant_id);
+CREATE INDEX IF NOT EXISTS audit_log_tenant ON audit_log(tenant_id, id) WHERE tenant_id IS NOT NULL;
+-- rows written per device take the tenant of their device, so no write path
+-- can file them under another tenant
+CREATE OR REPLACE FUNCTION limdm_device_tenant() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.tenant_id := coalesce((SELECT tenant_id FROM devices WHERE id = NEW.device_id), NEW.tenant_id);
+    RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS device_events_tenant ON device_events;
+CREATE TRIGGER device_events_tenant BEFORE INSERT ON device_events FOR EACH ROW EXECUTE FUNCTION limdm_device_tenant();
+DROP TRIGGER IF EXISTS compliance_changes_tenant ON compliance_changes;
+CREATE TRIGGER compliance_changes_tenant BEFORE INSERT ON compliance_changes FOR EACH ROW EXECUTE FUNCTION limdm_device_tenant();
+DROP TRIGGER IF EXISTS network_certs_tenant ON network_certs;
+CREATE TRIGGER network_certs_tenant BEFORE INSERT ON network_certs FOR EACH ROW EXECUTE FUNCTION limdm_device_tenant();

@@ -371,6 +371,11 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 	if !slices.Contains(settingsTabs, tab) {
 		tab = "general"
 	}
+	tabs := settingsTabLabels
+	if sess.TenantOnly() { // tenant accounts manage their notification channels only
+		tab, set = "notifications", Settings{}
+		tabs = slices.DeleteFunc(slices.Clone(tabs), func(t struct{ Key, Label string }) bool { return t.Key != tab })
+	}
 	data := map[string]any{}
 	if tab == "notifications" {
 		views, err := s.channelViews(r.Context())
@@ -381,8 +386,8 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 		data["Channels"], data["NotifyEvents"] = views, notifyEvents
 	}
 	s.render(w, r, sess, "settings", map[string]any{"Set": set, "ClientIP": clientIP(r), "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
-		"Tab": tab, "Tabs": settingsTabLabels, "Channels": data["Channels"], "NotifyEvents": data["NotifyEvents"],
-		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": s.webhookSecretHex(),
+		"Tab": tab, "Tabs": tabs, "Channels": data["Channels"], "NotifyEvents": data["NotifyEvents"], "TenantOnly": sess.TenantOnly(),
+		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": map[bool]string{false: s.webhookSecretHex()}[sess.TenantOnly()],
 		"RoleGroupsText": roleGroupsText(set.RoleGroups)})
 }
 

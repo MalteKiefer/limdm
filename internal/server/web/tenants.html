@@ -1,0 +1,38 @@
+{{define "title"}}{{t "Tenants · LiMDM"}}{{end}}
+{{define "content"}}
+<div class="page-head"><div><h1>{{t "Tenants"}} {{template "doclink" "tenants.md"}}</h1><div class="meta"><span>{{t "Companies sharing this server; each sees only its own devices and configuration"}}</span></div></div></div>
+{{template "err" .Error}}
+<div class="grid side-right">
+  <section class="tablecard">
+    <div class="card-head"><h2>{{t "Tenants"}}</h2></div>
+    <div class="scroll"><table>
+      <thead><tr><th>{{t "Name"}}</th><th>{{t "Company name"}}</th><th>{{t "Devices"}}</th><th>{{t "Status"}}</th><th>{{t "Created"}}</th></tr></thead>
+      <tbody>{{range .Tenants}}<tr>
+        <td><a href="/tenants/{{.ID}}">{{.Name}}</a>{{if eq .ID 1}}<span class="sub">{{t "owns the data from before tenants and the shared objects"}}</span>{{end}}</td>
+        <td>{{.CompanyName}}</td>
+        <td>{{.Devices}}</td>
+        <td><span class="pill {{if .Disabled}}na{{else}}ok{{end}}">{{if .Disabled}}{{t "disabled"}}{{else}}{{t "active"}}{{end}}</span></td>
+        <td>{{fmtTime .CreatedAt}}</td>
+      </tr>{{end}}</tbody>
+    </table></div>
+  </section>
+  {{if eq .Sess.Role "admin"}}
+  <form class="card" method="post" action="/tenants">
+    <h2>{{t "New tenant"}}</h2>
+    {{template "csrf" .CSRF}}
+    <label>{{t "Name"}}<input name="name" maxlength="100" required></label>
+    <p class="muted">{{t "Switch to the tenant in the side bar to add its users, enrollment tokens, blueprints and library items."}}</p>
+    <button>{{t "Create tenant"}}</button>
+  </form>
+  {{end}}
+</div>
+{{if eq .Sess.Role "admin"}}
+<form class="card" method="post" action="/tenants/shared">
+  {{template "csrf" .CSRF}}
+  <div class="card-head stacked"><h2>{{t "Shared objects"}}</h2><p class="muted">{{t "Library items and blueprints of the Default tenant marked here are readable by every tenant and can be used in their blueprints; only global administrators change them."}}</p></div>
+  <fieldset><legend>{{t "Blueprints"}}</legend>{{range .Blueprints}}<label class="check"><input type="checkbox" name="blueprint" value="{{.ID}}" {{if .Shared}}checked{{end}}> {{.Name}}</label>{{else}}<p class="muted">{{t "None"}}</p>{{end}}</fieldset>
+  <fieldset><legend>{{t "Library"}}</legend>{{range .Items}}<label class="check"><input type="checkbox" name="item" value="{{.ID}}" {{if .Shared}}checked{{end}}> {{.Name}} <span class="muted">{{typeLabel .Type}}</span></label>{{else}}<p class="muted">{{t "None"}}</p>{{end}}</fieldset>
+  <div class="form-foot"><span></span><button>{{t "Save"}}</button></div>
+</form>
+{{end}}
+{{end}}

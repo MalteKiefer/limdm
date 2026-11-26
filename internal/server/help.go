@@ -284,7 +284,8 @@ func (s *Server) blueprintAssignments(ctx context.Context) (map[int64]*bpAssignm
 		}
 		return m[id]
 	}
-	rows, err := s.db.Query(ctx, `SELECT blueprint_id, count(*) FROM devices WHERE NOT retired AND blueprint_id IS NOT NULL GROUP BY 1`)
+	dcond, dargs := tenantDevices(ctx, 0)
+	rows, err := s.db.Query(ctx, `SELECT blueprint_id, count(*) FROM devices d WHERE NOT retired AND blueprint_id IS NOT NULL AND `+dcond+` GROUP BY 1`, dargs...)
 	if err != nil {
 		return nil, err
 	}

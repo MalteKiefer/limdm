@@ -53,6 +53,10 @@ type session struct {
 	IAT   time.Time `json:"i"`
 	Last  time.Time `json:"l"`
 	Gen   int64     `json:"g"` // session generation of the account at sign in
+	// Tenant the session acts for, 0 for the global view; tenant accounts
+	// get theirs from the account on every request, super admins switch.
+	Tenant int64 `json:"t,omitempty"`
+	Super  bool  `json:"-"` // global account (tenant.go)
 	// device scope, loaded from the account on every request (scope.go)
 	Tags   []string `json:"-"`
 	Groups []string `json:"-"`
@@ -266,6 +270,10 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) (session, bool)
 	sess.Role = role
 	if err := s.loadScope(r.Context(), &sess); err != nil { // fail closed
 		s.log.Error("load scope", "err", err)
+		return sess, false
+	}
+	if err := s.loadTenant(r.Context(), &sess); err != nil { // fail closed
+		s.log.Warn("load tenant", "login", sess.Email, "err", err)
 		return sess, false
 	}
 	sess.Last = now
