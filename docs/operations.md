@@ -209,7 +209,8 @@ last verification.
 
 ### Syslog
 
-With `LIMDM_SYSLOG=udp://host:514` or `tcp://host:514` the server forwards every audit entry
+With a syslog target in **Settings, Operations** (`udp://host:514` or `tcp://host:514`;
+`LIMDM_SYSLOG` is the initial value) the server forwards every audit entry
 and device event as an RFC 5424 message (facility 13, log audit; TCP with octet counting
 framing, RFC 6587). Audit entries have the message ID `audit` and the structured data
 `limdm@32473` with `id`, `actor`, `action`, `target` and `hash`; device events have the
@@ -220,9 +221,10 @@ from its stored position after a restart or leader change
 transaction at a time up to the commit, so ids become visible in order and the position
 (last sent id) cannot skip an entry that committed late.
 
-`LIMDM_SYSLOG=tcp+tls://host:6514` sends over TLS (RFC 5425, octet counting, TLS 1.2 or
-newer); the collector's certificate is verified against the system roots, or against the CA
-file in `LIMDM_SYSLOG_CA` for a private CA.
+`tcp+tls://host:6514` sends over TLS (RFC 5425, octet counting, TLS 1.2 or newer); the
+collector's certificate is verified against the system roots, or against the CA certificate
+(PEM) in the same settings for a private CA (`LIMDM_SYSLOG_CA` names a file read once as the
+initial value). A changed target takes effect within seconds, without a restart.
 
 ## Retention
 

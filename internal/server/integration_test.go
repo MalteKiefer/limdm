@@ -831,6 +831,27 @@ func TestIntegration(t *testing.T) {
 		"retention_metrics": {"30"}, "retention_notification_log": {"30"}}, adminSess); !strings.Contains(body, "Settings saved") || s.settings().retentionDays("audit") != 730 {
 		t.Fatal("retention not saved")
 	}
+	// operations settings apply without a restart
+	if s.checkins == nil { // a test server without limits
+		s.downloads, s.checkins, s.bigCheckins = newSlots(1), newSlots(1), newSlots(1)
+	}
+	if _, body := ui("POST", "/settings", url.Values{"section": {"operations"}, "log_level": {"debug"}, "audit_api_reads": {"all"}, "access_log": {"on"},
+		"update_downloads": {"7"}, "max_checkins": {"16"}, "agent_proxy_protocol": {"10.0.0.5"}, "syslog": {""}}, adminSess); !strings.Contains(body, "Settings saved") {
+		t.Fatal("operations not saved")
+	}
+	if o := s.ops(); LogLevel.Level().String() != "DEBUG" || !o.AccessLog || o.AuditAPIReads != "all" || cap(s.checkins.get()) != 16 || cap(s.bigCheckins.get()) != 2 ||
+		cap(s.downloads.get()) != 7 || len(s.proxySources()) != 1 {
+		t.Fatalf("operations not active: %+v", o)
+	}
+	var detail string
+	if err := db.QueryRow(ctx, `SELECT detail FROM audit_log WHERE action='settings.save' ORDER BY id DESC LIMIT 1`).Scan(&detail); err != nil || !strings.Contains(detail, "max_checkins=16") {
+		t.Fatalf("operations change not audited: %q %v", detail, err)
+	}
+	if _, body := ui("POST", "/settings", url.Values{"section": {"operations"}, "log_level": {"info"}, "audit_api_reads": {"sensitive"},
+		"update_downloads": {"20"}, "max_checkins": {"64"}, "syslog": {"http://x"}}, adminSess); !strings.Contains(body, "syslog target") {
+		t.Fatal("invalid syslog target accepted")
+	}
+	LogLevel.Set(0)
 	if code, body := ui("GET", "/software/packages", nil, adminSess); code != 200 || !strings.Contains(body, "Upload") {
 		t.Fatalf("packages page: %d", code)
 	}

@@ -82,7 +82,8 @@ PostgreSQL itself is made highly available with the usual tools (see
   balancer's address: the device's public address and location and the enrollment failure
   limit then see the balancer. Enable PROXY protocol version 2 on the balancer (HAProxy
   `send-proxy-v2`, AWS NLB proxy protocol v2, nginx stream `proxy_protocol on`) and list its
-  addresses in `LIMDM_AGENT_PROXY_PROTOCOL`: connections from those addresses must start
+  addresses under **Settings, Operations, PROXY protocol sources** (`LIMDM_AGENT_PROXY_PROTOCOL`
+  is the initial value): connections from those addresses must start
   with the header, connections from anywhere else must not and keep their own address.
   Alternatively use a balancer that keeps the client address (HAProxy `usesrc clientip`,
   LVS direct routing). Enrollment failures are limited per address and token (20 tries of
