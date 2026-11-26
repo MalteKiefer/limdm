@@ -857,9 +857,9 @@ func TestCommandKeyRollover(t *testing.T) {
 	}
 }
 
-// The enrolled agent verifies the server against the current trusted CAs,
-// host name or IP address included, and a swapped pool applies at once.
-func TestVerifyTrusted(t *testing.T) {
+// The enrolled agent verifies the server with standard TLS verification
+// against the device CAs, host included, and new CAs apply at once.
+func TestSwapTransportRoots(t *testing.T) {
 	mkCA := func() (*x509.Certificate, *ecdsa.PrivateKey) {
 		key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "ca"}, NotAfter: time.Now().Add(time.Hour),
@@ -868,36 +868,38 @@ func TestVerifyTrusted(t *testing.T) {
 		c, _ := x509.ParseCertificate(der)
 		return c, key
 	}
-	oldCA, oldKey := mkCA()
+	oldCA, _ := mkCA()
 	newCA, newKey := mkCA()
-	leaf := func(ca *x509.Certificate, key *ecdsa.PrivateKey) tls.ConnectionState {
-		k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), NotAfter: time.Now().Add(time.Hour), DNSNames: []string{"mdm.test"},
-			IPAddresses: []net.IP{net.ParseIP("10.0.0.1")}, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
-		der, _ := x509.CreateCertificate(rand.Reader, tmpl, ca, &k.PublicKey, key)
-		c, _ := x509.ParseCertificate(der)
-		return tls.ConnectionState{PeerCertificates: []*x509.Certificate{c, ca}}
+	k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), NotAfter: time.Now().Add(time.Hour),
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, _ := x509.CreateCertificate(rand.Reader, tmpl, newCA, &k.PublicKey, newKey)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: k}}}
+	srv.StartTLS()
+	defer srv.Close()
+
+	tc, err := pinnedTLS(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: oldCA.Raw}), srv.URL)
+	if err != nil || tc.InsecureSkipVerify || tc.RootCAs == nil {
+		t.Fatalf("pinnedTLS: %v skip=%v", err, tc.InsecureSkipVerify)
 	}
-	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: oldCA.Raw})
-	tc, err := pinnedTLS(caPEM, "https://10.0.0.1:8444")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tc.VerifyConnection(leaf(oldCA, oldKey)); err != nil {
-		t.Fatal(err)
-	}
-	if verifyTrusted("10.0.0.2")(leaf(oldCA, oldKey)) == nil || verifyTrusted("other.test")(leaf(oldCA, oldKey)) == nil {
-		t.Fatal("wrong host accepted")
-	}
-	if tc.VerifyConnection(leaf(newCA, newKey)) == nil {
+	c := newClient(tc)
+	if resp, err := c.Get(srv.URL); err == nil {
+		resp.Body.Close()
 		t.Fatal("certificate of an untrusted CA accepted")
 	}
 	pool := x509.NewCertPool()
 	pool.AddCert(oldCA)
 	pool.AddCert(newCA)
-	trustedCAs.Store(pool)
-	if err := verifyTrusted("mdm.test")(leaf(newCA, newKey)); err != nil {
+	c.Transport.(*swapTransport).setRoots(pool)
+	resp, err := c.Get(srv.URL)
+	if err != nil {
 		t.Fatalf("new CA after the swap: %v", err)
+	}
+	resp.Body.Close()
+	if resp, err := c.Get(strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)); err == nil {
+		resp.Body.Close()
+		t.Fatal("wrong host accepted")
 	}
 }
 

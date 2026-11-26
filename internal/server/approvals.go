@@ -196,7 +196,7 @@ func (s *Server) approvalDecide(w http.ResponseWriter, r *http.Request, sess ses
 				if creds, err = localReset(ctx, tx, name); err != nil {
 					return errApproval(err.Error())
 				}
-				if err := audit(ctx, tx, a.RequestedBy, "user.reset", a.Target, fmt.Sprintf("new password and TOTP (approval #%d by %s)", a.ID, sess.Email)); err != nil {
+				if err := audit(ctx, tx, a.RequestedBy, "user.reset", a.Target, fmt.Sprintf("new credentials and TOTP (approval #%d by %s)", a.ID, sess.Email)); err != nil {
 					return err
 				}
 			case "recovery.view", "remote_shell":

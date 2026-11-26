@@ -179,7 +179,7 @@ type diffLine struct {
 // ponytail: O(n*m) table, falls back to "all removed, all added" above 4M cells.
 func lineDiff(a, b string) []diffLine {
 	x, y := strings.Split(strings.TrimRight(a, "\n"), "\n"), strings.Split(strings.TrimRight(b, "\n"), "\n")
-	if len(x)*len(y) > 4_000_000 {
+	if len(x) > 1<<16 || len(y) > 1<<16 || len(x)*len(y) > 4_000_000 { // bounded before the table is allocated
 		var out []diffLine
 		for _, l := range x {
 			out = append(out, diffLine{"del", l})

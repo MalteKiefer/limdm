@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -286,7 +287,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) (session, bool)
 		return sess, false
 	}
 	if err := s.loadTenant(r.Context(), &sess); err != nil { // fail closed
-		s.log.Warn("load tenant", "login", sess.Email, "err", err)
+		s.log.Warn("load tenant", "login", strconv.Quote(sess.Email), "err", err)
 		return sess, false
 	}
 	sess.Last = now

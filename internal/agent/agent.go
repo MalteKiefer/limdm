@@ -154,13 +154,9 @@ func validServerURL(s string) error {
 	return nil
 }
 
-// trustedCAs are the device CAs an enrolled agent trusts (ca.crt); the
-// server replaces them over the pinned channel during a CA rotation.
-var trustedCAs atomic.Pointer[x509.CertPool]
-
 // pinnedTLS trusts only the device CA, never system roots, and presents the
-// device identity when enrolled (server set). An enrolled agent verifies
-// against trustedCAs, so new trust anchors apply without a restart.
+// device identity when enrolled (server set). New trust anchors from the
+// server apply through swapTransport.setRoots without a restart.
 func pinnedTLS(caPEM []byte, server string) (*tls.Config, error) {
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caPEM) {
@@ -168,15 +164,6 @@ func pinnedTLS(caPEM []byte, server string) (*tls.Config, error) {
 	}
 	tc := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: pool}
 	if server != "" {
-		u, err := url.Parse(server)
-		if err != nil {
-			return nil, err
-		}
-		trustedCAs.Store(pool)
-		// standard verification against a fixed pool is replaced by the same
-		// verification against the current trustedCAs in VerifyConnection
-		tc.InsecureSkipVerify = true
-		tc.VerifyConnection = verifyTrusted(u.Hostname())
 		tc.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 			b, err := os.ReadFile(identityFile)
 			if err != nil {
@@ -189,26 +176,39 @@ func pinnedTLS(caPEM []byte, server string) (*tls.Config, error) {
 	return tc, nil
 }
 
-// verifyTrusted verifies the server certificate chain against trustedCAs
-// for host (a name or an IP address, like standard verification).
-func verifyTrusted(host string) func(tls.ConnectionState) error {
-	return func(cs tls.ConnectionState) error {
-		if len(cs.PeerCertificates) == 0 {
-			return errors.New("server sent no certificate")
-		}
-		inter := x509.NewCertPool()
-		for _, c := range cs.PeerCertificates[1:] {
-			inter.AddCert(c)
-		}
-		_, err := cs.PeerCertificates[0].Verify(x509.VerifyOptions{Roots: trustedCAs.Load(), Intermediates: inter,
-			DNSName: host, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}})
-		return err
-	}
+// swapTransport sends through the current transport; setRoots replaces it
+// with one that trusts a new CA pool (standard verification, no skipping).
+type swapTransport struct {
+	tc  *tls.Config
+	cur atomic.Pointer[http.Transport]
+}
+
+func newSwapTransport(tc *tls.Config) *swapTransport {
+	st := &swapTransport{tc: tc}
+	st.cur.Store(st.transport(tc))
+	return st
+}
+
+func (st *swapTransport) transport(tc *tls.Config) *http.Transport {
+	return &http.Transport{TLSClientConfig: tc, Proxy: agentProxy, ForceAttemptHTTP2: true, DialContext: fallbackDial()}
+}
+
+func (st *swapTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return st.cur.Load().RoundTrip(r)
+}
+
+func (st *swapTransport) CloseIdleConnections() { st.cur.Load().CloseIdleConnections() }
+
+// setRoots makes new connections verify the server against pool.
+func (st *swapTransport) setRoots(pool *x509.CertPool) {
+	tc := st.tc.Clone()
+	tc.RootCAs = pool
+	old := st.cur.Swap(st.transport(tc))
+	old.CloseIdleConnections()
 }
 
 func newClient(tc *tls.Config) *http.Client {
-	return &http.Client{Timeout: 2 * time.Minute, Transport: &http.Transport{
-		TLSClientConfig: tc, Proxy: agentProxy, ForceAttemptHTTP2: true, DialContext: fallbackDial()}}
+	return &http.Client{Timeout: 2 * time.Minute, Transport: newSwapTransport(tc)}
 }
 
 func newCSR() (keyPEM []byte, csrPEM string, err error) {
@@ -1318,8 +1318,9 @@ func (a *Agent) updateTrustAnchors(bundle string) {
 		a.event("storing the device CAs failed: %v", err)
 		return
 	}
-	trustedCAs.Store(pool)
-	a.client.CloseIdleConnections()
+	if st, ok := a.client.Transport.(*swapTransport); ok {
+		st.setRoots(pool)
+	}
 	a.event("trusted device CAs updated (%d)", len(certs))
 }
 
