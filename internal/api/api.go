@@ -66,7 +66,8 @@ var Types = map[string]string{
 // A zero section means "not managed".
 type Policy struct {
 	CheckinSeconds    int               `json:"checkin_seconds"`
-	OfflineLockHours  int               `json:"offline_lock_hours"` // lock the device when the server was unreachable this long, 0 = off
+	OfflineLockHours  int               `json:"offline_lock_hours"`     // lock the device when the server was unreachable this long, 0 = off
+	RemoteShell       bool              `json:"remote_shell,omitempty"` // remote shell sessions allowed (com.limdm.agent)
 	Compliance        Compliance        `json:"compliance"`
 	Updates           Updates           `json:"updates"`
 	Packages          Packages          `json:"packages"`
@@ -82,8 +83,9 @@ type Policy struct {
 }
 
 type agentPayload struct {
-	CheckinSeconds   int `json:"checkin_seconds"`
-	OfflineLockHours int `json:"offline_lock_hours,omitempty"`
+	CheckinSeconds   int  `json:"checkin_seconds"`
+	OfflineLockHours int  `json:"offline_lock_hours,omitempty"`
+	RemoteShell      bool `json:"remote_shell,omitempty"` // devices accept remote shell sessions
 }
 
 type Compliance struct {
@@ -289,7 +291,7 @@ func (d Declaration) apply(p *Policy) error {
 		if v.OfflineLockHours < 0 || v.OfflineLockHours > 8760 {
 			bad("offline_lock_hours must be 0 (off) up to 8760")
 		}
-		p.CheckinSeconds, p.OfflineLockHours = v.CheckinSeconds, v.OfflineLockHours
+		p.CheckinSeconds, p.OfflineLockHours, p.RemoteShell = v.CheckinSeconds, v.OfflineLockHours, v.RemoteShell
 	case TypeCompliance:
 		if err := strict(d.Payload, &p.Compliance); err != nil {
 			return err

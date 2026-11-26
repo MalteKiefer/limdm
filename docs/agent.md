@@ -137,7 +137,7 @@ allow_remote_shell = false
 | `fingerprint` | yes | SHA-256 of the device CA, shown on **Enrollment** |
 | `token` | yes | enrollment token |
 | `allow_scripts` | no | `true` allows remote scripts and `com.limdm.files` targets outside the plain text allowlist; default `false` |
-| `allow_remote_shell` | no | `true` allows remote support shells; default `false` |
+| `allow_remote_shell` | no | older local opt in for remote support shells; the policy (**Agent**, **Remote shell**) decides now ([remote-shell.md](remote-shell.md)) |
 
 Lines starting with `#` are comments. Both `allow_*` values are stored in
 `/etc/limdm/agent.json` and cannot be switched on from the server later; enroll again to

@@ -79,6 +79,11 @@ func TestRemoteShellIntegration(t *testing.T) {
 	if code, _ := start(`{}`, audit); code != http.StatusForbidden {
 		t.Fatalf("auditor: %d", code)
 	}
+	// the device's policy must allow remote shells
+	if code, _ := start(`{}`, admin); code != http.StatusConflict {
+		t.Fatalf("policy without remote_shell: %d", code)
+	}
+	allowShellPolicy(t, db)
 	if code, _ := start(`{"user":"root"}`, admin); code != http.StatusUnprocessableEntity {
 		t.Fatalf("root without the setting: %d", code)
 	}
@@ -180,5 +185,28 @@ func TestRemoteShellIntegration(t *testing.T) {
 	db.QueryRow(ctx, `SELECT end_reason, local_user FROM shell_sessions WHERE id=$1`, sid2).Scan(&reason, &cmdStatus)
 	if !strings.Contains(reason, "help@firma.de") || cmdStatus != "limdm-support" {
 		t.Fatalf("console end: %q %q", reason, cmdStatus)
+	}
+}
+
+// allowShellPolicy switches on remote_shell in the agent item of the library,
+// signed like the console does, so devices on the default blueprint allow
+// remote shells.
+func allowShellPolicy(t *testing.T, db *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+	var id int64
+	var name string
+	var raw []byte
+	if err := db.QueryRow(ctx, `SELECT id, name, payload FROM library_items WHERE type=$1 ORDER BY id LIMIT 1`, api.TypeAgent).Scan(&id, &name, &raw); err != nil {
+		t.Fatal(err)
+	}
+	var p map[string]any
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	p["remote_shell"] = true
+	raw, _ = json.Marshal(p)
+	if _, err := db.Exec(ctx, `UPDATE library_items SET payload=$2, signature=$3 WHERE id=$1`, id, raw, signItem(name, api.TypeAgent, raw)); err != nil {
+		t.Fatal(err)
 	}
 }

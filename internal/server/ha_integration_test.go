@@ -204,6 +204,7 @@ func TestHighAvailabilityIntegration(t *testing.T) {
 	agentA, agentB := agentSrv(a), agentSrv(b)
 	defer agentA.Close()
 	defer agentB.Close()
+	allowShellPolicy(t, db)
 	for i, tc := range []struct {
 		console *httptest.Server
 		agent   *httptest.Server

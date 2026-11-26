@@ -12359,6 +12359,10 @@
                   },
                   "four_eyes": {
                     "type": "boolean"
+                  },
+                  "policy": {
+                    "type": "boolean",
+                    "description": "The device's policy allows remote shells (com.limdm.agent remote_shell)."
                   }
                 },
                 "required": [
@@ -12367,7 +12371,8 @@
                   "allow_root",
                   "max_minutes",
                   "idle_minutes",
-                  "four_eyes"
+                  "four_eyes",
+                  "policy"
                 ]
               },
               "four_eyes_commands": {

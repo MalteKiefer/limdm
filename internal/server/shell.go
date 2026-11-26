@@ -263,6 +263,11 @@ func (s *Server) startShell(ctx context.Context, sess session, id, localUser str
 	if err := s.db.QueryRow(ctx, `SELECT retired FROM devices WHERE id=$1`, id).Scan(&retired); err != nil || retired || !s.inScope(ctx, sess, id) {
 		return "", "", errNotFound
 	}
+	if ok, err := s.policyAllowsShell(ctx, id); err != nil {
+		return "", "", err
+	} else if !ok {
+		return "", "", &userError{http.StatusConflict, shellPolicyOff}
+	}
 	maxM, idleM := set.Limits()
 	cmd := api.ShellCommand{Session: randToken(32), User: strings.TrimSpace(localUser), AllowRoot: set.AllowRoot,
 		By: sess.Email, MaxMinutes: maxM, IdleMinutes: idleM}
@@ -569,4 +574,24 @@ func terminalText(raw []byte) string {
 		}
 		return r
 	}, s)
+}
+
+// shellPolicyOff is the answer when the device's policy does not allow
+// remote shells.
+const shellPolicyOff = "remote shells are not allowed by this device's policy: switch on Remote shell in the Agent settings of its blueprint"
+
+// policyAllowsShell reports whether the resolved policy of a device allows
+// remote shell sessions (com.limdm.agent remote_shell). The agent checks again.
+func (s *Server) policyAllowsShell(ctx context.Context, id string) (bool, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx) // read only
+	res, err := resolveDevice(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
+	pol, _ := api.Compose(res.Decls)
+	return pol.RemoteShell, nil
 }

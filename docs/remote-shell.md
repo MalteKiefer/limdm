@@ -7,10 +7,12 @@ session is audited and its output is recorded.
 
 A session needs all of these:
 
-1. **The device opted in at enrollment:** `allow_remote_shell = true` in `enroll.conf`,
-   `LIMDM_ALLOW_REMOTE_SHELL=true` for the install script or `--allow-remote-shell` for
-   `limdm-agent enroll` ([agent.md](agent.md)). It is stored in `/etc/limdm/agent.json` and
-   cannot be switched on from the server.
+1. **The device's policy allows it:** **Remote shell** in the **Agent** declaration
+   (`com.limdm.agent`, `"remote_shell": true`) of the device's blueprint. The server refuses
+   a start without it (409) and the console says so in the start dialog; the agent checks
+   it again. Devices enrolled with the older local opt in (`allow_remote_shell = true` in
+   `/etc/limdm/agent.json`) keep accepting sessions on the agent side, but the server still
+   needs the policy.
 2. **The server allows it:** **Settings**, **Security**, **Remote shell**:
 
    | Setting | Default | |
