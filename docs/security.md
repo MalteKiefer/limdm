@@ -25,7 +25,13 @@
   runs only commands with a valid signature; refused ones are reported and logged. Whoever
   can only write to the database cannot make a device run anything. Recovery keys for lost
   mode travel beside the signed payload, inside the mTLS channel. Back up `command.key`
-  with the CA: a new key makes every device refuse commands until it is re-enrolled.
+  with the CA. A new key reaches devices only through a rotation: the server announces it
+  with a rollover record signed by the pinned key, and the agent refuses any other key
+  change ([keys.md](keys.md#command-key)).
+* **Keys and HSM.** Device CA, network CA and command key can live in a PKCS#11 HSM
+  (`LIMDM_KEY_PROVIDER=pkcs11`, separate build). Every key, including the session key, can
+  be rotated without enrolling devices again; inventory, runbooks and the compromise
+  procedure are in [keys.md](keys.md).
 * **Network CA.** EAP-TLS device certificates come from a second root, `network-ca.crt` and
   `network-ca.key` next to the device CA, so mTLS certificates never authenticate to the
   network and network certificates never reach the agent API. Agents send only a CSR; the
@@ -121,6 +127,14 @@ directory: without `command.key` and that file, keyed entries cannot be verified
 server instances for the upgrade, an old instance would write plain entries after the
 switch.
 
+**Key rotation.** A command key rotation starts a new segment: the first server started with
+the new key records the first entry of the segment in `audit-keys` (one line per segment:
+first entry, key id, and the key of every earlier segment) and writes `audit.key_rotate`
+under the new key, and signs the retention cut again. The table `audit_key` names the
+current key; an instance with another key refuses to write entries until it restarts, so
+the chain never mixes keys. With an HSM command key the audit key is derived from a
+deterministic Ed25519 signature over the label instead of the seed ([keys.md](keys.md)).
+
 **Verification.** The audit page verifies incrementally from the last checkpoint, a
 background run verifies the whole chain daily, and **Verify whole chain** does it on demand
 (audited as `audit.verify`). A break shows the first changed entry.
@@ -132,7 +146,7 @@ in hex, `scheme`). Recompute an export on the server, or give the key to an audi
 
 ```sh
 limdm-server audit verify limdm-20261126-audit.jsonl   # reads LIMDM_CA_DIR
-limdm-server audit key                                 # key=<hex> keyed_from=<id>
+limdm-server audit key                                 # key=<hex> keyed_from=<id>, one line per segment
 limdm-server audit -key <hex> -keyed-from <id> verify limdm-20261126-audit.jsonl
 ```
 
