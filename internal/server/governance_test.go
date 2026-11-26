@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -211,6 +212,27 @@ func TestGovernance(t *testing.T) {
 	db.QueryRow(ctx, `SELECT count(*) FROM commands WHERE type='script'`).Scan(&scripts)
 	if n != 2 || scripts != 0 {
 		t.Fatalf("bulk script under four eyes: %d requests, %d commands", n, scripts)
+	}
+	// remote shells wait when the setting asks for it; an approval is used once
+	shellSet := s.settings()
+	shellSet.FourEyesShell = true
+	s.rt.Store(&runtimeState{set: shellSet, auth: &oidcAuth{}})
+	asA := session{Email: "a@x.de", Role: "admin"}
+	if err := s.requireApproval(ctx, asA, "remote_shell", "d1"); !errors.Is(err, errAwaitingApproval) {
+		t.Fatalf("shell without approval: %v", err)
+	}
+	s.requireApproval(ctx, asA, "remote_shell", "d1") // no second request while one is pending
+	var shellID int64
+	db.QueryRow(ctx, `SELECT count(*), max(id) FROM approvals WHERE action='remote_shell' AND status='pending'`).Scan(&n, &shellID)
+	if n != 1 {
+		t.Fatalf("shell requests: %d", n)
+	}
+	ui("POST", "/approvals/"+strconv.FormatInt(shellID, 10)+"/approve", url.Values{}, "b@x.de", "admin")
+	if err := s.requireApproval(ctx, asA, "remote_shell", "d1"); err != nil {
+		t.Fatalf("approved shell: %v", err)
+	}
+	if err := s.requireApproval(ctx, asA, "remote_shell", "d1"); !errors.Is(err, errAwaitingApproval) {
+		t.Fatal("a shell approval was used twice")
 	}
 	// role changes wait too, and the last two admins stay admins
 	ui("POST", "/users/update", url.Values{"login": {"h@x.de"}, "role": {"auditor"}}, "a@x.de", "admin")
