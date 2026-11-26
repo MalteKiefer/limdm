@@ -85,7 +85,9 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 * JSON (RFC 8259), UTF-8, times RFC 3339. Requests with a body send
   `Content-Type: application/json`; unknown fields are refused, and the body holds exactly
   one JSON value.
-* Errors are RFC 9457 problem details (`application/problem+json`) with `status` and `detail`,
+* Errors are RFC 9457 problem details (`application/problem+json`) with `status`, `detail`
+  and a machine readable `code` (`type` is `urn:limdm:problem:<code>`: `bad_request`,
+  `unauthorized`, `forbidden`, `not_found`, `conflict`, `invalid`, `rate_limited`, `busy`, ...),
   also for unknown paths (`404`) and wrong methods (`405` with `Allow`). A `401` carries
   `WWW-Authenticate: Bearer realm="limdm", error="invalid_token"`.
 * Status codes: `200` read or replaced, `201` created (with `Location`), `202` command

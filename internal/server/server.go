@@ -1254,13 +1254,28 @@ func (s *Server) auditAction(ctx context.Context, actor, action, target, detail 
 	return tx.Commit(ctx)
 }
 
+// problemCodes are the machine readable error codes of the problem types.
+var problemCodes = map[int]string{
+	http.StatusBadRequest: "bad_request", http.StatusUnauthorized: "unauthorized", http.StatusForbidden: "forbidden",
+	http.StatusNotFound: "not_found", http.StatusMethodNotAllowed: "method_not_allowed", http.StatusConflict: "conflict",
+	http.StatusPreconditionFailed: "precondition_failed", http.StatusRequestEntityTooLarge: "too_large",
+	http.StatusUnsupportedMediaType: "unsupported_media_type", http.StatusUnprocessableEntity: "invalid",
+	http.StatusPreconditionRequired: "precondition_required", http.StatusTooManyRequests: "rate_limited",
+	http.StatusInternalServerError: "internal", http.StatusServiceUnavailable: "busy",
+}
+
 // problem answers the agent API with RFC 9457 problem details, so clients
-// can tell errors apart by status and type instead of parsing text.
+// can tell errors apart by status and type instead of parsing text. The type
+// is urn:limdm:problem:<code>, the code is also a member of its own.
 func problem(w http.ResponseWriter, status int, detail string) {
+	code := problemCodes[status]
+	if code == "" {
+		code = strconv.Itoa(status)
+	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"type": "about:blank", "title": http.StatusText(status), "status": status, "detail": detail})
+	_ = json.NewEncoder(w).Encode(map[string]any{"type": "urn:limdm:problem:" + code, "code": code, "title": http.StatusText(status), "status": status, "detail": detail})
 }
 
 // retryLater answers 503 with Retry-After: the server is overloaded, not the

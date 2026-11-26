@@ -1043,7 +1043,8 @@
         "type": "object",
         "properties": {
           "type": {
-            "type": "string"
+            "type": "string",
+            "description": "urn:limdm:problem:<code>"
           },
           "title": {
             "type": "string"
@@ -1053,6 +1054,26 @@
           },
           "detail": {
             "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "description": "machine readable error code, also the last part of type (urn:limdm:problem:<code>)",
+            "enum": [
+              "bad_request",
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "method_not_allowed",
+              "conflict",
+              "precondition_failed",
+              "too_large",
+              "unsupported_media_type",
+              "invalid",
+              "precondition_required",
+              "rate_limited",
+              "internal",
+              "busy"
+            ]
           }
         }
       },

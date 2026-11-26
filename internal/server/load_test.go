@@ -378,6 +378,10 @@ func TestCheckinBackpressure(t *testing.T) {
 	if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") == "" {
 		t.Fatalf("lock timeout: %d", w.Code)
 	}
+	var p struct{ Type, Code string }
+	if err := json.NewDecoder(w.Body).Decode(&p); err != nil || p.Code != "busy" || p.Type != "urn:limdm:problem:busy" {
+		t.Fatalf("problem type: %+v %v", p, err)
+	}
 }
 
 // A directory group assigned to a blueprint of tenant 2 does not hand that

@@ -26,7 +26,7 @@ Errors are RFC 9457 problem details:
 HTTP/1.1 403 Forbidden
 Content-Type: application/problem+json
 
-{"type": "about:blank", "title": "Forbidden", "status": 403, "detail": "certificate revoked"}
+{"type": "urn:limdm:problem:forbidden", "code": "forbidden", "title": "Forbidden", "status": 403, "detail": "certificate revoked"}
 ```
 
 | Status | Meaning |
