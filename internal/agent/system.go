@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -66,9 +65,9 @@ func (h *host) pkgDBStamp() string {
 }
 
 type pendingCache struct {
-	at            time.Time
-	all, security int
-	err           error
+	at   time.Time
+	list []api.PendingUpdate
+	err  error
 }
 
 func detectHost() (*host, error) {
@@ -353,21 +352,21 @@ func (h *host) remove(pkgs ...string) error {
 	return err
 }
 
-// upgrade installs updates. securityOnly uses unattended-upgrades on Debian
-// family (security origins by default) and dnf's security filter on Fedora.
+// upgrade installs OS updates. securityOnly uses unattended-upgrades on
+// Debian family (security origins by default), dnf's security filter on
+// Fedora and security patches on SUSE. Flatpak is its own source
+// (flatpakUpgrade).
 func (h *host) upgrade(securityOnly bool) (string, error) {
 	h.pkgMu.Lock()
 	defer h.pkgMu.Unlock()
 	h.pending = pendingCache{}
 	switch h.family { // rolling releases have no separate security channel: always everything
 	case "arch":
-		out, err := run(2*time.Hour, "pacman", "-Syu", "--noconfirm")
-		return out + flatpakUpgrade(), err
+		return run(2*time.Hour, "pacman", "-Syu", "--noconfirm")
 	case "alpine":
-		out, err := run(2*time.Hour, "apk", "upgrade", "--update-cache", "--no-interactive")
-		return out + flatpakUpgrade(), err
+		return run(2*time.Hour, "apk", "upgrade", "--update-cache", "--no-interactive")
 	case "suse":
-		return h.zypperUpgrade(securityOnly)
+		return h.zypperUpgrade(securityOnly, nil)
 	}
 	if h.family == "debian" {
 		h.aptUpdated = time.Time{}
@@ -383,132 +382,22 @@ func (h *host) upgrade(securityOnly bool) (string, error) {
 			return run(2*time.Hour, "unattended-upgrade", "-v")
 		}
 		// wait for dpkg instead of failing while unattended-upgrades or PackageKit holds it
-		out, err := run(2*time.Hour, "apt-get", "upgrade", "-y", "-q", "--with-new-pkgs", "-o", "DPkg::Lock::Timeout=900",
+		return run(2*time.Hour, "apt-get", "upgrade", "-y", "-q", "--with-new-pkgs", "-o", "DPkg::Lock::Timeout=900",
 			"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold")
-		return out + flatpakUpgrade(), err
 	}
 	args := []string{"upgrade", "-y", "-q", "--refresh"}
 	if securityOnly {
 		args = append(args, "--security")
 	}
-	out, err := run(2*time.Hour, "dnf", args...)
-	if !securityOnly {
-		out += flatpakUpgrade()
-	}
-	return out, err
+	return run(2*time.Hour, "dnf", args...)
 }
 
-// flatpakUpgrade updates system wide Flatpak apps and runtimes too, so
-// "install all updates" means all; its errors are reported, not fatal.
-func flatpakUpgrade() string {
+// flatpakUpgrade updates system wide Flatpak apps and runtimes.
+func flatpakUpgrade() (string, error) {
 	if !hasCmd("flatpak") {
-		return ""
+		return "", nil
 	}
-	out, err := run(time.Hour, "flatpak", "update", "-y", "--noninteractive", "--system")
-	if err != nil {
-		return "\nflatpak: " + err.Error()
-	}
-	return "\n" + lastLines(out, 10)
-}
-
-// pendingUpdates counts available updates; cached for an hour because it hits the mirrors.
-func (h *host) pendingUpdates() (all, security int, err error) {
-	if time.Since(h.pending.at) < time.Hour {
-		return h.pending.all, h.pending.security, h.pending.err
-	}
-	defer func() { h.pending = pendingCache{at: time.Now(), all: all, security: security, err: err} }()
-	switch h.family {
-	case "arch":
-		// checkupdates (pacman-contrib) uses its own database copy; pacman -Sy would
-		// leave the system in a partial upgrade state
-		if !hasCmd("checkupdates") {
-			return 0, 0, errors.New("checkupdates (pacman-contrib) missing")
-		}
-		out, cerr := run(10*time.Minute, "checkupdates")
-		var ee *exec.ExitError
-		if cerr != nil && (!errors.As(cerr, &ee) || ee.ExitCode() != 2) { // 2: nothing to update
-			return 0, 0, cerr
-		}
-		n := countLines(out) // rolling release: every pending update can carry security fixes
-		return n, n, nil
-	case "alpine":
-		if _, err = run(10*time.Minute, "apk", "update", "-q"); err != nil {
-			return
-		}
-		out, verr := run(5*time.Minute, "apk", "version", "-l", "<")
-		if verr != nil {
-			return 0, 0, verr
-		}
-		n := max(countLines(out)-1, 0) // first line is a header; no separate security channel
-		return n, n, nil
-	case "suse":
-		return h.zypperPending()
-	}
-	if h.family == "debian" {
-		h.pkgMu.Lock()
-		err = h.aptUpdate()
-		h.pkgMu.Unlock()
-		if err != nil {
-			return
-		}
-		var out string
-		if out, err = run(5*time.Minute, "apt-get", "-s", "-o", "Debug::NoLocking=1", "upgrade", "--with-new-pkgs"); err != nil {
-			return
-		}
-		all, security = countAptPending(out)
-		return
-	}
-	// dnf check-update exits 100 when updates exist.
-	out, cerr := run(10*time.Minute, "dnf", "-q", "check-update", "--refresh")
-	var ee *exec.ExitError
-	if cerr != nil && (!errors.As(cerr, &ee) || ee.ExitCode() != 100) {
-		return 0, 0, cerr
-	}
-	all = countDnfPackages(out)
-	sec, serr := run(10*time.Minute, "dnf", "-q", "updateinfo", "list", "--security")
-	if serr != nil {
-		return all, 0, serr
-	}
-	security = countDnfLines(sec)
-	return
-}
-
-func countAptPending(out string) (all, security int) {
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "Inst ") {
-			all++
-			if strings.Contains(strings.ToLower(line), "-security") {
-				security++
-			}
-		}
-	}
-	return
-}
-
-// advisoryRe matches the advisory ID that starts every package line of
-// "dnf updateinfo list" (dnf4: ID, severity, package) and of dnf5's
-// "advisory list" table (ID, type, severity, package, issued).
-var advisoryRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*(-[A-Z][A-Z0-9]*)*-[0-9]{4}[:-][0-9A-Za-z]+`) // FEDORA-, FEDORA-EPEL-, RHSA- …
-
-// countDnfPackages counts "name.arch version repo" lines of dnf check-update.
-func countDnfPackages(out string) int {
-	n := 0
-	for _, line := range strings.Split(out, "\n") {
-		if f := strings.Fields(line); len(f) == 3 && strings.Contains(f[0], ".") && !strings.HasSuffix(line, ":") {
-			n++
-		}
-	}
-	return n
-}
-
-func countDnfLines(out string) int {
-	n := 0
-	for _, line := range strings.Split(out, "\n") {
-		if f := strings.Fields(line); len(f) >= 3 && advisoryRe.MatchString(f[0]) {
-			n++
-		}
-	}
-	return n
+	return run(time.Hour, "flatpak", "update", "-y", "--noninteractive", "--system")
 }
 
 func (h *host) rebootRequired() bool {

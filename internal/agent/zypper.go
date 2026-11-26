@@ -1,11 +1,8 @@
 package agent
 
 import (
-	"encoding/xml"
 	"errors"
-	"io"
 	"os/exec"
-	"strings"
 	"time"
 )
 
@@ -78,54 +75,16 @@ func (h *host) zypperInstall(pkgs []string) error {
 	return err
 }
 
-func (h *host) zypperUpgrade(securityOnly bool) (string, error) {
+// zypperUpgrade installs updates, limited to repos (aliases) when given.
+func (h *host) zypperUpgrade(securityOnly bool, repos []string) (string, error) {
 	if _, err := zypper(10*time.Minute, "refresh"); err != nil {
 		return "", err
 	}
-	out, err := zypper(2*time.Hour, zypperUpgradeArgs(securityOnly, h.rolling())...)
-	if !securityOnly || h.rolling() {
-		out += flatpakUpgrade()
+	args := zypperUpgradeArgs(securityOnly, h.rolling())
+	for _, r := range repos {
+		args = append(args, "--repo", r)
 	}
-	return out, err
-}
-
-func (h *host) zypperPending() (all, security int, err error) {
-	args := []string{"--xmlout", "list-updates"}
-	if h.rolling() {
-		args = append(args, "--dup")
-	}
-	out, err := zypper(10*time.Minute, args...)
-	if err != nil {
-		return 0, 0, err
-	}
-	if all, err = countZypperUpdates(out); err != nil || h.rolling() {
-		return all, all, err // rolling release: every pending update can carry security fixes
-	}
-	out, err = zypper(10*time.Minute, "--xmlout", "list-patches", "--category", "security")
-	if err != nil {
-		return all, 0, err
-	}
-	security, err = countZypperUpdates(out)
-	return all, security, err
-}
-
-// countZypperUpdates counts the <update> elements of zypper's XML output
-// (list-updates lists packages, list-patches the needed patches).
-func countZypperUpdates(out string) (int, error) {
-	d := xml.NewDecoder(strings.NewReader(out))
-	n := 0
-	for {
-		t, err := d.Token()
-		if errors.Is(err, io.EOF) {
-			return n, nil
-		}
-		if err != nil {
-			return n, err
-		}
-		if se, ok := t.(xml.StartElement); ok && se.Name.Local == "update" {
-			n++
-		}
-	}
+	return zypper(2*time.Hour, args...)
 }
 
 // zypperRebootRequired: libzypp marks /run/reboot-needed after updates that
