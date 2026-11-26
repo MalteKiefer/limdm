@@ -18,13 +18,17 @@ ISO/IEC 27001:2022 Annex A.
 ## Features
 
 * **Library items and blueprints.** Reusable, strictly validated configuration items
-  (packages, firewall, SSH, sudo, polkit, package sources, certificates, proxy, screen lock
-  and more) are assigned through blueprints with nested conditions and inheritance.
-* **Compliance** with automatic remediation, grace periods, automatic lock and CSV evidence
-  for auditors.
+  (packages, updates, firewall, SSH, sudo, polkit, package sources, certificates, proxy,
+  printers, WLAN and VPN profiles, dconf, local accounts, screen lock and more) are assigned
+  through blueprints with nested conditions and inheritance. Every change is versioned with
+  diff, review step, rollback and restore.
+* **Compliance** with automatic remediation, grace periods, automatic lock, custom checks,
+  risk exceptions, compliance history and CSV evidence for auditors.
 * **Device commands** for lock and unlock, lost mode, wipe, restart, scripts, updates,
-  software removal and local accounts (create, admin rights, password, lock). Every command
-  is signed with Ed25519 and checked by the agent before it runs.
+  software removal, local accounts (create, admin rights, password, lock), log collection and
+  an audited remote support shell. Every command is signed with Ed25519 and checked by the
+  agent before it runs. Wipe, lost mode, scripts and role changes can require four eyes
+  approval.
 * **Single sign on** for the console (OIDC, for example Google Workspace) and for the
   desktop login, either for every login or as a session model like Platform SSO, with
   configurable reconfirmation and offline grace.
@@ -39,11 +43,19 @@ ISO/IEC 27001:2022 Annex A.
   branded desktop dialog, escrowed and sealed on the server.
 * **Inventory** via osquery: hardware, disks, volumes, packages, Flatpaks, snaps, accounts,
   network interfaces, package sources.
+* **Governance:** roles (admin, helpdesk, auditor) with device scopes, multi tenancy for
+  MSPs, a keyed and hash chained audit log with syslog forwarding, key rotation without
+  enrolling devices again and an optional PKCS#11 HSM.
+* **Integrations:** admin REST API with OpenAPI, Prometheus metrics, several server
+  instances behind a load balancer.
 * **Security by default:** mTLS only between agent and server (TLS 1.3, private device CA,
-  pinned fingerprint), signed library items, DNS over HTTPS fallback on the agent, IP allow
-  and block lists for the console, append only and hash chained audit log.
+  pinned fingerprint), signed library items, IP allow and block lists for the console,
+  append only audit log.
 * **Agent self updates** with signed checksums and automatic rollback; packages for deb,
   rpm, Arch and Alpine, systemd and OpenRC. Console in English and German.
+
+Upgrading from 0.15: stop every server instance first, see
+[docs/operations.md](docs/operations.md#upgrading-from-015-to-016).
 
 ## Quick start
 
@@ -68,26 +80,32 @@ Host installation with deb, rpm, Arch or Alpine packages behind Caddy, OIDC and 
 
 ## Documentation
 
+An index of all documents is in [docs/README.md](docs/README.md).
+
 | Topic | Content |
 |---|---|
-| [Installation](docs/installation.md) | Docker Compose, deb/rpm with Caddy, PostgreSQL, first sign in, upgrades |
-| [Configuration](docs/configuration.md) | Environment variables, console settings, OIDC, branding, roles |
-| [Concepts](docs/concepts.md) | Declarations, library, blueprints, conditions, inheritance, directory |
+| [Installation](docs/installation.md) | Supported systems, Docker Compose, deb/rpm with Caddy, PostgreSQL, ports, files, first sign in |
+| [Configuration](docs/configuration.md) | Environment variables, Settings tabs, OIDC, roles, install script variables |
+| [Console](docs/console.md) | Every console page, its actions, roles and permissions |
+| [Concepts](docs/concepts.md) | Declarations, library, blueprints, conditions, inheritance, versions, device states |
 | [Tenants](docs/tenants.md) | Multi tenancy for MSPs and groups of companies, super admins, shared objects |
-| [Declarations](docs/declarations.md) | Reference of every library item type |
-| [Agent deployment](docs/agent.md) | Install script, mass deployment with `enroll.conf`, desktop helper, updates |
+| [Declarations](docs/declarations.md) | Reference of every library item type and field |
+| [Agent](docs/agent.md) | Install script, `enroll.conf`, `limdm-agent`, `limdm` and `limdm-desktop`, files on the device, updates |
 | [Desktop login](docs/desktop-login.md) | SSO login and session mode, reconfirmation, offline grace |
-| [Disk encryption](docs/disk-encryption.md) | Recovery key escrow and rotation |
+| [Disk encryption](docs/disk-encryption.md) | Recovery key escrow, rotation, TPM 2.0 binding |
 | [Network profiles](docs/network.md) | WLAN, 802.1X, WireGuard and OpenVPN profiles, EAP-TLS device certificates, CRL |
-| [Compliance](docs/compliance.md) | Checks, custom checks, frameworks, policies, webhooks, evidence |
-| [Remote shell](docs/remote-shell.md) | Audited support terminal from the console to a device |
 | [Software catalog](docs/software.md) | Self service apps in the desktop app, requests, Flathub and vendor repositories |
-| [Notifications](docs/notifications.md) | Email, Slack, Discord and webhook channels, events, delivery log |
-| [Security](docs/security.md) | Architecture, mTLS, signed commands, sessions, audit log, privacy |
+| [Compliance](docs/compliance.md) | Checks with IDs, custom checks, frameworks, policies, exceptions, webhook, evidence |
+| [Remote shell](docs/remote-shell.md) | Audited support terminal from the console to a device |
+| [Notifications](docs/notifications.md) | Email, Slack, Discord and webhook channels, events |
+| [Security](docs/security.md) | Architecture, mTLS, signed commands, sessions, four eyes, audit log, privacy |
+| [Keys](docs/keys.md) | Key inventory, HSM, rotation runbooks, compromise |
+| [High availability](docs/high-availability.md) | Several server instances on one database |
 | [Agent API](docs/api.md) | Endpoints, problem details, integrity of commands and items |
-| [Admin API](docs/admin-api.md) | REST API for scripts and integrations, API tokens, OpenAPI |
-| [Operations](docs/operations.md) | Backup, restore, releases, Prometheus metrics, troubleshooting |
+| [Admin API](docs/admin-api.md) | REST API, API tokens, OpenAPI, Prometheus metrics |
+| [Operations](docs/operations.md) | Upgrades, backup, health checks, releases, syslog, retention, troubleshooting |
 | [Development](docs/development.md) | Building, tests, release process |
+| [Brand guidelines](docs/brand-guidelines.md) | Console design and customer branding |
 
 ## Limitations
 
@@ -97,10 +115,12 @@ Host installation with deb, rpm, Arch or Alpine packages behind Caddy, OIDC and 
   (BSI Standard 300-1) need review by an information security officer.
 * Official CIS Benchmarks exist for Ubuntu and Debian; Fedora uses the RHEL
   recommendations as reference.
-* The device CA key is a 0600 file (no HSM or PKCS#11); agent keys are files (no TPM).
-* The client secret of the desktop login declaration is stored unencrypted in the
-  database and on the device (0600, root only).
-* Console roles are assigned per user, not yet from directory groups.
+* Server keys can live in a PKCS#11 HSM only with the separate `-tags pkcs11` build; agent
+  keys are files (the TPM binds LUKS volumes, not the device key).
+* The client secret of the desktop login declaration is sealed on the server but stored in
+  plain text on the device (0600, root only).
+* SUSE support, TPM binding and printers are not yet verified on real SUSE, TPM and CUPS
+  systems.
 
 ## License
 
