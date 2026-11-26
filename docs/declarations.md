@@ -157,6 +157,19 @@ against strict patterns because they end up in shell files.
 
 Recurring root scripts, only on devices enrolled with `allow_scripts`.
 
+### `com.limdm.network` (list)
+
+```json
+{"profiles": [{"name": "office", "type": "wifi", "ssid": "Corp", "security": "wpa2-enterprise", "eap": {"method": "tls", "ca_cert": "corp-root", "server_domain": "radius.example.com"}}]}
+```
+
+WLAN (WPA2/WPA3 personal and enterprise), wired 802.1X (EAP-TLS, PEAP, TTLS), WireGuard and
+OpenVPN profiles as NetworkManager keyfiles; merged by profile name. EAP pins a CA of a
+certificates item (`ca_cert`) and the server domain. EAP-TLS uses a device certificate the
+server issues from its network CA. Secrets are masked in the console, the audit log, the
+desktop app and `limdm profiles`. Every field, the device side and the CRL for the RADIUS
+server: [Network profiles](network.md).
+
 ## Security
 
 ### `com.limdm.firewall` (list)
