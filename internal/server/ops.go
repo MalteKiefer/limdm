@@ -58,7 +58,12 @@ func (s *slots) resize(n int) {
 	if s == nil {
 		return
 	}
-	n = min(max(n, 1), maxSlots) // bounded: the size comes from a setting
+	if n < 1 {
+		n = 1
+	}
+	if n > maxSlots { // bounded: the size comes from a setting
+		n = maxSlots
+	}
 	if c := s.c.Load(); c != nil && cap(*c) == n {
 		return
 	}
