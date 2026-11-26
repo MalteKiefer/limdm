@@ -789,4 +789,10 @@ var deCatalog = map[string]string{
 	"access from this network is not allowed":                                        "Zugriff aus diesem Netz ist nicht erlaubt",
 	"parent would create an inheritance cycle":                                       "Das übergeordnete Blueprint würde einen Vererbungskreis erzeugen",
 	"library item not found":                                                         "Bibliothekselement nicht gefunden",
+	"Shown only once; hand them over securely and add the TOTP secret to an authenticator app.": "Wird nur einmal angezeigt; sicher übergeben und das TOTP Secret in einer Authenticator App hinterlegen.",
+	"What the roles may do": "Was die Rollen dürfen",
+	"Admin: everything.":    "Admin: alles.",
+	"Helpdesk: sees devices; sync, updates, restart, shut down, lock, message, password reset and lock of local accounts, disk recovery keys. No scripts, wipe, lost mode or configuration.": "Helpdesk: sieht Geräte; Synchronisieren, Updates, Neustart, Herunterfahren, Sperren, Nachricht, Passwort zurücksetzen und Sperren lokaler Konten, Wiederherstellungsschlüssel. Keine Skripte, kein Löschen, kein Verlustmodus, keine Konfiguration.",
+	"Auditor: reads everything including the audit log, changes nothing.":         "Auditor: liest alles einschließlich Audit Log, ändert nichts.",
+	"Reset password and TOTP of this account? The old ones stop working at once.": "Passwort und TOTP dieses Kontos zurücksetzen? Die bisherigen gelten sofort nicht mehr.",
 }
