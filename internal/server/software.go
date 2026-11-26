@@ -272,29 +272,7 @@ func (s *Server) appSave(w http.ResponseWriter, r *http.Request, sess session) {
 			return
 		}
 	}
-	if err := app.Validate(); err != nil {
-		s.renderApp(w, r, sess, app, isNew, err.Error())
-		return
-	}
-	if s.appNeedsApproval(app.CatalogApp) { // four eyes (foureyes.go); an uploaded icon is not kept
-		if _, err := s.requestApproval(ctx, sess, "catalog.save", app.ID, catalogApproval{App: app, New: isNew}, ""); err != nil {
-			s.renderApp(w, r, sess, app, isNew, err.Error())
-			return
-		}
-		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
-		return
-	}
-	src, _ := json.Marshal(app.Sources)
-	err := s.auditAction(ctx, sess.Email, "catalog.save", app.ID, string(src), func(tx pgx.Tx) error {
-		err := s.writeCatalogApp(ctx, tx, app, isNew)
-		if err == nil && icon != nil {
-			_, err = tx.Exec(ctx, `UPDATE catalog_apps SET icon=$2 WHERE slug=$1`, app.ID, icon)
-		}
-		if err == nil && r.FormValue("remove_icon") == "on" && icon == nil {
-			_, err = tx.Exec(ctx, `UPDATE catalog_apps SET icon=NULL, icon_tried=now() WHERE slug=$1`, app.ID)
-		}
-		return err
-	})
+	pending, err := s.saveCatalogApp(ctx, sess, app, isNew, icon, r.FormValue("remove_icon") == "on")
 	if errors.Is(err, errAppExists) {
 		msg := "An app with this ID exists already."
 		if !isNew {
@@ -303,22 +281,57 @@ func (s *Server) appSave(w http.ResponseWriter, r *http.Request, sess session) {
 		s.renderApp(w, r, sess, app, isNew, msg)
 		return
 	}
+	if code, msg := errStatus(err); code != 0 && code < 500 {
+		s.renderApp(w, r, sess, app, isNew, msg)
+		return
+	}
 	if err != nil {
 		s.fail(w, err)
+		return
+	}
+	if pending {
+		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/software", http.StatusSeeOther)
 }
 
-var errAppExists = errors.New("app exists or is unknown")
-
-func (s *Server) appDelete(w http.ResponseWriter, r *http.Request, sess session) {
-	id := r.PathValue("id")
-	err := s.auditAction(r.Context(), sess.Email, "catalog.delete", id, "", func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `DELETE FROM catalog_apps WHERE slug=$1`, id)
+// saveCatalogApp validates and stores a catalog app with its audit entry,
+// or files it for four eyes approval (pending; an uploaded icon is then not
+// kept). The console and the admin API both save through here.
+func (s *Server) saveCatalogApp(ctx context.Context, sess session, app catalogRow, isNew bool, icon []byte, removeIcon bool) (bool, error) {
+	if err := app.Validate(); err != nil {
+		return false, invalid("app", err)
+	}
+	if s.appNeedsApproval(app.CatalogApp) { // four eyes (foureyes.go)
+		_, err := s.requestApproval(ctx, sess, "catalog.save", app.ID, catalogApproval{App: app, New: isNew}, "")
+		return err == nil, err
+	}
+	src, _ := json.Marshal(app.Sources)
+	return false, s.auditAction(ctx, sess.Email, "catalog.save", app.ID, string(src), func(tx pgx.Tx) error {
+		err := s.writeCatalogApp(ctx, tx, app, isNew)
+		if err == nil && icon != nil {
+			_, err = tx.Exec(ctx, `UPDATE catalog_apps SET icon=$2 WHERE slug=$1`, app.ID, icon)
+		}
+		if err == nil && removeIcon && icon == nil {
+			_, err = tx.Exec(ctx, `UPDATE catalog_apps SET icon=NULL, icon_tried=now() WHERE slug=$1`, app.ID)
+		}
 		return err
 	})
-	if err != nil {
+}
+
+var errAppExists = errors.New("app exists or is unknown")
+
+// deleteCatalogApp removes an app from the catalog; installed copies stay.
+func (s *Server) deleteCatalogApp(ctx context.Context, actor, id string) error {
+	return s.auditAction(ctx, actor, "catalog.delete", id, "", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `DELETE FROM catalog_apps WHERE slug=$1`, id)
+		return err
+	})
+}
+
+func (s *Server) appDelete(w http.ResponseWriter, r *http.Request, sess session) {
+	if err := s.deleteCatalogApp(r.Context(), sess.Email, r.PathValue("id")); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -335,12 +348,31 @@ func (s *Server) requestDecide(w http.ResponseWriter, r *http.Request, sess sess
 		http.NotFound(w, r)
 		return
 	}
-	err = s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
+	err = s.decideAppRequest(ctx, sess.Email, id, op)
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		s.failUser(w, r, sess, err)
+		return
+	}
+	http.Redirect(w, r, "/software?tab=requests", http.StatusSeeOther)
+}
+
+// decideAppRequest approves (op approve or approve-all) or denies (deny) a
+// pending app request; pgx.ErrNoRows when it is unknown or decided.
+func (s *Server) decideAppRequest(ctx context.Context, actor string, id int64, op string) error {
+	status := map[string]string{"approve": "approved", "approve-all": "approved", "deny": "denied"}[op]
+	if status == "" {
+		return pgx.ErrNoRows
+	}
+	return s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
 		var device, app, flatpak, remote, name string
 		err := tx.QueryRow(ctx, `UPDATE catalog_requests SET status=$2, decided_by=$3, decided_at=now() WHERE id=$1 AND status='pending'
-			RETURNING device_id, coalesce(app, ''), flatpak, remote, app_name`, id, status, sess.Email).Scan(&device, &app, &flatpak, &remote, &name)
+			RETURNING device_id, coalesce(app, ''), flatpak, remote, app_name`, id, status, actor).Scan(&device, &app, &flatpak, &remote, &name)
 		if err != nil || status != "approved" || flatpak == "" {
-			return sess.Email, "catalog.request." + op, device, app + flatpak, err
+			return actor, "catalog.request." + op, device, app + flatpak, err
 		}
 		// an app from outside the catalog joins it: "on request" for this
 		// device only, or available for everyone
@@ -380,33 +412,28 @@ func (s *Server) requestDecide(w http.ResponseWriter, r *http.Request, sess sess
 			}
 		}
 		_, err = tx.Exec(ctx, `UPDATE catalog_requests SET app=$2 WHERE id=$1`, id, app)
-		return sess.Email, "catalog.request." + op, device, flatpak + " -> " + app, err
+		return actor, "catalog.request." + op, device, flatpak + " -> " + app, err
 	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		s.failUser(w, r, sess, err)
-		return
-	}
-	http.Redirect(w, r, "/software?tab=requests", http.StatusSeeOther)
 }
 
 func (s *Server) softwareSettingsSave(w http.ResponseWriter, r *http.Request, sess session) {
 	set := SoftwareSettings{RestrictFlathub: r.FormValue("restrict_flathub") == "on", StoresReadOnly: r.FormValue("stores_read_only") == "on",
 		OnlyManagedRemotes: r.FormValue("only_managed_remotes") == "on"}
-	doc, _ := json.Marshal(set)
-	err := s.auditAction(r.Context(), sess.Email, "catalog.settings", "software", string(doc), func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO settings(key, value) VALUES ('software', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
-		return err
-	})
-	if err != nil {
+	if err := s.saveSoftwareSettings(r.Context(), sess.Email, set); err != nil {
 		s.fail(w, err)
 		return
 	}
 	r.Form.Set("tab", "settings")
 	s.renderSoftware(w, r, sess, "Settings saved and active.", "")
+}
+
+// saveSoftwareSettings stores the store settings with their audit entry.
+func (s *Server) saveSoftwareSettings(ctx context.Context, actor string, set SoftwareSettings) error {
+	doc, _ := json.Marshal(set)
+	return s.auditAction(ctx, actor, "catalog.settings", "software", string(doc), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('software', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
+		return err
+	})
 }
 
 // fleetFlatpak is a Flatpak app installed somewhere in the fleet.
@@ -455,10 +482,24 @@ func (s *Server) slugFor(ctx context.Context, tx pgx.Tx, name string) (string, e
 // that have them count them as installed and managed from then on.
 func (s *Server) appImport(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
-	fleet, err := s.fleetFlatpaks(ctx)
-	if err != nil {
+	if _, err := s.importFleetFlatpaks(ctx, sess.Email, r.Form["flatpak"]); err != nil {
 		s.fail(w, err)
 		return
+	}
+	back := "/software"
+	if d := r.FormValue("device"); d != "" {
+		back = "/devices/" + d + "?tab=software&sub=flatpak"
+	}
+	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
+// importFleetFlatpaks adds installed Flatpaks (IDs from fleetFlatpaks) to
+// the catalog, mode available; devices that have them count them as
+// installed and managed from then on. Unknown IDs are skipped.
+func (s *Server) importFleetFlatpaks(ctx context.Context, actor string, ids []string) ([]string, error) {
+	fleet, err := s.fleetFlatpaks(ctx)
+	if err != nil {
+		return nil, err
 	}
 	names, origins := map[string]string{}, map[string]string{}
 	for _, f := range fleet {
@@ -466,7 +507,7 @@ func (s *Server) appImport(w http.ResponseWriter, r *http.Request, sess session)
 	}
 	var added []string
 	err = s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
-		for _, id := range r.Form["flatpak"] {
+		for _, id := range ids {
 			name, ok := names[id]
 			if !ok {
 				continue // unknown, or already in the catalog
@@ -493,18 +534,13 @@ func (s *Server) appImport(w http.ResponseWriter, r *http.Request, sess session)
 			}
 			added = append(added, id)
 		}
-		return sess.Email, "catalog.import", "catalog", strings.Join(added, " "), nil
+		return actor, "catalog.import", "catalog", strings.Join(added, " "), nil
 	})
 	if err != nil {
-		s.fail(w, err)
-		return
+		return nil, err
 	}
 	go s.fetchIcons(context.WithoutCancel(ctx)) // icon, summary and category from Flathub
-	back := "/software"
-	if d := r.FormValue("device"); d != "" {
-		back = "/devices/" + d + "?tab=software&sub=flatpak"
-	}
-	http.Redirect(w, r, back, http.StatusSeeOther)
+	return added, nil
 }
 
 // remoteSave adds or changes a managed remote (also to take over one found
@@ -515,21 +551,13 @@ func (s *Server) remoteSave(w http.ResponseWriter, r *http.Request, sess session
 	if rem.State == "" {
 		rem.State = "allowed"
 	}
-	if err := rem.Validate(); err != nil {
+	err := s.saveCatalogRemote(r.Context(), sess.Email, rem)
+	var fe *fieldError
+	if errors.As(err, &fe) {
 		r.Form.Set("tab", "remotes")
-		s.renderSoftware(w, r, sess, "", err.Error())
+		s.renderSoftware(w, r, sess, "", fe.Msg)
 		return
 	}
-	doc, _ := json.Marshal(rem)
-	err := s.auditAction(r.Context(), sess.Email, "catalog.remote", rem.Name, string(doc), func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO catalog_remotes(name, url, title, state, catalog_only) VALUES ($1,$2,$3,$4,$5)
-			ON CONFLICT (name) DO UPDATE SET url=EXCLUDED.url, title=EXCLUDED.title, state=EXCLUDED.state, catalog_only=EXCLUDED.catalog_only, updated_at=now()`,
-			rem.Name, rem.URL, rem.Title, rem.State, rem.CatalogOnly)
-		if err == nil {
-			err = s.signCatalogRemote(r.Context(), tx, rem.Name)
-		}
-		return err
-	})
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -537,42 +565,31 @@ func (s *Server) remoteSave(w http.ResponseWriter, r *http.Request, sess session
 	http.Redirect(w, r, "/software?tab=remotes", http.StatusSeeOther)
 }
 
-// remoteOp allows, blocks, switches the catalog filter of, or stops managing a remote.
-func (s *Server) remoteOp(w http.ResponseWriter, r *http.Request, sess session) {
-	name, op := r.PathValue("name"), r.PathValue("op")
-	q := map[string]string{
-		// only https remotes may be allowed; a blocked one may have any URL
-		"allow":    `UPDATE catalog_remotes SET state='allowed', updated_at=now() WHERE name=$1 AND (url LIKE 'https://%' OR url LIKE 'oci+https://%')`,
-		"block":    `UPDATE catalog_remotes SET state='blocked', updated_at=now() WHERE name=$1`,
-		"filter":   `UPDATE catalog_remotes SET catalog_only=NOT catalog_only, updated_at=now() WHERE name=$1`,
-		"unmanage": `DELETE FROM catalog_remotes WHERE name=$1`,
-	}[op]
-	if q == "" {
-		http.NotFound(w, r)
-		return
+// saveCatalogRemote validates and stores a managed remote, signed and audited.
+func (s *Server) saveCatalogRemote(ctx context.Context, actor string, rem api.CatalogRemote) error {
+	if err := rem.Validate(); err != nil {
+		return invalid("remote", err)
 	}
-	if op == "allow" {
-		var u string
-		if err := s.db.QueryRow(r.Context(), `SELECT url FROM catalog_remotes WHERE name=$1`, name).Scan(&u); err == nil &&
-			!strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "oci+https://") {
-			r.Form.Set("tab", "remotes")
-			s.renderSoftware(w, r, sess, "", "Only remotes with an https URL can be allowed.")
-			return
-		}
-	}
-	err := s.auditAction(r.Context(), sess.Email, "catalog.remote."+op, name, "", func(tx pgx.Tx) error {
-		if err := s.catalogRemoteIntact(r.Context(), tx, name); err != nil {
-			return err
-		}
-		tag, err := tx.Exec(r.Context(), q, name)
-		if err == nil && tag.RowsAffected() == 0 {
-			err = pgx.ErrNoRows
-		}
+	doc, _ := json.Marshal(rem)
+	return s.auditAction(ctx, actor, "catalog.remote", rem.Name, string(doc), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO catalog_remotes(name, url, title, state, catalog_only) VALUES ($1,$2,$3,$4,$5)
+			ON CONFLICT (name) DO UPDATE SET url=EXCLUDED.url, title=EXCLUDED.title, state=EXCLUDED.state, catalog_only=EXCLUDED.catalog_only, updated_at=now()`,
+			rem.Name, rem.URL, rem.Title, rem.State, rem.CatalogOnly)
 		if err == nil {
-			err = s.signCatalogRemote(r.Context(), tx, name)
+			err = s.signCatalogRemote(ctx, tx, rem.Name)
 		}
 		return err
 	})
+}
+
+// remoteOp allows, blocks, switches the catalog filter of, or stops managing a remote.
+func (s *Server) remoteOp(w http.ResponseWriter, r *http.Request, sess session) {
+	err := s.catalogRemoteOp(r.Context(), sess.Email, r.PathValue("name"), r.PathValue("op"))
+	if errors.Is(err, errRemoteNotHTTPS) {
+		r.Form.Set("tab", "remotes")
+		s.renderSoftware(w, r, sess, "", err.Error())
+		return
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.NotFound(w, r)
 		return
@@ -584,23 +601,80 @@ func (s *Server) remoteOp(w http.ResponseWriter, r *http.Request, sess session) 
 	http.Redirect(w, r, "/software?tab=remotes", http.StatusSeeOther)
 }
 
+var errRemoteNotHTTPS = &userError{http.StatusUnprocessableEntity, "Only remotes with an https URL can be allowed."}
+
+// catalogRemoteOp allows, blocks, switches the catalog filter of (filter),
+// or stops managing (unmanage) a remote; pgx.ErrNoRows when unknown.
+func (s *Server) catalogRemoteOp(ctx context.Context, actor, name, op string) error {
+	q := map[string]string{
+		// only https remotes may be allowed; a blocked one may have any URL
+		"allow":    `UPDATE catalog_remotes SET state='allowed', updated_at=now() WHERE name=$1 AND (url LIKE 'https://%' OR url LIKE 'oci+https://%')`,
+		"block":    `UPDATE catalog_remotes SET state='blocked', updated_at=now() WHERE name=$1`,
+		"filter":   `UPDATE catalog_remotes SET catalog_only=NOT catalog_only, updated_at=now() WHERE name=$1`,
+		"unmanage": `DELETE FROM catalog_remotes WHERE name=$1`,
+	}[op]
+	if q == "" {
+		return pgx.ErrNoRows
+	}
+	if op == "allow" {
+		var u string
+		if err := s.db.QueryRow(ctx, `SELECT url FROM catalog_remotes WHERE name=$1`, name).Scan(&u); err == nil &&
+			!strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "oci+https://") {
+			return errRemoteNotHTTPS
+		}
+	}
+	return s.auditAction(ctx, actor, "catalog.remote."+op, name, "", func(tx pgx.Tx) error {
+		if err := s.catalogRemoteIntact(ctx, tx, name); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, q, name)
+		if err == nil && tag.RowsAffected() == 0 {
+			err = pgx.ErrNoRows
+		}
+		if err == nil {
+			err = s.signCatalogRemote(ctx, tx, name)
+		}
+		return err
+	})
+}
+
 // flathubAdd puts a Flathub app into the catalog with its name, summary,
 // category and icon, then opens it for editing.
 func (s *Server) flathubAdd(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
 	id := strings.TrimSpace(r.FormValue("id"))
 	if !api.ValidFlatpakID(id) {
 		http.NotFound(w, r)
 		return
 	}
+	slug, pending, err := s.addFlathubApp(r.Context(), sess, id, r.FormValue("mode"))
+	switch {
+	case errors.Is(err, errFlathubDown):
+		s.renderApp(w, r, sess, catalogRow{CatalogApp: api.CatalogApp{Mode: api.AppAvailable}, Enabled: true}, true, "Flathub did not answer; try again later.")
+	case errors.Is(err, errAppExists):
+		http.Redirect(w, r, "/software", http.StatusSeeOther)
+	case err != nil:
+		s.fail(w, err)
+	case pending:
+		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+	default:
+		http.Redirect(w, r, "/software/apps/"+slug, http.StatusSeeOther)
+	}
+}
+
+var errFlathubDown = &userError{http.StatusBadGateway, "Flathub did not answer; try again later."}
+
+// addFlathubApp puts a Flathub app into the catalog with its name, summary,
+// category and icon (mode request or required, else available); a required
+// app goes to four eyes approval first (pending). errAppExists when the
+// catalog has the Flatpak already.
+func (s *Server) addFlathubApp(ctx context.Context, sess session, id, mode string) (string, bool, error) {
 	app, icon, err := s.flathubApp(ctx, id)
 	if err != nil {
 		s.log.Warn("flathub app lookup failed") // no details: they carry the requested ID
-		s.renderApp(w, r, sess, catalogRow{CatalogApp: api.CatalogApp{Mode: api.AppAvailable}, Enabled: true}, true, "Flathub did not answer; try again later.")
-		return
+		return "", false, errFlathubDown
 	}
-	if m := r.FormValue("mode"); m == api.AppOnRequest || m == api.AppRequired {
-		app.Mode = m
+	if mode == api.AppOnRequest || mode == api.AppRequired {
+		app.Mode = mode
 	}
 	if s.appNeedsApproval(app) { // four eyes for a required app (foureyes.go)
 		err := func() error {
@@ -622,15 +696,7 @@ func (s *Server) flathubAdd(w http.ResponseWriter, r *http.Request, sess session
 			_, err = s.requestApproval(ctx, sess, "catalog.save", app.ID, catalogApproval{App: catalogRow{CatalogApp: app, Enabled: true}, New: true}, "")
 			return err
 		}()
-		switch {
-		case errors.Is(err, errAppExists):
-			http.Redirect(w, r, "/software", http.StatusSeeOther)
-		case err != nil:
-			s.fail(w, err)
-		default:
-			http.Redirect(w, r, "/approvals", http.StatusSeeOther)
-		}
-		return
+		return app.ID, err == nil, err
 	}
 	var slug string
 	err = s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
@@ -654,13 +720,5 @@ func (s *Server) flathubAdd(w http.ResponseWriter, r *http.Request, sess session
 		}
 		return sess.Email, "catalog.save", slug, "from Flathub " + id, err
 	})
-	if errors.Is(err, errAppExists) {
-		http.Redirect(w, r, "/software", http.StatusSeeOther)
-		return
-	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/software/apps/"+slug, http.StatusSeeOther)
+	return slug, false, err
 }

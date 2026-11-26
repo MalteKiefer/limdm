@@ -607,7 +607,7 @@ export interface paths {
         };
         /**
          * JSON Schema of a declaration payload
-         * @description Draft 2020-12, derived from the Go types the server and agent decode the payload into. x-order keeps the field order.
+         * @description Draft 2020-12, derived from the Go types the server and agent decode the payload into. x-order keeps the field order; titles, descriptions, x-section, enum with x-enumTitles, x-widget (textarea, code, secret, checkboxes), x-secret, minimum, maximum and default describe the form.
          */
         get: operations["getSchema"];
         put?: never;
@@ -662,6 +662,432 @@ export interface paths {
         /** What needs attention: approvals, failed commands, non compliant and stale devices, expiring exceptions, last backup */
         get: operations["statsAttention"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/blueprints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Blueprints with usage
+         * @description Every visible blueprint with its devices, their compliance status, assignment sources (devices, directory groups, default), inheritance, the deleted blueprints that can be restored and the rule fields of conditions.
+         */
+        get: operations["configBlueprints"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/blueprints/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review a blueprint change
+         * @description Validates the blueprint like a save and answers the diff to the stored version, the devices it reaches and the library items it adds or removes. Nothing is saved.
+         */
+        post: operations["configBlueprintPreview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Library with usage
+         * @description Every visible library item (network secrets masked) with the blueprints that use it, an invalid signature flag, read only for shared items of the default tenant, and the deleted items that can be restored.
+         */
+        get: operations["configLibrary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/library/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review a library item change
+         * @description Validates the item like a save and answers the diff to the stored version, the devices it reaches, whether four eyes approval is needed and, for compliance items, the effect on the checks. Nothing is saved.
+         */
+        post: operations["configItemPreview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/{kind}/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Versions
+         * @description Every saved version, newest first, with the readable text diffs compare. Not for device scoped accounts.
+         */
+        get: operations["configVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/{kind}/{id}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Roll back or restore
+         * @description Saves an old version again as the newest one, or restores a deleted object, audited like a save. Root effective library items wait for four eyes approval (202).
+         */
+        post: operations["configRollback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/software/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Software catalog
+         * @description Catalog apps with their installs, Flatpaks installed in the fleet that no app covers yet, and the number of pending requests. Global accounts only.
+         */
+        get: operations["softwareCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/software/apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a catalog app
+         * @description Required apps wait for four eyes approval (202).
+         */
+        post: operations["softwareAppCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/software/apps/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Change a catalog app
+         * @description Required apps wait for four eyes approval (202).
+         */
+        put: operations["softwareAppSave"];
+        post?: never;
+        /**
+         * Remove a catalog app
+         * @description Installed copies stay on the devices.
+         */
+        delete: operations["softwareAppDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/software/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take over installed Flatpaks
+         * @description Adds Flatpaks installed in the fleet to the catalog, mode available.
+         */
+        post: operations["softwareImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/software/flathub/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Flathub
+         * @description Through the server; nothing is sent from the browser to Flathub.
+         */
+        get: operations["flathubSearch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/software/flathub": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a Flathub app
+         * @description Name, summary, category and icon come from Flathub.
+         */
+        post: operations["flathubAdd"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/software/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * App requests of users
+         * @description Pending first, then the newest 300.
+         */
+        get: operations["appRequests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/software/requests/{id}/{op}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide an app request
+         * @description approve, approve-all (an app from outside the catalog becomes available for everyone) or deny.
+         */
+        post: operations["appRequestDecide"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/software/remotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Flatpak remotes
+         * @description Managed remotes and remotes found on devices (managed false).
+         */
+        get: operations["softwareRemotes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/software/remotes/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Manage a remote
+         * @description Allowed remotes need an https URL.
+         */
+        put: operations["softwareRemoteSave"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/software/remotes/{name}/{op}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Allow, block, filter or unmanage a remote
+         * @description filter switches catalog only.
+         */
+        post: operations["softwareRemoteOp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/software/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Store settings */
+        get: operations["softwareSettings"];
+        /** Save the store settings */
+        put: operations["softwareSettingsSave"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Package repository
+         * @description Uploads of the tenant with usage, limits and quota use.
+         */
+        get: operations["packages"];
+        put?: never;
+        /**
+         * Upload a package
+         * @description multipart/form-data with name, version, kind, reason and file; the body may be as large as the upload limit. With four eyes on it waits for approval (status pending).
+         */
+        post: operations["packageUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/packages/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete an upload
+         * @description Refused while a library item references it.
+         */
+        delete: operations["packageDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/packages/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Package limits and store
+         * @description Global administrators. The S3 secret is sealed; empty keeps the stored one.
+         */
+        put: operations["packageSettings"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1017,6 +1443,11 @@ export interface components {
             items: {
                 type: string;
                 title: string;
+                description: string;
+                /** @description documentation link */
+                doc: string;
+                /** @description root effective: saves need four eyes approval while it is on */
+                four_eyes: boolean;
             }[];
         };
         StatsFleet: {
@@ -1082,6 +1513,239 @@ export interface components {
                 size: number;
                 error: string;
             };
+        };
+        ConfigDeleted: {
+            id?: number;
+            name?: string;
+            /** Format: date-time */
+            at?: string;
+            by?: string;
+        };
+        ConfigBlueprintSource: {
+            /** @enum {string} */
+            kind?: "device" | "group" | "default";
+            group?: string;
+            priority?: number;
+            devices?: number;
+        };
+        ConfigBlueprint: components["schemas"]["Blueprint"] & {
+            parent: string;
+            devices: number;
+            status: {
+                [key: string]: number;
+            };
+            items: number;
+            sources: components["schemas"]["ConfigBlueprintSource"][];
+            read_only: boolean;
+            deletable: boolean;
+            inherited: number[];
+        };
+        ConfigBlueprints: {
+            items: components["schemas"]["ConfigBlueprint"][];
+            deleted: components["schemas"]["ConfigDeleted"][];
+            rule_fields: {
+                [key: string]: string[];
+            };
+        };
+        ConfigLibraryItem: components["schemas"]["LibraryItem"] & {
+            /** Format: date-time */
+            updated_at: string;
+            used_by: string[];
+            invalid: boolean;
+            read_only: boolean;
+        };
+        ConfigLibrary: {
+            items: components["schemas"]["ConfigLibraryItem"][];
+            deleted: components["schemas"]["ConfigDeleted"][];
+        };
+        ConfigPreview: {
+            diff: {
+                /** @enum {string} */
+                op: "same" | "add" | "del";
+                text: string;
+            }[];
+            blueprints: string[];
+            devices: number;
+            online: number;
+            offline: number;
+            status: {
+                [key: string]: number;
+            };
+            sample: {
+                id: string;
+                hostname: string;
+                status: string;
+            }[];
+            needs_approval: boolean;
+            impact: {
+                /** @enum {string} */
+                code: "level" | "excluded_added" | "excluded_removed" | "advisory_added" | "advisory_removed" | "items_added" | "items_removed";
+                values: string[];
+            }[];
+        };
+        ConfigVersions: {
+            id: number;
+            name: string;
+            exists: boolean;
+            items: {
+                version: number;
+                /** Format: date-time */
+                at: string;
+                by: string;
+                note: string;
+                deleted: boolean;
+                /** @description readable text the diff compares */
+                doc: string;
+            }[];
+        };
+        ConfigSaved: {
+            id?: unknown;
+            status: string;
+        };
+        AppSource: {
+            /** @enum {string} */
+            kind: "flatpak" | "package";
+            flatpak?: string;
+            remote?: string;
+            debian?: string;
+            fedora?: string;
+            repos?: {
+                name?: string;
+                family?: string;
+                url?: string;
+                suites?: string;
+                components?: string;
+                key?: string;
+                signed_metadata?: boolean;
+            }[];
+        };
+        CatalogApp: {
+            id: string;
+            name: string;
+            summary?: string;
+            category?: string;
+            /** @enum {string} */
+            mode: "available" | "request" | "required";
+            sources: components["schemas"]["AppSource"][];
+            detect?: string[];
+            icon_hash?: string;
+            enabled: boolean;
+            scope: number[];
+            has_icon: boolean;
+            /** Format: date-time */
+            updated_at: string;
+            installs: number;
+        };
+        CatalogAppInput: {
+            id?: string;
+            name: string;
+            summary?: string;
+            category?: string;
+            /** @enum {string} */
+            mode: "available" | "request" | "required";
+            sources: components["schemas"]["AppSource"][];
+            detect?: string[];
+            enabled?: boolean;
+            scope?: number[];
+            /** @description PNG */
+            icon?: string;
+            remove_icon?: boolean;
+        };
+        Catalog: {
+            items: components["schemas"]["CatalogApp"][];
+            fleet: {
+                id: string;
+                name: string;
+                origin: string;
+                devices: number;
+            }[];
+            pending_requests: number;
+        };
+        FlatpakHit: {
+            id: string;
+            name: string;
+            summary?: string;
+            remote: string;
+            icon?: string;
+            category?: string;
+            developer?: string;
+        };
+        AppRequest: {
+            id: number;
+            device_id: string;
+            hostname: string;
+            app: string;
+            app_name: string;
+            user: string;
+            note: string;
+            /** @enum {string} */
+            status: "pending" | "approved" | "denied";
+            decided_by?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            decided_at?: string | null;
+            flatpak: string;
+            remote: string;
+        };
+        Remote: {
+            name: string;
+            url: string;
+            title: string;
+            /** @enum {string} */
+            state: "allowed" | "blocked" | "";
+            catalog_only: boolean;
+            devices: number;
+            managed: boolean;
+        };
+        SoftwareSettings: {
+            restrict_flathub: boolean;
+            stores_read_only: boolean;
+            only_managed_remotes: boolean;
+        };
+        Package: {
+            id: number;
+            tenant_id: number;
+            sha256: string;
+            name: string;
+            version: string;
+            kind: string;
+            filename: string;
+            store: string;
+            size: number;
+            uploaded_by: string;
+            approved_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            usage: string[];
+            snippet: string;
+        };
+        PackageConfig: {
+            max_upload_mb: number;
+            quota_mb: number;
+            quota_count: number;
+            /** @enum {string} */
+            store: "local" | "s3";
+            s3?: {
+                endpoint?: string;
+                region?: string;
+                bucket?: string;
+                prefix?: string;
+                access_key?: string;
+                path_style?: boolean;
+                /** @description write only; kept when empty */
+                secret?: string;
+            };
+        };
+        Packages: {
+            items: components["schemas"]["Package"][];
+            config: components["schemas"]["PackageConfig"];
+            used_bytes: number;
+            used_count: number;
+            kinds: string[];
+            four_eyes: boolean;
+            global: boolean;
+            type: string;
         };
     };
     responses: {
@@ -2327,7 +2991,10 @@ export interface operations {
     };
     listSchemas: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description language of titles and help texts; default from the request */
+                lang?: "de" | "en";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2351,7 +3018,10 @@ export interface operations {
     };
     getSchema: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description language of titles and help texts; default from the request */
+                lang?: "de" | "en";
+            };
             header?: never;
             path: {
                 /** @example com.limdm.firewall */
@@ -2448,6 +3118,739 @@ export interface operations {
             };
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    configBlueprints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigBlueprints"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    configBlueprintPreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id?: number;
+                    name: string;
+                    description?: string;
+                    parent_id?: number | null;
+                    tree: components["schemas"]["Node"][];
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigPreview"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    configLibrary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigLibrary"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    configItemPreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LibraryItem"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigPreview"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    configVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description blueprints or library */
+                kind: string;
+                /** @description ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigVersions"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    configRollback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description blueprints or library */
+                kind: string;
+                /** @description ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigSaved"];
+                };
+            };
+            /** @description Four eyes: waits for another administrator */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalPending"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    softwareCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Catalog"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    softwareAppCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CatalogAppInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigSaved"];
+                };
+            };
+            /** @description Four eyes: waits for another administrator */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalPending"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    softwareAppSave: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description app ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CatalogAppInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigSaved"];
+                };
+            };
+            /** @description Four eyes: waits for another administrator */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalPending"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    softwareAppDelete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description app ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+        };
+    };
+    softwareImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    flatpaks: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        added: string[];
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    flathubSearch: {
+        parameters: {
+            query: {
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlatpakHit"][];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    flathubAdd: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id: string;
+                    /** @enum {string} */
+                    mode?: "available" | "request" | "required";
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigSaved"];
+                };
+            };
+            /** @description Four eyes: waits for another administrator */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalPending"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            502: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    appRequests: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["AppRequest"][];
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    appRequestDecide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ID */
+                id: number;
+                op: "approve" | "approve-all" | "deny";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigSaved"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    softwareRemotes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Remote"][];
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    softwareRemoteSave: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Remote"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigSaved"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    softwareRemoteOp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                op: "allow" | "block" | "filter" | "unmanage";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigSaved"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    softwareSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoftwareSettings"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    softwareSettingsSave: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SoftwareSettings"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoftwareSettings"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    packages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Packages"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    packageUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    name: string;
+                    version?: string;
+                    kind: string;
+                    reason?: string;
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Uploaded */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigSaved"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    packageDelete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    packageSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PackageConfig"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status?: string;
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
         };

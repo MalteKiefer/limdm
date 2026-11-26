@@ -218,35 +218,50 @@ func (s *Server) packageUpload(w http.ResponseWriter, r *http.Request, sess sess
 		s.errorPage(w, r, sess, http.StatusForbidden, "your role cannot change this")
 		return
 	}
-	ctx := r.Context()
-	fail := func(msg string) { s.renderPackages(w, r, sess, "", msg) }
-	cfg, err := s.packageConfig(ctx)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	name, version, kind := strings.TrimSpace(r.FormValue("name")), strings.TrimSpace(r.FormValue("version")), r.FormValue("kind")
-	switch {
-	case !api.ArtifactNameRe.MatchString(name):
-		fail("Name: letters, digits and . _ + -, up to 100 characters.")
-		return
-	case !versionRe.MatchString(version):
-		fail("Version: up to 64 characters without spaces.")
-		return
-	case !slices.Contains(api.ArtifactKinds, kind):
-		fail("Choose the kind of the upload.")
-		return
-	}
 	f, hdr, err := r.FormFile("file")
 	if err != nil {
-		fail("Choose a file (at most the upload limit).")
+		s.renderPackages(w, r, sess, "", "Choose a file (at most the upload limit).")
 		return
 	}
 	defer f.Close()
-	tmp, err := os.CreateTemp("", "limdm-upload-*")
+	pending, err := s.storeUpload(r.Context(), sess, r.FormValue("name"), r.FormValue("version"), r.FormValue("kind"), hdr.Filename, f, r.FormValue("reason"))
+	if code, msg := errStatus(err); code != 0 && code < 500 {
+		s.renderPackages(w, r, sess, "", msg)
+		return
+	}
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	done := "uploaded"
+	if pending {
+		done = "approval"
+	}
+	http.Redirect(w, r, "/software/packages?done="+done, http.StatusSeeOther)
+}
+
+// storeUpload stores an upload for the tenant a request acts for: SHA-256
+// while copying, kind and quota checks, then the store, the row and the
+// audit entry. With four eyes on the upload waits for another admin
+// (pending). The console and the admin API both upload through here.
+func (s *Server) storeUpload(ctx context.Context, sess session, name, version, kind, filename string, f io.Reader, reason string) (bool, error) {
+	bad := func(msg string) (bool, error) { return false, &userError{http.StatusUnprocessableEntity, msg} }
+	cfg, err := s.packageConfig(ctx)
+	if err != nil {
+		return false, err
+	}
+	name, version = strings.TrimSpace(name), strings.TrimSpace(version)
+	switch {
+	case !api.ArtifactNameRe.MatchString(name):
+		return bad("Name: letters, digits and . _ + -, up to 100 characters.")
+	case !versionRe.MatchString(version):
+		return bad("Version: up to 64 characters without spaces.")
+	case !slices.Contains(api.ArtifactKinds, kind):
+		return bad("Choose the kind of the upload.")
+	}
+	tmp, err := os.CreateTemp("", "limdm-upload-*")
+	if err != nil {
+		return false, err
 	}
 	defer os.Remove(tmp.Name())
 	h := sha256.New()
@@ -255,47 +270,44 @@ func (s *Server) packageUpload(w http.ResponseWriter, r *http.Request, sess sess
 	head = head[:n]
 	size, err := io.Copy(io.MultiWriter(tmp, h), io.MultiReader(bytes.NewReader(head), f))
 	if err = errors.Join(err, tmp.Close()); err != nil {
-		s.fail(w, err)
-		return
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			return bad(fmt.Sprintf("The file is empty or larger than the upload limit of %d MiB.", cfg.MaxUploadMB))
+		}
+		return false, err
 	}
 	if size == 0 || size > int64(cfg.MaxUploadMB)<<20 {
-		fail(fmt.Sprintf("The file is empty or larger than the upload limit of %d MiB.", cfg.MaxUploadMB))
-		return
+		return bad(fmt.Sprintf("The file is empty or larger than the upload limit of %d MiB.", cfg.MaxUploadMB))
 	}
 	if !artifactMagic(kind, head) {
-		fail("The file content does not match the chosen kind.")
-		return
+		return bad("The file content does not match the chosen kind.")
 	}
 	sha := hex.EncodeToString(h.Sum(nil))
 	tenant := ownerTenant(ctx)
 	st, store, err := s.packageStore(ctx)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return false, err
 	}
+	quota := fmt.Sprintf("The package quota of this tenant (%d MiB, %d files) would be exceeded.", cfg.QuotaMB, cfg.QuotaCount)
 	var usedBytes, count int64
 	if err := s.db.QueryRow(ctx, `SELECT coalesce(sum(size), 0), count(*) FROM artifacts WHERE tenant_id=$1`, tenant).Scan(&usedBytes, &count); err != nil {
-		s.fail(w, err)
-		return
+		return false, err
 	}
 	if usedBytes+size > int64(cfg.QuotaMB)<<20 || count+1 > int64(cfg.QuotaCount) {
-		fail(fmt.Sprintf("The package quota of this tenant (%d MiB, %d files) would be exceeded.", cfg.QuotaMB, cfg.QuotaCount))
-		return
+		return bad(quota)
 	}
 	var exists string
 	if err := s.db.QueryRow(ctx, `SELECT name FROM artifacts WHERE tenant_id=$1 AND sha256=$2`, tenant, sha).Scan(&exists); err == nil {
-		fail("This file was uploaded already as " + exists + ".")
-		return
+		return false, &userError{http.StatusConflict, "This file was uploaded already as " + exists + "."}
 	}
 	if err := st.Put(ctx, artifactObject(tenant, sha), tmp.Name()); err != nil {
-		s.fail(w, fmt.Errorf("package store: %w", err))
-		return
+		return false, fmt.Errorf("package store: %w", err)
 	}
 	var approver *string
 	if !s.settings().FourEyes {
 		approver = &sess.Email
 	}
-	filename := filepath.Base(hdr.Filename)
+	filename = filepath.Base(filename)
 	detail := fmt.Sprintf("%s %s kind=%s size=%d sha256=%s file=%q", name, version, kind, size, sha, truncate(filename, 200))
 	errQuota := errors.New("quota")
 	err = s.auditAction(ctx, sess.Email, "artifact.upload", sha, detail, func(tx pgx.Tx) error {
@@ -316,22 +328,13 @@ func (s *Server) packageUpload(w http.ResponseWriter, r *http.Request, sess sess
 		return err
 	})
 	if errors.Is(err, errQuota) {
-		fail(fmt.Sprintf("The package quota of this tenant (%d MiB, %d files) would be exceeded.", cfg.QuotaMB, cfg.QuotaCount))
-		return
+		return bad(quota)
 	}
-	if err != nil {
-		s.fail(w, err)
-		return
+	if err != nil || approver != nil {
+		return false, err
 	}
-	done := "uploaded"
-	if approver == nil {
-		if _, err := s.requestApproval(ctx, sess, "artifact.upload", sha, map[string]any{"tenant": tenant, "name": name, "kind": kind}, r.FormValue("reason")); err != nil {
-			s.fail(w, err)
-			return
-		}
-		done = "approval"
-	}
-	http.Redirect(w, r, "/software/packages?done="+done, http.StatusSeeOther)
+	_, err = s.requestApproval(ctx, sess, "artifact.upload", sha, map[string]any{"tenant": tenant, "name": name, "kind": kind}, reason)
+	return err == nil, err
 }
 
 // packageDelete removes an upload no library item references.
@@ -340,38 +343,53 @@ func (s *Server) packageDelete(w http.ResponseWriter, r *http.Request, sess sess
 		s.errorPage(w, r, sess, http.StatusForbidden, "your role cannot change this")
 		return
 	}
-	ctx := r.Context()
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	err := s.deletePackage(r.Context(), sess, id)
+	var ue *userError
+	switch {
+	case errors.As(err, &ue) && ue.Status == http.StatusNotFound:
+		s.notFound(w, r, sess)
+	case errors.As(err, &ue):
+		s.renderPackages(w, r, sess, "", ue.Msg)
+	case err != nil:
+		s.fail(w, err)
+	default:
+		http.Redirect(w, r, "/software/packages", http.StatusSeeOther)
+	}
+}
+
+// deletePackage removes an upload of the session's tenant that no library
+// item references, with its audit entry, then its file.
+func (s *Server) deletePackage(ctx context.Context, sess session, id int64) error {
 	tcond, targs := tenantCond(sess, "tenant_id", 1)
 	var tenant int64
 	var sha, name string
 	if err := s.db.QueryRow(ctx, `SELECT tenant_id, sha256, name FROM artifacts WHERE id=$1 AND `+tcond, append([]any{id}, targs...)...).Scan(&tenant, &sha, &name); err != nil {
-		s.notFound(w, r, sess)
-		return
+		if errors.Is(err, pgx.ErrNoRows) {
+			return &userError{http.StatusNotFound, "package not found"}
+		}
+		return err
 	}
 	var users []string
 	if err := s.db.QueryRow(ctx, `SELECT coalesce(array_agg(name), '{}') FROM library_items WHERE type=$1 AND (tenant_id=$2 OR $2=1)
 		AND payload->'artifacts' @> jsonb_build_array(jsonb_build_object('sha256', $3::text))`, api.TypeArtifacts, tenant, sha).Scan(&users); err != nil {
-		s.fail(w, err)
-		return
+		return err
 	}
 	if len(users) > 0 {
-		s.renderPackages(w, r, sess, "", "Still used by: "+strings.Join(users, ", ")+". Remove it from these library items first.")
-		return
+		return &userError{http.StatusConflict, "Still used by: " + strings.Join(users, ", ") + ". Remove it from these library items first."}
 	}
 	if err := s.auditAction(ctx, sess.Email, "artifact.delete", sha, name, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `DELETE FROM artifacts WHERE id=$1`, id)
 		return err
 	}); err != nil {
-		s.fail(w, err)
-		return
+		return err
 	}
 	if st, _, err := s.packageStore(ctx); err == nil {
 		if err := st.Delete(ctx, artifactObject(tenant, sha)); err != nil {
 			s.log.Error("delete package file", "sha256", sha, "err", err)
 		}
 	}
-	http.Redirect(w, r, "/software/packages", http.StatusSeeOther)
+	return nil
 }
 
 // packagesSettings saves the limits and the store (global admins).
@@ -400,33 +418,41 @@ func (s *Server) packagesSettings(w http.ResponseWriter, r *http.Request, sess s
 	} else {
 		c.S3 = nil
 	}
-	if err := c.validate(); err != nil {
-		s.renderPackages(w, r, sess, "", err.Error())
+	err = s.savePackageConfig(ctx, sess.Email, cur, c)
+	if code, msg := errStatus(err); code != 0 && code < 500 {
+		s.renderPackages(w, r, sess, "", msg)
 		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/software/packages", http.StatusSeeOther)
+}
+
+// savePackageConfig validates and stores the package limits and store
+// (global administrators); the store moves only while it is empty.
+func (s *Server) savePackageConfig(ctx context.Context, actor string, cur, c PackageConfig) error {
+	if err := c.validate(); err != nil {
+		return &userError{http.StatusUnprocessableEntity, err.Error()}
 	}
 	moved := (cur.S3 == nil) != (c.S3 == nil) || cur.S3 != nil && c.S3 != nil &&
 		(cur.S3.Endpoint != c.S3.Endpoint || cur.S3.Region != c.S3.Region || cur.S3.Bucket != c.S3.Bucket || cur.S3.Prefix != c.S3.Prefix)
 	if moved {
 		var n int
 		if err := s.db.QueryRow(ctx, `SELECT count(*) FROM artifacts`).Scan(&n); err != nil {
-			s.fail(w, err)
-			return
+			return err
 		}
 		if n > 0 {
-			s.renderPackages(w, r, sess, "", "Delete the uploads or move them to the new store before switching it (docs/packages.md).")
-			return
+			return &userError{http.StatusConflict, "Delete the uploads or move them to the new store before switching it (docs/packages.md)."}
 		}
 	}
 	doc, _ := json.Marshal(c)
-	if err := s.auditAction(ctx, sess.Email, "artifact.settings", "packages", fmt.Sprintf("max_upload_mb=%d quota_mb=%d quota_count=%d s3=%v",
+	return s.auditAction(ctx, actor, "artifact.settings", "packages", fmt.Sprintf("max_upload_mb=%d quota_mb=%d quota_count=%d s3=%v",
 		c.MaxUploadMB, c.QuotaMB, c.QuotaCount, c.S3 != nil), func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('packages', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
 		return err
-	}); err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/software/packages", http.StatusSeeOther)
+	})
 }
 
 // checkArtifactRefs: every upload a library item references exists in the

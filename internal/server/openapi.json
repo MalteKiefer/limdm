@@ -2151,14 +2151,29 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "de",
+                "en"
+              ]
+            },
+            "description": "language of titles and help texts; default from the request"
+          }
+        ]
       }
     },
     "/api/v1/schemas/{type}": {
       "get": {
         "operationId": "getSchema",
         "summary": "JSON Schema of a declaration payload",
-        "description": "Draft 2020-12, derived from the Go types the server and agent decode the payload into. x-order keeps the field order.",
+        "description": "Draft 2020-12, derived from the Go types the server and agent decode the payload into. x-order keeps the field order; titles, descriptions, x-section, enum with x-enumTitles, x-widget (textarea, code, secret, checkboxes), x-secret, minimum, maximum and default describe the form.",
         "parameters": [
           {
             "name": "type",
@@ -2168,6 +2183,19 @@
               "type": "string"
             },
             "example": "com.limdm.firewall"
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "de",
+                "en"
+              ]
+            },
+            "description": "language of titles and help texts; default from the request"
           }
         ],
         "responses": {
@@ -2300,6 +2328,1215 @@
           },
           "503": {
             "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/config/blueprints": {
+      "get": {
+        "operationId": "configBlueprints",
+        "summary": "Blueprints with usage",
+        "description": "Every visible blueprint with its devices, their compliance status, assignment sources (devices, directory groups, default), inheritance, the deleted blueprints that can be restored and the rule fields of conditions.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigBlueprints"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/config/blueprints/preview": {
+      "post": {
+        "operationId": "configBlueprintPreview",
+        "summary": "Review a blueprint change",
+        "description": "Validates the blueprint like a save and answers the diff to the stored version, the devices it reaches and the library items it adds or removes. Nothing is saved.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigPreview"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "parent_id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "tree": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Node"
+                    }
+                  }
+                },
+                "required": [
+                  "name",
+                  "tree"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config/library": {
+      "get": {
+        "operationId": "configLibrary",
+        "summary": "Library with usage",
+        "description": "Every visible library item (network secrets masked) with the blueprints that use it, an invalid signature flag, read only for shared items of the default tenant, and the deleted items that can be restored.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigLibrary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/config/library/preview": {
+      "post": {
+        "operationId": "configItemPreview",
+        "summary": "Review a library item change",
+        "description": "Validates the item like a save and answers the diff to the stored version, the devices it reaches, whether four eyes approval is needed and, for compliance items, the effect on the checks. Nothing is saved.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigPreview"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryItem"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config/{kind}/{id}/versions": {
+      "get": {
+        "operationId": "configVersions",
+        "summary": "Versions",
+        "description": "Every saved version, newest first, with the readable text diffs compare. Not for device scoped accounts.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigVersions"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "blueprints or library"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID"
+          }
+        ]
+      }
+    },
+    "/api/v1/config/{kind}/{id}/rollback": {
+      "post": {
+        "operationId": "configRollback",
+        "summary": "Roll back or restore",
+        "description": "Saves an old version again as the newest one, or restores a deleted object, audited like a save. Root effective library items wait for four eyes approval (202).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSaved"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "202": {
+            "description": "Four eyes: waits for another administrator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalPending"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "blueprints or library"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "version"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/software/catalog": {
+      "get": {
+        "operationId": "softwareCatalog",
+        "summary": "Software catalog",
+        "description": "Catalog apps with their installs, Flatpaks installed in the fleet that no app covers yet, and the number of pending requests. Global accounts only.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Catalog"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/software/apps": {
+      "post": {
+        "operationId": "softwareAppCreate",
+        "summary": "Add a catalog app",
+        "description": "Required apps wait for four eyes approval (202).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSaved"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "202": {
+            "description": "Four eyes: waits for another administrator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalPending"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogAppInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/software/apps/{id}": {
+      "put": {
+        "operationId": "softwareAppSave",
+        "summary": "Change a catalog app",
+        "description": "Required apps wait for four eyes approval (202).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSaved"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "202": {
+            "description": "Four eyes: waits for another administrator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalPending"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "app ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogAppInput"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "softwareAppDelete",
+        "summary": "Remove a catalog app",
+        "description": "Installed copies stay on the devices.",
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "app ID"
+          }
+        ]
+      }
+    },
+    "/api/v1/software/import": {
+      "post": {
+        "operationId": "softwareImport",
+        "summary": "Take over installed Flatpaks",
+        "description": "Adds Flatpaks installed in the fleet to the catalog, mode available.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "added": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "added"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "flatpaks": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "flatpaks"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/software/flathub/search": {
+      "get": {
+        "operationId": "flathubSearch",
+        "summary": "Search Flathub",
+        "description": "Through the server; nothing is sent from the browser to Flathub.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FlatpakHit"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/software/flathub": {
+      "post": {
+        "operationId": "flathubAdd",
+        "summary": "Add a Flathub app",
+        "description": "Name, summary, category and icon come from Flathub.",
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSaved"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "502": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "202": {
+            "description": "Four eyes: waits for another administrator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalPending"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "available",
+                      "request",
+                      "required"
+                    ]
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/software/requests": {
+      "get": {
+        "operationId": "appRequests",
+        "summary": "App requests of users",
+        "description": "Pending first, then the newest 300.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AppRequest"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/software/requests/{id}/{op}": {
+      "post": {
+        "operationId": "appRequestDecide",
+        "summary": "Decide an app request",
+        "description": "approve, approve-all (an app from outside the catalog becomes available for everyone) or deny.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSaved"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID"
+          },
+          {
+            "name": "op",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "approve",
+                "approve-all",
+                "deny"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/software/remotes": {
+      "get": {
+        "operationId": "softwareRemotes",
+        "summary": "Flatpak remotes",
+        "description": "Managed remotes and remotes found on devices (managed false).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Remote"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/software/remotes/{name}": {
+      "put": {
+        "operationId": "softwareRemoteSave",
+        "summary": "Manage a remote",
+        "description": "Allowed remotes need an https URL.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSaved"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Remote"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/software/remotes/{name}/{op}": {
+      "post": {
+        "operationId": "softwareRemoteOp",
+        "summary": "Allow, block, filter or unmanage a remote",
+        "description": "filter switches catalog only.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSaved"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "name": "op",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "allow",
+                "block",
+                "filter",
+                "unmanage"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/software/settings": {
+      "get": {
+        "operationId": "softwareSettings",
+        "summary": "Store settings",
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SoftwareSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "put": {
+        "operationId": "softwareSettingsSave",
+        "summary": "Save the store settings",
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SoftwareSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SoftwareSettings"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/packages": {
+      "get": {
+        "operationId": "packages",
+        "summary": "Package repository",
+        "description": "Uploads of the tenant with usage, limits and quota use.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Packages"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "packageUpload",
+        "summary": "Upload a package",
+        "description": "multipart/form-data with name, version, kind, reason and file; the body may be as large as the upload limit. With four eyes on it waits for approval (status pending).",
+        "responses": {
+          "201": {
+            "description": "Uploaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSaved"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "413": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "name",
+                  "kind",
+                  "file"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/packages/{id}": {
+      "delete": {
+        "operationId": "packageDelete",
+        "summary": "Delete an upload",
+        "description": "Refused while a library item references it.",
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID"
+          }
+        ]
+      }
+    },
+    "/api/v1/packages/settings": {
+      "put": {
+        "operationId": "packageSettings",
+        "summary": "Package limits and store",
+        "description": "Global administrators. The S3 secret is sealed; empty keeps the stored one.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PackageConfig"
+              }
+            }
           }
         }
       }
@@ -3518,8 +4755,11 @@
             "items": {
               "type": "object",
               "required": [
-                "type",
-                "title"
+                "description",
+                "doc",
+                "four_eyes",
+                "title",
+                "type"
               ],
               "properties": {
                 "type": {
@@ -3527,6 +4767,17 @@
                 },
                 "title": {
                   "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "doc": {
+                  "type": "string",
+                  "description": "documentation link"
+                },
+                "four_eyes": {
+                  "type": "boolean",
+                  "description": "root effective: saves need four eyes approval while it is on"
                 }
               }
             }
@@ -3782,6 +5033,929 @@
             ]
           }
         }
+      },
+      "ConfigDeleted": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "by": {
+            "type": "string"
+          }
+        }
+      },
+      "ConfigBlueprintSource": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "device",
+              "group",
+              "default"
+            ]
+          },
+          "group": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "devices": {
+            "type": "integer"
+          }
+        }
+      },
+      "ConfigBlueprint": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Blueprint"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "parent": {
+                "type": "string"
+              },
+              "devices": {
+                "type": "integer"
+              },
+              "status": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                }
+              },
+              "items": {
+                "type": "integer"
+              },
+              "sources": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ConfigBlueprintSource"
+                }
+              },
+              "read_only": {
+                "type": "boolean"
+              },
+              "deletable": {
+                "type": "boolean"
+              },
+              "inherited": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              }
+            },
+            "required": [
+              "parent",
+              "devices",
+              "status",
+              "items",
+              "sources",
+              "read_only",
+              "deletable",
+              "inherited"
+            ]
+          }
+        ]
+      },
+      "ConfigBlueprints": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigBlueprint"
+            }
+          },
+          "deleted": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigDeleted"
+            }
+          },
+          "rule_fields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "items",
+          "deleted",
+          "rule_fields"
+        ]
+      },
+      "ConfigLibraryItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/LibraryItem"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "used_by": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "invalid": {
+                "type": "boolean"
+              },
+              "read_only": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "updated_at",
+              "used_by",
+              "invalid",
+              "read_only"
+            ]
+          }
+        ]
+      },
+      "ConfigLibrary": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigLibraryItem"
+            }
+          },
+          "deleted": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigDeleted"
+            }
+          }
+        },
+        "required": [
+          "items",
+          "deleted"
+        ]
+      },
+      "ConfigPreview": {
+        "type": "object",
+        "properties": {
+          "diff": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "same",
+                    "add",
+                    "del"
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op",
+                "text"
+              ]
+            }
+          },
+          "blueprints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "devices": {
+            "type": "integer"
+          },
+          "online": {
+            "type": "integer"
+          },
+          "offline": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "sample": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "hostname": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "hostname",
+                "status"
+              ]
+            }
+          },
+          "needs_approval": {
+            "type": "boolean"
+          },
+          "impact": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "level",
+                    "excluded_added",
+                    "excluded_removed",
+                    "advisory_added",
+                    "advisory_removed",
+                    "items_added",
+                    "items_removed"
+                  ]
+                },
+                "values": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "code",
+                "values"
+              ]
+            }
+          }
+        },
+        "required": [
+          "diff",
+          "blueprints",
+          "devices",
+          "online",
+          "offline",
+          "status",
+          "sample",
+          "needs_approval",
+          "impact"
+        ]
+      },
+      "ConfigVersions": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "type": "integer"
+                },
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "by": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                },
+                "deleted": {
+                  "type": "boolean"
+                },
+                "doc": {
+                  "type": "string",
+                  "description": "readable text the diff compares"
+                }
+              },
+              "required": [
+                "version",
+                "at",
+                "by",
+                "note",
+                "deleted",
+                "doc"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "exists",
+          "items"
+        ]
+      },
+      "ConfigSaved": {
+        "type": "object",
+        "properties": {
+          "id": {},
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "AppSource": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "flatpak",
+              "package"
+            ]
+          },
+          "flatpak": {
+            "type": "string"
+          },
+          "remote": {
+            "type": "string"
+          },
+          "debian": {
+            "type": "string"
+          },
+          "fedora": {
+            "type": "string"
+          },
+          "repos": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "family": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "suites": {
+                  "type": "string"
+                },
+                "components": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "signed_metadata": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "CatalogApp": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "available",
+              "request",
+              "required"
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AppSource"
+            }
+          },
+          "detect": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "icon_hash": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "has_icon": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "installs": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "mode",
+          "sources",
+          "enabled",
+          "scope",
+          "has_icon",
+          "updated_at",
+          "installs"
+        ]
+      },
+      "CatalogAppInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "available",
+              "request",
+              "required"
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AppSource"
+            }
+          },
+          "detect": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "icon": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "description": "PNG"
+          },
+          "remove_icon": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "mode",
+          "sources"
+        ]
+      },
+      "Catalog": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogApp"
+            }
+          },
+          "fleet": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "origin": {
+                  "type": "string"
+                },
+                "devices": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "origin",
+                "devices"
+              ]
+            }
+          },
+          "pending_requests": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "fleet",
+          "pending_requests"
+        ]
+      },
+      "FlatpakHit": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "remote": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "developer": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "remote"
+        ]
+      },
+      "AppRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "app": {
+            "type": "string"
+          },
+          "app_name": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "denied"
+            ]
+          },
+          "decided_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decided_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "flatpak": {
+            "type": "string"
+          },
+          "remote": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "device_id",
+          "hostname",
+          "app",
+          "app_name",
+          "user",
+          "note",
+          "status",
+          "created_at",
+          "flatpak",
+          "remote"
+        ]
+      },
+      "Remote": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "allowed",
+              "blocked",
+              ""
+            ]
+          },
+          "catalog_only": {
+            "type": "boolean"
+          },
+          "devices": {
+            "type": "integer"
+          },
+          "managed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "url",
+          "title",
+          "state",
+          "catalog_only",
+          "devices",
+          "managed"
+        ]
+      },
+      "SoftwareSettings": {
+        "type": "object",
+        "properties": {
+          "restrict_flathub": {
+            "type": "boolean"
+          },
+          "stores_read_only": {
+            "type": "boolean"
+          },
+          "only_managed_remotes": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "restrict_flathub",
+          "stores_read_only",
+          "only_managed_remotes"
+        ]
+      },
+      "Package": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "tenant_id": {
+            "type": "integer"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "store": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "uploaded_by": {
+            "type": "string"
+          },
+          "approved_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "usage": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "snippet": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "sha256",
+          "name",
+          "version",
+          "kind",
+          "filename",
+          "store",
+          "size",
+          "uploaded_by",
+          "approved_by",
+          "created_at",
+          "usage",
+          "snippet"
+        ]
+      },
+      "PackageConfig": {
+        "type": "object",
+        "properties": {
+          "max_upload_mb": {
+            "type": "integer"
+          },
+          "quota_mb": {
+            "type": "integer"
+          },
+          "quota_count": {
+            "type": "integer"
+          },
+          "store": {
+            "type": "string",
+            "enum": [
+              "local",
+              "s3"
+            ]
+          },
+          "s3": {
+            "type": "object",
+            "properties": {
+              "endpoint": {
+                "type": "string"
+              },
+              "region": {
+                "type": "string"
+              },
+              "bucket": {
+                "type": "string"
+              },
+              "prefix": {
+                "type": "string"
+              },
+              "access_key": {
+                "type": "string"
+              },
+              "path_style": {
+                "type": "boolean"
+              },
+              "secret": {
+                "type": "string",
+                "description": "write only; kept when empty"
+              }
+            }
+          }
+        },
+        "required": [
+          "max_upload_mb",
+          "quota_mb",
+          "quota_count",
+          "store"
+        ]
+      },
+      "Packages": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Package"
+            }
+          },
+          "config": {
+            "$ref": "#/components/schemas/PackageConfig"
+          },
+          "used_bytes": {
+            "type": "integer"
+          },
+          "used_count": {
+            "type": "integer"
+          },
+          "kinds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "four_eyes": {
+            "type": "boolean"
+          },
+          "global": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "config",
+          "used_bytes",
+          "used_count",
+          "kinds",
+          "four_eyes",
+          "global",
+          "type"
+        ]
       }
     }
   }

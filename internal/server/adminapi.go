@@ -208,7 +208,8 @@ func routeScope(r *http.Request, level string) string {
 		return "commands"
 	case level == "read", level == "self":
 		return "read"
-	case strings.HasPrefix(path, "/api/v1/library-items"), strings.HasPrefix(path, "/api/v1/blueprints"), strings.HasPrefix(path, "/api/v1/devices"):
+	case strings.HasPrefix(path, "/api/v1/library-items"), strings.HasPrefix(path, "/api/v1/blueprints"), strings.HasPrefix(path, "/api/v1/devices"),
+		strings.HasPrefix(path, "/api/v1/config/"):
 		return "library"
 	}
 	return "admin"
@@ -376,7 +377,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 			s.deny(pw, r, c, "metrics tokens only read /metrics")
 			return
 		}
-		r.Body = http.MaxBytesReader(pw, r.Body, 1<<20)
+		r.Body = http.MaxBytesReader(pw, r.Body, s.apiBodyLimit(pw, r)) // 1 MiB, package uploads more
 		m.ServeHTTP(pw, r.WithContext(context.WithValue(r.Context(), apiCallerKey, c)))
 	}))
 }
