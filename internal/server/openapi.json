@@ -289,6 +289,9 @@
           },
           "429": {
             "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
           }
         }
       },
@@ -1182,7 +1185,7 @@
                 "boolean"
               ]
             },
-            "description": "The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove). true is sent as on."
+            "description": "The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove). true is sent as on; reason (wipe, lost, script: the reason shown to the approving admin when four eyes approval is on)."
           }
         }
       },

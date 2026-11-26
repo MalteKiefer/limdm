@@ -54,13 +54,13 @@ func (s *Server) requestApproval(ctx context.Context, sess session, action, targ
 	if err != nil {
 		return 0, err
 	}
-	var id int64
+	var id, tenant int64
 	err = s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
 		// the tenant that decides: the requester's, else the target device's or user's
 		err := tx.QueryRow(ctx, `INSERT INTO approvals(action, target, payload, reason, requested_by, expires_at, tenant_id)
 			VALUES ($1,$2,$3,$4,$5, now() + make_interval(secs => $6), coalesce(nullif($7::bigint, 0), (SELECT tenant_id FROM devices WHERE id=$2),
-				(SELECT tenant_id FROM console_users WHERE email=$2), (SELECT tenant_id FROM local_admins WHERE 'local:' || name = $2), 1)) RETURNING id`,
-			action, target, b, reason, sess.Email, approvalTTL.Seconds(), sess.Tenant).Scan(&id)
+				(SELECT tenant_id FROM console_users WHERE email=$2), (SELECT tenant_id FROM local_admins WHERE 'local:' || name = $2), 1)) RETURNING id, tenant_id`,
+			action, target, b, reason, sess.Email, approvalTTL.Seconds(), sess.Tenant).Scan(&id, &tenant)
 		return sess.Email, "approval.request", target, fmt.Sprintf("#%d %s %s reason=%q", id, action, truncate(string(b), 2000), reason), err
 	})
 	if err != nil {
@@ -68,7 +68,7 @@ func (s *Server) requestApproval(ctx context.Context, sess session, action, targ
 	}
 	s.notify(notice{Type: "approval.request", Severity: "warning", Title: "Approval requested: " + action + " " + target,
 		Text: fmt.Sprintf("%s asks for %s on %s. Reason: %s. Another admin decides under Approvals within 24 hours.", sess.Email, action, target, firstNonEmpty(reason, "none given")),
-		URL:  s.cfg.PublicURL + "/approvals"})
+		URL:  s.cfg.PublicURL + "/approvals", Tenant: tenant}) // the tenant's channels and the global ones
 	return id, nil
 }
 

@@ -1,4 +1,4 @@
--- Idempotent base schema applied at startup; data conversions live in migrations.go.
+-- Idempotent schema applied at startup under an advisory lock; data conversions run in Go at startup (library.go migrate).
 
 -- Reusable configuration building blocks (one declaration type each).
 CREATE TABLE IF NOT EXISTS library_items (

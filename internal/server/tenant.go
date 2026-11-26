@@ -140,7 +140,7 @@ func (s *Server) loadTenant(ctx context.Context, sess *session) error {
 // Each handler filters what it reads and writes by the session tenant;
 // every route missing here is global and answers 403 to them.
 var tenantRoutes = map[string]bool{
-	"GET /{$}": true, "GET /help": true,
+	"GET /{$}": true, "GET /help": true, "POST /onboarding/dismiss": true,
 	"GET /devices": true, "GET /devices/{id}": true, "POST /devices/bulk": true, "POST /devices/{id}/command": true,
 	"GET /devices/{id}/diagnostics/{cid}": true, "POST /devices/{id}/agent-update": true, "POST /devices/{id}/recovery": true,
 	"POST /devices/{id}/assign": true, "POST /devices/{id}/retire": true, "POST /devices/{id}/delete": true,

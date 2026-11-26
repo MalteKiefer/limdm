@@ -713,7 +713,7 @@ func runOSSupported(a *Agent) (string, string) {
 		return pass, a.host.Name + " (no minimum version declared)"
 	}
 	if api.CompareVersions(a.host.Version, min) < 0 {
-		return fail, fmt.Sprintf("%s < Mindestversion %s", a.host.Version, min)
+		return fail, fmt.Sprintf("%s is below the minimum %s", a.host.Version, min)
 	}
 	return pass, a.host.Name
 }
