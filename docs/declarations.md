@@ -266,6 +266,27 @@ which would otherwise win. `"hide_users": true` hides the user list (GDM
 LightDM guest sessions are off whenever the login screen is managed. Agents before 0.9.2
 reject the two keys as unknown, so add them only after the fleet runs 0.9.2.
 
+### `com.limdm.localusers` (list)
+
+```json
+{"users": [{"name": "svc-backup", "uid": 1500, "full_name": "Backup", "groups": ["backup"],
+            "shell": "/bin/bash", "locked": false, "authorized_keys": ["ssh-ed25519 AAAA... backup@example.com"]}]}
+```
+
+Local accounts that must exist; items are merged by name. A missing account is created
+with a home (`uid` is used only then, 1000 to 60000; an existing account is never
+renumbered) and without a password, so it signs in with its SSH keys. Shell and groups are
+kept in line: declared groups are added, groups an earlier version of the declaration
+added and that are no longer listed are removed, other memberships stay. `locked` locks
+the account and ends its sessions; unlocking undoes only a lock the declaration set.
+`authorized_keys` are plain public keys (no options); they are written root owned to
+`/etc/ssh/limdm_authorized_keys/<user>`, never into the home, and a drop in
+(`00-limdm-keys.conf`) makes sshd read them besides `~/.ssh/authorized_keys`. This drop in
+takes precedence over an `AuthorizedKeysFile` set with `com.limdm.ssh`.
+
+Accounts removed from the declaration are locked, never deleted, and their key file is
+removed. The imperative user commands on the device page keep working.
+
 ### `com.limdm.dconf` (list)
 
 ```json

@@ -78,29 +78,30 @@ type State struct {
 	Results       []api.CommandResult  `json:"results"`               // not yet reported
 	Events        []string             `json:"events"`
 
-	PendingKeys    []pendingKey         `json:"pending_keys,omitempty"` // recovery keys not yet escrowed
-	Escrowed       map[string]time.Time `json:"escrowed,omitempty"`     // LUKS UUID: escrowed at
-	CommandKey     string               `json:"command_key,omitempty"`  // pinned public key commands are signed with
-	Enrollment     string               `json:"enrollment,omitempty"`   // server and device ID this state belongs to
-	EscrowNotified time.Time            `json:"escrow_notified"`
-	Company        string               `json:"company,omitempty"`
-	BrandingHash   string               `json:"branding_hash,omitempty"`
-	Catalog        *api.Catalog         `json:"catalog,omitempty"`      // software catalog for the desktop app
-	AppRequests    []api.AppRequest     `json:"app_requests,omitempty"` // requests not yet sent
-	LastContact    time.Time            `json:"last_contact"`
-	DoneCommands   map[int64]time.Time  `json:"done_commands,omitempty"`  // executed command IDs: the server redelivers until it has the result
-	RemovePending  map[string]bool      `json:"remove_pending,omitempty"` // removed users whose account lock still has to succeed
-	UserLocked     map[string]bool      `json:"user_locked,omitempty"`    // accounts IT locked with user_lock; the SSO rules leave them locked
-	UpdateResult   *api.UpdateResult    `json:"update_result,omitempty"`  // agent update outcome not yet reported
-	OfflineLocked  bool                 `json:"offline_locked,omitempty"`
-	FallbackDNS    bool                 `json:"fallback_dns,omitempty"` // server allows the DNS over HTTPS fallback
-	DNFProxy       string               `json:"dnf_proxy,omitempty"`    // proxy= value LiMDM wrote to dnf.conf (dnf4)
-	Held           []string             `json:"held,omitempty"`         // packages LiMDM put on apt hold
-	DNFExclude     string               `json:"dnf_exclude,omitempty"`  // excludepkgs= value LiMDM wrote to dnf.conf
-	PacmanIgnore   string               `json:"pacman_ignore,omitempty"`
-	SnapRefresh    string               `json:"snap_refresh,omitempty"`   // "hold" or "timer=..." LiMDM set in snapd
-	ManagedFiles   []string             `json:"managed_files,omitempty"`  // paths written for com.limdm.files, removed when undeclared
-	FirewallRules  []api.FirewallRule   `json:"firewall_rules,omitempty"` // allow rules LiMDM added
+	PendingKeys    []pendingKey              `json:"pending_keys,omitempty"` // recovery keys not yet escrowed
+	Escrowed       map[string]time.Time      `json:"escrowed,omitempty"`     // LUKS UUID: escrowed at
+	CommandKey     string                    `json:"command_key,omitempty"`  // pinned public key commands are signed with
+	Enrollment     string                    `json:"enrollment,omitempty"`   // server and device ID this state belongs to
+	EscrowNotified time.Time                 `json:"escrow_notified"`
+	Company        string                    `json:"company,omitempty"`
+	BrandingHash   string                    `json:"branding_hash,omitempty"`
+	Catalog        *api.Catalog              `json:"catalog,omitempty"`      // software catalog for the desktop app
+	AppRequests    []api.AppRequest          `json:"app_requests,omitempty"` // requests not yet sent
+	LastContact    time.Time                 `json:"last_contact"`
+	DoneCommands   map[int64]time.Time       `json:"done_commands,omitempty"`  // executed command IDs: the server redelivers until it has the result
+	RemovePending  map[string]bool           `json:"remove_pending,omitempty"` // removed users whose account lock still has to succeed
+	UserLocked     map[string]bool           `json:"user_locked,omitempty"`    // accounts IT locked with user_lock; the SSO rules leave them locked
+	UpdateResult   *api.UpdateResult         `json:"update_result,omitempty"`  // agent update outcome not yet reported
+	OfflineLocked  bool                      `json:"offline_locked,omitempty"`
+	FallbackDNS    bool                      `json:"fallback_dns,omitempty"` // server allows the DNS over HTTPS fallback
+	DNFProxy       string                    `json:"dnf_proxy,omitempty"`    // proxy= value LiMDM wrote to dnf.conf (dnf4)
+	Held           []string                  `json:"held,omitempty"`         // packages LiMDM put on apt hold
+	DNFExclude     string                    `json:"dnf_exclude,omitempty"`  // excludepkgs= value LiMDM wrote to dnf.conf
+	PacmanIgnore   string                    `json:"pacman_ignore,omitempty"`
+	SnapRefresh    string                    `json:"snap_refresh,omitempty"`   // "hold" or "timer=..." LiMDM set in snapd
+	ManagedFiles   []string                  `json:"managed_files,omitempty"`  // paths written for com.limdm.files, removed when undeclared
+	FirewallRules  []api.FirewallRule        `json:"firewall_rules,omitempty"` // allow rules LiMDM added
+	LocalUsers     map[string]localUserState `json:"local_users,omitempty"`    // accounts com.limdm.localusers manages
 }
 
 type Agent struct {
@@ -722,6 +723,9 @@ func (a *Agent) enforce() {
 	}
 	if err := a.applyUsers(); err != nil {
 		a.problem(api.TypeLogin, "users: %v", err)
+	}
+	if err := a.applyLocalUsers(p.Extra.LocalUsers); err != nil {
+		a.problem(api.TypeLocalUsers, "local users: %v", err)
 	}
 	if err := a.applyHolds(p.Updates.Hold); err != nil {
 		a.problem(api.TypeUpdates, "hold: %v", err)

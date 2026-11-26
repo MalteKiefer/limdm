@@ -721,6 +721,7 @@ var deCatalog = map[string]string{
 	"Update agents automatically":                         "Agenten automatisch aktualisieren",
 	// W1
 	"GNOME settings (dconf)": "GNOME Einstellungen (dconf)",
+	"Local accounts":         "Lokale Konten",
 	"Look up the location of device public addresses (sent to the geolocation service)":                  "Standort der öffentlichen Geräteadressen nachschlagen (wird an den Geolocation Dienst gesendet)",
 	"Agents may ask public DNS over HTTPS resolvers (Cloudflare, Google) when the system resolver fails": "Agenten dürfen öffentliche DNS over HTTPS Resolver (Cloudflare, Google) fragen, wenn der Systemresolver versagt",
 }

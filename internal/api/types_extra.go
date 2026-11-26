@@ -30,7 +30,20 @@ const (
 	TypeFlatpak       = "com.limdm.flatpak"
 	TypeScripts       = "com.limdm.scripts"
 	TypeDconf         = "com.limdm.dconf"
+	TypeLocalUsers    = "com.limdm.localusers"
 )
+
+// LocalUser is a local account that must exist. Accounts dropped from the
+// declaration are locked, never deleted.
+type LocalUser struct {
+	Name           string   `json:"name"`
+	UID            int      `json:"uid,omitempty"` // only used when the account is created
+	FullName       string   `json:"full_name,omitempty"`
+	Groups         []string `json:"groups,omitempty"` // supplementary groups, must exist
+	Shell          string   `json:"shell,omitempty"`  // default /bin/bash
+	Locked         bool     `json:"locked,omitempty"`
+	AuthorizedKeys []string `json:"authorized_keys,omitempty"` // SSH public keys, one per entry, no options
+}
 
 // Dconf are GNOME (dconf) defaults for every user: key paths with GVariant
 // values, and keys or directories users cannot change.
@@ -145,6 +158,7 @@ type ExtraPolicy struct {
 	Flatpak       *Flatpak          `json:"flatpak,omitempty"`
 	Scripts       []Script          `json:"scripts,omitempty"`
 	Dconf         *Dconf            `json:"dconf,omitempty"`
+	LocalUsers    []LocalUser       `json:"local_users,omitempty"`
 
 	DiskEncryption *DiskEncryption `json:"disk_encryption,omitempty"`
 	Polkit         []PolkitRule    `json:"polkit,omitempty"`
@@ -166,6 +180,7 @@ var extraExamples = map[string]string{
 	TypeFlatpak:       `{"remotes": [{"name": "flathub", "url": "https://dl.flathub.org/repo/flathub.flatpakrepo"}], "install": ["org.mozilla.firefox"], "remove": []}`,
 	TypeScripts:       `{"scripts": [{"name": "cleanup", "interval_hours": 24, "body": "#!/bin/sh\njournalctl --vacuum-time=30d"}]}`,
 	TypeDconf:         `{"settings": {"/org/gnome/desktop/interface/clock-show-seconds": "true"}, "locks": ["/org/gnome/desktop/interface/clock-show-seconds"]}`,
+	TypeLocalUsers:    `{"users": [{"name": "svc-backup", "groups": ["backup"], "shell": "/bin/bash", "locked": false, "authorized_keys": ["ssh-ed25519 AAAA... backup@example.com"]}]}`,
 }
 
 var (
@@ -178,7 +193,7 @@ func init() {
 	for t, ex := range extraExamples {
 		Types[t] = ex
 	}
-	for _, t := range []string{TypeRepositories, TypeCertificates, TypeSysctl, TypeKernelModules, TypeSSH, TypeFlatpak, TypeScripts, TypeDconf} {
+	for _, t := range []string{TypeRepositories, TypeCertificates, TypeSysctl, TypeKernelModules, TypeSSH, TypeFlatpak, TypeScripts, TypeDconf, TypeLocalUsers} {
 		listTypes[t] = true
 	}
 }
@@ -193,6 +208,8 @@ var (
 	suiteRe    = regexp.MustCompile(`^[A-Za-z0-9._/ -]{0,200}$`)
 	sshValRe   = regexp.MustCompile(`^[A-Za-z0-9 ,@._:/*-]{1,200}$`)
 	repoFileRe = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9._-]{0,100}\.(list|sources|repo)|sources\.list)$`)
+	shellRe    = regexp.MustCompile(`^/[A-Za-z0-9/_.+-]{1,100}$`)
+	sshKeyRe   = regexp.MustCompile(`^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp(256|384|521)|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com) [A-Za-z0-9+/]+={0,3}( [^\x00-\x1f]{0,200})?$`)
 	dconfKeyRe = regexp.MustCompile(`^(/[A-Za-z0-9_.-]+)+$`)
 	keyFileRe  = regexp.MustCompile(`^(/usr/share/keyrings|/etc/apt/keyrings|/etc/pki/rpm-gpg)/[A-Za-z0-9][A-Za-z0-9._-]{0,100}$`)
 )
@@ -400,6 +417,41 @@ func (d Declaration) applyExtra(p *Policy) (bool, error) {
 			}
 		}
 		p.Extra.Scripts = v.Scripts
+	case TypeLocalUsers:
+		var v struct {
+			Users []LocalUser `json:"users"`
+		}
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		for i, u := range v.Users {
+			if !localUserRe.MatchString(u.Name) || u.Name == "root" || slices.ContainsFunc(v.Users[:i], func(o LocalUser) bool { return o.Name == u.Name }) {
+				bad("local user %q: lower case name, not root, each once", u.Name)
+			}
+			if u.UID < 0 || u.UID > 60000 || u.UID != 0 && u.UID < 1000 {
+				bad("local user %s: uid 1000..60000 or unset", u.Name)
+			}
+			if len(u.FullName) > 100 || strings.ContainsAny(u.FullName, ":\n\r\x00,") {
+				bad("local user %s: full name up to 100 characters, no colon or comma", u.Name)
+			}
+			if u.Shell != "" && (!shellRe.MatchString(u.Shell) || strings.Contains(u.Shell, "..")) {
+				bad("local user %s: shell must be an absolute path", u.Name)
+			}
+			if len(u.Groups) > 32 || len(u.AuthorizedKeys) > 100 {
+				bad("local user %s: at most 32 groups and 100 keys", u.Name)
+			}
+			for _, g := range u.Groups {
+				if !userRe.MatchString(g) || g == "root" {
+					bad("local user %s: invalid group %q", u.Name, g)
+				}
+			}
+			for _, k := range u.AuthorizedKeys {
+				if len(k) > 16<<10 || !sshKeyRe.MatchString(k) {
+					bad("local user %s: authorized key must be \"type base64 [comment]\" without options", u.Name)
+				}
+			}
+		}
+		p.Extra.LocalUsers = v.Users
 	case TypeDconf:
 		var v Dconf
 		if err := strict(d.Payload, &v); err != nil {
@@ -495,6 +547,8 @@ func mergeExtra(typ string, a, b json.RawMessage) (json.RawMessage, bool, error)
 		out, err = byName("certificates")
 	case TypeScripts:
 		out, err = byName("scripts")
+	case TypeLocalUsers:
+		out, err = byName("users")
 	case TypeSysctl:
 		out, err = mergeMap("settings")
 	case TypeSSH:
