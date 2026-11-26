@@ -152,5 +152,5 @@ func (d Declaration) applyPlatform(p *Policy) (bool, error) {
 		p.Extra.Printers = &v
 		return true, errors.Join(errs...)
 	}
-	return false, nil
+	return d.applyArtifacts(p) // artifacts.go
 }

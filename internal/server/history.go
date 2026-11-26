@@ -58,6 +58,9 @@ func (s *Server) historyLoop(ctx context.Context) {
 		if err := s.prune(ctx); err != nil {
 			s.log.Error("prune history", "err", err)
 		}
+		if err := s.metricPartitions(ctx); err != nil {
+			s.log.Error("device_metrics partitions", "err", err)
+		}
 	}
 	tick()
 	t := time.NewTicker(time.Hour)

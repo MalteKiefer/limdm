@@ -1,11 +1,13 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -49,6 +51,7 @@ var notifyEvents = []struct{ Type, Label string }{
 	{"audit.broken", "Audit log verification failed"},
 	{"network.crl_token", "Network CRL token rotated"},
 	{"keys.rotate", "Key rotation started or finished"},
+	{"backup.failed", "Backup failed or stored backup damaged"},
 }
 
 // notifyCommand announces privileged commands once they are queued.
@@ -160,23 +163,46 @@ func validateChannel(c channel) error {
 
 // ---- formats ----
 
+// Titles and texts carry what devices and users report (host names, user
+// names, command output, tamper details). They must not become links,
+// mentions or formatting in chat channels.
+
 // slackEscape keeps host and user names from forming Slack links or mentions.
 var slackEscape = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
+// defang breaks URLs so chat clients do not turn them into links.
+func defang(s string) string { return strings.ReplaceAll(s, "://", ":\u200b//") }
+
+// slackBody shows title and text as plain_text blocks, which Slack never
+// renders as formatting or links; only the console link is mrkdwn. The
+// escaped fallback text is what notifications show.
 func slackBody(n notice) ([]byte, error) {
-	text := "*" + slackEscape.Replace(n.Title) + "*\n" + slackEscape.Replace(n.Text)
-	if n.URL != "" {
-		text += "\n<" + n.URL + "|Open in LiMDM>"
+	plain := func(s string, max int) map[string]any {
+		return map[string]any{"type": "plain_text", "text": truncate(defang(cleanText(s)), max), "emoji": false}
 	}
-	return json.Marshal(map[string]any{"text": text})
+	blocks := []any{map[string]any{"type": "header", "text": plain(firstNonEmpty(n.Title, "LiMDM"), 150)}}
+	if n.Text != "" {
+		blocks = append(blocks, map[string]any{"type": "section", "text": plain(n.Text, 3000)})
+	}
+	if n.URL != "" {
+		blocks = append(blocks, map[string]any{"type": "context", "elements": []any{map[string]any{"type": "mrkdwn", "text": "<" + n.URL + "|Open in LiMDM>"}}})
+	}
+	return json.Marshal(map[string]any{"text": slackEscape.Replace(defang(n.Title)), "blocks": blocks, "unfurl_links": false, "unfurl_media": false})
 }
+
+// discordEscape matches the characters Discord markdown gives a meaning
+// (formatting, masked links, headings, lists, quotes, mentions).
+var discordEscape = regexp.MustCompile("[\\\\*_~`|>#\\-\\[\\]()<@:]")
+
+// discordText escapes markdown with backslashes and defangs URLs.
+func discordText(s string) string { return defang(discordEscape.ReplaceAllString(s, `\$0`)) }
 
 func discordBody(n notice) ([]byte, error) {
 	color := map[string]int{"critical": 0xE01B24, "warning": 0xF5C211}[n.Severity]
 	if color == 0 {
 		color = 0x0F6E6E
 	}
-	embed := map[string]any{"title": n.Title, "description": n.Text, "color": color, "timestamp": n.At.Format(time.RFC3339)}
+	embed := map[string]any{"title": discordText(n.Title), "description": discordText(n.Text), "color": color, "timestamp": n.At.Format(time.RFC3339)}
 	if n.URL != "" {
 		embed["url"] = n.URL
 	}
@@ -216,87 +242,187 @@ func cleanText(s string) string {
 
 // safeDialer refuses loopback, link-local (cloud metadata at 169.254.169.254)
 // and unspecified addresses after name resolution, so a channel cannot be
-// pointed at the server itself. Private networks stay allowed (an internal
-// SIEM or mail relay).
-var safeDialer = &net.Dialer{Timeout: 15 * time.Second, Control: func(_, address string, _ syscall.RawConn) error {
+// pointed at the server itself, and private networks unless the request
+// may reach them (withPrivate).
+var safeDialer = &net.Dialer{Timeout: 15 * time.Second, ControlContext: func(ctx context.Context, _, address string, _ syscall.RawConn) error {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
 		return err
 	}
-	if !targetAllowed(net.ParseIP(host)) {
+	if !targetAllowed(ctx, net.ParseIP(host)) {
 		return fmt.Errorf("notification target %s is not allowed", host)
 	}
 	return nil
 }}
 
-func targetAllowed(ip net.IP) bool {
-	return ip != nil && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsUnspecified() && !ip.IsMulticast()
+type privateKey struct{}
+
+// withPrivate lets a delivery reach private networks: global channels and
+// the compliance webhook with Settings NotifyPrivate on, never tenant channels.
+func withPrivate(ctx context.Context, ok bool) context.Context {
+	return context.WithValue(ctx, privateKey{}, ok)
 }
 
-// proxyChecked uses the proxy from the environment, but checks the target
-// itself first: through a proxy, the dialer only sees the proxy's address.
-// The proxy, configured by the operator, may be on loopback.
-func proxyChecked(req *http.Request) (*url.URL, error) {
-	u, err := http.ProxyFromEnvironment(req)
-	if u == nil || err != nil {
-		return u, err
+func privateAllowed(ctx context.Context) bool {
+	ok, _ := ctx.Value(privateKey{}).(bool)
+	return ok
+}
+
+// sharedSpace is RFC 6598 shared address space (carrier NAT, also some
+// cloud metadata services such as 100.100.100.200).
+var sharedSpace = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
+func targetAllowed(ctx context.Context, ip net.IP) bool {
+	if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+		return false
 	}
-	host := req.URL.Hostname()
-	if ip := net.ParseIP(host); ip != nil {
-		if !targetAllowed(ip) {
-			return nil, fmt.Errorf("notification target %s is not allowed", host)
-		}
-		return u, nil
+	if ip.IsPrivate() || sharedSpace.Contains(ip) {
+		return privateAllowed(ctx)
 	}
-	ips, err := net.DefaultResolver.LookupIP(req.Context(), "ip", host)
+	return true
+}
+
+// notifyPrivate is the setting for global channels (false before settings load).
+func (s *Server) notifyPrivate() bool {
+	rt := s.rt.Load()
+	return rt != nil && rt.set.NotifyPrivate
+}
+
+type proxyKey struct{}
+
+// pinnedTransport routes requests through the proxy of the environment
+// (HTTPS_PROXY, HTTP_PROXY, NO_PROXY) without letting the proxy resolve
+// the target: the proxy is only chosen here and dialPinned opens the
+// tunnel to an address this host resolved and checked. A proxy resolving
+// the name again could get another answer (DNS rebinding) and reach an
+// address targetAllowed refuses.
+type pinnedTransport struct{ *http.Transport }
+
+func (t pinnedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	p, err := http.ProxyFromEnvironment(req)
 	if err != nil {
-		// egress only through the proxy, without outside DNS on this host: the
-		// proxy resolves and enforces its own rules (channel URLs are set by
-		// admins only)
-		return u, nil //nolint:nilerr // see above
+		return nil, err
+	}
+	return t.Transport.RoundTrip(req.WithContext(context.WithValue(req.Context(), proxyKey{}, p)))
+}
+
+// dialPinned dials addr with direct, or through the proxy pinnedTransport
+// chose: the name is resolved here, every address must pass
+// targetAllowed, and a CONNECT tunnel goes to the first one (TLS still
+// checks the certificate for the name). Without local DNS a request that
+// may reach private networks lets the proxy resolve, as egress only
+// through the proxy needs.
+func dialPinned(ctx context.Context, network, addr string, direct func(context.Context, string, string) (net.Conn, error)) (net.Conn, error) {
+	p, _ := ctx.Value(proxyKey{}).(*url.URL)
+	if p == nil {
+		return direct(ctx, network, addr)
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	target := addr
+	ips := []net.IP{net.ParseIP(host)}
+	if ips[0] == nil {
+		if ips, err = net.DefaultResolver.LookupIP(ctx, "ip", host); err != nil && !privateAllowed(ctx) {
+			return nil, fmt.Errorf("target %s cannot be resolved to check it: %w", host, err)
+		}
 	}
 	for _, ip := range ips {
-		if !targetAllowed(ip) {
-			return nil, fmt.Errorf("notification target %s is not allowed", req.URL.Hostname())
+		if !targetAllowed(ctx, ip) {
+			return nil, fmt.Errorf("target %s is not allowed", host)
 		}
 	}
-	return u, nil
+	if len(ips) > 0 {
+		target = net.JoinHostPort(ips[0].String(), port)
+	}
+	return proxyConnect(ctx, p, target)
 }
 
-// proxyAddr is the host:port the transport dials for proxy p (the scheme's
-// default port when the URL names none).
-func proxyAddr(p *url.URL) string {
+// proxyConnect opens a CONNECT tunnel to target through an http or https
+// proxy (with the credentials of its URL).
+func proxyConnect(ctx context.Context, p *url.URL, target string) (net.Conn, error) {
 	port := p.Port()
-	if port == "" {
-		port = map[string]string{"http": "80", "https": "443", "socks5": "1080", "socks5h": "1080"}[p.Scheme]
+	switch {
+	case p.Scheme != "http" && p.Scheme != "https":
+		return nil, fmt.Errorf("proxy scheme %s is not supported, use an http or https proxy", p.Scheme)
+	case port == "" && p.Scheme == "https":
+		port = "443"
+	case port == "":
+		port = "80"
 	}
-	return net.JoinHostPort(p.Hostname(), port)
+	conn, err := (&net.Dialer{Timeout: 15 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(p.Hostname(), port))
+	if err != nil {
+		return nil, err
+	}
+	if p.Scheme == "https" {
+		tc := tls.Client(conn, &tls.Config{ServerName: p.Hostname(), MinVersion: tls.VersionTLS12})
+		if err := tc.HandshakeContext(ctx); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		conn = tc
+	}
+	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	req := &http.Request{Method: http.MethodConnect, URL: &url.URL{Opaque: target}, Host: target, Header: http.Header{}}
+	if u := p.User; u != nil {
+		pw, _ := u.Password()
+		req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(u.Username()+":"+pw)))
+	}
+	if err := req.Write(conn); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	// the target speaks only after the client, so the reader holds nothing
+	// beyond the answer
+	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		conn.Close()
+		return nil, fmt.Errorf("proxy refused the tunnel to %s: %s", target, resp.Status)
+	}
+	_ = conn.SetDeadline(time.Time{})
+	return conn, nil
 }
 
-// notifyDial dials the target through safeDialer, a configured proxy directly.
 func notifyDial(ctx context.Context, network, addr string) (net.Conn, error) {
-	if p, _ := http.ProxyFromEnvironment(&http.Request{URL: &url.URL{Scheme: "https", Host: "limdm.invalid"}}); p != nil && proxyAddr(p) == addr {
-		return (&net.Dialer{Timeout: 15 * time.Second}).DialContext(ctx, network, addr)
-	}
-	return safeDialer.DialContext(ctx, network, addr)
+	return dialPinned(ctx, network, addr, safeDialer.DialContext)
 }
 
 var notifyClient = &http.Client{
-	Timeout:       10 * time.Second,
-	Transport:     &http.Transport{DialContext: notifyDial, Proxy: proxyChecked, TLSHandshakeTimeout: 10 * time.Second},
+	Timeout: 10 * time.Second,
+	// no idle connections: a pooled connection skips the dial check, so a
+	// tenant channel could reuse one a global channel opened to a private
+	// address (NotifyPrivate)
+	Transport:     pinnedTransport{&http.Transport{DialContext: notifyDial, TLSHandshakeTimeout: 10 * time.Second, DisableKeepAlives: true}},
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, // no redirects to internal addresses
 }
 
-func (s *Server) postJSON(ctx context.Context, target string, body []byte, signed bool) error {
+// postJSON posts body. signed adds X-LiMDM-Signature: for a global channel
+// (tenant nil) the scheme of the compliance webhook, HMAC over timestamp
+// "." body with the webhook secret; for a tenant channel HMAC over
+// timestamp "." tenant ID "." body with the tenant's own secret, so a
+// tenant's signed events cannot be replayed to another tenant's receiver.
+func (s *Server) postJSON(ctx context.Context, target string, body []byte, signed bool, tenant *int64) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if signed { // same scheme as the legacy webhook: timestamp and body under HMAC
+	if signed {
 		ts := strconv.FormatInt(time.Now().Unix(), 10)
-		mac := hmac.New(sha256.New, s.webhookKey())
-		mac.Write([]byte(ts + "."))
+		key, prefix := s.webhookKey(), ts+"."
+		if tenant != nil {
+			id := strconv.FormatInt(*tenant, 10)
+			key, prefix = s.tenantWebhookKey(*tenant), ts+"."+id+"."
+			req.Header.Set("X-LiMDM-Tenant", id)
+		}
+		mac := hmac.New(sha256.New, key)
+		mac.Write([]byte(prefix))
 		mac.Write(body)
 		req.Header.Set("X-LiMDM-Timestamp", ts)
 		req.Header.Set("X-LiMDM-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
@@ -376,25 +502,26 @@ func sendEmail(ctx context.Context, cfg channelConfig, password string, n notice
 }
 
 func (s *Server) deliver(ctx context.Context, c channel, n notice) error {
+	ctx = withPrivate(ctx, c.Tenant == nil && s.notifyPrivate())
 	switch c.Kind {
 	case "slack":
 		b, err := slackBody(n)
 		if err != nil {
 			return err
 		}
-		return s.postJSON(ctx, c.Secret, b, false)
+		return s.postJSON(ctx, c.Secret, b, false, nil)
 	case "discord":
 		b, err := discordBody(n)
 		if err != nil {
 			return err
 		}
-		return s.postJSON(ctx, c.Secret, b, false)
+		return s.postJSON(ctx, c.Secret, b, false, nil)
 	case "webhook":
 		b, err := json.Marshal(n)
 		if err != nil {
 			return err
 		}
-		return s.postJSON(ctx, c.Secret, b, true)
+		return s.postJSON(ctx, c.Secret, b, true, c.Tenant)
 	case "email":
 		return sendEmail(ctx, c.Config, c.Secret, n)
 	}
@@ -415,7 +542,6 @@ func (s *Server) notify(n notice) {
 			s.log.Error("notifications", "err", err)
 			return
 		}
-		_, _ = s.db.Exec(ctx, `DELETE FROM notification_log WHERE at < now() - interval '30 days'`) // retention
 		for _, c := range chans {
 			if len(c.Events) > 0 && !slices.Contains(c.Events, n.Type) || c.Tenant != nil && *c.Tenant != n.Tenant {
 				continue
@@ -473,6 +599,10 @@ func (s *Server) loadChannels(ctx context.Context, enabledOnly bool) ([]channel,
 	})
 }
 
+// tenantDeliveryError replaces delivery errors for tenant accounts, so a
+// channel cannot be used to probe networks (open, closed, TLS, banners).
+const tenantDeliveryError = "Test failed: the target did not accept the message. Check the URL or the mail settings."
+
 // channelField binds a sealed secret to its channel.
 func channelField(id int64) string { return "notification_channel:" + strconv.FormatInt(id, 10) }
 
@@ -528,6 +658,9 @@ func (s *Server) channelViews(ctx context.Context) ([]channelView, error) {
 		var e, ev string
 		var at time.Time
 		if err := s.db.QueryRow(ctx, `SELECT ok, error, event, at FROM notification_log WHERE channel_id=$1 ORDER BY id DESC LIMIT 1`, c.ID).Scan(&ok, &e, &ev, &at); err == nil {
+			if e != "" && ctxTenant(ctx) != 0 {
+				e = tenantDeliveryError
+			}
 			v.LastOK, v.LastError, v.LastEv, v.LastAt = &ok, e, ev, &at
 		}
 		out = append(out, v)
@@ -608,6 +741,11 @@ func (s *Server) channelOp(w http.ResponseWriter, r *http.Request, sess session)
 			msg = truncate(err.Error(), 500)
 		}
 		_, _ = s.db.Exec(ctx, `INSERT INTO notification_log(channel_id, event, ok, error) VALUES ($1,'test',$2,$3)`, id, err == nil, msg)
+		if err != nil && ctxTenant(ctx) != 0 { // no network details for tenant accounts: the log has them
+			s.log.Warn("notification test failed", "channel", id, "err", msg)
+			s.renderSettings(w, r, sess, s.settings(), "", tenantDeliveryError)
+			return
+		}
 		if err != nil {
 			s.renderSettings(w, r, sess, s.settings(), "", "Test failed: "+msg)
 			return

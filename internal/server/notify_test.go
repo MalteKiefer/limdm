@@ -1,11 +1,19 @@
 package server
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -56,15 +64,38 @@ func TestNotificationFormats(t *testing.T) {
 	if json.Unmarshal(b, &d) != nil || d.Embeds[0].Title != n.Title || d.Embeds[0].Color != 0xE01B24 || d.Mentions.Parse == nil || len(d.Mentions.Parse) != 0 {
 		t.Fatalf("discord: %s", b)
 	}
-	inj2 := n
-	inj2.Text = "<!channel> <https://evil.example|click>"
-	b, _ = slackBody(inj2)
-	var sl struct {
-		Text string `json:"text"`
+	// device controlled text: no masked links, formatting or bare links
+	md := n
+	md.Text = "[click](https://evil.example) **bold** `x`"
+	b, _ = discordBody(md)
+	var dd struct {
+		Embeds []struct {
+			Description string `json:"description"`
+		} `json:"embeds"`
 	}
-	if json.Unmarshal(b, &sl) != nil || !strings.Contains(sl.Text, "<https://mdm.example.com/devices/d1|Open in LiMDM>") ||
-		strings.Contains(sl.Text, "<!channel>") || strings.Contains(sl.Text, "<https://evil.example") {
-		t.Fatalf("slack: %s", sl.Text)
+	if json.Unmarshal(b, &dd) != nil || strings.Contains(dd.Embeds[0].Description, "[click](") || strings.Contains(dd.Embeds[0].Description, "**") ||
+		strings.Contains(dd.Embeds[0].Description, "https://") {
+		t.Fatalf("discord markdown not escaped: %s", dd.Embeds[0].Description)
+	}
+	inj2 := n
+	inj2.Text = "<!channel> <https://evil.example|click> *bold*"
+	b, _ = slackBody(inj2)
+	if !strings.Contains(string(b), "https://mdm.example.com/devices/d1|Open in LiMDM") {
+		t.Fatalf("slack: console link missing: %s", b)
+	}
+	var sl struct {
+		Text   string `json:"text"`
+		Blocks []struct {
+			Type string `json:"type"`
+			Text struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"text"`
+		} `json:"blocks"`
+	}
+	if json.Unmarshal(b, &sl) != nil || len(sl.Blocks) < 2 || sl.Blocks[1].Text.Type != "plain_text" || strings.Contains(sl.Blocks[1].Text.Text, "https://") ||
+		strings.Contains(sl.Text, "<!channel>") {
+		t.Fatalf("slack: device text must be plain: %s", b)
 	}
 	inj := n
 	inj.Title = "x\r\nBcc: victim@example.com"
@@ -96,10 +127,96 @@ func TestDeliverWebhookKinds(t *testing.T) {
 }
 
 func TestNotifyRefusesLocalTargets(t *testing.T) {
+	private := withPrivate(context.Background(), true)
 	for _, target := range []string{"https://127.0.0.1:9/x", "https://[::1]:9/x", "https://169.254.169.254/latest/meta-data"} {
 		s := &Server{} // the real client with the guarded dialer
-		if err := s.postJSON(context.Background(), target, []byte("{}"), false); err == nil || !strings.Contains(err.Error(), "not allowed") {
+		if err := s.postJSON(private, target, []byte("{}"), false, nil); err == nil || !strings.Contains(err.Error(), "not allowed") {
 			t.Errorf("%s: %v", target, err)
 		}
+	}
+	// private networks only for global channels with the setting on
+	for _, target := range []string{"https://10.0.0.1:9/x", "https://192.168.1.1:9/x", "https://100.100.100.200/x", "https://[fd00:ec2::254]/x"} {
+		s := &Server{}
+		if err := s.postJSON(context.Background(), target, []byte("{}"), false, nil); err == nil || !strings.Contains(err.Error(), "not allowed") {
+			t.Errorf("%s: %v", target, err)
+		}
+	}
+	if !targetAllowed(private, net.ParseIP("10.1.2.3")) || targetAllowed(context.Background(), net.ParseIP("10.1.2.3")) {
+		t.Fatal("withPrivate")
+	}
+}
+
+func TestTenantWebhookSignature(t *testing.T) {
+	s := &Server{whKey: bytes.Repeat([]byte{1}, 32)}
+	a, b := s.tenantWebhookKey(2), s.tenantWebhookKey(3)
+	if bytes.Equal(a, b) || bytes.Equal(a, s.webhookKey()) {
+		t.Fatal("each tenant needs its own secret")
+	}
+	var sig, tenant, at string
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sig, tenant, at = r.Header.Get("X-LiMDM-Signature"), r.Header.Get("X-LiMDM-Tenant"), r.Header.Get("X-LiMDM-Timestamp")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+	s.hooks = ts.Client()
+	two := int64(2)
+	if err := s.postJSON(context.Background(), ts.URL, []byte("{}"), true, &two); err != nil {
+		t.Fatal(err)
+	}
+	mac := hmac.New(sha256.New, a)
+	fmt.Fprintf(mac, "%s.2.{}", at)
+	if tenant != "2" || sig != "sha256="+hex.EncodeToString(mac.Sum(nil)) {
+		t.Fatalf("tenant header %q, signature %q", tenant, sig)
+	}
+}
+
+// a pooled connection would skip the private network check of the dialer
+func TestNotifyClientNoPooling(t *testing.T) {
+	if tr, ok := notifyClient.Transport.(pinnedTransport); !ok || !tr.DisableKeepAlives {
+		t.Fatal("notification transport keeps idle connections")
+	}
+}
+
+// Through a proxy the target is resolved and checked here and the tunnel
+// goes to the checked address, so the proxy cannot resolve it again to a
+// refused one (DNS rebinding).
+func TestDialPinnedThroughProxy(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	seen := make(chan string, 4)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			req, err := http.ReadRequest(bufio.NewReader(c))
+			if err == nil {
+				seen <- req.Method + " " + req.Host + " " + req.Header.Get("Proxy-Authorization")
+				c.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
+			}
+			c.Close()
+		}
+	}()
+	proxy, _ := url.Parse("http://u:p@" + ln.Addr().String())
+	ctx := context.WithValue(context.Background(), proxyKey{}, proxy)
+	if _, err := dialPinned(ctx, "tcp", "localhost:443", safeDialer.DialContext); err == nil {
+		t.Fatal("a name resolving to loopback was tunneled")
+	}
+	c, err := dialPinned(withPrivate(ctx, true), "tcp", "203.0.113.7:443", safeDialer.DialContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	if got := <-seen; got != "CONNECT 203.0.113.7:443 Basic dTpw" {
+		t.Fatalf("proxy saw %q", got)
+	}
+	select {
+	case got := <-seen:
+		t.Fatalf("refused target reached the proxy: %q", got)
+	default:
 	}
 }

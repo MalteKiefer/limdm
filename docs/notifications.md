@@ -36,8 +36,8 @@ the label, webhooks receive the code.
 
 | Kind (console) | Setup | Message |
 |---|---|---|
-| Slack | an incoming webhook URL (`https://hooks.slack.com/…`) | title, text and an "Open in LiMDM" link; host and user names are escaped, so they cannot form links or mentions |
-| Discord | a channel webhook URL (`https://discord.com/api/webhooks/…`, also `discordapp.com`, `ptb.discord.com`, `canary.discord.com`) | an embed coloured by severity; mentions are switched off |
+| Slack | an incoming webhook URL (`https://hooks.slack.com/…`) | title and text as plain text blocks and an "Open in LiMDM" link; text from devices cannot form links, mentions or formatting, and link previews are off |
+| Discord | a channel webhook URL (`https://discord.com/api/webhooks/…`, also `discordapp.com`, `ptb.discord.com`, `canary.discord.com`) | an embed coloured by severity; mentions are switched off, markdown in title and text is escaped and URLs are broken up, so text from devices cannot form links or formatting |
 | Email (SMTP) | SMTP server, port, encryption (`STARTTLS` or `TLS`), optional user and password, sender, 1 to 20 recipients | subject `[LiMDM] <title>`, plain text; plain SMTP is refused, TLS 1.2 at least, header values are encoded and control characters removed |
 | Webhook | an https URL | the JSON event, signed |
 
@@ -61,6 +61,15 @@ HMAC-SHA256 of `<timestamp>.<raw body>`, exactly like the
 ([keys.md](keys.md#webhook-signing-secret)), shown to admins as **Signing key** in the
 Compliance webhook card. Reject timestamps older than five minutes.
 
+A channel of a [tenant](tenants.md) signs with the tenant's own secret, derived from the
+webhook signing secret (HMAC-SHA256 over `limdm tenant webhook v1`, a line feed and the
+tenant ID), and signs `<timestamp>.<tenant id>.<raw body>`; the request also carries
+`X-LiMDM-Tenant: <tenant id>`. Tenant admins see their secret as **Signing key of this
+tenant** in the channel form. A tenant therefore cannot forge events for another tenant's
+receiver, and a signed event of one tenant does not verify at another tenant's receiver
+(no replay across tenants). Receivers should also check `X-LiMDM-Tenant` against the tenant
+they expect. Rotating the webhook signing secret rotates every tenant secret.
+
 ## Delivery
 
 Delivery runs in the background, so the action that caused the event never waits. Each
@@ -70,10 +79,23 @@ second limit. The outcome is shown as the channel's last delivery and kept in
 instance where the event happened delivers it.
 
 Targets are checked after name resolution: loopback, link local (including cloud metadata
-at 169.254.169.254), multicast and unspecified addresses are refused; private networks are
-allowed (an internal SIEM or mail relay). An outbound proxy from the environment
-(`HTTPS_PROXY`) is used, and the target is checked before the request goes to it.
-Redirects are not followed.
+at 169.254.169.254), multicast and unspecified addresses are always refused. Private
+networks (RFC 1918, IPv6 unique local addresses including `fd00:ec2::254`, and the shared
+address space 100.64.0.0/10 with metadata services such as 100.100.100.200) are refused too,
+unless a global administrator turns on **Global channels and this webhook may reach private
+networks** in the Compliance webhook card (an internal SIEM or mail relay). That switch
+covers global channels and the compliance webhook only; tenant channels never reach private
+networks. An outbound proxy from the environment (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`;
+`http` or `https` proxies) is used without letting it resolve the target: the server
+resolves the name, checks every address and opens a `CONNECT` tunnel to the checked address
+(TLS still verifies the certificate for the name), so the proxy cannot be steered to an
+internal address by a second DNS answer. A target name the server cannot resolve itself is
+refused unless private networks are allowed; then the proxy resolves it. Redirects are not
+followed.
+
+Tenant accounts get no network details of a failed delivery (connection refused, timeout,
+TLS or SMTP errors): the test answers that the target did not accept the message and the
+last delivery shows the same. The server log has the details.
 
 Webhook URLs (Slack, Discord, webhook) and the SMTP password are credentials. They are
 sealed with AES-256-GCM, bound to the channel, and never shown again; the list shows only
@@ -90,4 +112,4 @@ global when a global administrator created it in the global view.
   `network.crl_token`, `keys.rotate`) reach global channels only.
 
 Tenant accounts see only the **Notifications** tab of the settings, with their own channels;
-they cannot see or change the compliance webhook or the signing secret.
+they cannot see or change the compliance webhook or the global signing secret.

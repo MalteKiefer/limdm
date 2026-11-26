@@ -78,6 +78,7 @@ func (a *Agent) applyExtra() {
 	run(api.TypeBootloader, a.applyBootloader(x.Bootloader))
 	run(api.TypeNetwork, a.applyNetwork(x.Network))
 	run(api.TypePrinters, a.applyPrinters(x.Printers))
+	run(api.TypeArtifacts, a.applyArtifacts(x.Artifacts))
 	a.ensureDependencies()
 	a.notifyEscrow()
 }

@@ -29,3 +29,7 @@ release.key
 
 # public signing keys of vendor package repositories (seed catalog)
 !internal/server/vendorkeys/*.asc
+
+# backup archives and age identities (docs/backup.md)
+*.lbk
+*.agekey

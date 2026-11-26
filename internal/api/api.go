@@ -876,6 +876,9 @@ type UserCommand struct {
 	Password string `json:"password,omitempty"` // user_create, user_password: must be changed at first login
 	Admin    bool   `json:"admin,omitempty"`    // user_create, user_admin
 	KeepHome bool   `json:"keep_home,omitempty"`
+	// NoAdmin is set by the server for the helpdesk role: the agent refuses
+	// accounts with uid 0, admin group membership or sudo rules.
+	NoAdmin bool `json:"no_admin,omitempty"`
 }
 
 var localUserRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
@@ -1015,6 +1018,11 @@ type CheckinResponse struct {
 	RenewCert bool `json:"renew_cert,omitempty"`
 	// RenewNetworkCert does the same for the EAP-TLS certificate.
 	RenewNetworkCert bool `json:"renew_network_cert,omitempty"`
+	// SignedData: this server signs catalog apps, managed remotes and the
+	// device user list (SignedUsers). An agent with a pinned command key
+	// then refuses entries without a valid signature.
+	SignedData  bool         `json:"signed_data,omitempty"`
+	SignedUsers *SignedUsers `json:"signed_users,omitempty"`
 }
 
 // ---- signed agent releases ----

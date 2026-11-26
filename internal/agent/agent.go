@@ -88,6 +88,7 @@ type State struct {
 	CommandKey          string                    `json:"command_key,omitempty"`      // pinned public key commands are signed with
 	CommandKeyPrev      string                    `json:"command_key_prev,omitempty"` // key before the last rollover, accepted until CommandKeyPrevUntil
 	CommandKeyPrevUntil time.Time                 `json:"command_key_prev_until,omitzero"`
+	SignedSeq           map[string]int64          `json:"signed_seq,omitempty"` // highest accepted sequence number per signed entry (api.SignedSeq)
 	Enrollment          string                    `json:"enrollment,omitempty"` // server and device ID this state belongs to
 	EscrowNotified      time.Time                 `json:"escrow_notified"`
 	Company             string                    `json:"company,omitempty"`
@@ -106,11 +107,12 @@ type State struct {
 	Held                []string                  `json:"held,omitempty"`         // packages LiMDM put on apt hold
 	DNFExclude          string                    `json:"dnf_exclude,omitempty"`  // excludepkgs= value LiMDM wrote to dnf.conf
 	PacmanIgnore        string                    `json:"pacman_ignore,omitempty"`
-	SnapRefresh         string                    `json:"snap_refresh,omitempty"`   // "hold" or "timer=..." LiMDM set in snapd
-	ScriptResults       []api.ScriptResult        `json:"script_results,omitempty"` // recurring script runs not yet reported
-	ManagedFiles        []string                  `json:"managed_files,omitempty"`  // paths written for com.limdm.files, removed when undeclared
-	FirewallRules       []api.FirewallRule        `json:"firewall_rules,omitempty"` // allow rules LiMDM added
-	LocalUsers          map[string]localUserState `json:"local_users,omitempty"`    // accounts com.limdm.localusers manages
+	SnapRefresh         string                    `json:"snap_refresh,omitempty"`      // "hold" or "timer=..." LiMDM set in snapd
+	ScriptResults       []api.ScriptResult        `json:"script_results,omitempty"`    // recurring script runs not yet reported
+	ManagedFiles        []string                  `json:"managed_files,omitempty"`     // paths written for com.limdm.files, removed when undeclared
+	ManagedFileSums     map[string]string         `json:"managed_file_sums,omitempty"` // path -> SHA-256 of the content written; removal only when it still matches
+	FirewallRules       []api.FirewallRule        `json:"firewall_rules,omitempty"`    // allow rules LiMDM added
+	LocalUsers          map[string]localUserState `json:"local_users,omitempty"`       // accounts com.limdm.localusers manages
 }
 
 type Agent struct {
@@ -133,6 +135,8 @@ type Agent struct {
 
 	sentStatusHash, sentPkgHash string
 	failedUpdate                string    // release version whose update already failed, reported once
+	busy                        backoff   // the server asked to come back later (503, 429)
+	checkinFailures             int       // failed check ins in a row (checkinWait)
 	osqueryTried                time.Time // last osquery install attempt
 	syncNow                     bool
 	renewNow, renewNetNow       bool // the server asked for new certificates (CA rotation)
@@ -530,16 +534,17 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.enforceOffline(false) // before anything else: the device may have been off for a long time
 	for {
 		a.cycle(ctx)
-		wait := time.Duration(a.pol.CheckinSeconds) * time.Second
-		if wait <= 0 {
-			wait = 5 * time.Minute
+		interval := time.Duration(a.pol.CheckinSeconds) * time.Second
+		if interval <= 0 {
+			interval = 5 * time.Minute
 		}
 		// jitter spreads the fleet: after a blueprint change every device would
 		// otherwise check in at the same moment
-		wait += time.Duration(mrand.Int64N(int64(wait/10) + 1)) //nolint:gosec // scheduling jitter, not a secret
+		wait := checkinWait(interval, a.checkinFailures)
 		if a.syncNow {
 			a.syncNow, wait = false, 5*time.Second+time.Duration(mrand.Int64N(int64(55*time.Second))) //nolint:gosec // scheduling jitter
 		}
+		wait = a.busy.wait(wait)
 		select {
 		case <-ctx.Done():
 			a.saveState()
@@ -609,9 +614,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	a.lastSystem = DesktopSystem{OS: strings.TrimSpace(inv.OSName + " " + inv.OSVersion), Kernel: inv.Kernel, Arch: inv.Arch,
 		Inventory: inv.Source, Vendor: inv.Vendor, Model: inv.Model, Serial: inv.Serial}
 	status := api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus(), CatalogVersion: CatalogVersion}
-	sb, _ := json.Marshal(status)
-	sum := sha256.Sum256(sb)
-	statusHash := hex.EncodeToString(sum[:])
+	statusHash := statusHashOf(status)
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
 		StatusHash: statusHash, Results: a.state.Results, Events: a.pendingEvents(), Metrics: metrics(), BrandingHash: a.state.BrandingHash,
 		UpdateResult: a.state.UpdateResult, ScriptResults: a.state.ScriptResults, CommandKey: a.state.CommandKey}
@@ -645,12 +648,14 @@ func (a *Agent) cycle(ctx context.Context) {
 
 	var resp api.CheckinResponse
 	if err := a.post(ctx, "/api/v1/checkin", req, &resp); err != nil {
+		a.checkinFailures++
 		a.log.Error("checkin failed, enforcing stored declarations", "err", err)
 		a.lastError = err.Error()
 		a.enforceOffline(false)
 		return
 	}
 	now := time.Now()
+	a.checkinFailures = 0
 	a.lastCheckin, a.lastError = &now, ""
 	a.enforceOffline(true)
 	// drop only what was sent: entries added meanwhile (unlock events, desktop) stay
@@ -672,10 +677,13 @@ func (a *Agent) cycle(ctx context.Context) {
 	if req.UpdateResult != nil {
 		a.state.UpdateResult = nil // reported
 	}
+	// pinned first: what follows is checked against it
+	a.pinCommandKey(resp.CommandKey, resp.CommandKeyRollover)
 	a.applyBranding(resp.Branding)
 	a.state.FallbackDNS = resp.FallbackDNS
 	fallbackDNS.Store(resp.FallbackDNS && !a.cfg.NoFallbackDNS)
 	if resp.Catalog != nil {
+		a.verifyCatalog(resp.SignedData, resp.Catalog)
 		a.state.Catalog = resp.Catalog
 	}
 	if len(resp.RecoveryRotate) > 0 {
@@ -699,19 +707,24 @@ func (a *Agent) cycle(ctx context.Context) {
 		a.event("declarations updated (token %s)", resp.DeclarationsToken)
 		a.syncNow = true // converge and report right away
 	}
-	if !slices.Equal(resp.Users, a.state.Users) {
-		a.state.Users = resp.Users
+	if users, err := a.verifyUsers(resp); err != nil {
+		a.refused("device user list (the previous one stays)", err)
+	} else if !slices.Equal(users, a.state.Users) {
+		a.state.Users = users
 		a.syncNow = true
 	}
 	a.compose()
-	a.pinCommandKey(resp.CommandKey, resp.CommandKeyRollover)
 	if resp.DeviceCAs != "" {
 		a.updateTrustAnchors(resp.DeviceCAs)
 	}
 	a.renewNow, a.renewNetNow = a.renewNow || resp.RenewCert, a.renewNetNow || resp.RenewNetworkCert
 	a.runCommands(resp.Commands)
 	if u := resp.AgentUpdate; u != nil && u.Version != a.failedUpdate {
-		if err := a.installUpdate(ctx, *u); err != nil {
+		var busy busyError
+		if err := a.installUpdate(ctx, *u); errors.As(err, &busy) {
+			a.busy.note(err) // the server limits parallel downloads: offered again later
+			a.log.Info("agent update deferred", "version", u.Version, "err", err)
+		} else if err != nil {
 			a.failedUpdate = u.Version
 			a.state.UpdateResult = &api.UpdateResult{From: Version, To: u.Version, Detail: err.Error()}
 			a.event("agent update to %s failed: %v", u.Version, err)
@@ -971,6 +984,10 @@ func (a *Agent) post(ctx context.Context, path string, in, out any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if err := busyOf(path, resp); err != nil {
+			a.busy.note(err)
+			return err
+		}
 		return apiError(path, resp)
 	}
 	return json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(out)
@@ -1005,14 +1022,19 @@ func (a *Agent) pollLoop(ctx context.Context) {
 		if err == nil && resp.Pending {
 			a.kickCheckin() // buffered: a check in already running picks it up next
 		}
-		wait = pollWait(failures)
+		wait = a.busy.wait(pollWait(failures))
 	}
 }
 
-// pollWait is one minute, doubling per failure up to five, plus jitter.
+// pollWait is one minute, doubling per failure up to five, plus jitter;
+// after failures up to half of the wait, so the fleet does not return in
+// the same ten seconds when the server is back.
 func pollWait(failures int) time.Duration {
-	d := time.Minute << min(failures, 3)
-	return min(d, 5*time.Minute) + pollJitter()
+	d := min(time.Minute<<min(failures, 3), 5*time.Minute)
+	if failures > 0 {
+		d += time.Duration(mrand.Int64N(int64(d / 2))) //nolint:gosec // jitter, not a secret
+	}
+	return d + pollJitter()
 }
 
 func pollJitter() time.Duration { return time.Duration(mrand.Int64N(int64(10 * time.Second))) } //nolint:gosec // jitter, not a secret

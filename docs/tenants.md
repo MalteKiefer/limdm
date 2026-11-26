@@ -105,11 +105,15 @@ then disable it.
   tenant of the target device or user). They are decided by an admin of that tenant or a
   global administrator.
 
+Library item and blueprint names are unique per tenant: two tenants can each have an item
+called `firewall`, and a name another tenant uses is neither refused nor revealed. The name
+`default` belongs to the Default tenant's baseline blueprint and is refused in other tenants.
+
 ## Limits
 
-* Library item and blueprint names are unique across the installation, so a name taken by
-  another tenant is refused.
 * Version history: restoring a deleted library item or blueprint is available in the global
   view only, and the restored object belongs to Default.
 * Directory, SSO and the software catalog are per installation. Directory group role
-  mappings create global accounts.
+  mappings create global accounts. A directory group assigned to a blueprint applies only to
+  devices of that blueprint's tenant (or to all, for a shared blueprint of Default); devices
+  of other tenants fall through to their default blueprint.

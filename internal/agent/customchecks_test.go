@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/maltekiefer/limdm/internal/api"
@@ -46,6 +47,14 @@ func TestEvalQuery(t *testing.T) {
 		if got, detail := evalQuery(c.rows, c.q); got != c.want {
 			t.Errorf("%+v: %s (%s), want %s", c.q, got, detail, c.want)
 		}
+	}
+	// row data never leaves the device, compared values only bounded
+	secret := []map[string]string{{"result": "AKIA" + strings.Repeat("x", 500)}}
+	if _, d := evalQuery(secret, api.QueryTest{Expect: "no_rows"}); strings.Contains(d, "AKIA") {
+		t.Errorf("no_rows detail leaks the row: %s", d)
+	}
+	if _, d := evalQuery(secret, api.QueryTest{Expect: "compare", Column: "result", Op: "eq", Value: "x"}); len(d) > 120 {
+		t.Errorf("compare detail not bounded: %d bytes", len(d))
 	}
 }
 

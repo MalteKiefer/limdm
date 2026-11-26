@@ -59,6 +59,10 @@ func TestIntegration(t *testing.T) {
 	if err := migrate(ctx, db); err != nil {
 		t.Fatal(err)
 	}
+	// an unchanged schema is skipped; forget it to apply it once more
+	if _, err := db.Exec(ctx, `DELETE FROM schema_applied`); err != nil {
+		t.Fatal(err)
+	}
 	if err := migrate(ctx, db); err != nil {
 		t.Fatal("schema must be idempotent: ", err)
 	}
@@ -717,6 +721,18 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("helpdesk %s: %d, want %d", typ, code, want)
 		}
 	}
+	// helpdesk commands carry no_admin, and accounts the inventory lists with admin rights are refused
+	db.QueryRow(ctx, `SELECT payload FROM commands WHERE type='user_lock' ORDER BY id DESC LIMIT 1`).Scan(&pl)
+	if !strings.Contains(pl, `"no_admin":true`) {
+		t.Fatalf("helpdesk user_lock payload without no_admin: %s", pl)
+	}
+	db.Exec(ctx, `UPDATE devices SET inventory = jsonb_set(coalesce(inventory, '{}'::jsonb), '{accounts}',
+		'[{"name":"opsadm","uid":1001,"admin":true},{"name":"toor","uid":0,"admin":false}]') WHERE id=$1`, er.DeviceID)
+	for _, name := range []string{"opsadm", "toor"} {
+		if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"user_unlock"}, "username": {name}}, help); code != http.StatusForbidden {
+			t.Fatalf("helpdesk user_unlock of admin account %s: %d", name, code)
+		}
+	}
 	// the device page (retired by now) says where the blueprint comes from and hides admin dialogs
 	if code, body := ui("GET", "/devices/"+er.DeviceID, nil, help); code != 200 || strings.Contains(body, "dlg-wipe") || !strings.Contains(body, "/help#blueprint-source") {
 		t.Fatalf("helpdesk device page: %d", code)
@@ -788,6 +804,71 @@ func TestIntegration(t *testing.T) {
 	}
 	if code, _ := ui("POST", "/settings", url.Values{"section": {"bogus"}}, adminSess); code != http.StatusBadRequest {
 		t.Fatalf("unknown section: %d", code)
+	}
+	// B: backup schedules, retention and packages in the console
+	backupTargetDir := t.TempDir()
+	if code, body := ui("POST", "/settings/backup/targets", url.Values{"name": {"local"}, "kind": {"local"}, "dir": {backupTargetDir}}, adminSess); code != http.StatusSeeOther {
+		t.Fatalf("backup target: %d %s", code, body)
+	}
+	if code, body := ui("POST", "/settings/backup/schedules", url.Values{"name": {"nightly"}, "kind": {"cron"}, "cron": {"0 2 * * 1-5"},
+		"targets": {"local"}, "keep_last": {"5"}, "keep_daily": {"7"}, "paused": {"on"}}, adminSess); code != http.StatusSeeOther {
+		t.Fatalf("backup schedule: %d %s", code, body)
+	}
+	if _, body := ui("POST", "/settings/backup/schedules", url.Values{"name": {"bad"}, "kind": {"cron"}, "cron": {"61 * * * *"}, "targets": {"local"}, "keep_last": {"1"}}, adminSess); !strings.Contains(body, "outside 0 to 59") {
+		t.Fatal("invalid cron accepted")
+	}
+	if code, body := ui("GET", "/settings/backup?edit=nightly", nil, adminSess); code != 200 || !strings.Contains(body, "0 2 * * 1-5") || !strings.Contains(body, "nightly") {
+		t.Fatalf("backup page: %d", code)
+	}
+	if _, body := ui("POST", "/settings/backup/schedules/nightly/resume", url.Values{}, adminSess); !strings.Contains(body, "need at least one recipient") {
+		t.Fatal("schedule resumed without an age recipient")
+	}
+	if code, _ := ui("GET", "/settings/backup", nil, auditor); code != http.StatusForbidden {
+		t.Fatalf("auditor sees backups: %d", code)
+	}
+	if _, body := ui("POST", "/settings", url.Values{"section": {"retention"}, "retention_audit": {"730"}, "retention_device_events": {"365"}, "retention_compliance": {"1095"},
+		"retention_commands": {"180"}, "retention_script_results": {"90"}, "retention_diagnostics": {"30"}, "retention_shell_transcripts": {"90"},
+		"retention_metrics": {"30"}, "retention_notification_log": {"30"}}, adminSess); !strings.Contains(body, "Settings saved") || s.settings().retentionDays("audit") != 730 {
+		t.Fatal("retention not saved")
+	}
+	// operations settings apply without a restart
+	if s.checkins == nil { // a test server without limits
+		s.downloads, s.checkins, s.bigCheckins = newSlots(1), newSlots(1), newSlots(1)
+	}
+	if _, body := ui("POST", "/settings", url.Values{"section": {"operations"}, "log_level": {"debug"}, "audit_api_reads": {"all"}, "access_log": {"on"},
+		"update_downloads": {"7"}, "max_checkins": {"16"}, "agent_proxy_protocol": {"10.0.0.5"}, "syslog": {""}}, adminSess); !strings.Contains(body, "Settings saved") {
+		t.Fatal("operations not saved")
+	}
+	if o := s.ops(); LogLevel.Level().String() != "DEBUG" || !o.AccessLog || o.AuditAPIReads != "all" || cap(s.checkins.get()) != 16 || cap(s.bigCheckins.get()) != 2 ||
+		cap(s.downloads.get()) != 7 || len(s.proxySources()) != 1 {
+		t.Fatalf("operations not active: %+v", o)
+	}
+	var detail string
+	if err := db.QueryRow(ctx, `SELECT detail FROM audit_log WHERE action='settings.save' ORDER BY id DESC LIMIT 1`).Scan(&detail); err != nil || !strings.Contains(detail, "max_checkins=16") {
+		t.Fatalf("operations change not audited: %q %v", detail, err)
+	}
+	if _, body := ui("POST", "/settings", url.Values{"section": {"operations"}, "log_level": {"info"}, "audit_api_reads": {"sensitive"},
+		"update_downloads": {"20"}, "max_checkins": {"64"}, "syslog": {"http://x"}}, adminSess); !strings.Contains(body, "syslog target") {
+		t.Fatal("invalid syslog target accepted")
+	}
+	LogLevel.Set(0)
+	if code, body := ui("GET", "/software/packages", nil, adminSess); code != 200 || !strings.Contains(body, "Upload") {
+		t.Fatalf("packages page: %d", code)
+	}
+	// the handlers check the role themselves, not only the route wrappers
+	for _, who := range []session{{Email: "hd@firma.de", Role: "helpdesk"}, {Email: "au@firma.de", Role: "auditor"}, {Email: "ta@firma.de", Role: "admin", Tenant: 2}} {
+		for name, h := range map[string]handler{"store": s.packagesSettings, "settings": s.settingsSave, "backup": s.backupSave, "schedule": s.backupScheduleSave,
+			"upload": s.packageUpload, "delete": s.packageDelete, "run": s.backupRunNow, "target": s.backupTargetSave} {
+			if (name == "upload" || name == "delete") && who.Role == "admin" {
+				continue // tenant admins manage their own packages
+			}
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest("POST", "/x", strings.NewReader("store=s3&section=retention"))
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			if h(w, r, who); w.Code != http.StatusForbidden {
+				t.Errorf("%s by %s (tenant %d): %d", name, who.Role, who.Tenant, w.Code)
+			}
+		}
 	}
 	if _, body := ui("POST", "/settings", url.Values{"section": {"general"}, "stale_hours": {"48"}, "local_login": {"on"}}, adminSess); !strings.Contains(body, "Settings saved") {
 		t.Fatalf("general settings not saved: %s", body)
@@ -1193,14 +1274,42 @@ func TestRecoveryCodeLogin(t *testing.T) {
 			pw = strings.TrimSpace(v)
 		}
 	}
-	if role, err := s.checkLocal(ctx, "alice", pw, strings.ToUpper(code), "127.0.0.1"); err != nil || role != "admin" {
+	if role, err := s.checkLocal(ctx, "alice", pw, strings.ToUpper(code), "127.0.0.1", "127.0.0.1"); err != nil || role != "admin" {
 		t.Fatalf("recovery code login: %q %v", role, err)
 	}
-	if _, err := s.checkLocal(ctx, "alice", pw, code, "127.0.0.1"); err == nil {
+	if _, err := s.checkLocal(ctx, "alice", pw, code, "127.0.0.1", "127.0.0.1"); err == nil {
 		t.Fatal("recovery code worked twice")
 	}
-	if _, err := s.checkLocal(ctx, "alice", "wrong", newRecoveryCode(), "127.0.0.1"); err == nil {
+	if _, err := s.checkLocal(ctx, "alice", "wrong", newRecoveryCode(), "127.0.0.1", "127.0.0.1"); err == nil {
 		t.Fatal("wrong password accepted")
+	}
+	// a lockout counts per source: an attacker locks out only their own network
+	var secret string
+	db.QueryRow(ctx, `SELECT totp_secret FROM local_admins WHERE name='alice'`).Scan(&secret)
+	for range maxFailures {
+		s.checkLocal(ctx, "alice", "wrong", "000000", "203.0.113.9", "203.0.113.9")
+	}
+	now, _ := totpCode(secret, time.Now().Unix()/30)
+	if _, err := s.checkLocal(ctx, "alice", pw, now, "203.0.113.9", "203.0.113.9"); err == nil {
+		t.Fatal("the locked source signed in")
+	}
+	if role, err := s.checkLocal(ctx, "alice", pw, now, "192.0.2.5", "192.0.2.5"); err != nil || role != "admin" {
+		t.Fatalf("another source must still sign in: %v", err)
+	}
+	// failures from long ago do not add up to a lockout, and stale rows go
+	db.Exec(ctx, `INSERT INTO local_login_failures(name, source, failures, updated_at) VALUES ('alice', 'old', $1, now() - interval '2 days'),
+		('alice', 'gone', 1, now() - interval '2 days')`, maxFailures-1)
+	s.checkLocal(ctx, "alice", "wrong", "000000", "198.51.100.1", "old")
+	var fails, gone int
+	var until *time.Time
+	db.QueryRow(ctx, `SELECT failures, locked_until, (SELECT count(*) FROM local_login_failures WHERE source='gone') FROM local_login_failures WHERE name='alice' AND source='old'`).Scan(&fails, &until, &gone)
+	if fails != 1 || until != nil || gone != 0 {
+		t.Fatalf("old failures counted: %d %v, stale rows %d", fails, until, gone)
+	}
+	var lockEntries int
+	db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action='login.local.failed' AND detail LIKE '%locked for this source'`).Scan(&lockEntries)
+	if lockEntries == 0 {
+		t.Fatal("a lockout must be audited")
 	}
 	// sign out ends every session of the account
 	_, gen0 := s.account(ctx, "local:alice")
@@ -1317,6 +1426,7 @@ func TestAgentUpdates(t *testing.T) {
 	// poll: nothing pending, then a queued command
 	pollOf := func(id string) bool {
 		t.Helper()
+		s.forgetRollout() // the test changes releases in the database directly
 		rec := httptest.NewRecorder()
 		s.poll(rec, httptest.NewRequest("POST", "/api/v1/poll", nil).WithContext(context.WithValue(ctx, deviceKey, id)))
 		var pr api.PollResponse

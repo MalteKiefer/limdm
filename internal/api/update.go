@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/ed25519"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -115,4 +116,70 @@ func VerifyRollover(pinned ed25519.PublicKey, r KeyRollover) error {
 // compact payload. The server signs at saving and checks before delivery.
 func ItemSigned(name, typ string, payload []byte) []byte {
 	return fmt.Appendf(nil, "limdm-item-v1\n%s\n%s\n%s", name, typ, payload)
+}
+
+// Declaration like data outside library items is signed with the command
+// key too, when an admin saves it, so a database write alone changes nothing
+// a device acts on as root. The agent checks these signatures with the
+// pinned key once the server announces SignedData.
+//
+// SignedSeq: every signature covers a sequence number that grows with
+// each signed change of the entry (the server's database clock in
+// microseconds; 0 for rows signed before it existed, left out of the
+// message). The agent keeps the highest number
+// per entry and refuses a lower one, so an older signed state written back
+// into the database (an earlier repository, a revoked admin flag) is not
+// applied again.
+
+// CatalogAppSigned is what a catalog app signature covers: what decides
+// what gets installed (ID, name, mode, sources with their repositories,
+// detect names). Summary, category, icon and the device's request state are
+// display only and change without an admin (Flathub metadata, requests).
+func CatalogAppSigned(a CatalogApp) []byte {
+	b, _ := json.Marshal(struct {
+		ID      string      `json:"id"`
+		Name    string      `json:"name"`
+		Mode    string      `json:"mode"`
+		Sources []AppSource `json:"sources"`
+		Detect  []string    `json:"detect,omitempty"`
+		Seq     int64       `json:"seq,omitempty"`
+	}{a.ID, a.Name, a.Mode, a.Sources, a.Detect, a.Seq})
+	return append([]byte("limdm-catalog-app-v1\n"), b...)
+}
+
+// CatalogRemoteSigned is what a managed Flatpak remote signature covers.
+func CatalogRemoteSigned(r CatalogRemote) []byte {
+	r.Signature = ""
+	b, _ := json.Marshal(r)
+	return append([]byte("limdm-catalog-remote-v1\n"), b...)
+}
+
+// UsersSigned is what the signature of a device's user list covers: the
+// device and the list as an admin saved it (no list and an empty one are
+// the same), and its sequence number (SignedSeq) when it has one.
+func UsersSigned(deviceID string, users []User, seq int64) []byte {
+	if users == nil {
+		users = []User{}
+	}
+	b, _ := json.Marshal(users)
+	msg := fmt.Appendf(nil, "limdm-users-v1\n%s\n%s", deviceID, b)
+	if seq != 0 {
+		msg = fmt.Appendf(msg, "\n%d", seq)
+	}
+	return msg
+}
+
+// SignedUsers is the user list of a device as an admin saved it, with its
+// signature. The check in answer's Users can be shorter (people disabled
+// in the directory), never longer or with other rights.
+type SignedUsers struct {
+	Users     []User `json:"users"`
+	Signature string `json:"signature"`
+	Seq       int64  `json:"seq,omitempty"`
+}
+
+// VerifySigned checks a hex Ed25519 signature over msg.
+func VerifySigned(pub ed25519.PublicKey, msg []byte, sigHex string) bool {
+	sig, err := hex.DecodeString(sigHex)
+	return err == nil && len(pub) == ed25519.PublicKeySize && ed25519.Verify(pub, msg, sig)
 }

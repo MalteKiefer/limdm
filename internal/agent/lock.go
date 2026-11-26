@@ -54,6 +54,45 @@ func parsePeople(passwd string) []string {
 // lockAfterLost records a lock sent during lost mode.
 const lockAfterLost = stateDir + "/lock-after-lost"
 
+// While the device is locked or lost, the lock screen of GNOME, Cinnamon
+// and MATE cannot be switched off by the user: disable-lock-screen in the
+// user's own settings makes these shells ignore logind's lock request, and
+// lockSessions trusts them to lock. A system setting with a dconf lock
+// overrides it; removed again on unlock.
+const (
+	lockdownSettings = "/etc/dconf/db/local.d/50-limdm-device-lock"
+	lockdownLocks    = "/etc/dconf/db/local.d/locks/50-limdm-device-lock"
+)
+
+// lockdownDirs hold disable-lock-screen (keys of absent desktops are ignored).
+var lockdownDirs = []string{"org/gnome/desktop/lockdown", "org/cinnamon/desktop/lockdown", "org/mate/lockdown"}
+
+func lockdownFiles() (settings, locks string) {
+	settings, locks = managedHeader, managedHeader
+	for _, dir := range lockdownDirs {
+		settings += "\n[" + dir + "]\ndisable-lock-screen=false\n"
+		locks += "/" + dir + "/disable-lock-screen\n"
+	}
+	return settings, locks
+}
+
+// setLockdown writes (on) or removes the lock screen lockdown.
+func setLockdown(on bool) error {
+	if !hasCmd("dconf") {
+		return nil
+	}
+	settings, locks := "", ""
+	if on {
+		settings, locks = lockdownFiles()
+	}
+	c1, e1 := writeOrRemove(lockdownSettings, settings, 0o644)
+	c2, e2 := writeOrRemove(lockdownLocks, locks, 0o644)
+	if err := errors.Join(e1, e2); err != nil || !c1 && !c2 {
+		return err
+	}
+	return dconfUpdate(true, on)
+}
+
 func readLockUsers() []string {
 	var users []string
 	_ = json.Unmarshal([]byte(readFile(deviceLockUsers)), &users)
@@ -70,6 +109,9 @@ func (a *Agent) lockDevice() (string, error) {
 	}
 	if _, err := writeIfChanged(nologinFile, nologinText, 0o644); err != nil {
 		return "", err
+	}
+	if err := setLockdown(true); err != nil { // before the lock request, or the shell may ignore it
+		a.event("keeping the lock screen enabled: %v", err)
 	}
 	locked, err := lockPasswords()
 	ended := endConsoleSessions()
@@ -90,6 +132,9 @@ func (a *Agent) unlockDevice() (string, error) {
 		}
 	}
 	_ = os.Remove(lockAfterLost)
+	if err := setLockdown(false); err != nil {
+		a.event("removing the lock screen lockdown: %v", err)
+	}
 	released, err := a.releasePasswords()
 	return "logins allowed again, local passwords released: " + strings.Join(released, ", ") + "; users unlock their screen with their password", err
 }
@@ -149,7 +194,11 @@ func (a *Agent) releasePasswords() ([]string, error) {
 // enforceDeviceLock keeps sessions locked while the device is locked; run
 // every minute, so ending the locker does not help.
 func (a *Agent) enforceDeviceLock() {
-	if readFile(nologinFile) == nologinText {
+	locked := readFile(nologinFile) == nologinText
+	if err := setLockdown(locked || inLostMode()); err != nil {
+		a.event("lock screen lockdown: %v", err)
+	}
+	if locked {
 		if ended := endConsoleSessions(); len(ended) > 0 {
 			a.event("device locked: ended %s", strings.Join(ended, ", "))
 		}
@@ -328,19 +377,25 @@ func afterComm(stat string) string {
 	return ""
 }
 
-// verifiedCompositor: the process runs a known compositor or X server binary
-// that root owns in a system directory (a renamed user program fails both),
-// on a virtual console.
-func verifiedCompositor(pid string) bool {
+// trustedExe: the process runs one of the named binaries, owned by root
+// and not writable by others, in a system directory (a renamed or copied
+// user program fails).
+func trustedExe(pid string, names map[string]bool) bool {
 	exe, err := os.Readlink("/proc/" + pid + "/exe")
-	if err != nil || !graphicalExe[filepath.Base(exe)] {
+	if err != nil || !names[filepath.Base(exe)] {
 		return false
 	}
 	if dir := filepath.Dir(exe); !slices.Contains([]string{"/usr/bin", "/usr/local/bin", "/usr/libexec", "/usr/lib/xorg", "/bin"}, dir) {
 		return false
 	}
 	var st syscall.Stat_t
-	if syscall.Stat(exe, &st) != nil || st.Uid != 0 || st.Mode&0o022 != 0 {
+	return syscall.Stat(exe, &st) == nil && st.Uid == 0 && st.Mode&0o022 == 0
+}
+
+// verifiedCompositor: the process runs a known compositor or X server binary
+// (trustedExe) on a virtual console.
+func verifiedCompositor(pid string) bool {
+	if !trustedExe(pid, graphicalExe) {
 		return false
 	}
 	// started at the device: a compositor run headless over SSH has a
@@ -354,29 +409,44 @@ var graphicalExe = map[string]bool{"sway": true, "Hyprland": true, "Xorg": true,
 	"weston": true, "labwc": true, "river": true, "wayfire": true, "niri": true, "cage": true, "gnome-shell": true,
 	"kwin_wayland": true, "dwl": true, "Xwayland": true}
 
+// logindLocks: desktops whose shell locks itself on loginctl lock-sessions,
+// by logind's Desktop property, which the display manager sets at login and
+// the user cannot change. LockedHint is not used: the session owner sets it.
+func logindLocks(desktop string) bool {
+	d := strings.ToLower(desktop)
+	for _, n := range []string{"gnome", "ubuntu", "plasma", "kde", "cinnamon", "mate"} {
+		if strings.Contains(d, n) {
+			return true
+		}
+	}
+	return false
+}
+
 // lockSessions locks every graphical session: through logind first (the
-// desktop's own locker), then, where after a few seconds neither logind
-// reports the session locked nor a locker process runs (compositors and
-// window managers without a logind aware locker, LXQt, LXDE …), with
-// swaylock or i3lock started in the session. Returns the sessions locked
-// that way.
+// desktop's own locker), then, unless the session's desktop locks itself on
+// logind's request, with swaylock or i3lock started in the session
+// (compositors and window managers without a logind aware locker, LXQt,
+// LXDE …). A locker that seems to run already is not trusted: its name,
+// environment and display are the user's to choose. Starting a second
+// locker on a locked session fails harmlessly (swaylock finds the session
+// lock taken, i3lock cannot grab the keyboard). Returns the sessions
+// locked that way.
 func (a *Agent) lockSessions() int {
 	sessions := graphicalSessions()
 	if len(sessions) == 0 {
 		return 0
 	}
+	desktops := map[string]string{}
 	if hasCmd("loginctl") {
 		_, _ = sh("loginctl", "lock-sessions")
-		time.Sleep(3 * time.Second) // lockers set LockedHint once they show
+		time.Sleep(3 * time.Second) // give lockers time to show
+		for _, l := range loginSessions() {
+			desktops[l.ID] = l.Desktop
+		}
 	}
-	locked := map[string]bool{}
-	for _, l := range loginSessions() {
-		locked[l.ID] = l.Locked
-	}
-	procs := userProcs()
 	n := 0
 	for _, s := range sessions {
-		if locked[s.id] || lockerRunning(procs[s.uid]) {
+		if logindLocks(desktops[s.id]) {
 			continue
 		}
 		var argv []string

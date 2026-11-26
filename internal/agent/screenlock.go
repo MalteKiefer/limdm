@@ -63,6 +63,15 @@ lock-delay=0
 
 [org/mate/desktop/session]
 idle-delay=%[2]d
+
+[org/gnome/desktop/lockdown]
+disable-lock-screen=false
+
+[org/cinnamon/desktop/lockdown]
+disable-lock-screen=false
+
+[org/mate/lockdown]
+disable-lock-screen=false
 `, seconds, lockMinutes(seconds))
 	locks = managedHeader + `/org/gnome/desktop/session/idle-delay
 /org/gnome/desktop/screensaver/lock-enabled
@@ -74,6 +83,9 @@ idle-delay=%[2]d
 /org/mate/screensaver/lock-enabled
 /org/mate/screensaver/lock-delay
 /org/mate/desktop/session/idle-delay
+/org/gnome/desktop/lockdown/disable-lock-screen
+/org/cinnamon/desktop/lockdown/disable-lock-screen
+/org/mate/lockdown/disable-lock-screen
 `
 	return
 }

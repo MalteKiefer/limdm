@@ -29,17 +29,59 @@ import (
 
 // ---- schema and migrations ----
 
+// migrate applies schema.sql and the migrations when they changed since the
+// last start. An unchanged schema takes no lock at all: a rolling restart
+// must not queue ACCESS EXCLUSIVE requests in front of the running instances.
 func migrate(ctx context.Context, db *pgxpool.Pool) error {
-	// one migrator at a time, and the schema inside the same transaction:
-	// SET LOCAL keeps the disabled timeouts out of the pooled connection
-	tx, err := db.Begin(ctx)
+	if ok, err := schemaCurrent(ctx, db); err != nil || ok {
+		return err
+	}
+	conn, err := db.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+	// one migrator at a time, for the schema transaction and the index builds
+	// after it. A try lock in a loop: a statement waiting for the lock would
+	// hold a snapshot, and the concurrent index build of the instance that
+	// migrates waits for every older snapshot to end
+	for start := time.Now(); ; {
+		var got bool
+		if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(7364)`).Scan(&got); err != nil {
+			return err
+		}
+		if got {
+			break
+		}
+		if time.Since(start) > 15*time.Minute {
+			return errors.New("another instance has been migrating the schema for 15 minutes")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+	defer func() {
+		// the session keeps the lock and settings otherwise; at worst the
+		// connection is closed with them
+		if _, err := conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(7364); RESET statement_timeout`); err != nil {
+			conn.Conn().Close(context.WithoutCancel(ctx)) //nolint:errcheck // already failing
+		}
+	}()
+	if ok, err := schemaCurrent(ctx, conn); err != nil || ok { // another instance was faster
+		return err
+	}
+	// the schema inside one transaction: SET LOCAL keeps the disabled
+	// timeouts to it
+	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 	// no statement limit, but a bounded lock wait: the schema takes table
 	// locks until the commit, and a running instance must not stall behind them
-	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = '30s'; SELECT pg_advisory_xact_lock(7364)`); err != nil {
+	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = '30s'`); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, schema); err != nil {
@@ -60,10 +102,76 @@ func migrate(ctx context.Context, db *pgxpool.Pool) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO schema_applied(hash, version) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING`, schemaHash(), Version); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := buildIndexes(ctx, conn); err != nil {
+		return fmt.Errorf("build indexes: %w", err)
+	}
+	// recorded last: a start that failed to build an index tries again
+	_, err = conn.Exec(ctx, `INSERT INTO schema_applied(hash, version) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING`, schemaHash(), Version)
+	return err
+}
+
+// concurrentIndexes are indexes on tables that grow with the fleet. They are
+// built with CREATE INDEX CONCURRENTLY outside the schema transaction, so a
+// first build on a big installation does not block writes to the table.
+// Each entry is "name ON table ...".
+var concurrentIndexes = []string{
+	// poll and check in: device users disabled, renamed or deleted in the directory
+	`dir_users_lower_email ON dir_users (lower(email))`,
+	`dir_users_previous_emails ON dir_users USING gin (previous_emails) WHERE NOT active`,
+	// enrollment: earlier records of the same machine
+	`devices_machine_id ON devices (machine_id) WHERE NOT retired`,
+	// device list and API pages: sorted by host name
+	`devices_hostname ON devices (hostname, id)`,
+	`devices_retired_hostname ON devices (retired, hostname, id)`,
+	// device filters (deviceFilters, pkgCond)
+	`devices_tags ON devices USING gin (tags)`,
+	`devices_apps ON devices USING gin ((inventory->'apps') jsonb_path_ops)`,
+	`devices_flatpaks ON devices USING gin ((inventory->'flatpaks') jsonb_path_ops)`,
+	`devices_flatpak_remotes ON devices USING gin ((inventory->'flatpak_remotes') jsonb_path_ops)`,
+	`devices_checks ON devices USING gin (checks jsonb_path_ops)`,
+	// retention of finished commands
+	`commands_finished ON commands (updated_at) WHERE status IN ('ok', 'failed', 'expired')`,
+}
+
+// buildIndexes creates the concurrentIndexes that are missing, on conn
+// which holds the migration lock. An invalid index left by an interrupted
+// build is built again.
+func buildIndexes(ctx context.Context, conn *pgxpool.Conn) error {
+	if _, err := conn.Exec(ctx, `SET statement_timeout = 0`); err != nil { // reset by migrate
+		return err
+	}
+	for _, ix := range concurrentIndexes {
+		name, _, _ := strings.Cut(ix, " ")
+		var invalid bool
+		if err := conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+			WHERE c.relname = $1 AND c.relnamespace = current_schema()::regnamespace AND NOT i.indisvalid)`, name).Scan(&invalid); err != nil {
+			return err
+		}
+		if invalid {
+			if _, err := conn.Exec(ctx, `DROP INDEX CONCURRENTLY IF EXISTS `+name); err != nil {
+				return err
+			}
+		}
+		if _, err := conn.Exec(ctx, `CREATE INDEX CONCURRENTLY IF NOT EXISTS `+ix); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// schemaCurrent tells whether this exact schema and set of migrations was
+// applied already (schema_applied, keyed by schemaHash).
+func schemaCurrent(ctx context.Context, q rowQuerier) (bool, error) {
+	var ok bool
+	err := q.QueryRow(ctx, `SELECT to_regclass('schema_applied') IS NOT NULL`).Scan(&ok)
+	if err != nil || !ok {
+		return false, err
+	}
+	err = q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_applied WHERE hash=$1)`, schemaHash()).Scan(&ok)
+	return ok, err
 }
 
 var migrations = []struct {
@@ -85,6 +193,36 @@ var migrations = []struct {
 	}},
 	{7, func(ctx context.Context, tx pgx.Tx) error { return seedApps(ctx, tx, moreCatalog) }},
 	{8, seedVendorIcons},
+	// one off data repairs and baselines, formerly run with schema.sql at every start
+	{9, func(ctx context.Context, tx pgx.Tx) error {
+		// agents without a compliance item reported "checks": null, which the
+		// jsonb_array_* functions of the device page and the export reject;
+		// then the history baseline for devices that reported before it existed
+		_, err := tx.Exec(ctx, `UPDATE devices SET checks = '[]' WHERE jsonb_typeof(checks) <> 'array';
+			UPDATE devices SET decl_status = '[]' WHERE jsonb_typeof(decl_status) <> 'array';
+			INSERT INTO compliance_changes(device_id, at, check_id, status, detail, catalog_version)
+			SELECT d.id, coalesce(d.last_seen, now()), c->>'id', coalesce(c->>'status', ''), coalesce(c->>'detail', ''), d.catalog_version
+			FROM devices d, jsonb_array_elements(d.checks) c
+			WHERE c->>'id' IS NOT NULL AND NOT EXISTS (SELECT 1 FROM compliance_changes x WHERE x.device_id = d.id)`)
+		return err
+	}},
+	{10, func(ctx context.Context, tx pgx.Tx) error { // baseline version of blueprints saved before versioning existed
+		_, err := tx.Exec(ctx, `INSERT INTO blueprint_versions(blueprint_id, version, name, description, parent_id, tree, note, created_by, created_at)
+			SELECT b.id, 1, b.name, b.description, b.parent_id, b.tree, 'baseline', 'system', b.updated_at FROM blueprints b
+			WHERE NOT EXISTS (SELECT 1 FROM blueprint_versions v WHERE v.blueprint_id = b.id)`)
+		return err
+	}},
+	{11, partitionMetrics}, // device_metrics by day (partitions.go)
+	{12, func(ctx context.Context, tx pgx.Tx) error { // packages from devices.packages to device_packages
+		_, err := tx.Exec(ctx, `INSERT INTO device_packages(device_id, name, version, arch)
+			SELECT d.id, left(p->>'n', 200), left(coalesce(p->>'v', ''), 200), left(coalesce(p->>'a', ''), 50)
+			FROM devices d, jsonb_array_elements(CASE WHEN jsonb_typeof(d.packages) = 'array' THEN d.packages ELSE '[]'::jsonb END) p
+			WHERE coalesce(p->>'n', '') <> ''
+			ON CONFLICT DO NOTHING;
+			DROP INDEX IF EXISTS devices_packages;
+			UPDATE devices SET packages = '[]' WHERE packages <> '[]'`)
+		return err
+	}},
 }
 
 func columnExists(ctx context.Context, tx pgx.Tx, table, column string) (bool, error) {
@@ -168,14 +306,14 @@ func migratePriorityBlueprints(ctx context.Context, tx pgx.Tx) error {
 // seedDefaultBlueprint gives a new installation the CIS Level 1 baseline.
 func seedDefaultBlueprint(ctx context.Context, tx pgx.Tx) error {
 	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blueprints WHERE name='default')`).Scan(&exists); err != nil || exists {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blueprints WHERE name='default' AND tenant_id=1)`).Scan(&exists); err != nil || exists {
 		return err
 	}
 	var ids []int64
 	for _, li := range api.DefaultLibrary() {
 		var id int64
 		if err := tx.QueryRow(ctx, `INSERT INTO library_items(name, type, payload) VALUES ($1,$2,$3)
-			ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id`, li.Name, li.Type, string(li.Payload)).Scan(&id); err != nil {
+			ON CONFLICT (tenant_id, name) DO UPDATE SET name=EXCLUDED.name RETURNING id`, li.Name, li.Type, string(li.Payload)).Scan(&id); err != nil {
 			return err
 		}
 		ids = append(ids, id)
@@ -271,7 +409,7 @@ func resolveDevice(ctx context.Context, q pgx.Tx, deviceID string) (resolved, er
 	}
 	if bp == nil {
 		var def int64
-		if err := q.QueryRow(ctx, `SELECT id FROM blueprints WHERE name='default'`).Scan(&def); err != nil {
+		if err := q.QueryRow(ctx, `SELECT id FROM blueprints WHERE name='default' AND tenant_id=1`).Scan(&def); err != nil {
 			return res, err
 		}
 		bp = &def
@@ -564,6 +702,10 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		return
 	}
 	if err := s.saveLibraryItem(r.Context(), sess.Email, &it); err != nil {
+		if _, ok := pendingApproval(err); ok {
+			http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+			return
+		}
 		fail(err)
 		return
 	}
@@ -588,7 +730,7 @@ func (s *Server) restoreNetworkSecrets(ctx context.Context, it *api.LibraryItem)
 	}
 	p, err := api.RestoreNetworkSecrets(it.Payload, stored)
 	if err != nil {
-		return invalid(err)
+		return invalid("payload", err)
 	}
 	it.Payload = p
 	return nil
@@ -601,11 +743,25 @@ func (s *Server) saveLibraryItem(ctx context.Context, actor string, it *api.Libr
 	if it.Type == api.TypeBootloader { // hash a plain password before it is validated and stored
 		p, err := api.PrepareBootloader(it.Payload)
 		if err != nil {
-			return invalid(err)
+			return invalid("payload", err)
 		}
 		it.Payload = p
 	}
+	if err := s.checkArtifactRefs(ctx, it); err != nil { // packages.go
+		return invalid("payload", err)
+	}
 	return s.storeItem(ctx, actor, "library.save", "save", it, false)
+}
+
+// itemField names the request field a validation error of it is about.
+func itemField(it api.LibraryItem, err error) string {
+	switch {
+	case strings.TrimSpace(it.Name) == "" || len(it.Name) > 100:
+		return "name"
+	case strings.HasPrefix(err.Error(), "unknown declaration type"):
+		return "type"
+	}
+	return "payload"
 }
 
 // storeItem validates, signs and saves an item with its new version and
@@ -621,7 +777,7 @@ func (s *Server) storeItem(ctx context.Context, actor, action, note string, it *
 		return err
 	}
 	if err := it.Validate(); err != nil {
-		return invalid(err)
+		return invalid(itemField(*it, err), err)
 	}
 	sealed, _, err := sealItemSecrets(it.Type, it.Payload) // never stored, signed, versioned or audited in clear
 	if err != nil {
@@ -629,47 +785,64 @@ func (s *Server) storeItem(ctx context.Context, actor, action, note string, it *
 	}
 	var compact bytes.Buffer
 	if err := json.Compact(&compact, sealed); err != nil {
-		return invalid(err)
+		return invalid("payload", err)
 	}
 	it.Payload = compact.Bytes()
-	sig := signItem(it.Name, it.Type, compact.Bytes())
-	detail := it.Type + " " + compact.String()
+	if s.itemNeedsApproval(*it) { // four eyes: stored as a request, signed when approved
+		return s.requestItemApproval(ctx, actor, action, note, *it, restore)
+	}
+	return s.auditAction(ctx, actor, action, it.Name, itemDetail(*it, note), func(tx pgx.Tx) error {
+		return writeItem(ctx, tx, actor, note, it, restore)
+	})
+}
+
+// itemDetail is the audit text of an item save.
+func itemDetail(it api.LibraryItem, note string) string {
+	detail := it.Type + " " + string(it.Payload)
 	if it.Type == api.TypeNetwork {
-		detail = it.Type + " " + string(api.MaskNetworkSecrets(compact.Bytes())) // no secrets in the audit log
+		detail = it.Type + " " + string(api.MaskNetworkSecrets(it.Payload)) // no secrets in the audit log
 	}
 	if note != "save" {
 		detail = note + ": " + detail
 	}
-	return s.auditAction(ctx, actor, action, it.Name, detail, func(tx pgx.Tx) error {
-		id := it.ID
-		if id > 0 {
-			if err := tenantGuard(ctx, tx, "library_items", id); err != nil {
-				return err
-			}
-			if err := ensureItemBaseline(ctx, tx, id); err != nil {
-				return err
-			}
-			tag, err := tx.Exec(ctx, `UPDATE library_items SET name=$2, type=$3, description=$4, payload=$5, signature=$6, updated_at=now() WHERE id=$1`,
-				id, it.Name, it.Type, it.Description, compact.String(), sig)
-			if err != nil {
-				return err
-			}
-			if tag.RowsAffected() == 0 {
-				if !restore {
-					return &userError{http.StatusNotFound, "library item not found"}
-				}
-				if _, err := tx.Exec(ctx, `INSERT INTO library_items(id, name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-					id, it.Name, it.Type, it.Description, compact.String(), sig, ownerTenant(ctx)); err != nil {
-					return err
-				}
-			}
-		} else if err := tx.QueryRow(ctx, `INSERT INTO library_items(name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-			it.Name, it.Type, it.Description, compact.String(), sig, ownerTenant(ctx)).Scan(&id); err != nil {
+	return detail
+}
+
+// writeItem signs and writes a validated, compact item with its version in
+// tx and sets it.ID.
+func writeItem(ctx context.Context, tx pgx.Tx, actor, note string, it *api.LibraryItem, restore bool) error {
+	sig := signItem(it.Name, it.Type, it.Payload)
+	id := it.ID
+	if id > 0 {
+		if err := tenantGuard(ctx, tx, "library_items", id); err != nil {
 			return err
 		}
-		it.ID = id
-		return recordItemVersion(ctx, tx, id, actor, note, false)
-	})
+		if err := checkIfMatch(ctx, tx, "library_items", id); err != nil {
+			return err
+		}
+		if err := ensureItemBaseline(ctx, tx, id); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE library_items SET name=$2, type=$3, description=$4, payload=$5, signature=$6, updated_at=now() WHERE id=$1`,
+			id, it.Name, it.Type, it.Description, string(it.Payload), sig)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			if !restore {
+				return &userError{http.StatusNotFound, "library item not found"}
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO library_items(id, name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+				id, it.Name, it.Type, it.Description, string(it.Payload), sig, ownerTenant(ctx)); err != nil {
+				return err
+			}
+		}
+	} else if err := tx.QueryRow(ctx, `INSERT INTO library_items(name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+		it.Name, it.Type, it.Description, string(it.Payload), sig, ownerTenant(ctx)).Scan(&id); err != nil {
+		return err
+	}
+	it.ID = id
+	return recordItemVersion(ctx, tx, id, actor, note, false)
 }
 
 func (s *Server) libraryDelete(w http.ResponseWriter, r *http.Request, sess session) {
@@ -720,15 +893,16 @@ func (s *Server) deleteLibraryItem(ctx context.Context, actor string, id int64) 
 // it: the explicit one, else the primary user's group, else default.
 const effectiveBlueprintSQL = `coalesce(d.blueprint_id,
 	(SELECT a.blueprint_id FROM dir_users u JOIN dir_members m ON m.user_id=u.id JOIN blueprint_group_assignments a ON a.group_id=m.group_id
+	 JOIN blueprints gb ON gb.id=a.blueprint_id AND (gb.tenant_id=d.tenant_id OR gb.tenant_id=1 AND gb.shared)
 	 WHERE u.id=d.primary_user_id AND u.active ORDER BY a.priority, a.group_id LIMIT 1),
-	(SELECT id FROM blueprints WHERE name='default'))`
+	(SELECT id FROM blueprints WHERE name='default' AND tenant_id=1))`
 
 func (s *Server) allBlueprints(ctx context.Context, deviceID string) ([]blueprintRec, error) {
 	cond, args := visibleCond(ctx, "b", 1)
 	dcond, dargs := tenantDevices(ctx, 1+len(args))
 	rows, err := s.db.Query(ctx, `SELECT b.id, b.name, b.parent_id, b.tree, b.description, b.updated_at,
 		(SELECT count(*) FROM devices d WHERE NOT d.retired AND `+dcond+` AND `+effectiveBlueprintSQL+` = b.id),
-		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND (d.blueprint_id=b.id OR (d.blueprint_id IS NULL AND b.name='default'))),
+		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND (d.blueprint_id=b.id OR (d.blueprint_id IS NULL AND b.name='default' AND b.tenant_id=1))),
 		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND `+effectiveBlueprintSQL+` = b.id)
 		FROM blueprints b WHERE `+cond+` ORDER BY b.name='default' DESC, b.name`, append(append([]any{deviceID}, args...), dargs...)...)
 	if err != nil {
@@ -783,7 +957,7 @@ func (s *Server) blueprintEdit(w http.ResponseWriter, r *http.Request, sess sess
 		}
 	} else {
 		var def int64
-		if err := s.db.QueryRow(r.Context(), `SELECT id FROM blueprints WHERE name='default'`).Scan(&def); err == nil {
+		if err := s.db.QueryRow(r.Context(), `SELECT id FROM blueprints WHERE name='default' AND tenant_id=1`).Scan(&def); err == nil {
 			bp.Parent = &def
 		}
 	}
@@ -861,7 +1035,10 @@ func (s *Server) saveBlueprint(ctx context.Context, actor string, bp *blueprintR
 // validateBlueprint checks name, items and inheritance before a save.
 func (s *Server) validateBlueprint(ctx context.Context, bp blueprintRec) error {
 	if !identOK(bp.Name) {
-		return invalid(errors.New("name must be 1..64 characters: letters, digits, dot, dash, underscore"))
+		return invalid("name", errors.New("name must be 1..64 characters: letters, digits, dot, dash, underscore"))
+	}
+	if bp.Name == "default" && ownerTenant(ctx) != defaultTenant { // names are unique per tenant; default applies by name
+		return &userError{http.StatusConflict, "the name is already in use"}
 	}
 	items, err := s.allItems(ctx)
 	if err != nil {
@@ -872,7 +1049,7 @@ func (s *Server) validateBlueprint(ctx context.Context, bp blueprintRec) error {
 		ids[it.ID] = true
 	}
 	if err := api.ValidateTree(bp.Tree, func(i int64) bool { return ids[i] }); err != nil {
-		return invalid(err)
+		return invalid("tree", err)
 	}
 	if bp.Parent == nil {
 		return nil
@@ -883,11 +1060,11 @@ func (s *Server) validateBlueprint(ctx context.Context, bp blueprintRec) error {
 		return err
 	}
 	if !ok {
-		return invalid(errors.New("the parent blueprint does not exist"))
+		return invalid("parent_id", errors.New("the parent blueprint does not exist"))
 	}
 	if bp.ID > 0 {
 		if err := s.checkNoCycle(ctx, bp.ID, *bp.Parent); err != nil {
-			return invalid(err)
+			return invalid("parent_id", err)
 		}
 	}
 	return nil
@@ -907,6 +1084,9 @@ func (s *Server) storeBlueprint(ctx context.Context, actor, action, note string,
 		var exists bool
 		if id > 0 {
 			if err := tenantGuard(ctx, tx, "blueprints", id); err != nil {
+				return err
+			}
+			if err := checkIfMatch(ctx, tx, "blueprints", id); err != nil {
 				return err
 			}
 			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blueprints WHERE id=$1)`, id).Scan(&exists); err != nil {

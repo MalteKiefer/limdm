@@ -103,15 +103,41 @@ func mapRole(mappings []RoleGroup, groups []string) (string, []string) {
 }
 
 // memberGroups lists the directory groups of an active directory user plus
-// extra names (OIDC group claim).
-func (s *Server) memberGroups(ctx context.Context, email string, extra []string) ([]string, error) {
-	rows, err := s.db.Query(ctx, `SELECT g.name FROM dir_groups g JOIN dir_members m ON m.group_id=g.id
+// extra names (OIDC group claim), and the names the user holds only through
+// SCIM groups.
+func (s *Server) memberGroups(ctx context.Context, email string, extra []string) ([]string, []string, error) {
+	rows, err := s.db.Query(ctx, `SELECT g.name, g.source FROM dir_groups g JOIN dir_members m ON m.group_id=g.id
 		JOIN dir_users u ON u.id=m.user_id WHERE lower(u.email)=$1 AND u.active`, email)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	return append(names, extra...), err
+	type member struct{ Name, Source string }
+	list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[member])
+	if err != nil {
+		return nil, nil, err
+	}
+	names := append([]string{}, extra...)
+	var scim []string
+	for _, m := range list {
+		names = append(names, m.Name)
+		if m.Source == "scim" {
+			scim = append(scim, m.Name)
+		}
+	}
+	scimOnly := slices.DeleteFunc(scim, func(n string) bool {
+		return slices.Contains(extra, n) || slices.ContainsFunc(list, func(m member) bool { return m.Name == n && m.Source != "scim" })
+	})
+	return names, scimOnly, nil
+}
+
+// adminMappings drops the mappings that must not grant the admin role:
+// all of them while four eyes approval is on (an administrator needs an
+// approved account), and those of groups the user holds only through SCIM,
+// whose static token would otherwise create global administrators.
+func adminMappings(m []RoleGroup, fourEyes bool, scimOnly []string) []RoleGroup {
+	return slices.DeleteFunc(slices.Clone(m), func(g RoleGroup) bool {
+		return g.Role == "admin" && (fourEyes || slices.Contains(scimOnly, g.Group))
+	})
 }
 
 // groupRole derives the role of a console user created from a group mapping.
@@ -120,12 +146,12 @@ func (s *Server) groupRole(ctx context.Context, email string, claim []string) (s
 	if len(m) == 0 {
 		return "", nil
 	}
-	groups, err := s.memberGroups(ctx, email, claim)
+	groups, scimOnly, err := s.memberGroups(ctx, email, claim)
 	if err != nil {
 		s.log.Error("directory groups", "err", err)
 		return "", nil
 	}
-	return mapRole(m, groups)
+	return mapRole(adminMappings(m, s.settings().FourEyes, scimOnly), groups)
 }
 
 // syncGroupUser runs at OIDC sign in: a person without an explicit console
@@ -252,10 +278,12 @@ func (s *Server) unscoped(h handler) handler {
 	}
 }
 
-// activeAdmins counts enabled admin accounts (OIDC and local).
+// activeAdmins counts enabled admin accounts (OIDC and local); accounts from
+// group mappings do not count, they lose the admin role while four eyes
+// approval is on (adminMappings).
 func (s *Server) activeAdmins(ctx context.Context) (int, error) {
 	var n int
-	err := s.db.QueryRow(ctx, `SELECT (SELECT count(*) FROM console_users WHERE role='admin' AND NOT disabled)
+	err := s.db.QueryRow(ctx, `SELECT (SELECT count(*) FROM console_users WHERE role='admin' AND NOT disabled AND NOT from_group)
 		+ (SELECT count(*) FROM local_admins WHERE role='admin' AND NOT disabled)`).Scan(&n)
 	return n, err
 }

@@ -12,6 +12,8 @@ The documents for LiMDM 0.16. Start with [Installation](installation.md), then
 | [installation.md](installation.md) | Supported systems, Docker Compose, deb and rpm packages behind Caddy, PostgreSQL, ports, files, first sign in |
 | [configuration.md](configuration.md) | Every environment variable, every Settings tab and field, roles, install script and Docker variables |
 | [operations.md](operations.md) | Upgrades, backup and restore, health checks, releases and agent updates, monitoring, syslog, retention, command line, troubleshooting |
+| [backup.md](backup.md) | Built in encrypted backups (local, S3, B2, SFTP, WebDAV), schedule, GFS expiry, restore, restore test |
+| [retention.md](retention.md) | Retention period per data type with defaults and legal reasoning |
 | [high-availability.md](high-availability.md) | Several server instances behind a load balancer on one PostgreSQL database |
 | [keys.md](keys.md) | Key inventory, PKCS#11 HSM, rotation runbooks, compromise procedure |
 | [tenants.md](tenants.md) | Multi tenancy, super admins, tenant branding, shared objects |
@@ -26,6 +28,7 @@ The documents for LiMDM 0.16. Start with [Installation](installation.md), then
 | [compliance.md](compliance.md) | Built in checks with IDs and references, custom checks, policies, risk exceptions, history, evidence |
 | [notifications.md](notifications.md) | Channels and every notification event |
 | [software.md](software.md) | Software catalog, requests, Flathub and vendor repositories |
+| [packages.md](packages.md) | Uploaded packages, scripts and files, delivery and verification |
 | [network.md](network.md) | WLAN, 802.1X, WireGuard and OpenVPN profiles, EAP-TLS certificates, CRL |
 | [disk-encryption.md](disk-encryption.md) | LUKS recovery keys, escrow, rotation, TPM 2.0, lost devices |
 | [remote-shell.md](remote-shell.md) | Audited remote support shell |

@@ -5,19 +5,17 @@ import (
 	"fmt"
 	"os"
 	"os/user"
-	"path/filepath"
 	"slices"
 	"strconv"
-	"syscall"
 
 	"github.com/maltekiefer/limdm/internal/api"
 )
 
 // fileAllowed limits devices without allow_scripts to the allowlist of
-// plain text locations (api.SafeFilePath), refuses files with an execute
-// bit there, and makes sure no component of the path is a symlink: a link
-// in a parent would redirect the write elsewhere, and a link as the file
-// itself would make the mode change follow it.
+// plain text locations (api.SafeFilePath) and refuses files with an execute
+// bit there. Symlinks in the path are refused on every device by the
+// writer itself (writeNoFollow): a link in a parent would redirect the
+// write elsewhere, a link as the file would make the mode change follow it.
 func fileAllowed(f api.File, allowScripts bool) error {
 	if allowScripts {
 		return nil
@@ -27,26 +25,6 @@ func fileAllowed(f api.File, allowScripts bool) error {
 	}
 	if m, _ := f.FileMode(); m&0o111 != 0 {
 		return errors.New("executable files only on devices enrolled with allow_scripts")
-	}
-	return noSymlinks(f.Path)
-}
-
-// noSymlinks fails when the deepest existing directory of p resolves to a
-// different path, or p itself is a symlink.
-func noSymlinks(p string) error {
-	dir := filepath.Dir(p)
-	for !exists(dir) && dir != "/" {
-		dir = filepath.Dir(dir)
-	}
-	real, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return err
-	}
-	if real != dir {
-		return fmt.Errorf("%s is a symlink to %s", dir, real)
-	}
-	if st, err := os.Lstat(p); err == nil && st.Mode()&os.ModeSymlink != 0 {
-		return errors.New("the file is a symlink")
 	}
 	return nil
 }
@@ -78,18 +56,7 @@ func writeManagedFile(f api.File) (bool, error) {
 		return false, err
 	}
 	mode, _ := f.FileMode()
-	changed, err := writeIfChanged(f.Path, f.Content, os.FileMode(mode))
-	if err != nil {
-		return changed, err
-	}
-	st, err := os.Lstat(f.Path)
-	if err != nil {
-		return changed, err
-	}
-	if s, ok := st.Sys().(*syscall.Stat_t); ok && (int(s.Uid) != uid || int(s.Gid) != gid) {
-		return true, os.Lchown(f.Path, uid, gid)
-	}
-	return changed, nil
+	return writeNoFollow(f.Path, []byte(f.Content), os.FileMode(mode), uid, gid)
 }
 
 // applyFiles writes the declared files and removes the ones LiMDM wrote
@@ -97,6 +64,9 @@ func writeManagedFile(f api.File) (bool, error) {
 // declaration is invalid: its files would look undeclared.
 func (a *Agent) applyFiles(files []api.File) {
 	var written []string
+	if a.state.ManagedFileSums == nil {
+		a.state.ManagedFileSums = map[string]string{}
+	}
 	for _, f := range files {
 		if err := fileAllowed(f, a.cfg.AllowScripts); err != nil {
 			a.problem(api.TypeFiles, "file %s: %v", f.Path, err)
@@ -105,8 +75,11 @@ func (a *Agent) applyFiles(files []api.File) {
 		written = append(written, f.Path)
 		if changed, err := writeManagedFile(f); err != nil {
 			a.problem(api.TypeFiles, "file %s: %v", f.Path, err)
-		} else if changed {
-			a.event("wrote %s", f.Path)
+		} else {
+			a.state.ManagedFileSums[f.Path] = contentSum([]byte(f.Content))
+			if changed {
+				a.event("wrote %s", f.Path)
+			}
 		}
 	}
 	if slices.ContainsFunc(a.declStatus, func(s api.DeclarationStatus) bool { return s.Type == api.TypeFiles && !s.Valid }) {
@@ -117,19 +90,29 @@ func (a *Agent) applyFiles(files []api.File) {
 }
 
 // removeUndeclared removes managed files not in written and records written
-// as the managed set.
+// as the managed set. A file is removed only when it is still the regular
+// file LiMDM wrote (no symlink on the way, same content); otherwise it
+// stays and is no longer managed.
 func (a *Agent) removeUndeclared(written []string) {
 	keep := slices.Clone(written)
 	for _, p := range a.state.ManagedFiles {
 		if slices.Contains(written, p) {
 			continue
 		}
-		if err := os.Remove(p); err == nil {
+		switch err := removeNoFollow(p, a.state.ManagedFileSums[p]); {
+		case err == nil:
 			a.event("removed %s (no longer declared)", p)
-		} else if !os.IsNotExist(err) {
+		case errors.Is(err, errNotOurs):
+			a.event("kept %s (no longer declared): %v", p, err)
+		default:
 			a.problem(api.TypeFiles, "remove %s: %v", p, err)
 			keep = append(keep, p) // try again next cycle
 		}
 	}
 	a.state.ManagedFiles = slices.Compact(slices.Sorted(slices.Values(keep)))
+	for p := range a.state.ManagedFileSums {
+		if !slices.Contains(a.state.ManagedFiles, p) {
+			delete(a.state.ManagedFileSums, p)
+		}
+	}
 }

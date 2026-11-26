@@ -70,6 +70,39 @@ func TestLimiter(t *testing.T) {
 	if _, ok := l.hits["old"]; ok {
 		t.Fatal("idle key kept")
 	}
+	// over the bound, the least recently used throughput keys go; failure
+	// counters stay
+	prev := limiterMaxKeys
+	limiterMaxKeys = 2
+	t.Cleanup(func() { limiterMaxKeys = prev })
+	l.mu.Lock()
+	now := time.Now()
+	l.hits = map[string][]time.Time{"dev:1": {now.Add(-3 * time.Minute)}, "dev:2": {now.Add(-2 * time.Minute)}, "dev:3": {now.Add(-time.Minute)},
+		"login:1.2.3.4": {now.Add(-4 * time.Minute)}, "enroll:1.2.3.4": {now.Add(-4 * time.Minute)}}
+	l.swept = time.Time{}
+	l.sweep(now)
+	_, d1 := l.hits["dev:1"]
+	_, d3 := l.hits["dev:3"]
+	_, login := l.hits["login:1.2.3.4"]
+	_, enroll := l.hits["enroll:1.2.3.4"]
+	l.mu.Unlock()
+	if d1 || !d3 || !login || !enroll {
+		t.Fatalf("eviction: dev:1 %v dev:3 %v login %v enroll %v", d1, d3, login, enroll)
+	}
+	// failure counters have their own, larger bound
+	prevF := limiterMaxFailureKeys
+	limiterMaxFailureKeys = 1
+	t.Cleanup(func() { limiterMaxFailureKeys = prevF })
+	l.mu.Lock()
+	l.hits = map[string][]time.Time{"enroll:a": {now.Add(-2 * time.Minute)}, "enroll:b": {now.Add(-time.Minute)}}
+	l.swept = time.Time{}
+	l.sweep(now)
+	_, a := l.hits["enroll:a"]
+	_, b := l.hits["enroll:b"]
+	l.mu.Unlock()
+	if a || !b {
+		t.Fatalf("failure key bound: a %v b %v", a, b)
+	}
 	// IPv6 clients share the budget of their /64
 	r1, r2 := httptest.NewRequest("GET", "/", nil), httptest.NewRequest("GET", "/", nil)
 	r1.RemoteAddr, r2.RemoteAddr = "[2001:db8:1:2::1]:4000", "[2001:db8:1:2::ffff]:4000"

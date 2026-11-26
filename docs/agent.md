@@ -21,11 +21,19 @@ there.
 
 | Family | Distributions | Packages | Init | Notes |
 |---|---|---|---|---|
-| Debian | Debian, Ubuntu, Mint, Pop!_OS | apt, `.deb` | systemd | full feature set |
-| Fedora | Fedora, CentOS Stream, RHEL, Rocky, Alma | dnf, `.rpm` | systemd | full feature set |
-| SUSE | openSUSE Leap, openSUSE Tumbleweed, SLES, SLED | zypper, `.rpm` | systemd | see [SUSE](#suse) |
+| Debian | Debian 12 and later, Ubuntu 22.04 and later, Mint 21 and later, Pop!_OS 22.04 and later | apt, `.deb` | systemd | full feature set |
+| Fedora | Fedora, CentOS Stream 9 and later, RHEL, Rocky and Alma 9 and later | dnf, `.rpm` | systemd | full feature set |
+| SUSE | openSUSE Leap 16, openSUSE Tumbleweed, SLES and SLED 16 | zypper, `.rpm` | systemd | see [SUSE](#suse) |
 | Arch | Arch, Manjaro, EndeavourOS | pacman, `.pkg.tar.zst` | systemd | no osquery (native inventory); pending updates through `pacman-contrib`; updates are always full upgrades |
-| Alpine | Alpine | apk, `.apk` | OpenRC | no osquery; no host firewall management; SSO login needs linux-pam; no systemd watchdog (supervise-daemon restarts the agent) |
+| Alpine | Alpine 3.17 and later | apk, `.apk` | OpenRC | no osquery; no host firewall management; SSO login needs linux-pam; no systemd watchdog (supervise-daemon restarts the agent) |
+
+The agent needs OpenSSL 3: the installer verifies the Ed25519 signature of the release with
+`openssl pkeyutl -rawin`, which OpenSSL 1.1.1 lacks, and the packages depend on
+`openssl >= 3`. Systems whose default OpenSSL is 1.1.1 are not supported, with no fallback:
+Ubuntu 20.04, Debian 11, RHEL, Rocky and Alma 8, CentOS Stream 8, openSUSE Leap 15 and
+SLES 15 (both still ship OpenSSL 1.1.1 as `openssl`), and Alpine 3.16 and older. On them
+the installer stops with "this system is not supported by the LiMDM agent (OpenSSL 3
+required)".
 
 Arch and Alpine are rolling or have no separate security channel: every pending update
 counts for the security update check, and "install all updates" upgrades everything.
@@ -50,8 +58,8 @@ dependencies, and the agent installs any missing tool itself.
   package names and Fedora (rpm-md) repositories. Switching off unmanaged `.repo` files
   works as on Fedora, with the original kept in `/var/lib/limdm/repo-backup`.
 * osquery comes from the official rpm repository, as on Fedora.
-* Firewall: firewalld. Mandatory access control is checked as it runs: AppArmor (Leap 15,
-  SLES 15) or SELinux (Leap 16, Tumbleweed).
+* Firewall: firewalld. Mandatory access control is checked as it runs: AppArmor or
+  SELinux (Leap 16 and Tumbleweed use SELinux).
 * PAM: the SSO hook goes into `common-auth` (the `common-auth-pc` file of pam-config);
   if a later `pam-config` run drops it, the agent adds it again. The password quality fix
   installs `pam_pwquality` and runs `pam-config --add --pwquality`.
@@ -92,8 +100,12 @@ fingerprint, no secret. It
 2. writes `/etc/limdm/enroll.conf` (0600) from `LIMDM_TOKEN`; without `LIMDM_TOKEN` it uses
    an existing `/etc/limdm/enroll.conf`,
 3. finds the newest release of `LIMDM_RELEASE_REPO` through the GitHub API, downloads
-   `limdm-agent_<version>_linux_<arch>.<deb|rpm|pkg.tar.zst|apk>` and verifies it against
-   `limdm_<version>_SHA256SUMS`,
+   `limdm-agent_<version>_linux_<arch>.<deb|rpm|pkg.tar.zst|apk>`,
+   `limdm_<version>_SHA256SUMS` and its signature `limdm_<version>_SHA256SUMS.sig`, checks
+   the Ed25519 signature with the release public key embedded in the script (the key the
+   server has, `LIMDM_RELEASE_PUBLIC_KEY`; OpenSSL 3 does the check) and then the package
+   against the signed sums; anything that does not verify stops the installation, so a
+   tampered GitHub release cannot install anything,
 4. on apt, dnf and zypper systems adds the osquery repository, trusting only the embedded
    signing key `1484 120A C4E9 F8A1 A577 AEEE 97A8 0C63 C9D8 B80B`,
 5. installs osquery and the agent; the package enrolls the device from `enroll.conf` in its
@@ -160,12 +172,18 @@ Example with Ansible:
 ## Manual installation and other systems
 
 ```sh
-sudo sh install-agent.sh ./limdm-agent_0.16.0_linux_amd64.deb   # adds osquery, installs both
+# SHA256SUMS and SHA256SUMS.sig of the release next to the package; the key is the
+# RELEASE_KEY line of https://mdm.example.com/install.sh
+sudo LIMDM_RELEASE_PUBLIC_KEY=<hex> sh install-agent.sh ./limdm-agent_0.16.0_linux_amd64.deb   # adds osquery, installs both
 sudo limdm-agent enroll --config /etc/limdm/enroll.conf
 sudo systemctl enable --now limdm-agent
 ```
 
 or with flags: `limdm-agent enroll --server URL --fingerprint FP --token TOKEN [--allow-scripts] [--allow-remote-shell]`.
+`install-agent.sh` verifies the signature of `limdm_<version>_SHA256SUMS` and the package
+checksum before it installs anything; there is no way to skip it. Packages you build yourself
+are signed with your own release key (`limdm-server keygen`, see [operations.md](operations.md#release-key)).
+Both installers stop at once on a system without OpenSSL 3.
 Distributions without apt, dnf, zypper, pacman or apk use the tar.gz release; the agent
 falls back to native inventory when osquery is missing.
 
@@ -214,6 +232,11 @@ in [concepts.md](concepts.md#agent-cycle). In addition it
 * starts the desktop helper in graphical sessions that did not start it themselves,
 * keeps enforcing the stored declarations while the server is unreachable, and locks the
   device after `offline_lock_hours` without contact when that is set.
+
+The agent runs with lower CPU and I/O priority (systemd `Nice=10`, `CPUWeight=20`,
+`IOSchedulingClass=best-effort` with priority 7; on OpenRC nice 10 and ionice 2:7), so its
+background work yields to users on laptops and to workloads on servers. Package installs it
+starts inherit that priority.
 
 ### Privacy options
 
@@ -375,7 +398,12 @@ Agents are updated from the console, page **Agents**:
 2. An admin **approves** a version. Nothing is installed before that.
 3. Rollout: with **Update agents automatically**, devices tagged with the **Pilot tag** get
    an approved version at their next check in, all others after the delay (default 7
-   days). **Update agent…** on a device page installs the newest approved version, or any
+   days) spread over the **Rollout window** (default 24 hours): each device gets the version
+   at its own fixed offset within the window (derived from device and version), so a release
+   reaches the fleet evenly instead of within one poll minute. 0 hands it to all at once.
+   The server serves at most `LIMDM_UPDATE_DOWNLOADS` packages at once per instance
+   (default 20); further downloads wait up to 20 seconds, then get 503 with `Retry-After`
+   and the agent tries again later without counting a failed update. **Update agent…** on a device page installs the newest approved version, or any
    fetched version that is not blocked and newer than the running one, on that device
    only, regardless of policy and delay. Picking a version counts as its approval for this
    device. Agents never downgrade: an older pick is dropped. **Outdated agents** on the
@@ -433,13 +461,26 @@ well.
 * Terminal and SSH sessions of people end (they cannot be locked); root's stay. While the
   device is locked, the agent ends such sessions again every minute.
 * Graphical sessions are locked, not ended, like on Windows and macOS (unsaved work stays):
-  GNOME, KDE Plasma, Xfce, Cinnamon and MATE through logind,
+  GNOME, KDE Plasma, Xfce, Cinnamon and MATE through logind (Xfce additionally with i3lock),
   compositors and window managers without a logind aware locker (labwc, sway, Hyprland,
   river, niri, Wayfire, i3 and others) get swaylock or i3lock started directly, again every
   minute while the device stays locked.
 
-Whether a session is locked is checked: logind's LockedHint or a running locker; only
-where neither shows after a few seconds does the agent start swaylock or i3lock itself.
+Whether a session still needs the agent's locker is decided only from what the session's
+user cannot fake. The agent skips a session whose logind `Desktop` (set by the display
+manager at login) is GNOME, KDE Plasma, Cinnamon or MATE, whose shell locks itself on
+logind's request. So that the user cannot make these shells ignore the request with their
+own `disable-lock-screen` setting (`org.gnome.desktop.lockdown`, `org.cinnamon.desktop.lockdown`,
+`org.mate.lockdown`), the agent sets it to `false` in the dconf system database with a lock
+while the device is locked or lost (`/etc/dconf/db/local.d/50-limdm-device-lock`), and removes
+it on unlock. KDE Plasma has no such dconf key; its user restriction `action/lock_screen` in
+`kdeglobals` is not overridden. Every other graphical session gets swaylock or i3lock started by the
+agent, even when a locker seems to run already: logind's `LockedHint` (the session owner
+sets it), process names (any program can be called `i3lock`) and a locker's environment
+(a real locker can run on another, nested or virtual display) are not trusted. A second
+locker on an already locked session fails harmlessly. Xfce sessions therefore may get
+i3lock on top of their own locker.
+
 Sessions are found through logind, one by one (also several sessions of one user), and
 each gets the display and D-Bus environment of its own processes.
 
@@ -484,6 +525,12 @@ agent update that is due (a version picked for the device, an admin request, or 
 version the rollout policy releases for it). Agent updates can carry security fixes, so they
 do not wait for the next regular check in. A version being installed or one that already
 failed on the device does not trigger check ins. After failed polls the agent waits longer,
-up to 5 minutes, and returns to one minute with the first answer. Restart and shutdown
+up to 5 minutes plus up to half of that as random delay, and returns to one minute with the
+first answer. Failed check ins back off the same way: the interval doubles per failure up to
+15 minutes, with up to 50 % random delay, so a fleet does not return in the same seconds
+after a server outage. When the server answers 503 or 429 (overloaded, too many parallel
+package downloads) the agent honors `Retry-After` (at most 30 minutes, plus jitter) for check
+ins, polls and update downloads; a deferred update download is not reported as a failed
+update and is offered again later. Restart and shutdown
 delays count from when the command was sent in the console; a command that arrives late
 still gives users at least one minute of warning.

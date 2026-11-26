@@ -184,10 +184,30 @@ Custom checks never run a shell. The only program a check starts is `osqueryi` w
 query, for at most 30 seconds, with extensions disabled. Server (on save) and agent (before
 running) both accept only one read only statement of at most 4096 characters: it must start
 with `SELECT` or `WITH` and may not contain a second statement (a trailing semicolon is
-fine), comments, control characters, `INSERT`, `UPDATE`, `DELETE`, `REPLACE` (the string
-function `replace()` is allowed), `ATTACH`, `DETACH`, `PRAGMA`, `load_extension`,
-`writefile` or the osquery tables `curl`, `curl_certificate` and `carves` (network requests
-and file carving). Without osquery on the device a query check fails. Items of several
+fine), comments, control characters, characters outside ASCII (except inside `'string'`
+literals), `INSERT`, `UPDATE`, `DELETE`, `REPLACE` (the string function `replace()` is
+allowed), `ATTACH`, `DETACH`, `PRAGMA`, `load_extension`, `writefile` or `readfile`.
+The validator tokenizes the query like SQLite (quoted names `"x"`, `[x]` and `` `x` ``,
+schema qualified `main.x`) and checks every table after `FROM`, `JOIN`, a comma in a
+`FROM` clause and `IN` against an allowlist of local tables:
+`apparmor_profiles`, `apt_sources`, `authorized_keys`, `block_devices`,
+`cpu_info`, `crontab`, `deb_packages`, `disk_encryption`, `dns_resolvers`, `etc_hosts`,
+`etc_protocols`, `etc_services`, `file`, `groups`, `hash`, `interface_addresses`,
+`interface_details`, `iptables`, `kernel_info`, `kernel_modules`, `last`,
+`listening_ports`, `logged_in_users`, `md_devices`, `memory_info`, `mounts`,
+`npm_packages`, `os_version`, `osquery_info`, `pci_devices`, `platform_info`,
+`portage_packages`, `process_open_sockets`, `processes`, `python_packages`, `routes`,
+`rpm_packages`, `secureboot`, `selinux_settings`, `shadow`, `ssh_configs`,
+`startup_items`, `sudoers`, `suid_bin`, `system_controls`, `system_info`,
+`systemd_units`, `time`, `tpm_info`, `uptime`, `usb_devices`, `user_groups`,
+`user_ssh_keys`, `users`, `yum_sources`, plus the common table expressions of a leading
+`WITH`. Tables that reach the network (`curl`, `curl_certificate`, cloud metadata,
+`prometheus_metrics`), carve files, read process environments or read any file (`augeas`, whose lenses parse `/etc/shadow` too) are refused. The agent
+also starts `osqueryi` with `--enable_tables` set to the same allowlist and
+`--disable_tables` for the network and carving tables, so osquery itself does not offer
+them. The result sent to the server holds only the row count and, for `compare`, the
+compared value of the first failing row (at most 64 characters); rows are never sent.
+Without osquery on the device a query check fails. Items of several
 blueprints are merged by `id`; the item evaluated last wins.
 
 ## Policy: `com.limdm.compliance`

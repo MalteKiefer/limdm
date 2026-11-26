@@ -9,11 +9,11 @@ each one without enrolling the fleet again.
 |---|---|---|---|---|
 | Device CA (`ca`) | issues the agents' mTLS client certificates and the certificate of the agent listener; agents pin it | ECDSA P-384, certificate 15 years | `LIMDM_CA_DIR/<name>.crt` and `<name>.key` (0600), or the HSM | yes, with the CA directory |
 | Network CA (`network-ca`) | issues EAP-TLS device certificates and signs the network CRL ([network.md](network.md)) | ECDSA P-384, 15 years | as above | yes |
-| Command key (`command`) | signs commands and library items; the audit chain key is derived from it | Ed25519 | `LIMDM_CA_DIR/<name>.key` (0600), or the HSM | yes |
+| Command key (`command`) | signs commands, library items, catalog apps, managed Flatpak remotes and device user lists; the audit chain key is derived from it | Ed25519 | `LIMDM_CA_DIR/<name>.key` (0600), or the HSM | yes |
 | Audit chain keys | HMAC-SHA256 of the audit log ([security.md](security.md#audit-log)) | derived with HKDF from the command key | derived; earlier segments in `LIMDM_CA_DIR/audit-keys` (0600) | yes, `audit-keys` and `audit-keyed-from` |
 | Session key | signs console sessions and CSRF tokens, derives the AES-256-GCM keys for sealed values (OIDC client secret, Google service account key, notification channel secrets, LUKS recovery keys, desktop login client secret, webhook signing secret) | 32+ random bytes | `LIMDM_SESSION_KEY` in `server.env` or `.env` | yes, apart from the database |
-| Webhook signing secret (`webhook`) | signs the compliance webhook and signed webhook channels (`X-LiMDM-Signature`) | HMAC-SHA256, 32 random bytes | settings row `webhook` in the database, sealed with the session key; shown in Settings, Notifications | yes, with the database |
-| Release key | signs `SHA256SUMS` of agent releases; its public half is compiled into the agent | Ed25519 | CI secret `RELEASE_SIGNING_KEY`, an offline file, or the HSM ([operations.md](operations.md#release-key)) | offline |
+| Webhook signing secret (`webhook`) | signs the compliance webhook and global signed webhook channels (`X-LiMDM-Signature`); each tenant's channel secret is derived from it ([notifications.md](notifications.md#webhook-channel-payload-and-signature)) | HMAC-SHA256, 32 random bytes | settings row `webhook` in the database, sealed with the session key; shown in Settings, Notifications | yes, with the database |
+| Release key | signs `SHA256SUMS` of agent releases; its public half is compiled into the agent and the server (`/install.sh` embeds it, `LIMDM_RELEASE_PUBLIC_KEY` overrides it) | Ed25519 | CI secret `RELEASE_SIGNING_KEY`, an offline file, or the HSM ([operations.md](operations.md#release-key)) | offline |
 | Console TLS key | HTTPS of the console | any | `LIMDM_TLS_KEY` or the reverse proxy | as usual |
 
 The agent listener certificate is issued by the device CA at every start (one year, renewed
@@ -156,8 +156,9 @@ still holds the old keys refuses to start. A step waits while an instance starts
 
 ### Command key
 
-1. `rotate command`. After the restart the new key signs commands and library items (items
-   signed by the old key are signed again at start), and the audit chain starts a new
+1. `rotate command`. After the restart the new key signs commands, library items, catalog
+   apps, managed remotes and device user lists (what the old key signed is signed again at
+   start), and the audit chain starts a new
    segment keyed from the new key (`audit.key_rotate`). The first process that starts with
    the new key records the segment, a server or a later `limdm-server keys` call; from then
    on an instance that still runs the old key can no longer write audit entries until it

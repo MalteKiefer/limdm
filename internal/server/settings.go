@@ -1,12 +1,15 @@
 package server
 
 import (
+	"cmp"
 	"context"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -40,6 +43,12 @@ type Settings struct {
 	// Loopback is always allowed, so the host itself can repair a mistake.
 	ConsoleAllow []string `json:"console_allow,omitempty"`
 	ConsoleBlock []string `json:"console_block,omitempty"`
+	// SCIMAllow limits /scim/ to these networks (the identity provider's
+	// provisioning addresses); empty allows every network.
+	SCIMAllow []string `json:"scim_allow,omitempty"`
+	// NotifyPrivate lets global notification channels reach private
+	// networks (an internal SIEM or mail relay); tenant channels never can.
+	NotifyPrivate bool `json:"notify_private_networks,omitempty"`
 	// Password rules for passwords chosen in the console: local accounts on
 	// devices (create, reset) and local console accounts.
 	Rules PasswordPolicy `json:"password_policy"` // password rules
@@ -52,8 +61,12 @@ type Settings struct {
 	// (amr), or, with MFAACR set, whose acr is not one of these values.
 	RequireMFA bool     `json:"require_mfa,omitempty"`
 	MFAACR     []string `json:"mfa_acr,omitempty"`
-	// AuditRetentionDays deletes audit entries older than this (0 keeps them).
+	// AuditRetentionDays is the audit period saved before Retention existed;
+	// it still applies until the retention tab is saved (retention.go).
 	AuditRetentionDays int `json:"audit_retention_days,omitempty"`
+	// Retention is the period in days per data type (retentionKinds); a
+	// missing entry uses the default.
+	Retention map[string]int `json:"retention,omitempty"`
 	// RoleGroups give console roles to members of directory groups or OIDC
 	// group claims.
 	RoleGroups []RoleGroup `json:"role_groups,omitempty"`
@@ -63,6 +76,61 @@ type Settings struct {
 	Geolocation bool                `json:"geolocation,omitempty"`
 	FallbackDNS bool                `json:"fallback_dns,omitempty"`
 	RemoteShell RemoteShellSettings `json:"remote_shell,omitzero"`
+	Ops         OpsSettings         `json:"ops"`
+}
+
+// OpsSettings are the runtime operations of every instance (Settings,
+// Operations). The environment variables of the same name only give the
+// initial values; once saved in the console, the stored values apply.
+type OpsSettings struct {
+	LogLevel      string `json:"log_level"`       // debug, info, warn or error (LIMDM_LOG_LEVEL)
+	AccessLog     bool   `json:"access_log"`      // a log line per request (LIMDM_ACCESS_LOG)
+	AuditAPIReads string `json:"audit_api_reads"` // off, sensitive or all (LIMDM_AUDIT_API_READS)
+	// parallel agent package downloads per instance (LIMDM_UPDATE_DOWNLOADS)
+	UpdateDownloads int `json:"update_downloads"`
+	MaxCheckins     int `json:"max_checkins"` // check ins processed at once per instance (LIMDM_MAX_CHECKINS)
+	// load balancers that send a PROXY v2 header to the agent listener;
+	// empty: PROXY protocol off (LIMDM_AGENT_PROXY_PROTOCOL)
+	AgentProxyFrom []string `json:"agent_proxy_protocol"`
+	Syslog         string   `json:"syslog"`    // udp://, tcp:// or tcp+tls://host:port (LIMDM_SYSLOG)
+	SyslogCA       string   `json:"syslog_ca"` // PEM for tcp+tls; empty: system roots (LIMDM_SYSLOG_CA)
+}
+
+// withDefaults fills fields left empty (settings without Ops, tests).
+func (o OpsSettings) withDefaults() OpsSettings {
+	o.LogLevel = cmp.Or(o.LogLevel, "info")
+	o.AuditAPIReads = cmp.Or(o.AuditAPIReads, "sensitive")
+	o.UpdateDownloads = cmp.Or(o.UpdateDownloads, 20)
+	o.MaxCheckins = cmp.Or(o.MaxCheckins, 64)
+	return o
+}
+
+// validate checks the operations settings and returns the parsed PROXY sources.
+func (o OpsSettings) validate() ([]netip.Prefix, error) {
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(o.LogLevel)); err != nil {
+		return nil, errors.New("log level: debug, info, warn or error")
+	}
+	if !slices.Contains([]string{"off", "sensitive", "all"}, o.AuditAPIReads) {
+		return nil, errors.New("audit of API reads: off, sensitive or all")
+	}
+	if o.UpdateDownloads < 1 || o.UpdateDownloads > 10000 || o.MaxCheckins < 1 || o.MaxCheckins > 10000 {
+		return nil, errors.New("parallel downloads and check ins: 1 to 10000")
+	}
+	if o.Syslog != "" {
+		u, err := url.Parse(o.Syslog)
+		if err != nil || (u.Scheme != "udp" && u.Scheme != "tcp" && u.Scheme != "tcp+tls") || u.Host == "" || u.Port() == "" {
+			return nil, errors.New("syslog target: udp://host:port, tcp://host:port or tcp+tls://host:port")
+		}
+	}
+	if o.SyslogCA != "" && !x509.NewCertPool().AppendCertsFromPEM([]byte(o.SyslogCA)) {
+		return nil, errors.New("syslog CA: no PEM certificate found")
+	}
+	proxies, err := parseNets(o.AgentProxyFrom)
+	if err != nil {
+		return nil, fmt.Errorf("PROXY protocol sources: %w", err)
+	}
+	return proxies, nil
 }
 
 // PasswordPolicy: the minimum length (12..128, 12 when unset) and the
@@ -138,6 +206,8 @@ type runtimeState struct {
 	set      Settings
 	allow    []netip.Prefix // parsed ConsoleAllow
 	block    []netip.Prefix // parsed ConsoleBlock
+	scim     []netip.Prefix // parsed SCIMAllow
+	proxy    []netip.Prefix // parsed Ops.AgentProxyFrom
 	auth     *oidcAuth      // nil when OIDC is not configured
 	branding api.Branding   // derived from set once, sent to agents and shown in the console
 }
@@ -148,9 +218,18 @@ func (s *Server) staleAfter() time.Duration {
 	return time.Duration(s.settings().StaleHours) * time.Hour
 }
 
+// envSettings are the settings before anything was saved in the console;
+// a stored setting overrides its field (loadSettings).
 func envSettings(c Config) Settings {
+	proxies := make([]string, len(c.AgentProxyFrom))
+	for i, p := range c.AgentProxyFrom {
+		proxies[i] = p.String()
+	}
 	return Settings{OIDCIssuer: c.OIDCIssuer, OIDCClientID: c.OIDCClientID, OIDCClientSecret: c.OIDCSecret,
-		AllowedDomain: c.AllowedDomain, LocalLogin: c.LocalLogin, StaleHours: int(c.StaleAfter.Hours())}
+		AllowedDomain: c.AllowedDomain, LocalLogin: c.LocalLogin, StaleHours: int(c.StaleAfter.Hours()),
+		Ops: OpsSettings{LogLevel: c.LogLevel, AccessLog: c.AccessLog, AuditAPIReads: c.AuditAPIReads,
+			UpdateDownloads: c.UpdateDownloads, MaxCheckins: c.MaxCheckins, AgentProxyFrom: proxies,
+			Syslog: c.Syslog, SyslogCA: c.SyslogCA}.withDefaults()}
 }
 
 func (s *Server) loadSettings(ctx context.Context) error {
@@ -164,7 +243,9 @@ func (s *Server) loadSettings(ctx context.Context) error {
 		return err
 	default:
 		s.ha.settingsAt.Store(at.UnixMicro())
-		var st storedSettings
+		// on top of the environment: fields saved before they existed in
+		// the console (Ops after an upgrade) keep their environment value
+		st := storedSettings{Settings: set}
 		if err := json.Unmarshal(raw, &st); err != nil {
 			return err
 		}
@@ -189,6 +270,7 @@ func (s *Server) loadSettings(ctx context.Context) error {
 		return err
 	}
 	s.rt.Store(rt)
+	s.applyOps(rt)
 	return nil
 }
 
@@ -254,6 +336,9 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 	if d := set.AuditRetentionDays; d != 0 && (d < 365 || d > 36500) {
 		return nil, errors.New("audit log retention: 0 (keep forever) or 365 to 36500 days")
 	}
+	if err := validRetention(set.Retention); err != nil {
+		return nil, err
+	}
 	if len(set.MFAACR) > 10 {
 		return nil, errors.New("accepted acr values: at most 10")
 	}
@@ -279,6 +364,15 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 	if err != nil {
 		return nil, fmt.Errorf("blocked networks: %w", err)
 	}
+	scim, err := parseNets(set.SCIMAllow)
+	if err != nil {
+		return nil, fmt.Errorf("SCIM networks: %w", err)
+	}
+	set.Ops = set.Ops.withDefaults()
+	proxy, err := set.Ops.validate()
+	if err != nil {
+		return nil, err
+	}
 	var auth *oidcAuth
 	if cur := s.rt.Load(); cur != nil && set.OIDCIssuer != "" && cur.set.OIDCIssuer == set.OIDCIssuer &&
 		cur.set.OIDCClientID == set.OIDCClientID && cur.set.OIDCClientSecret == set.OIDCClientSecret &&
@@ -300,7 +394,7 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 	if auth == nil && !set.LocalLogin && (!s.rediscover.Load() || set.OIDCIssuer == "") {
 		return nil, errors.New("enable at least one login method: OIDC or local accounts")
 	}
-	return &runtimeState{set: set, auth: auth, branding: computeBranding(set), allow: allow, block: block}, nil
+	return &runtimeState{set: set, auth: auth, branding: computeBranding(set), allow: allow, block: block, scim: scim, proxy: proxy}, nil
 }
 
 // parseNets reads CIDRs or single addresses (one per entry).
@@ -329,6 +423,12 @@ func parseNets(list []string) ([]netip.Prefix, error) {
 		return nil, errors.New("at most 200 entries")
 	}
 	return res, nil
+}
+
+// netsContain reports whether the address ip is in one of nets.
+func netsContain(nets []netip.Prefix, ip string) bool {
+	a, err := netip.ParseAddr(ip)
+	return err == nil && slices.ContainsFunc(nets, func(p netip.Prefix) bool { return p.Contains(a.Unmap()) })
 }
 
 // consoleAllowed decides by the client address (clientIP).
@@ -360,6 +460,10 @@ func consoleAllowed(rt *runtimeState, ip string) bool {
 // ---- settings page ----
 
 func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, sess session) {
+	if r.URL.Query().Get("tab") == "backup" && !sess.TenantOnly() { // its own page (backup.go)
+		http.Redirect(w, r, "/settings/backup", http.StatusSeeOther)
+		return
+	}
 	s.renderSettings(w, r, sess, s.settings(), "", "")
 }
 
@@ -387,6 +491,10 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 			return
 		}
 		data["Channels"], data["NotifyEvents"] = views, notifyEvents
+		if t := ctxTenant(r.Context()); t != 0 && sess.Role == "admin" { // signed webhook channels of this tenant
+			data["TenantWebhookSecret"] = hex.EncodeToString(s.tenantWebhookKey(t))
+			data["TenantID"] = t
+		}
 	}
 	if tab == "security" && keysAllowed(sess) {
 		if keys, err := s.KeysStatus(r.Context()); err != nil {
@@ -398,18 +506,23 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 	s.render(w, r, sess, "settings", map[string]any{"Set": set, "ClientIP": clientIP(r), "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
 		"Tab": tab, "Tabs": tabs, "Channels": data["Channels"], "NotifyEvents": data["NotifyEvents"], "Keys": data["Keys"], "TenantOnly": sess.TenantOnly(),
 		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": map[bool]string{false: hex.EncodeToString(s.whKey)}[sess.TenantOnly()],
-		"RoleGroupsText": roleGroupsText(set.RoleGroups)})
+		"RoleGroupsText": roleGroupsText(set.RoleGroups), "TenantWebhookSecret": data["TenantWebhookSecret"], "TenantID": data["TenantID"], "Retention": retentionRows(set)})
 }
 
 // settingsTabs are the sections of the settings page; each tab saves only
 // its own fields.
-var settingsTabs = []string{"general", "security", "sso", "notifications", "branding"}
+var settingsTabs = []string{"general", "security", "sso", "notifications", "branding", "retention", "operations", "backup"}
 
 var settingsTabLabels = []struct{ Key, Label string }{
 	{"general", "General"}, {"security", "Security"}, {"sso", "SSO"}, {"notifications", "Notifications"}, {"branding", "Branding"},
+	{"retention", "Data retention"}, {"operations", "Operations"}, {"backup", "Backup"},
 }
 
 func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess session) {
+	if !backupAdmin(sess) { // server settings are global; tenants save their channels elsewhere
+		s.errorPage(w, r, sess, http.StatusForbidden, "settings are managed by global administrators")
+		return
+	}
 	ctx := r.Context()
 	// held from reading the current settings to storing them: two tabs saved
 	// at once must not overwrite each other, nor leave runtime and database apart
@@ -450,8 +563,10 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		set.RoleGroups = groups
 	case "monitoring":
 		set.WebhookURL = strings.TrimSpace(r.FormValue("webhook_url"))
+		set.NotifyPrivate = r.FormValue("notify_private") == "on"
 	case "network":
 		set.ConsoleAllow, set.ConsoleBlock = strings.Fields(r.FormValue("console_allow")), strings.Fields(r.FormValue("console_block"))
+		set.SCIMAllow = strings.Fields(r.FormValue("scim_allow"))
 	case "branding":
 		set.CompanyName = strings.TrimSpace(r.FormValue("company_name"))
 	case "security":
@@ -461,7 +576,6 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		set.FourEyes = r.FormValue("four_eyes") == "on"
 		set.FourEyesRecovery = set.FourEyes && r.FormValue("four_eyes_recovery") == "on"
 		set.FourEyesShell = set.FourEyes && r.FormValue("four_eyes_shell") == "on"
-		set.AuditRetentionDays, _ = strconv.Atoi(r.FormValue("audit_retention_days"))
 		if set.FourEyes && !cur.FourEyes {
 			n, err := s.activeAdmins(ctx)
 			if err != nil {
@@ -476,6 +590,28 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		set.Geolocation, set.FallbackDNS = r.FormValue("geolocation") == "on", r.FormValue("fallback_dns") == "on"
 	case "remote_shell":
 		set.RemoteShell = remoteShellForm(r)
+	case "operations":
+		dl, err1 := strconv.Atoi(r.FormValue("update_downloads"))
+		ci, err2 := strconv.Atoi(r.FormValue("max_checkins"))
+		if err1 != nil || err2 != nil {
+			s.renderSettings(w, r, sess, set, "", "parallel downloads and check ins: 1 to 10000")
+			return
+		}
+		set.Ops = OpsSettings{LogLevel: r.FormValue("log_level"), AccessLog: r.FormValue("access_log") == "on",
+			AuditAPIReads: r.FormValue("audit_api_reads"), UpdateDownloads: dl, MaxCheckins: ci,
+			AgentProxyFrom: strings.Fields(r.FormValue("agent_proxy_protocol")), Syslog: strings.TrimSpace(r.FormValue("syslog")),
+			SyslogCA: strings.TrimSpace(r.FormValue("syslog_ca"))}
+	case "retention":
+		set.Retention = map[string]int{}
+		for _, k := range retentionKinds {
+			d, err := strconv.Atoi(r.FormValue("retention_" + k.Key))
+			if err != nil {
+				s.renderSettings(w, r, sess, set, "", "retention: whole days only")
+				return
+			}
+			set.Retention[k.Key] = d
+		}
+		set.AuditRetentionDays = 0 // replaced by Retention["audit"]
 	default:
 		s.errorPage(w, r, sess, http.StatusBadRequest, "unknown settings section")
 		return
@@ -533,7 +669,9 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d allow=%q block=%q rules=%+v four_eyes=%v four_eyes_recovery=%v four_eyes_shell=%v require_mfa=%v acr=%q audit_retention_days=%d role_groups=%+v geolocation=%v fallback_dns=%v",
 		set.OIDCIssuer, set.AllowedDomain, set.LocalLogin, set.StaleHours, set.WebhookURL != "", set.OIDCClientSecret != cur.OIDCClientSecret,
 		set.CompanyName, len(set.Logo), set.ConsoleAllow, set.ConsoleBlock, set.Rules,
-		set.FourEyes, set.FourEyesRecovery, set.FourEyesShell, set.RequireMFA, set.MFAACR, set.AuditRetentionDays, set.RoleGroups, set.Geolocation, set.FallbackDNS) + fmt.Sprintf(" remote_shell=%+v", set.RemoteShell)
+		set.FourEyes, set.FourEyesRecovery, set.FourEyesShell, set.RequireMFA, set.MFAACR, set.AuditRetentionDays, set.RoleGroups, set.Geolocation, set.FallbackDNS) + fmt.Sprintf(" remote_shell=%+v retention=%v scim_allow=%q notify_private=%v", set.RemoteShell, set.Retention, set.SCIMAllow, set.NotifyPrivate) +
+		fmt.Sprintf(" log_level=%s access_log=%v audit_api_reads=%s update_downloads=%d max_checkins=%d agent_proxy_protocol=%q syslog=%q syslog_ca_bytes=%d",
+			set.Ops.LogLevel, set.Ops.AccessLog, set.Ops.AuditAPIReads, set.Ops.UpdateDownloads, set.Ops.MaxCheckins, set.Ops.AgentProxyFrom, set.Ops.Syslog, len(set.Ops.SyslogCA))
 	err = s.auditAction(ctx, sess.Email, "settings.save", "server", detail, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()
 			RETURNING updated_at`, string(doc)).Scan(&at)
@@ -543,6 +681,7 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		return
 	}
 	s.rt.Store(rt) // only what is stored and audited becomes active
+	s.applyOps(rt)
 	s.ha.settingsAt.Store(at.UnixMicro())
 	s.renderSettings(w, r, sess, set, "Settings saved and active.", "")
 }

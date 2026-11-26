@@ -470,6 +470,10 @@ func (s *Server) libraryRollback(w http.ResponseWriter, r *http.Request, sess se
 	if err == nil {
 		err = s.storeItem(ctx, sess.Email, "library.rollback", fmt.Sprintf("rollback to version %d", n), &v.Item, true)
 	}
+	if _, ok := pendingApproval(err); ok {
+		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+		return
+	}
 	if err != nil {
 		s.errorPage(w, r, sess, http.StatusConflict, err.Error())
 		return

@@ -5,7 +5,7 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/MalteKiefer/limdm/badge)](https://scorecard.dev/viewer/?uri=github.com/MalteKiefer/limdm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Declarative device management for Linux clients (Debian, Ubuntu, Fedora, CentOS Stream and other RHEL rebuilds, openSUSE, SLES, Arch, Alpine), modelled on
+Declarative device management for Linux clients with OpenSSL 3 (Debian 12+, Ubuntu 22.04+, Fedora, CentOS Stream and RHEL rebuilds 9+, openSUSE Tumbleweed and Leap 16, SLES 16, Arch, Alpine 3.17+), modelled on
 Apple's Declarative Device Management. Administrators describe the desired state; the agent
 on every device converges to it on its own, also while offline, and reports back.
 Compliance checks map to BSI IT-Grundschutz, CIS Benchmarks (Level 1 and 2) and

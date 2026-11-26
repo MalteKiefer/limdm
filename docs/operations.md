@@ -2,25 +2,25 @@
 
 ## Backup
 
-Back up regularly and before every upgrade:
+LiMDM backs up database, CA directory (with `keys.json` and the audit key files) and local
+uploads itself: on configurable schedules, after every key rotation and before package
+upgrades, encrypted with age, signed with the command key, to local, S3 (with Object Lock),
+Backblaze B2, SFTP or WebDAV targets, with retention rules per schedule, weekly checksum
+verification and restore tests. Set it up under **Settings, Backup**;
+the full description is [backup.md](backup.md).
 
-| What | Where | Why |
+| What | In the archive | Why |
 |---|---|---|
-| PostgreSQL database | `pg_dump limdm` | devices, configuration, audit log, sealed secrets, webhook signing secret |
-| CA directory | `LIMDM_CA_DIR` (default `/var/lib/limdm-server/ca`) | device and network CA, command key, `keys.json` (active and retiring key names), `audit-keys` (audit key segments of earlier command keys), `audit-keyed-from` (switch point of the keyed audit chain). Without it no device can check in and the audit log cannot be verified |
-| `LIMDM_SESSION_KEY` | `server.env` or `.env` | without it sealed secrets and recovery keys are unreadable |
+| PostgreSQL database | yes (`COPY` export of one snapshot) | devices, configuration, audit log, sealed secrets, webhook signing secret |
+| CA directory | yes | device and network CA, command key, `keys.json`, `audit-keys`, `audit-keyed-from`. Without it no device can check in and the audit log cannot be verified |
+| Uploaded packages in `LIMDM_ARTIFACT_DIR` | yes | [packages.md](packages.md); uploads in S3 stay in their bucket (enable versioning) |
+| `LIMDM_SESSION_KEY` | **no** | keep it apart from the archives (password safe); without it sealed secrets and recovery keys are unreadable |
+| age private key | **no** | offline, never on the server |
 
-```sh
-sudo -u postgres pg_dump -Fc limdm > limdm-$(date +%F).dump          # package install
-docker compose exec db pg_dump -U limdm -Fc limdm > limdm-$(date +%F).dump   # Docker
-```
-
-Store the CA directory and the session key apart from the database dump, encrypted. Back
-up the CA directory again after every key rotation step. With `LIMDM_KEY_PROVIDER=pkcs11`
-the private keys are in the HSM: back up the token as its vendor describes, and the CA
-directory for the certificates, `keys.json`, `audit-keys` and `audit-keyed-from`.
-For point in time recovery, RPO and RTO guidance and a restore test procedure see
-[high-availability.md](high-availability.md#backup).
+With `LIMDM_KEY_PROVIDER=pkcs11` the private keys are in the HSM: back up the token as its
+vendor describes; the archive holds the certificates and key files. For point in time
+recovery, RPO and RTO guidance see [high-availability.md](high-availability.md#backup); a
+`pg_dump -Fc` next to the built in backup does no harm.
 
 ## Key rotation
 
@@ -31,17 +31,63 @@ Agents must run 0.16 or newer. Runbooks: [keys.md](keys.md).
 
 ## Restore
 
-1. Install the same or a newer server version.
-2. Restore the CA directory and `LIMDM_SESSION_KEY`.
-3. `pg_restore -d limdm limdm-<date>.dump` into an empty database.
-4. Start the server. Devices continue checking in without enrolling again.
+`limdm-server backup restore` restores an archive into an empty database and CA directory
+([backup.md](backup.md#restore)):
+
+1. Install the same or a newer server version; keep the agent port closed.
+2. Set `LIMDM_SESSION_KEY` of the backup and a new, empty `LIMDM_DATABASE_URL`.
+3. `limdm-server backup verify`, then `limdm-server backup restore -identity KEY -command-key HEX -replay
+   AUDIT_AFTER_BACKUP FILE`.
+4. Start one instance, check `/readyz` and the audit chain, then open the agent port.
+
+Devices keep checking in without enrolling again, with these limits:
+
+* A device that **renewed its certificate after the backup** presents a certificate the
+  restored database does not know. During the restore window (default 7 days) the server
+  accepts a certificate of its own device CA issued after the backup once and pins it
+  (`device.cert_repin` audit entry). After the window such a device must enroll again.
+* A device **enrolled after the backup** is unknown and must enroll again.
+* **Retirements, deletions and token revocations after the backup** are undone by the restore.
+  `-replay` applies them again from the syslog copy or an audit export; without such a copy
+  retire lost devices by hand.
+* Other changes after the backup (console users, roles, settings, library, blueprints) are
+  listed by `restore` for a manual review.
 
 ## Upgrades
 
 See [installation.md](installation.md#upgrades). Read the release notes; migrations run
-automatically and are not reversible, so keep the backup until the new version runs.
+automatically and are not reversible: the server packages back up before the upgrade when
+backups are configured ([backup.md](backup.md#before-upgrades)); keep that archive until the
+new version runs.
 With several instances upgrade one at a time, unless the release notes ask for a full stop
 ([high-availability.md](high-availability.md#upgrades)).
+
+### Upgrading from 0.16 to 0.17
+
+1. **Full stop with several instances** ([high-availability.md](high-availability.md#upgrades)):
+   0.16 instances write package lists and device users in a way 0.17 does not read or
+   sign, and the first 0.17 start partitions `device_metrics` and moves the package lists.
+2. **OpenSSL 3 on devices.** The installers verify the release signature with OpenSSL 3
+   and the agent packages depend on `openssl (>= 3)`. Systems without it (Ubuntu 20.04,
+   Debian 11, RHEL, Alma and Rocky 8) are no longer supported: their agents fail the
+   package install of every new version (the update is reported as failed and the agent
+   stays on 0.16). Move these devices to a supported release first.
+3. **Managed files with symlinks in their path fail.** `com.limdm.files` and file uploads
+   are written without following symlinks, also on devices with `allow_scripts`. A path
+   through a symlink (`/lib`, `/bin` and `/sbin` on merged `/usr`, `/var/run`, `/home` on
+   Fedora Atomic) or a target that is itself a link (`/etc/resolv.conf`) is refused, and such
+   a file that becomes undeclared is left in place. Declare the real path (`/usr/lib/...`).
+4. **Password prompts of polkit on GNOME and KDE Plasma.** The SSO device flow does not run
+   for polkit there: the polkit helper runs outside the user's logind session (under
+   `user@.service` or socket activated), which the agent cannot tell from an SSH session.
+   pam_unix decides, so SSO only users without a local password cannot authenticate admin
+   prompts on these desktops ([desktop-login.md](desktop-login.md)).
+5. **Custom compliance checks** may read only the allowlisted osquery tables (no `augeas`;
+   osquery 4 or newer); see [compliance.md](compliance.md).
+6. **Restore** needs `-command-key` unless it runs on a server with the signing command
+   key ([backup.md](backup.md#restore)).
+7. **Outbound proxy.** Notifications and backup targets go through `http` or `https`
+   proxies only (SOCKS is no longer used), with the target resolved by the server.
 
 ### Upgrading from 0.15 to 0.16
 
@@ -177,7 +223,12 @@ scrape_configs:
 | `limdm_notifications_24h` | `result` | Notification deliveries in the last 24 hours, `ok` or `failed` |
 | `limdm_audit_chain_intact` | | 1 while the audit hash chain verifies, 0 after an entry was changed |
 | `limdm_audit_verified_timestamp_seconds` | | Last audit chain verification |
+| `limdm_backup_last_success_timestamp_seconds` | | Start of the last successful backup ([backup.md](backup.md)) |
+| `limdm_backup_last_size_bytes` | | Size of the last successful archive |
+| `limdm_backup_last_run_failed` | | 1 when the last backup run failed |
+| `limdm_backup_failures_total` | | Failed backup runs of this instance since its start |
 | `limdm_http_requests_total` | `listener`, `method`, `code` | Requests since the process started, console and agent listener; per instance, scrape every instance |
+| `limdm_http_request_duration_seconds` | `listener`, `le` | Histogram of request durations (5 ms to 30 s buckets), console and agent listener; per instance |
 
 Useful alerts: `limdm_audit_chain_intact == 0`, `increase(limdm_notifications_24h{result="failed"}[1h]) > 0`,
 `limdm_devices{status="stale"} > 0`. Each scrape verifies the audit entries written since the
@@ -185,33 +236,78 @@ last verification.
 
 ### Syslog
 
-With `LIMDM_SYSLOG=udp://host:514` or `tcp://host:514` the server forwards every audit entry
+With a syslog target in **Settings, Operations** (`udp://host:514` or `tcp://host:514`;
+`LIMDM_SYSLOG` is the initial value) the server forwards every audit entry
 and device event as an RFC 5424 message (facility 13, log audit; TCP with octet counting
 framing, RFC 6587). Audit entries have the message ID `audit` and the structured data
 `limdm@32473` with `id`, `actor`, `action`, `target` and `hash`; device events have the
 message ID `event` with `id` and `device`. A copy outside the database anchors the audit
 chain externally. Forwarding runs on one instance, retries unsent entries and continues
 from its stored position after a restart or leader change
-([high-availability.md](high-availability.md#background-jobs)).
+([high-availability.md](high-availability.md#background-jobs)). Both streams are written one
+transaction at a time up to the commit, so ids become visible in order and the position
+(last sent id) cannot skip an entry that committed late.
+
+`tcp+tls://host:6514` sends over TLS (RFC 5425, octet counting, TLS 1.2 or newer); the
+collector's certificate is verified against the system roots, or against the CA certificate
+(PEM) in the same settings for a private CA (`LIMDM_SYSLOG_CA` names a file read once as the
+initial value). A changed target takes effect within seconds, without a restart.
 
 ## Retention
 
-An hourly job (one instance) deletes:
-
-| Data | Kept |
-|---|---|
-| Finished commands (`ok`, `failed`, `expired`) | 180 days; lock, unlock, lost mode, end of lost mode and wipe stay |
-| Device events | 365 days (`device_events` refuses deletes outside this job) |
-| Compliance changes | 365 days; the latest change per device and check stays |
-| Device metrics (memory, disk, load) | 30 days |
-| Fleet history (overview chart) | 400 days |
-| Notification delivery log | 30 days |
-| Approval requests | expire after 24 hours |
-| Audit log | forever, or **Settings, Security, Audit log retention** (365 to 36500 days) |
+An hourly job (one instance) deletes data older than the period set per data type under
+**Settings, Data retention**: audit log (default 3 years), device events, compliance history,
+finished commands, script results, diagnostics bundles, remote shell transcripts, device
+metrics and the notification log. Device metrics are partitioned by day and whole days are
+dropped, so their expiry leaves no bloat. Defaults, bounds and the legal reasoning:
+[retention.md](retention.md). Fleet history is kept 400 days; approval requests expire after
+24 hours.
 
 Audit retention runs once a day and only behind a fully verified chain. The last deleted
 entry's id and hash become a checkpoint signed with the audit key, from which verification
 starts afterwards; the deletion itself is an audit entry ([security.md](security.md#audit-log)).
+
+`device_metrics` is partitioned by day (`device_metrics_YYYYMMDD`, created a week ahead by
+the hourly job, a default partition catches anything else). The upgrade to 0.17 keeps the
+existing rows in `device_metrics_legacy`, which is dropped once its 30 days are over.
+
+## Sizing
+
+Estimates for the default intervals (check in every 5 minutes, poll every minute, a metric
+sample every 15 minutes) with package lists of 150 to 300 KB per device. They are a starting
+point; measure with `limdm_http_request_duration_seconds` and the PostgreSQL statistics.
+
+| | 1,000 devices | 10,000 devices | 50,000 devices |
+|---|---|---|---|
+| Check ins per second | 3 | 32 | 160 |
+| Polls per second | 15 | 150 | 770 |
+| Server instances (2 CPU, 2 GB each) | 1 (2 for HA) | 2 | 4 to 6 |
+| `LIMDM_DB_MAX_CONNS` per instance | 32 | 32 | 24 to 32 |
+| PostgreSQL | 2 CPU, 4 GB RAM | 4 CPU, 16 GB RAM | 8 to 16 CPU, 32 to 64 GB RAM, `max_connections` 300 |
+| `device_metrics` (30 days) | 3 million rows, 0.5 GB | 29 million rows, 4 GB | 144 million rows, 20 GB |
+| `devices` with inventory | 0.2 GB | 2 GB | 10 GB |
+| `device_packages` (about 2,000 rows per device, with indexes) | 0.3 GB | 3 GB | 15 GB |
+| Device events, compliance changes (365 days) | 1 GB | 10 GB | 50 GB |
+| WAL per day (package changes are written as a diff) | 0.2 GB | 1 to 2 GB | 5 to 10 GB |
+| Agent release rollout (6 MB package) | 6 GB | 60 GB | 300 GB |
+
+Notes:
+
+* The rollout window (default 24 hours) spreads the agent download over the day: 300 GB at
+  50,000 devices are about 30 Mbit/s on average instead of a peak of tens of Gbit/s.
+  **Settings, Operations** bounds parallel downloads per instance.
+* Installed packages live in `device_packages`, one row per package. A check in with a
+  changed list deletes and inserts only the changed rows. The upgrade to 0.17 moves the
+  lists out of `devices.packages` in one migration; at 50,000 devices plan a few minutes
+  for the first start.
+* Audit entries are appended at the commit of a check in; the advisory lock is held for the
+  append only, so check ins with command results scale with the database, not one after
+  another.
+* Shell transcripts (365 days) and script results (200 per device, up to 32 KB each) can
+  add up to several GB at 50,000 devices; the audit log grows without limit unless audit
+  retention is set.
+* Rolling restarts of the same version do not lock tables. The first start of a new version
+  applies the schema and builds new indexes concurrently.
 
 ## Command line
 
@@ -227,6 +323,11 @@ starts afterwards; the deletion itself is an audit entry ([security.md](security
 | `audit [-ca DIR] verify FILE.jsonl` | verify a JSON Lines audit export (**Audit**, export) outside the server; prints the range and "chain intact" or the first broken entry |
 | `audit [-ca DIR] key` | print the audit key segments (`key=<hex> keyed_from=<id>`, one line per command key) for an auditor who verifies on another machine |
 | `audit -key HEX -keyed-from ID verify FILE.jsonl` | verify with a printed key instead of the CA directory (one segment) |
+| `backup [-env FILE] create [-reason TEXT] [-if-configured]` | back up now to the configured targets ([backup.md](backup.md)) |
+| `backup [-env FILE] list [-from TARGET]` | runs of the history, or the archives on a target |
+| `backup [-env FILE] verify -identity KEY [-command-key HEX] FILE` | decrypt and check an archive against its signed manifest |
+| `backup [-env FILE] restore -identity KEY [-replay FILE] [-window 168h] FILE` | restore into an empty database and CA directory ([backup.md](backup.md#restore)) |
+| `backup [-env FILE] restore-test -identity KEY [-from TARGET] FILE` | restore into a scratch database, verify, record the result |
 | `keygen [-out FILE]` | create a release signing key (default `release.key`), print the public key |
 | `sign -key FILE\|-key-env VAR\|-pkcs11 LABEL SHA256SUMS` | sign release checksums ([release key](#release-key)) |
 
@@ -243,6 +344,8 @@ key files stay readable only by it.
 | Enrollment fails with fingerprint mismatch | fingerprint copied from another server, or a proxy on 8444 |
 | Devices stay `pending` | no status yet; first check in takes up to one interval |
 | `/install.sh` reports "no release found" | no release in `LIMDM_RELEASE_REPO` yet, or GitHub not reachable |
+| `/install.sh` answers 404 "release signing key not configured" | the server was built without the release key: set `LIMDM_RELEASE_PUBLIC_KEY` |
+| `/install.sh` stops with "release signature ... invalid" | the release lacks `SHA256SUMS.sig` or was changed, or the host has no OpenSSL 3 |
 | Agent update fails with "built without a release signing key" | the agent was built without `UPDATE_PUBKEY`; update with the package manager ([release key](#release-key)) |
 | Desktop helper does not ask | `limdm-desktop --now` in the session; zenity or kdialog installed; `/run/limdm/agent.sock` exists. Compositors without XDG autostart (sway, Hyprland) get the dialog from the agent together with the daily notification |
 | Device locked unexpectedly | `/etc/nologin` text: manual lock, compliance lock or offline lock; check in from the device unlocks the offline lock |

@@ -13,9 +13,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Four eyes approval: with the setting on, wipe, lost mode, scripts and
-// console role changes (and optionally recovery key views) are stored as a
-// request; another admin approves or rejects it. The requester can never
+// Four eyes approval: with the setting on, wipe, lost mode, scripts,
+// console role changes, root effective library items, required catalog apps
+// or ones with a repository and admin API tokens (foureyes.go), and
+// optionally recovery key views and remote shells, are stored as a request; another admin approves or rejects it. The requester can never
 // approve their own request, requests expire after a day, every step is
 // audited. With the setting off nothing changes.
 
@@ -119,101 +120,7 @@ func (s *Server) approvalDecide(w http.ResponseWriter, r *http.Request, sess ses
 		http.NotFound(w, r)
 		return
 	}
-	var notices []func()
-	var creds string // new local credentials, shown once to the approver
-	err = func() error {
-		tx, err := s.db.Begin(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback(ctx)
-		var a approval
-		tcond, targs := tenantCond(sess, "tenant_id", 1)
-		err = tx.QueryRow(ctx, `SELECT id, action, target, payload, reason, requested_by, status, decided_by, decided_at, created_at, expires_at
-			FROM approvals WHERE id=$1 AND `+tcond+` FOR UPDATE`, append([]any{id}, targs...)...).Scan(&a.ID, &a.Action, &a.Target, &a.Payload, &a.Reason, &a.RequestedBy, &a.Status,
-			&a.DecidedBy, &a.DecidedAt, &a.CreatedAt, &a.ExpiresAt)
-		if err != nil {
-			return err
-		}
-		switch {
-		case a.Status != "pending":
-			return errApproval("this request was decided already")
-		case time.Now().After(a.ExpiresAt):
-			return errApproval("this request has expired")
-		case s.sameActor(ctx, tx, a.RequestedBy, sess.Email):
-			return errApproval("you cannot decide your own request")
-		}
-		status, expires := "rejected", a.ExpiresAt
-		if op == "approve" {
-			status = "approved"
-			switch a.Action {
-			case "command":
-				var c commandApproval
-				if err := json.Unmarshal(a.Payload, &c); err != nil {
-					return err
-				}
-				var active bool
-				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM devices WHERE id=$1 AND NOT retired)`, a.Target).Scan(&active); err != nil {
-					return err
-				}
-				if !active {
-					return errApproval("the device is retired or deleted")
-				}
-				cmdID, err := s.insertCommand(ctx, tx, a.Target, c.Type, c.Payload, a.RequestedBy)
-				if err != nil {
-					return err
-				}
-				if err := audit(ctx, tx, a.RequestedBy, "command."+c.Type, a.Target, fmt.Sprintf("command %d ", cmdID)+truncate(c.Payload, 2000)+fmt.Sprintf(" (approval #%d by %s)", a.ID, sess.Email)); err != nil {
-					return err
-				}
-				notices = append(notices, func() { s.notifyCommand(a.RequestedBy, a.Target, c.Type) })
-			case "user.update":
-				var c userChange
-				if err := json.Unmarshal(a.Payload, &c); err != nil {
-					return err
-				}
-				old := s.currentRole(ctx, a.Target)
-				if err := s.applyUserChange(ctx, tx, a.Target, c); err != nil {
-					return errApproval(err.Error())
-				}
-				if err := audit(ctx, tx, a.RequestedBy, "user.update", a.Target, c.String()+fmt.Sprintf(" (approval #%d by %s)", a.ID, sess.Email)); err != nil {
-					return err
-				}
-				notices = append(notices, func() { s.notifyRoleChange(a.RequestedBy, a.Target, old, c.Role, sess.Email) })
-			case "user.add":
-				var c userAddition
-				if err := json.Unmarshal(a.Payload, &c); err != nil {
-					return err
-				}
-				if creds, err = c.apply(ctx, tx); err != nil {
-					return errApproval(err.Error())
-				}
-				if err := audit(ctx, tx, a.RequestedBy, "user.add", a.Target, c.Kind+" "+c.Role+fmt.Sprintf(" (approval #%d by %s)", a.ID, sess.Email)); err != nil {
-					return err
-				}
-			case "user.reset":
-				name := strings.TrimPrefix(a.Target, localPrefix)
-				if creds, err = localReset(ctx, tx, name); err != nil {
-					return errApproval(err.Error())
-				}
-				if err := audit(ctx, tx, a.RequestedBy, "user.reset", a.Target, fmt.Sprintf("new credentials and TOTP (approval #%d by %s)", a.ID, sess.Email)); err != nil {
-					return err
-				}
-			case "recovery.view", "remote_shell":
-				expires = time.Now().Add(viewWindow) // the requester opens the key or shell within the hour
-			default:
-				return fmt.Errorf("unknown approval action %q", a.Action)
-			}
-		}
-		if _, err := tx.Exec(ctx, `UPDATE approvals SET status=$2, decided_by=$3, decided_at=now(), expires_at=$4 WHERE id=$1`,
-			a.ID, status, sess.Email, expires); err != nil {
-			return err
-		}
-		if err := audit(ctx, tx, sess.Email, "approval."+op, a.Target, fmt.Sprintf("#%d %s requested by %s", a.ID, a.Action, a.RequestedBy)); err != nil {
-			return err
-		}
-		return tx.Commit(ctx)
-	}()
+	creds, notices, err := s.decideApproval(ctx, sess, id, op)
 	var ae errApproval
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
@@ -271,24 +178,177 @@ func (s *Server) expireApprovals(ctx context.Context) error {
 	return tx.Commit(ctx)
 }
 
-// sameActor reports whether a request was made by the deciding admin: the
-// same login, or an API token that admin created.
+// sameActor reports whether a request was made by the deciding admin:
+// both sides are traced to the person behind them (an API token to its
+// creator, a token made by a token to that one's creator, and so on).
 func (s *Server) sameActor(ctx context.Context, tx pgx.Tx, requestedBy, email string) bool {
 	if requestedBy == email {
 		return true
 	}
-	rest, ok := strings.CutPrefix(requestedBy, "api:")
-	if !ok {
-		return false
+	a, ok1 := rootActor(ctx, tx, requestedBy)
+	b, ok2 := rootActor(ctx, tx, email)
+	// an actor we cannot resolve never passes as someone else
+	return !ok1 || !ok2 || strings.EqualFold(a, b)
+}
+
+// rootActor returns the person behind an actor: "api:name#id" is replaced
+// by the creator of token id until a person is reached.
+func rootActor(ctx context.Context, q querier, actor string) (string, bool) {
+	for range 10 {
+		rest, ok := strings.CutPrefix(actor, "api:")
+		if !ok {
+			return actor, true
+		}
+		i := strings.LastIndexByte(rest, '#')
+		if i < 0 {
+			return "", false
+		}
+		id, err := strconv.ParseInt(rest[i+1:], 10, 64)
+		if err != nil || q.QueryRow(ctx, `SELECT created_by FROM api_tokens WHERE id=$1`, id).Scan(&actor) != nil {
+			return "", false
+		}
 	}
-	i := strings.LastIndexByte(rest, '#')
-	id, err := strconv.ParseInt(rest[i+1:], 10, 64)
-	if i < 0 || err != nil {
-		return true // an API requester we cannot resolve never passes as someone else
-	}
-	var creator string
-	if err := tx.QueryRow(ctx, `SELECT created_by FROM api_tokens WHERE id=$1`, id).Scan(&creator); err != nil {
+	return "", false
+}
+
+// globalRequest reports whether approving a acts beyond one tenant: the
+// catalog, a global API token, a library item saved in the global view.
+func globalRequest(a approval) bool {
+	switch a.Action {
+	case "catalog.save":
 		return true
+	case "token.add":
+		var t tokenApproval
+		return json.Unmarshal(a.Payload, &t) != nil || t.Tenant == nil
+	case "library.save":
+		var c itemApproval
+		return json.Unmarshal(a.Payload, &c) != nil || c.Tenant == 0
 	}
-	return creator == email
+	return false
+}
+
+// decideApproval approves or rejects a pending request for the console and
+// the admin API. It returns new local credentials (shown once to the
+// approver) and notifications to send after the commit.
+func (s *Server) decideApproval(ctx context.Context, sess session, id int64, op string) (creds string, notices []func(), err error) {
+	err = func() error {
+		tx, err := s.db.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(ctx)
+		var a approval
+		tcond, targs := tenantCond(sess, "tenant_id", 1)
+		err = tx.QueryRow(ctx, `SELECT id, action, target, payload, reason, requested_by, status, decided_by, decided_at, created_at, expires_at
+			FROM approvals WHERE id=$1 AND `+tcond+` FOR UPDATE`, append([]any{id}, targs...)...).Scan(&a.ID, &a.Action, &a.Target, &a.Payload, &a.Reason, &a.RequestedBy, &a.Status,
+			&a.DecidedBy, &a.DecidedAt, &a.CreatedAt, &a.ExpiresAt)
+		if err != nil {
+			return err
+		}
+		switch {
+		case a.Status != "pending":
+			return errApproval("this request was decided already")
+		case time.Now().After(a.ExpiresAt):
+			return errApproval("this request has expired")
+		case s.sameActor(ctx, tx, a.RequestedBy, sess.Email):
+			return errApproval("you cannot decide your own request")
+		case sess.Tenant != 0 && globalRequest(a):
+			// stored under tenant 1 (or the tenant its name matched), but
+			// approving it acts for every tenant
+			return errApproval("a global request is decided in the global view")
+		}
+		status, expires := "rejected", a.ExpiresAt
+		if op == "approve" {
+			status = "approved"
+			switch a.Action {
+			case "command":
+				var c commandApproval
+				if err := json.Unmarshal(a.Payload, &c); err != nil {
+					return err
+				}
+				var active bool
+				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM devices WHERE id=$1 AND NOT retired)`, a.Target).Scan(&active); err != nil {
+					return err
+				}
+				if !active {
+					return errApproval("the device is retired or deleted")
+				}
+				cmdID, err := s.insertCommand(ctx, tx, a.Target, c.Type, c.Payload, a.RequestedBy)
+				if err != nil {
+					return err
+				}
+				if err := audit(ctx, tx, a.RequestedBy, "command."+c.Type, a.Target, fmt.Sprintf("command %d ", cmdID)+truncate(c.Payload, 2000)+fmt.Sprintf(" (approval #%d by %s)", a.ID, sess.Email)); err != nil {
+					return err
+				}
+				notices = append(notices, func() { s.notifyCommand(a.RequestedBy, a.Target, c.Type) })
+			case "user.update":
+				var c userChange
+				if err := json.Unmarshal(a.Payload, &c); err != nil {
+					return err
+				}
+				old := s.currentRole(ctx, a.Target)
+				if err := s.applyUserChange(ctx, tx, a.Target, c); err != nil {
+					return errApproval(err.Error())
+				}
+				if err := audit(ctx, tx, a.RequestedBy, "user.update", a.Target, c.String()+fmt.Sprintf(" (approval #%d by %s)", a.ID, sess.Email)); err != nil {
+					return err
+				}
+				notices = append(notices, func() { s.notifyRoleChange(a.RequestedBy, a.Target, old, c.Role, sess.Email) })
+			case "user.add":
+				var c userAddition
+				if err := json.Unmarshal(a.Payload, &c); err != nil {
+					return err
+				}
+				if creds, err = c.apply(ctx, tx); err != nil {
+					return errApproval(err.Error())
+				}
+				if err := audit(ctx, tx, a.RequestedBy, "user.add", a.Target, c.Kind+" "+c.Role+fmt.Sprintf(" (approval #%d by %s)", a.ID, sess.Email)); err != nil {
+					return err
+				}
+			case "user.reset":
+				name := strings.TrimPrefix(a.Target, localPrefix)
+				if creds, err = localReset(ctx, tx, name); err != nil {
+					return errApproval(err.Error())
+				}
+				if err := audit(ctx, tx, a.RequestedBy, "user.reset", a.Target, fmt.Sprintf("new credentials and TOTP (approval #%d by %s)", a.ID, sess.Email)); err != nil {
+					return err
+				}
+			case "library.save":
+				if err := applyItemApproval(ctx, tx, a, sess.Email); err != nil {
+					return err
+				}
+			case "catalog.save":
+				if err := s.applyCatalogApproval(ctx, tx, a, sess.Email); err != nil {
+					return err
+				}
+			case "token.add":
+				if creds, err = applyTokenApproval(ctx, tx, a, sess.Email); err != nil {
+					return err
+				}
+			case "artifact.upload": // the upload becomes installable (packages.go)
+				var c struct {
+					Tenant int64 `json:"tenant"`
+				}
+				if err := json.Unmarshal(a.Payload, &c); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `UPDATE artifacts SET approved_by=$3 WHERE tenant_id=$1 AND sha256=$2 AND approved_by IS NULL`, c.Tenant, a.Target, sess.Email); err != nil {
+					return err
+				}
+			case "recovery.view", "remote_shell":
+				expires = time.Now().Add(viewWindow) // the requester opens the key or shell within the hour
+			default:
+				return fmt.Errorf("unknown approval action %q", a.Action)
+			}
+		}
+		if _, err := tx.Exec(ctx, `UPDATE approvals SET status=$2, decided_by=$3, decided_at=now(), expires_at=$4 WHERE id=$1`,
+			a.ID, status, sess.Email, expires); err != nil {
+			return err
+		}
+		if err := audit(ctx, tx, sess.Email, "approval."+op, a.Target, fmt.Sprintf("#%d %s requested by %s", a.ID, a.Action, a.RequestedBy)); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}()
+	return creds, notices, err
 }

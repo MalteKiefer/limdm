@@ -75,10 +75,11 @@ func (h *host) ensureOsquery() error {
 // osq runs one query; osquery returns every column as a string.
 func osq(query string) ([]map[string]string, error) { return osqWithin(time.Minute, query) }
 
-func osqWithin(timeout time.Duration, query string) ([]map[string]string, error) {
+func osqWithin(timeout time.Duration, query string, flags ...string) ([]map[string]string, error) {
 	// an explicit database path: osqueryi otherwise writes below $HOME, which
 	// is unset or / for a service; events are not needed for single queries
-	out, err := run(timeout, osqueryi, "--json", "--database_path="+stateDir+"/osqueryi.db", "--disable_events", "--disable_extensions", query)
+	args := append([]string{"--json", "--database_path=" + stateDir + "/osqueryi.db", "--disable_events", "--disable_extensions"}, flags...)
+	out, err := run(timeout, osqueryi, append(args, query)...)
 	if err != nil {
 		return nil, err
 	}

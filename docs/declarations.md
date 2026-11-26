@@ -79,8 +79,8 @@ Compliance checks defined by IT, counted like built in checks. Merged by `id`; a
 
 Every check has exactly one test. `op` is `eq`, `ne`, `lt`, `le`, `gt`, `ge` (numbers),
 `contains` or `matches` (RE2); `value` is up to 1024 characters. Queries run with `osqueryi`
-without extensions; writing statements and the tables `curl`, `curl_certificate` and `carves`
-are refused. Details: [compliance.md](compliance.md#custom-checks-comlimdmcustomchecks).
+without extensions and may read only an allowlist of local tables; writing statements and
+tables that reach the network or carve files are refused. Details: [compliance.md](compliance.md#custom-checks-comlimdmcustomchecks).
 
 ### `com.limdm.privacy`
 
@@ -261,6 +261,39 @@ On the device page, **Edit** and **Disable** next to a reported source open a pr
 item: Edit copies all entries of that file into managed sources (http becomes https, check
 the URL) and disables the original. Assign the item to a blueprint to apply it.
 
+### `com.limdm.artifacts` (list)
+
+Console: **Uploaded packages**. Installs packages, scripts and files an admin uploaded under
+**Software**, **Packages** ([packages.md](packages.md)). The payload names each upload by its
+SHA-256; the library item is signed with the command key, so the hash the agent checks comes
+from signed data.
+
+```json
+{"artifacts": [
+  {"sha256": "3f5a...", "name": "vendor-vpn", "kind": "deb", "size": 1048576},
+  {"sha256": "9c1e...", "name": "vendor-vpn", "kind": "rpm", "size": 1101004},
+  {"sha256": "aa07...", "name": "license", "kind": "file", "size": 812, "path": "/etc/opt/vendor/license.key", "mode": "0600"}]}
+```
+
+| Field | Type | Rules |
+|---|---|---|
+| `artifacts[].sha256` | text | 64 lower case hex characters of an approved upload of the item's tenant |
+| `artifacts[].name` | text | letters, digits, `.`, `_`, `+`, `-` |
+| `artifacts[].kind` | text | `deb`, `rpm`, `apk`, `pacman`, `flatpak`, `script` or `file`, as uploaded |
+| `artifacts[].size` | number | bytes, as uploaded |
+| `artifacts[].path` | text | `file` only: absolute, outside user writable and virtual directories |
+| `artifacts[].mode` | text | `file` only: octal, default `0644`, no setuid, setgid or sticky bit |
+
+Merged by hash and path (a later item wins). Each upload installs once per device: packages
+with the native package manager (dependencies from the configured sources), only on the
+matching family (`deb` on Debian and Ubuntu, `rpm` on Fedora, RHEL and SUSE, `apk` on Alpine,
+`pacman` on Arch), so one item can carry the package for every family. Flatpak bundles go to
+the system installation, scripts run once with `/bin/sh`, files are written as root. Removing
+an upload from the item does not uninstall it.
+
+Every kind acts as root, so devices install uploads only when they were enrolled with
+`allow_scripts`; other devices report the item as failed.
+
 ## System
 
 ### `com.limdm.services` (list)
@@ -298,16 +331,26 @@ Console: **Files**.
 
 Merged by path, a later item wins. Owner and group must exist on the device. Files removed
 from the declaration are deleted from the device: the agent remembers the paths it wrote
-(since 0.16) and removes the undeclared ones, except while a files declaration is invalid.
+(since 0.16) with the SHA-256 sum of their content and removes the undeclared ones, except
+while a files declaration is invalid. It removes a file only when it is still a regular file
+reached without symlinks and its content still matches the sum; a file someone changed, a
+link, or a file written by an agent before the sums existed is left in place and reported as
+kept.
 
 On devices enrolled without `allow_scripts` (the opt in remote scripts need) only plain text
 locations are accepted: `/etc/motd`, `/etc/issue`, `/etc/issue.net`, and files below
 `/etc/motd.d`, `/srv`, `/etc/opt` and `/var/opt`. Everything else is refused, because almost
 every other system path is read as code by something running as root (cron, systemd, sudo,
 PAM, shell profiles, the dynamic linker, D-Bus, package manager hooks …). There the agent
-also refuses files with an execute bit and paths with a symlink in any component, the file
-itself included, so a link cannot redirect the write. With `allow_scripts` any allowed
-absolute path works.
+also refuses files with an execute bit. With `allow_scripts` any allowed absolute path works.
+
+On every device, with or without `allow_scripts`, a path with a symlink in any component,
+the file itself included, is refused, so a local user who owns a parent directory cannot
+redirect the write, owner change or removal (declare the real path, for example
+`/usr/bin/x` instead of `/bin/x` on merged `/usr` systems). The agent opens each directory
+from `/` with `O_NOFOLLOW`, writes a temporary file in the opened directory, sets mode and
+owner on the open file and renames it in place, so swapping a directory for a link between
+check and write has no effect.
 
 ### `com.limdm.certificates` (list)
 
@@ -559,7 +602,7 @@ cannot change:
 
 | Desktop | How |
 |---|---|
-| GNOME, Budgie, Cinnamon, MATE | dconf system database with locked keys |
+| GNOME, Budgie, Cinnamon, MATE | dconf system database with locked keys, `disable-lock-screen` locked to `false` too |
 | KDE Plasma | `/etc/xdg/kscreenlockerrc`, immutable through KDE kiosk (`[$i]`) |
 | Xfce | xfconf system defaults with locked properties (xfce4-screensaver) |
 | sway, Hyprland, river, labwc, niri, Wayfire | `swayidle` with `swaylock`; for sway also `/etc/sway/config.d` |

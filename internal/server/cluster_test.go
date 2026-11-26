@@ -33,3 +33,13 @@ func TestTrustedProxies(t *testing.T) {
 		}
 	}
 }
+
+func TestLockKeysDistinct(t *testing.T) {
+	seen := map[int64]bool{7363: true, 7364: true} // audit, schema
+	for _, k := range []int64{lockStartup, lockSettings, lockSCIM, lockEvents, lockBackup} {
+		if seen[k] {
+			t.Fatalf("advisory lock key %d used twice", k)
+		}
+		seen[k] = true
+	}
+}

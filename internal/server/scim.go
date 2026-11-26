@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"regexp"
 	"slices"
 	"strconv"
@@ -102,6 +103,15 @@ func scimID(s string) int64 {
 // scimAuth checks the bearer token against the stored hash.
 func (s *Server) scimAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if rt := s.rt.Load(); rt != nil && len(rt.scim) > 0 && !netsContain(rt.scim, clientIP(r)) {
+			ip := "invalid"
+			if a, err := netip.ParseAddr(clientIP(r)); err == nil {
+				ip = a.String() // parsed, never the raw header text
+			}
+			s.log.Warn("scim request refused by network list", "ip", ip)
+			scimErr(w, http.StatusForbidden, "access from this network is not allowed")
+			return
+		}
 		// refuse before evaluating the token while the client is over the limit
 		if s.limit.over("scim:"+rateKey(r), 20, 5*time.Minute) {
 			scimErr(w, http.StatusTooManyRequests, "too many failed attempts")

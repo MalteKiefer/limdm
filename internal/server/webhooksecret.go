@@ -3,12 +3,14 @@ package server
 import (
 	"context"
 	"crypto/hkdf"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -74,6 +76,15 @@ func (s *Server) storedWebhookSecret(ctx context.Context) ([]byte, time.Time, er
 
 // webhookKey is the HMAC key receivers use to verify X-LiMDM-Signature.
 func (s *Server) webhookKey() []byte { return s.whKey }
+
+// tenantWebhookKey is the signing secret of a tenant's webhook channels,
+// derived from the webhook secret: each tenant has its own, no tenant can
+// compute another's, and rotating the webhook secret rotates them all.
+func (s *Server) tenantWebhookKey(tenant int64) []byte {
+	mac := hmac.New(sha256.New, s.whKey)
+	mac.Write([]byte("limdm tenant webhook v1\n" + strconv.FormatInt(tenant, 10)))
+	return mac.Sum(nil)
+}
 
 // rotateWebhook stores a new random secret. Like the other keys it is used
 // after every server instance restarted; receivers need it before that.

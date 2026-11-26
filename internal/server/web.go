@@ -183,7 +183,7 @@ func (s *Server) pageFor(h handler, postRole string) http.HandlerFunc {
 			return
 		}
 		if r.Method == http.MethodPost {
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+			r.Body = http.MaxBytesReader(w, r.Body, s.bodyLimit(w, r)) // 1 MiB, uploads more (packages.go)
 			if sess.Role != "admin" && postRole != "self" && (postRole != "helpdesk" || sess.Role != "helpdesk") {
 				s.errorPage(w, r, sess, http.StatusForbidden, "your role cannot change this")
 				return
@@ -264,6 +264,18 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /software/apps/{id}/delete", s.page(s.appDelete))
 	mux.HandleFunc("POST /software/requests/{id}/{op}", s.page(s.requestDecide))
 	mux.HandleFunc("POST /software/settings", s.page(s.softwareSettingsSave))
+	mux.HandleFunc("GET /software/packages", s.page(s.adminOrAuditor(s.packagesPage))) // packages.go
+	mux.HandleFunc("POST /software/packages", s.page(s.packageUpload))
+	mux.HandleFunc("POST /software/packages/{id}/delete", s.page(s.packageDelete))
+	mux.HandleFunc("POST /software/packages/settings", s.page(s.packagesSettings))
+	mux.HandleFunc("GET /settings/backup", s.page(s.unscoped(s.backupPage))) // backup_web.go
+	mux.HandleFunc("POST /settings/backup", s.page(s.unscoped(s.backupSave)))
+	mux.HandleFunc("POST /settings/backup/targets", s.page(s.unscoped(s.backupTargetSave)))
+	mux.HandleFunc("POST /settings/backup/targets/{name}/{op}", s.page(s.unscoped(s.backupTargetOp)))
+	mux.HandleFunc("POST /settings/backup/run", s.page(s.unscoped(s.backupRunNow)))
+	mux.HandleFunc("POST /settings/backup/schedules", s.page(s.unscoped(s.backupScheduleSave)))
+	mux.HandleFunc("POST /settings/backup/schedules/{name}/{op}", s.page(s.unscoped(s.backupScheduleOp)))
+	mux.HandleFunc("POST /settings/backup/{id}/verify", s.page(s.unscoped(s.backupVerifyNow)))
 	mux.HandleFunc("POST /agents/policy", s.page(s.agentsPolicy))
 	mux.HandleFunc("POST /agents/fetch", s.page(s.agentsFetch))
 	mux.HandleFunc("POST /agents/{version}/{op}", s.page(s.agentsRelease))
@@ -374,15 +386,16 @@ func (s *Server) listDevicesQuery(ctx context.Context, where, tail string, args 
 }
 
 // deviceFilters are the device list filters other pages link to; each is
-// a condition on d with the value as $1.
+// a condition on d with the value as $1. Containment (@>) instead of
+// expanding the arrays: the GIN indexes in schema.sql answer it.
 var deviceFilters = []struct{ Key, Label, Where string }{
-	{"tag", "Tag", `$1 = ANY(d.tags)`},
-	{"app", "Catalog app installed", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.inventory->'apps', '[]'::jsonb)) a WHERE a->>'id' = $1 AND (a->>'installed')::boolean)`},
-	{"flatpak", "Flatpak installed", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.inventory->'flatpaks', '[]'::jsonb)) f WHERE f->>'id' = $1)`},
-	{"remote", "Flatpak remote", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.inventory->'flatpak_remotes', '[]'::jsonb)) r WHERE r->>'name' = $1)`},
+	{"tag", "Tag", `d.tags @> ARRAY[$1::text]`},
+	{"app", "Catalog app installed", `d.inventory->'apps' @> jsonb_build_array(jsonb_build_object('id', $1::text, 'installed', true))`},
+	{"flatpak", "Flatpak installed", `d.inventory->'flatpaks' @> jsonb_build_array(jsonb_build_object('id', $1::text))`},
+	{"remote", "Flatpak remote", `d.inventory->'flatpak_remotes' @> jsonb_build_array(jsonb_build_object('name', $1::text))`},
 	{"blueprint", "Blueprint", `(SELECT name FROM blueprints WHERE id = ` + effectiveBlueprintSQL + `) = $1`},
 	{"agent", "Agent version", `d.agent_version = $1`},
-	{"failing", "Failing check", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.checks, '[]'::jsonb)) c WHERE c->>'id' = $1 AND c->>'status' = 'fail')`},
+	{"failing", "Failing check", `d.checks @> jsonb_build_array(jsonb_build_object('id', $1::text, 'status', 'fail'))`},
 }
 
 // devicesPageSize is the number of devices per page of the device list.
@@ -660,13 +673,13 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		return
 	}
 	var d deviceRow
-	var inv, checks, decl, users, pkgs []byte
+	var inv, checks, decl, users []byte
 	var enrolled, certExp time.Time
 	var since *time.Time
 	err := s.db.QueryRow(ctx, `SELECT id, hostname, agent_version, failing, jsonb_array_length(checks), last_seen, retired,
-		inventory, checks, decl_status, users, packages, enrolled_at, cert_not_after, grace_until, auto_locked, noncompliant_since,
+		inventory, checks, decl_status, users, enrolled_at, cert_not_after, grace_until, auto_locked, noncompliant_since,
 		update_state, update_version, update_requested, external_ip, geo FROM devices WHERE id=$1`, id).
-		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &pkgs, &enrolled, &certExp, &d.GraceUntil, &d.AutoLocked, &since,
+		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &enrolled, &certExp, &d.GraceUntil, &d.AutoLocked, &since,
 			&d.UpdateState, &d.UpdateVersion, &d.UpdateRequested, &d.ExternalIP, &d.Geo)
 	if err != nil {
 		s.notFound(w, r, sess)
@@ -681,7 +694,12 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		Packages []api.Package
 	}
 	if err := errors.Join(json.Unmarshal(inv, &data.Inv), json.Unmarshal(checks, &data.Checks), json.Unmarshal(decl, &data.Decl),
-		json.Unmarshal(users, &data.Users), json.Unmarshal(pkgs, &data.Packages)); err != nil {
+		json.Unmarshal(users, &data.Users)); err != nil {
+		s.fail(w, err)
+		return
+	}
+	data.Packages, err = devicePackages(ctx, s.db, id)
+	if err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -1090,6 +1108,12 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		if err := u.Validate(typ); err != nil {
 			return "", http.StatusBadRequest, err.Error()
 		}
+		if sess.Role != "admin" { // signed with the command; the agent refuses admin accounts
+			u.NoAdmin = true
+			if s.accountPrivileged(r.Context(), id, u.Username) {
+				return "", http.StatusForbidden, helpdeskAdminAccount
+			}
+		}
 		if typ == "user_create" || typ == "user_password" {
 			if r.Form.Has("password2") && r.FormValue("password2") != u.Password { // the repeat field of the console form
 				return "", http.StatusBadRequest, passwordMismatch
@@ -1197,6 +1221,9 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 	ub, _ := json.Marshal(users)
 	err = s.auditAction(r.Context(), sess.Email, "device.assign", id, fmt.Sprintf("blueprint=%v tags=%v users=%s", r.FormValue("blueprint_id"), tags, ub), func(tx pgx.Tx) error {
 		_, err := tx.Exec(r.Context(), `UPDATE devices SET users=$2, blueprint_id=$3, tags=$4, primary_user_id=$5 WHERE id=$1`, id, string(ub), bpID, tags, primary)
+		if err == nil {
+			err = signDeviceUsers(r.Context(), tx, id)
+		}
 		return err
 	})
 	if err != nil {
@@ -1679,9 +1706,9 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 			FROM devices d WHERE ` + cond + ` ORDER BY hostname`
 	case "packages.csv":
 		header = []string{"device_id", "hostname", "package", "version", "arch"}
-		q = `SELECT d.id, d.hostname, coalesce(p->>'n',''), coalesce(p->>'v',''), coalesce(p->>'a','')
-			FROM devices d, jsonb_array_elements(CASE WHEN jsonb_typeof(d.packages) = 'array' THEN d.packages ELSE '[]'::jsonb END) p
-			WHERE NOT d.retired AND ` + cond + ` ORDER BY d.hostname, d.id, p->>'n'`
+		q = `SELECT d.id, d.hostname, p.name, p.version, p.arch
+			FROM devices d JOIN device_packages p ON p.device_id = d.id
+			WHERE NOT d.retired AND ` + cond + ` ORDER BY d.hostname, d.id, p.name, p.arch, p.version`
 	case "audit.csv":
 		var where string
 		_, where, args = auditFilter(r.URL.Query(), sess)
@@ -1769,6 +1796,7 @@ func (s *Server) streamExport(w http.ResponseWriter, r *http.Request, sess sessi
 		_, _ = io.WriteString(w, "\nERROR: export incomplete, run it again\n")
 		detail += " incomplete"
 	}
+	_ = tx.Rollback(ctx) // the audit entry takes a connection of its own
 	if err := s.auditAction(context.WithoutCancel(ctx), sess.Email, "export.done", kind, detail, nil); err != nil {
 		s.log.Error("audit export.done", "err", err)
 	}

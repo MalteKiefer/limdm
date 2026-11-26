@@ -31,7 +31,6 @@ import (
 const (
 	shellTranscriptCap = 1 << 20         // bytes of output kept per session
 	shellConnectWait   = 3 * time.Minute // the device polls every minute
-	shellRetention     = "365 days"      // like device events
 )
 
 // RemoteShellSettings are the server side switches of the remote shell. A
@@ -302,6 +301,7 @@ func (s *Server) shellPage(w http.ResponseWriter, r *http.Request, sess session)
 // shellErrors are shown after a refused start; only the key travels in the URL.
 var shellErrors = map[string]string{
 	"user": "Invalid user name.", "root": "Root sessions are not allowed in the settings.", "approval": "The session waits for approval.",
+	"admin": privilegedShellAccount,
 }
 
 func (s *Server) shellStart(w http.ResponseWriter, r *http.Request, sess session) {
@@ -328,6 +328,10 @@ func (s *Server) shellStart(w http.ResponseWriter, r *http.Request, sess session
 	}
 	if cmd.Validate() != nil {
 		back("user")
+		return
+	}
+	if !set.AllowRoot && cmd.User != "" && s.accountPrivileged(ctx, id, cmd.User) { // the agent checks again
+		back("admin")
 		return
 	}
 	user := cmd.User
@@ -433,8 +437,7 @@ func (s *Server) finishShell(l *liveShell) {
 		if _, err := tx.Exec(ctx, `UPDATE commands SET status='expired', updated_at=now() WHERE id=$1 AND status='pending'`, l.cmdID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `DELETE FROM shell_sessions WHERE created_at < now() - interval '`+shellRetention+`'`)
-		return err
+		return nil // old transcripts: the retention job (retention.go)
 	})
 	if err != nil {
 		s.log.Error("store remote shell session", "session", l.id, "err", err)

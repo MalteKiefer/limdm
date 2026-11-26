@@ -376,10 +376,7 @@ CREATE TABLE IF NOT EXISTS notification_log (
     at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS notification_log_channel ON notification_log(channel_id, id DESC);
--- agents without a compliance item reported "checks": null, which the
--- jsonb_array_* functions of the device page and the export reject
-UPDATE devices SET checks = '[]' WHERE jsonb_typeof(checks) <> 'array';
-UPDATE devices SET decl_status = '[]' WHERE jsonb_typeof(decl_status) <> 'array';
+-- the one off repair of checks and decl_status is migration 9 (library.go)
 -- users of a device already reported as disabled (notified once)
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS users_disabled TEXT[] NOT NULL DEFAULT '{}';
 -- addresses a directory user had before (renames, domain moves): device user
@@ -432,11 +429,8 @@ CREATE INDEX IF NOT EXISTS compliance_changes_at ON compliance_changes USING bri
 DROP TRIGGER IF EXISTS compliance_changes_append_only ON compliance_changes;
 CREATE TRIGGER compliance_changes_append_only BEFORE UPDATE ON compliance_changes
     FOR EACH ROW EXECUTE FUNCTION rows_append_only();
--- baseline for devices that reported before the history existed
-INSERT INTO compliance_changes(device_id, at, check_id, status, detail, catalog_version)
-    SELECT d.id, coalesce(d.last_seen, now()), c->>'id', coalesce(c->>'status', ''), coalesce(c->>'detail', ''), d.catalog_version
-    FROM devices d, jsonb_array_elements(d.checks) c
-    WHERE c->>'id' IS NOT NULL AND NOT EXISTS (SELECT 1 FROM compliance_changes x WHERE x.device_id = d.id);
+-- the baseline for devices that reported before the history existed is
+-- migration 9 (library.go)
 
 -- Versions of library items and blueprints: every save, rollback and delete
 -- (the deleted payload stays). No foreign key, versions outlive the object.
@@ -475,11 +469,8 @@ CREATE TRIGGER library_item_versions_append_only BEFORE UPDATE OR DELETE ON libr
 DROP TRIGGER IF EXISTS blueprint_versions_append_only ON blueprint_versions;
 CREATE TRIGGER blueprint_versions_append_only BEFORE UPDATE OR DELETE ON blueprint_versions
     FOR EACH ROW EXECUTE FUNCTION rows_append_only();
--- baseline version of objects saved before versioning existed (library
--- items: at startup in server.go, after secrets are sealed and items signed)
-INSERT INTO blueprint_versions(blueprint_id, version, name, description, parent_id, tree, note, created_by, created_at)
-    SELECT b.id, 1, b.name, b.description, b.parent_id, b.tree, 'baseline', 'system', b.updated_at FROM blueprints b
-    WHERE NOT EXISTS (SELECT 1 FROM blueprint_versions v WHERE v.blueprint_id = b.id);
+-- the baseline version of blueprints saved before versioning existed is
+-- migration 10 (library.go); library items get theirs at startup in server.go
 -- W2
 -- Four eyes approvals: a second admin approves wipe, lost mode, scripts, role
 -- changes and (optionally) recovery key views before they run.
@@ -725,3 +716,146 @@ BEGIN
     END IF;
     RAISE EXCEPTION '% is append only', TG_TABLE_NAME;
 END $$;
+-- L
+-- Allowed states and references, checked for new and changed rows. NOT VALID:
+-- adding them does not scan the tables, and existing rows are not checked.
+DO $$
+BEGIN
+    ALTER TABLE commands ADD CONSTRAINT commands_status_check
+        CHECK (status IN ('pending', 'sent', 'ok', 'failed', 'expired')) NOT VALID;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$
+BEGIN
+    ALTER TABLE approvals ADD CONSTRAINT approvals_status_check
+        CHECK (status IN ('pending', 'approved', 'rejected', 'expired', 'used')) NOT VALID;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$
+BEGIN
+    ALTER TABLE catalog_requests ADD CONSTRAINT catalog_requests_status_check
+        CHECK (status IN ('pending', 'approved', 'denied')) NOT VALID;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$
+BEGIN
+    ALTER TABLE devices ADD CONSTRAINT devices_update_state_check
+        CHECK (update_state IN ('', 'offered', 'ok', 'failed', 'rolled_back')) NOT VALID;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+-- results and sessions outlive the retention of their command
+DO $$
+BEGIN
+    ALTER TABLE script_results ADD CONSTRAINT script_results_command_fk
+        FOREIGN KEY (command_id) REFERENCES commands(id) ON DELETE SET NULL NOT VALID;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$
+BEGIN
+    ALTER TABLE shell_sessions ADD CONSTRAINT shell_sessions_command_fk
+        FOREIGN KEY (command_id) REFERENCES commands(id) ON DELETE SET NULL NOT VALID;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+ALTER TABLE api_tokens ADD COLUMN IF NOT EXISTS scopes TEXT[] NOT NULL DEFAULT '{}'; -- tokenScopes (adminapi.go), empty: all of the role
+-- Idempotency-Key of admin API requests (adminapi_admin.go): the first
+-- answer per token and key, replayed for 24 hours
+CREATE TABLE IF NOT EXISTS api_idempotency (
+    token_id     BIGINT NOT NULL REFERENCES api_tokens(id) ON DELETE CASCADE,
+    key          TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    status       INT NOT NULL DEFAULT 0,
+    location     TEXT NOT NULL DEFAULT '',
+    body         BYTEA NOT NULL DEFAULT '',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (token_id, key)
+);
+CREATE INDEX IF NOT EXISTS api_idempotency_created ON api_idempotency(created_at);
+
+-- S1
+-- signatures of what devices act on as root besides library items (datasig.go)
+ALTER TABLE catalog_apps ADD COLUMN IF NOT EXISTS signature TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog_remotes ADD COLUMN IF NOT EXISTS signature TEXT NOT NULL DEFAULT '';
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS users_sig TEXT NOT NULL DEFAULT '';
+-- library item and blueprint names are unique per tenant, not globally
+ALTER TABLE library_items DROP CONSTRAINT IF EXISTS library_items_name_key;
+ALTER TABLE blueprints DROP CONSTRAINT IF EXISTS blueprints_name_key;
+CREATE UNIQUE INDEX IF NOT EXISTS library_items_tenant_name ON library_items(tenant_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS blueprints_tenant_name ON blueprints(tenant_id, name);
+-- failed local sign ins per account and client network: a lockout from one
+-- source does not lock the account for everyone else (local.go)
+CREATE TABLE IF NOT EXISTS local_login_failures (
+    name         TEXT NOT NULL REFERENCES local_admins(name) ON DELETE CASCADE,
+    source       TEXT NOT NULL,
+    failures     INT NOT NULL DEFAULT 0,
+    locked_until TIMESTAMPTZ,
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (name, source)
+);
+-- B
+-- backup runs (backup.go): one row per run, with the targets that hold the
+-- archive, the result of the checksum verification and of the last restore test
+CREATE TABLE IF NOT EXISTS backups (
+    id                 BIGSERIAL PRIMARY KEY,
+    name               TEXT NOT NULL,
+    reason             TEXT NOT NULL DEFAULT '',
+    actor              TEXT NOT NULL DEFAULT '',
+    started_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    size               BIGINT NOT NULL DEFAULT 0,
+    sha256             TEXT NOT NULL DEFAULT '',
+    targets            TEXT[] NOT NULL DEFAULT '{}',
+    status             TEXT NOT NULL,
+    error              TEXT NOT NULL DEFAULT '',
+    keys_hash          TEXT NOT NULL DEFAULT '',
+    server_version     TEXT NOT NULL DEFAULT '',
+    verified_at        TIMESTAMPTZ,
+    verify_error       TEXT NOT NULL DEFAULT '',
+    restore_tested_at  TIMESTAMPTZ,
+    restore_test_error TEXT NOT NULL DEFAULT '',
+    deleted_at         TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS backups_started ON backups(started_at DESC);
+ALTER TABLE backups ADD COLUMN IF NOT EXISTS schedule TEXT NOT NULL DEFAULT '';
+-- the last restore: while window_until lies ahead, a device certificate of
+-- our CA issued after backup_at is pinned again (restoreRepin)
+CREATE TABLE IF NOT EXISTS restore_state (
+    one          BOOLEAN PRIMARY KEY DEFAULT true CHECK (one),
+    backup_name  TEXT NOT NULL,
+    backup_at    TIMESTAMPTZ NOT NULL,
+    restored_at  TIMESTAMPTZ NOT NULL,
+    window_until TIMESTAMPTZ NOT NULL
+);
+-- uploaded packages (packages.go): content addressed per tenant; approved_by
+-- stays NULL while a four eyes approval is pending
+CREATE TABLE IF NOT EXISTS artifacts (
+    id          BIGSERIAL PRIMARY KEY,
+    tenant_id   BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id),
+    sha256      TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    version     TEXT NOT NULL DEFAULT '',
+    kind        TEXT NOT NULL,
+    filename    TEXT NOT NULL,
+    size        BIGINT NOT NULL,
+    store       TEXT NOT NULL,
+    uploaded_by TEXT NOT NULL,
+    approved_by TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, sha256)
+);
+
+-- integration v0.17.0
+-- installed packages per device, written by diff at check in (server.go
+-- savePackages) instead of the whole list as JSONB; devices.packages is no
+-- longer read or written (migration 12 moves its content here)
+CREATE TABLE IF NOT EXISTS device_packages (
+    device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    name      TEXT NOT NULL,
+    version   TEXT NOT NULL,
+    arch      TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (device_id, name, arch, version)
+);
+CREATE INDEX IF NOT EXISTS device_packages_name ON device_packages(name, device_id);
+
+-- review: sequence numbers of signed data (api.SignedSeq)
+ALTER TABLE catalog_apps ADD COLUMN IF NOT EXISTS seq BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE catalog_remotes ADD COLUMN IF NOT EXISTS seq BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS users_seq BIGINT NOT NULL DEFAULT 0;

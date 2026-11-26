@@ -1,9 +1,27 @@
 # Configuration
 
 Bootstrap values (database, listeners, keys) come from the environment. Everything else is
-configured in the console and stored in the database. The console settings start from the
-environment (OIDC, allowed domain, local login, stale threshold); once saved in the console,
-the saved values win.
+configured in the console, stored in the database, audited and applied at runtime on every
+instance. Some console settings start from the environment (OIDC, allowed domain, local login,
+stale threshold and the operations settings below); once saved in the console, the saved
+values win and the variable no longer matters.
+
+Variables that stay in the environment, and why:
+
+* Bootstrap: `LIMDM_DATABASE_URL` and `LIMDM_DB_MAX_CONNS` (needed before the database,
+  where the settings live, can be read), `LIMDM_SESSION_KEY`, `LIMDM_CA_DIR`,
+  `LIMDM_KEY_PROVIDER` and `LIMDM_PKCS11_*` (keys that protect the settings themselves; a
+  console that could change them could take over the server), `LIMDM_LISTEN`,
+  `LIMDM_AGENT_LISTEN`, `LIMDM_TLS_*`, `LIMDM_PUBLIC_URL`, `LIMDM_AGENT_URL`,
+  `LIMDM_AGENT_HOSTS` (sockets and certificates bound at the start),
+  `LIMDM_RELEASE_PUBLIC_KEY` (trust anchor of agent packages: a stolen console session must
+  not replace it), `LIMDM_ARTIFACT_DIR`, `LIMDM_RELEASE_DIR` and `TMPDIR` (file system paths
+  of the host).
+* Safety: `LIMDM_ADMINS` and `LIMDM_AUDITORS` (seed accounts that get you back in),
+  `LIMDM_TRUSTED_PROXIES` (decides the client address the console network lists check; a
+  wrong value in the console could lock everyone out), `LIMDM_GEOIP_URL` (`off` is a host
+  level privacy guarantee), `LIMDM_MULTI_TENANT`, `LIMDM_DRAIN_SECONDS` and
+  `LIMDM_SKIP_UPGRADE_BACKUP` (package and shutdown time).
 
 ## Environment variables
 
@@ -35,17 +53,29 @@ Read by `limdm-server serve` (`ConfigFromEnv`). The package reads them from
 | `LIMDM_STALE_HOURS` | `24` | Hours without check in until a device counts as stale (positive integer). Starting value of the console setting. |
 | `LIMDM_RELEASE_DIR` | `/var/lib/limdm-server/agent-releases` | Cache of verified agent packages for updates ([agent.md](agent.md#updates)). The packaged `server.env` sets `/var/lib/limdm-server/releases`. |
 | `LIMDM_RELEASE_REPO` | `MalteKiefer/limdm` | GitHub repository for agent updates and `/install.sh`. |
+| `LIMDM_RELEASE_PUBLIC_KEY` | compiled in (release builds) | Ed25519 public release key (64 hex characters) that `/install.sh` embeds to verify `SHA256SUMS` before installing. Without a key `/install.sh` answers 404. Set it for servers built without `UPDATE_PUBKEY` or agents from your own fork ([operations.md](operations.md#release-key)). |
 | `LIMDM_GEOIP_URL` | `https://ipwho.is/` | Location lookup for device public addresses, the IP is appended. Used only when **Settings, Security, Privacy** turns geolocation on (default off); `off` disables it for good ([security.md](security.md#privacy)). |
 | `LIMDM_TRUSTED_PROXIES` | | Load balancers or reverse proxies whose `X-Forwarded-For` names the client, comma separated addresses or networks (`10.0.0.5,10.0.1.0/24`). A proxy on loopback is always trusted. Without it, a proxy on another host makes every request seem to come from the proxy (rate limits, console network lists, audit) ([high-availability.md](high-availability.md#load-balancer)). |
+| `LIMDM_DB_MAX_CONNS` | `32` | Database connections of this instance (4 to 1000); a `pool_max_conns` parameter in `LIMDM_DATABASE_URL` wins. All instances together plus about 3 per instance (schema, notifications) must stay below `max_connections` of PostgreSQL ([high-availability.md](high-availability.md#postgresql)). |
+| `LIMDM_MAX_CHECKINS` | `64` | Agent check ins processed at once per instance (1 to 10000); an eighth of them (at least 1) may carry a body over 1 MiB (inventory, package list). A check in without a free slot within 5 s gets 503 with `Retry-After`, as do agent and API requests that hit a lock or statement timeout; agents wait that long before they try again. Initial value of **Settings, Operations**. |
+| `LIMDM_UPDATE_DOWNLOADS` | `20` | Agent packages served at once per instance (1 to 10000); more downloads wait up to 20 s, then get 503 with `Retry-After` ([agent.md](agent.md)). Initial value of **Settings, Operations**. |
+| `LIMDM_AGENT_PROXY_PROTOCOL` | | Load balancers in TCP passthrough mode that send a PROXY protocol v2 header on the agent port, comma separated addresses or networks. Connections from them must start with the header, which names the device's address; other connections are taken as they are ([high-availability.md](high-availability.md#load-balancer)). Initial value of **Settings, Operations**. |
+| `LIMDM_LOG_LEVEL` | `info` | Level of the JSON log on stdout: `debug`, `info`, `warn` or `error`. TLS handshake and HTTP protocol errors are logged as `warn` lines too. Initial value of **Settings, Operations**. |
+| `LIMDM_ACCESS_LOG` | `false` | `true` writes one log line per request: listener, method, path (without query), status, duration, client address and request id. Every answer carries an `X-Request-ID` header (taken from the request when a proxy set a well formed one, else random), and error log lines name it. Initial value of **Settings, Operations**. |
+| `LIMDM_AUDIT_API_READS` | `sensitive` | Which admin API reads go to the audit log as `api.read` (writes are always audited): `sensitive` reads of the audit log and of a single device with its inventory, `all` every read, `off` none ([admin-api.md](admin-api.md)). Initial value of **Settings, Operations**. |
 | `LIMDM_DRAIN_SECONDS` | `5` | On SIGTERM, how long `/readyz` fails before connections close, so load balancers stop sending requests (0 to 300). |
-| `LIMDM_SYSLOG` | | Forward audit entries and device events as RFC 5424 syslog, `udp://host:514` or `tcp://host:514` ([operations.md](operations.md#syslog)). |
+| `LIMDM_SYSLOG` | | Forward audit entries and device events as RFC 5424 syslog, `udp://host:514`, `tcp://host:514` or over TLS `tcp+tls://host:6514` ([operations.md](operations.md#syslog)). Initial value of **Settings, Operations**. |
+| `LIMDM_SYSLOG_CA` | | CA certificate file (PEM) that verifies a `tcp+tls` syslog collector; without it the system roots apply. Read once into **Settings, Operations** as PEM. |
 | `LIMDM_MULTI_TENANT` | `false` | `true` shows the tenant pages and the tenant switcher to global administrators ([tenants.md](tenants.md)). Tenant isolation applies regardless. |
+| `LIMDM_ARTIFACT_DIR` | `/var/lib/limdm-server/artifacts` | Local store of uploaded packages, content addressed per tenant ([packages.md](packages.md)). Part of every backup. Not used when **Software, Packages** keeps uploads in S3. |
+| `LIMDM_SKIP_UPGRADE_BACKUP` | | Set to `1` in the environment of apt or dnf to skip the backup the server package makes before an upgrade ([backup.md](backup.md#before-upgrades)). |
+| `TMPDIR` | `/tmp` | Where backup archives and uploads are staged before they go to their target. Needs room for one archive or upload; the Docker example points it at the state volume. |
 
 The server refuses to start when OIDC and local login are both off, when OIDC is set without
 an administrator in `LIMDM_ADMINS`, when `LIMDM_PUBLIC_URL` or `LIMDM_AGENT_URL` is not
 `https`, or when the console would listen on a public address without a certificate.
 
-`limdm-server local-admin -env FILE` and `limdm-server keys -env FILE` read the same
+`limdm-server local-admin -env FILE`, `limdm-server keys -env FILE` and `limdm-server backup -env FILE` read the same
 variables from an env file ([operations.md](operations.md#command-line)).
 
 ### install.sh
@@ -83,7 +113,8 @@ network namespace) and `LIMDM_AGENT_LISTEN` itself. Other variables of the table
 ## Console settings
 
 **Settings** is open to admins (edit) and auditors (read). It has the tabs General,
-Security, SSO, Notifications and Branding; each form saves only its own fields, changes take
+Security, SSO, Notifications, Branding, Data retention, Operations and Backup (saving and
+Backup: global admins only); each form saves only its own fields, changes take
 effect at once on every instance and are written to the audit log (`settings.save`).
 Accounts of a tenant see only the Notifications tab with their own channels
 ([tenants.md](tenants.md)).
@@ -99,6 +130,9 @@ Accounts of a tenant see only the Notifications tab with their own channels
   blocked networks are refused even when allowed. Loopback is always allowed, the agent API
   is not affected. Saving is refused when your own address would be locked out. Behind a
   proxy on another host set `LIMDM_TRUSTED_PROXIES`, otherwise the proxy's address is checked.
+  **SCIM allowed networks** limits `/scim/` to the provisioning addresses of the identity
+  provider (empty: every network). SCIM ignores the console lists, because the identity
+  provider calls it from its own networks; a refused request answers 403 and is logged.
 
 ### Security
 
@@ -108,9 +142,8 @@ Accounts of a tenant see only the Notifications tab with their own channels
   viewer gives a reason or ticket reference) and **Also for remote shell sessions** (the
   approved session must be opened within one hour). Needs at least two active
   administrators ([security.md](security.md#four-eyes-approval)).
-* **Audit log retention.** **Keep audit entries (days)**: 0 keeps everything (default),
-  otherwise 365 to 36500. Older entries are deleted once a day after the full chain
-  verified; a signed checkpoint keeps the rest verifiable ([security.md](security.md#audit-log)).
+* **Audit log retention** moved to **Data retention** (below). A period saved here before
+  still applies until that tab is saved.
 * **Privacy.** Both off by default: **Look up the location of device public addresses**
   (sends them to `LIMDM_GEOIP_URL`) and **Agents may ask public DNS over HTTPS resolvers
   (Cloudflare, Google) when the system resolver fails** ([security.md](security.md#privacy)).
@@ -160,6 +193,39 @@ in the desktop helper's dialogs and notifications on devices. Only PNG is accept
 SVG served from the console's origin could carry script. With multi tenancy each tenant can
 have its own name, logo and accent color, this one is the fallback ([tenants.md](tenants.md#branding)).
 
+### Data retention
+
+One period in days per data type: audit log (default 3 years, 0 keeps everything), device
+events, compliance history, finished commands, script results, diagnostics bundles, remote
+shell transcripts, device metrics and the notification log. Each has bounds that keep
+security evidence and a hint on the legal reasoning. Defaults, bounds and the reasoning:
+[retention.md](retention.md).
+
+### Operations
+
+Runtime behavior of every instance, applied within seconds without a restart (an instance
+that missed the change notification loads it on reconnect):
+
+* Log level (`debug`, `info`, `warn`, `error`), the access log (one line per request), and
+  which admin API reads are audited (`off`, `sensitive`, `all`).
+* Load limits per instance: agent package downloads and check ins processed at once. After a
+  change, requests already running finish under the old limit.
+* PROXY protocol sources of the agent listener: the load balancers that send a PROXY v2
+  header; empty turns the PROXY protocol off. Applies to new connections.
+* Syslog target (`udp://`, `tcp://` or `tcp+tls://host:port`, empty: off) and the CA
+  certificate (PEM) of a private collector. Forwarding reconnects to a new target and
+  continues where it stopped.
+
+The environment variables of the same name are only the values until the first save here.
+
+### Backup
+
+Targets (local directory, S3 with Object Lock, Backblaze B2, SFTP, WebDAV) with a connection test,
+the age recipients, the time zone, schedules (every N hours, weekdays at times, monthly,
+cron) with their own targets and retention, and the history of runs with size, checksum verification
+and restore test. **Back up now** starts a run. Only global administrators see the tab;
+restores run on the command line ([backup.md](backup.md)).
+
 ## Google Workspace as identity provider
 
 Console sign in:
@@ -180,7 +246,7 @@ Other providers (Entra ID, Okta, authentik, Keycloak) work the same way with the
 | Role | May |
 |---|---|
 | `admin` | everything |
-| `helpdesk` | see devices (within its scope); sync, install updates, restart, shut down, lock and unlock, send a message; reset the password of, lock and unlock local accounts on a device; collect logs (diagnostics); reveal disk recovery keys; a remote shell only when **Settings, Security, Remote shell** allows the helpdesk. Not: scripts, lost mode, wipe, retire, software, creating or deleting accounts, configuration, Settings |
+| `helpdesk` | see devices (within its scope); sync, install updates, restart, shut down, lock and unlock, send a message; reset the password of, lock and unlock local accounts without admin rights on a device (accounts with uid 0, membership in `sudo`, `wheel` or `admin` or a sudoers rule are refused by the server from the inventory and by the agent, which also refuses members of `docker`, `lxd`, `incus-admin`, `libvirt` and `disk`); collect logs (diagnostics); reveal disk recovery keys; a remote shell only when **Settings, Security, Remote shell** allows the helpdesk. Not: scripts, lost mode, wipe, retire, software, creating or deleting accounts, configuration, Settings |
 | `auditor` | read everything including the audit log and Settings, change nothing |
 
 API tokens have their own roles, among them `metrics` ([admin-api.md](admin-api.md#tokens)).
@@ -217,6 +283,13 @@ again on every request, so leaving the group ends access after the next director
 strongest mapped role wins. Accounts created or edited in **Users** are explicit and
 ignore the mapping.
 
+A mapping to `admin` grants the role only through the OIDC `groups` claim or Google
+Workspace groups, never through a group the person is in only by SCIM: the static SCIM
+token alone must not create global administrators. While
+[four eyes approval](security.md#four-eyes-approval) is on, no group grants `admin` at
+all; the person gets the strongest other mapped role. Administrators are then added
+explicitly in **Users**, with an approval.
+
 ### Local admins
 
 `limdm-server local-admin` manages local accounts from the server host, for the first
@@ -252,8 +325,8 @@ Every user opens the profile by clicking their name in the sidebar:
     shown once and stored as SHA-256 hashes; the profile shows how many are left.
     Generating new codes invalidates the old ones.
 
-Password checks in the profile count towards the same lockout as the sign in (5 failures,
-15 minutes). OIDC accounts are managed by the identity provider.
+Password checks in the profile count towards the same lockout as the sign in (5 failures within
+a day from one client network lock it there for 15 minutes). OIDC accounts are managed by the identity provider.
 
 ## Directory
 
@@ -261,7 +334,9 @@ Password checks in the profile count towards the same lockout as the sign in (5 
 
 * **SCIM 2.0** at `<LIMDM_PUBLIC_URL>/scim/v2` (filters: `attribute eq "value"` only, others
   are answered with 400 `invalidFilter`; no ETags) with a bearer token created on the page
-  (Okta, Microsoft Entra ID, authentik, JumpCloud).
+  (Okta, Microsoft Entra ID, authentik, JumpCloud). Limit it to the provider's addresses
+  with **Settings**, **General**, **SCIM allowed networks**. SCIM groups never make anyone a
+  console administrator ([role groups](#role-groups)).
 * **Google Workspace:** a service account with domain wide delegation for the scopes
   `admin.directory.user.readonly`, `admin.directory.group.readonly` and
   `admin.directory.group.member.readonly`, plus an admin email to impersonate. The service

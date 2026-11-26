@@ -51,9 +51,13 @@ func (a *Agent) runCustom(c api.CustomCheck) (string, string) {
 		if !hasOsquery() {
 			return fail, "osquery is not installed, the query cannot run"
 		}
-		rows, err := osqWithin(30*time.Second, c.Query.SQL)
+		// second barrier next to the validator: osqueryi itself registers
+		// only the allowed tables and disables the network ones
+		rows, err := osqWithin(30*time.Second, c.Query.SQL,
+			"--enable_tables="+strings.Join(api.OsqueryTables, ","),
+			"--disable_tables="+strings.Join(api.OsqueryDeniedTables, ","))
 		if err != nil {
-			return fail, "query failed: " + lastLines(err.Error(), 3)
+			return fail, "query failed: " + truncateText(lastLines(err.Error(), 3), 200)
 		}
 		return evalQuery(rows, *c.Query)
 	case c.File != nil:
@@ -91,7 +95,9 @@ func (a *Agent) runCustom(c api.CustomCheck) (string, string) {
 	return fail, "check has no test"
 }
 
-// evalQuery decides a query test from osquery's rows.
+// evalQuery decides a query test from osquery's rows. The detail sent to
+// the server carries row counts and, for compare, the compared value
+// (bounded), never whole rows.
 func evalQuery(rows []map[string]string, q api.QueryTest) (string, string) {
 	switch q.Expect {
 	case "rows":
@@ -101,7 +107,7 @@ func evalQuery(rows []map[string]string, q api.QueryTest) (string, string) {
 		return pass, fmt.Sprintf("%d rows", len(rows))
 	case "no_rows":
 		if len(rows) > 0 {
-			return fail, fmt.Sprintf("%d rows, first: %s", len(rows), rowText(rows[0]))
+			return fail, fmt.Sprintf("%d rows", len(rows))
 		}
 		return pass, "no rows"
 	case "compare":
@@ -114,20 +120,12 @@ func evalQuery(rows []map[string]string, q api.QueryTest) (string, string) {
 				return fail, "column " + q.Column + " not in the result"
 			}
 			if ok, err := compare(got, q.Op, q.Value); err != nil || !ok {
-				return fail, fmt.Sprintf("%s=%q (want %s %q)", q.Column, got, q.Op, q.Value)
+				return fail, fmt.Sprintf("%s=%q (want %s %q)", q.Column, truncateText(got, 64), q.Op, q.Value)
 			}
 		}
 		return pass, fmt.Sprintf("%d rows match", len(rows))
 	}
 	return fail, "unknown expectation " + q.Expect
-}
-
-func rowText(r map[string]string) string {
-	parts := make([]string, 0, len(r))
-	for _, k := range sortedKeys(r) {
-		parts = append(parts, k+"="+r[k])
-	}
-	return truncateText(strings.Join(parts, " "), 300)
 }
 
 func truncateText(s string, n int) string {

@@ -1,8 +1,15 @@
 #!/bin/sh
 # Install the LiMDM agent with its mandatory dependency osquery.
 #
-#   sudo sh install-agent.sh ./limdm-agent_<version>_<arch>.deb|.rpm (Debian, Ubuntu, Fedora, RHEL, openSUSE, SLES)
+#   sudo LIMDM_RELEASE_PUBLIC_KEY=<hex> sh install-agent.sh ./limdm-agent_<version>_<arch>.deb|.rpm
+#   (Debian, Ubuntu, Fedora, RHEL, openSUSE, SLES)
 #
+# Checks the package against limdm_<version>_SHA256SUMS and its Ed25519
+# signature limdm_<version>_SHA256SUMS.sig from the same release, both next to
+# the package, with the release public key in LIMDM_RELEASE_PUBLIC_KEY (the
+# RELEASE_KEY line of your server's /install.sh). There is no way to skip it:
+# packages you build yourself are signed with your own release key.
+# Needs OpenSSL 3 (Ed25519 verification); older systems are not supported.
 # Adds the official osquery repository, trusting only the embedded signing key
 # (fingerprint 1484 120A C4E9 F8A1 A577  AEEE 97A8 0C63 C9D8 B80B), then installs
 # osquery and the given agent package. Enroll afterwards with `limdm-agent enroll`.
@@ -11,6 +18,41 @@ set -eu
 pkg=${1:?usage: install-agent.sh <limdm-agent package file>}
 [ "$(id -u)" -eq 0 ] || { echo "run as root" >&2; exit 1; }
 [ -f "$pkg" ] || { echo "package $pkg not found" >&2; exit 1; }
+# The release signature needs OpenSSL 3: Ed25519 verification of raw input
+# (pkeyutl -rawin). Older systems are not supported, there is no way around it.
+openssl_ok() {
+    command -v openssl >/dev/null 2>&1 || return 1
+    case "$(openssl version 2>/dev/null)" in "OpenSSL "[3-9].*|"OpenSSL "[1-9][0-9].*) ;; *) return 1 ;; esac
+    case "$(openssl pkeyutl -help 2>&1)" in *-rawin*) ;; *) return 1 ;; esac
+}
+openssl_ok || { echo "this system is not supported by the LiMDM agent (OpenSSL 3 required)" >&2; exit 1; }
+
+# verify_sums KEY SUMS SIG: the Ed25519 release signature (hex) over
+# "limdm SHA256SUMS v1\n" and the sums file, with the hex public KEY.
+hex2bin() { tr -d ' \n\r' | awk '{ h = "0123456789abcdef"; s = tolower($0); for (i = 1; i < length(s); i += 2) printf "\\%03o", (index(h, substr(s, i, 1)) - 1) * 16 + index(h, substr(s, i + 1, 1)) - 1 }'; }
+verify_sums() {
+    d=$(mktemp -d) || return 1
+    printf "$(printf '302a300506032b6570032100%s' "$1" | hex2bin)" > "$d/key.der"
+    printf "$(hex2bin < "$3")" > "$d/sig"
+    { printf 'limdm SHA256SUMS v1\n'; cat "$2"; } > "$d/msg"
+    ok=0
+    openssl pkeyutl -verify -pubin -keyform DER -inkey "$d/key.der" -rawin -in "$d/msg" -sigfile "$d/sig" >/dev/null 2>&1 || ok=1
+    rm -rf "$d"
+    return $ok
+}
+
+key=${LIMDM_RELEASE_PUBLIC_KEY:-}
+case "$key" in ''|*[!0-9a-fA-F]*) echo "set LIMDM_RELEASE_PUBLIC_KEY to the release public key (hex)" >&2; exit 1 ;; esac
+[ ${#key} -eq 64 ] || { echo "LIMDM_RELEASE_PUBLIC_KEY: 64 hex characters" >&2; exit 1; }
+for c in awk sha256sum; do command -v "$c" >/dev/null 2>&1 || { echo "$c is required" >&2; exit 1; }; done
+file=$(basename "$pkg")
+ver=$(printf '%s' "$file" | sed -n 's/^limdm-agent_\([^_]*\)_linux_.*/\1/p')
+sums=$(dirname "$pkg")/limdm_${ver}_SHA256SUMS
+[ -n "$ver" ] && [ -f "$sums" ] && [ -f "$sums.sig" ] || { echo "place limdm_${ver}_SHA256SUMS and limdm_${ver}_SHA256SUMS.sig of the release next to the package" >&2; exit 1; }
+verify_sums "$key" "$sums" "$sums.sig" || { echo "release signature of $sums invalid" >&2; exit 1; }
+want=$(awk -v f="$file" '$2 == f || $2 == "*" f { print $1 }' "$sums")
+got=$(sha256sum "$pkg" | cut -d ' ' -f 1)
+[ -n "$want" ] && [ "$want" = "$got" ] || { echo "checksum mismatch for $file" >&2; exit 1; }
 
 key=$(cat <<'KEY'
 -----BEGIN PGP PUBLIC KEY BLOCK-----

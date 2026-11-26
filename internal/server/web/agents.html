@@ -36,6 +36,7 @@
       <label class="check"><input type="checkbox" name="auto" {{if .Policy.Auto}}checked{{end}}> {{t "Update agents automatically"}}</label>
       <label>{{t "Pilot tag"}}<input name="pilot_tag" value="{{.Policy.PilotTag}}"><small class="field-hint">{{t "Devices with this tag get an approved version at once"}}</small></label>
       <label>{{t "Delay for all other devices (days)"}}<input name="delay_days" type="number" min="0" max="90" value="{{.Policy.DelayDays}}"></label>
+      <label>{{t "Rollout window (hours)"}}<input name="spread_hours" type="number" min="0" max="720" value="{{.Policy.SpreadHours}}"><small class="field-hint">{{t "After the delay each device gets the version at its own fixed time within this window"}}</small></label>
       <button>{{t "Save"}}</button>
       <p class="muted">{{t "A device that does not check in within 15 minutes after an update returns to its previous agent. After three failed devices a version is blocked automatically."}}</p>
     </form>

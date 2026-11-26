@@ -23,6 +23,7 @@
   <p class="muted">{{t "Addresses or CIDR ranges, separated by spaces or lines. The agent API is not affected; this host (loopback) is always allowed. Your address:"}} <span class="mono">{{.ClientIP}}</span></p>
   <label>{{t "Allowed networks"}}<textarea name="console_allow" rows="3" class="code" placeholder="10.0.0.0/8 2001:db8::/32">{{join .Set.ConsoleAllow "\n"}}</textarea><small class="field-hint">{{t "Empty: every network"}}</small></label>
   <label>{{t "Blocked networks"}}<textarea name="console_block" rows="3" class="code" placeholder="203.0.113.0/24">{{join .Set.ConsoleBlock "\n"}}</textarea><small class="field-hint">{{t "Refused even when allowed above"}}</small></label>
+  <label>{{t "SCIM allowed networks"}}<textarea name="scim_allow" rows="2" class="code" placeholder="198.51.100.0/24">{{join .Set.SCIMAllow "\n"}}</textarea><small class="field-hint">{{t "The provisioning addresses of your identity provider. SCIM ignores the lists above; empty: every network"}}</small></label>
   {{if $admin}}<div class="form-foot"><span class="muted">{{t "Saving is refused when your own address would be locked out."}}</span><button>{{t "Save"}}</button></div>{{end}}
 </form>
 {{else if eq .Tab "security"}}
@@ -38,12 +39,11 @@
     <label class="check"><input type="checkbox" name="symbol" {{if .Set.Rules.Symbol}}checked{{end}}><span>{{t "Special character"}}<code>! ? # …</code></span></label>
   </fieldset>
   <label class="check"><input type="checkbox" name="no_name" {{if .Set.Rules.NoName}}checked{{end}}> {{t "Must not contain the user name"}}</label>
-  <div class="card-head stacked"><h2>{{t "Four eyes approval"}}</h2><p class="muted">{{t "Wipe, lost mode, scripts and role changes of console users wait until a second administrator approves them under Approvals. The requester can never approve their own request; requests expire after 24 hours. Needs at least two active administrators."}}</p></div>
+  <div class="card-head stacked"><h2>{{t "Four eyes approval"}}</h2><p class="muted">{{t "Wipe, lost mode, scripts, library items that act as root, required catalog apps and apps with a package repository, new administrators, admin API tokens and role changes of console users wait until a second administrator approves them under Approvals. Directory groups grant no admin role meanwhile. The requester can never approve their own request; requests expire after 24 hours. Needs at least two active administrators."}}</p></div>
   <label class="check"><input type="checkbox" name="four_eyes" {{if .Set.FourEyes}}checked{{end}}> {{t "Require a second administrator's approval"}}</label>
   <label class="check"><input type="checkbox" name="four_eyes_recovery" {{if .Set.FourEyesRecovery}}checked{{end}}> {{t "Also for recovery key views (the viewer gives a reason or ticket reference)"}}</label>
   <label class="check"><input type="checkbox" name="four_eyes_shell" {{if .Set.FourEyesShell}}checked{{end}}> {{t "Also for remote shell sessions (open the approved session within one hour)"}}</label>
-  <div class="card-head stacked"><h2>{{t "Audit log retention"}}</h2><p class="muted">{{t "Entries older than this are deleted once a day after the hash chain was verified; a signed checkpoint keeps the rest verifiable. 0 keeps everything."}}</p></div>
-  <label>{{t "Keep audit entries (days)"}}<input name="audit_retention_days" type="number" min="0" max="36500" value="{{.Set.AuditRetentionDays}}"><small class="field-hint">{{t "0 or 365 to 36500"}}</small></label>
+  <p class="muted">{{t "The audit log retention is set with the other data types under Data retention."}} <a href="/settings?tab=retention">{{t "Data retention"}}</a></p>
   <fieldset>
     <legend>{{t "Privacy"}}</legend>
     <label class="check"><input type="checkbox" name="geolocation" {{if .Set.Geolocation}}checked{{end}}> {{t "Look up the location of device public addresses (sent to the geolocation service)"}}</label>
@@ -124,7 +124,8 @@
     <label><input type="radio" name="kind" value="webhook"><strong>{{t "Webhook"}}</strong><span>{{t "Signed JSON to any HTTPS endpoint"}}</span></label>
   </fieldset>
   <label>{{t "Name"}}<input name="name" required maxlength="80" placeholder="{{t "IT on call"}}"></label>
-  <label class="kind-url">{{t "Webhook URL"}}<input name="url" type="url" spellcheck="false" placeholder="https://…"><small class="field-hint">{{t "Stored encrypted. Only https targets; loopback, link local and metadata addresses are refused."}}</small></label>
+  <label class="kind-url">{{t "Webhook URL"}}<input name="url" type="url" spellcheck="false" placeholder="https://…"><small class="field-hint">{{t "Stored encrypted. Only https targets; loopback, link local, metadata and private network addresses are refused (for global channels private networks can be allowed below)."}}</small></label>
+  {{if .TenantWebhookSecret}}<dl class="kv"><dt>{{t "Signing key of this tenant"}}</dt><dd><span class="fp">{{.TenantWebhookSecret}}</span><span class="sub">X-LiMDM-Signature: sha256=HMAC-SHA256(key, timestamp + "." + "{{.TenantID}}" + "." + body), X-LiMDM-Tenant: {{.TenantID}}</span></dd></dl>{{end}}
   <div class="kind-email">
     <div class="form-row">
       <label class="grow">{{t "SMTP server"}}<input name="smtp_host" spellcheck="false" placeholder="smtp.example.com"></label>
@@ -152,6 +153,7 @@
   <div class="card-head stacked"><h2>{{t "Compliance webhook"}}</h2><p class="muted">{{t "One URL that receives signed JSON when a device becomes non-compliant, independent of the channels above."}}</p></div>
   <label>{{t "URL"}}<input name="webhook_url" value="{{.Set.WebhookURL}}" placeholder="{{t "https://hooks.example.com/limdm"}}" spellcheck="false"><small class="field-hint">{{t "Https URL receiving JSON when a device becomes non-compliant"}}</small></label>
   {{if $admin}}<dl class="kv"><dt>{{t "Signing key"}}</dt><dd><span class="fp">{{.WebhookSecret}}</span><span class="sub">X-LiMDM-Signature: sha256=HMAC-SHA256(key, timestamp + "." + body)</span></dd></dl>{{end}}
+  <label class="check"><input type="checkbox" name="notify_private"{{if .Set.NotifyPrivate}} checked{{end}}> {{t "Global channels and this webhook may reach private networks (an internal SIEM or mail relay). Tenant channels never can."}}</label>
   {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
 </form>{{end}}
 {{else if eq .Tab "branding"}}
@@ -162,6 +164,46 @@
   <label>{{t "Logo"}}<input type="file" name="logo" accept="image/png"><small class="field-hint">{{t "PNG, square, up to 256 KiB"}}</small></label>
   {{if .Set.Logo}}<div class="logo-preview"><img src="/branding/logo.png?v={{.Brand.V}}" alt=""><label class="check"><input type="checkbox" name="remove_logo"> {{t "Remove logo"}}</label></div>{{end}}
   {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
+</form>
+{{else if eq .Tab "operations"}}
+<form class="card" method="post" action="/settings">
+  {{template "csrf" .CSRF}}<input type="hidden" name="section" value="operations">
+  <div class="card-head stacked"><h2>{{t "Operations"}}</h2><p class="muted">{{t "Applies to every server instance within seconds, without a restart. The environment variables only give the values before the first save."}} {{template "doclink" "configuration.md"}}</p></div>
+  <fieldset>
+    <legend>{{t "Logging"}}</legend>
+    <label>{{t "Log level"}}<select name="log_level">{{range $l := list "debug" "info" "warn" "error"}}<option value="{{$l}}"{{if eq $.Set.Ops.LogLevel $l}} selected{{end}}>{{$l}}</option>{{end}}</select></label>
+    <label class="check"><input type="checkbox" name="access_log"{{if .Set.Ops.AccessLog}} checked{{end}}> {{t "Write a log line per request (access log)"}}</label>
+    <label>{{t "API reads in the audit log"}}<select name="audit_api_reads">{{range $l := list "off" "sensitive" "all"}}<option value="{{$l}}"{{if eq $.Set.Ops.AuditAPIReads $l}} selected{{end}}>{{t $l}}</option>{{end}}</select><small class="field-hint">{{t "sensitive: the audit log and single devices with their inventory"}}</small></label>
+  </fieldset>
+  <fieldset>
+    <legend>{{t "Load limits per instance"}}</legend>
+    <label>{{t "Agent package downloads at once"}}<input name="update_downloads" type="number" min="1" max="10000" value="{{.Set.Ops.UpdateDownloads}}"></label>
+    <label>{{t "Check ins processed at once"}}<input name="max_checkins" type="number" min="1" max="10000" value="{{.Set.Ops.MaxCheckins}}"><small class="field-hint">{{t "More wait a few seconds, then get 503 with Retry-After"}}</small></label>
+  </fieldset>
+  <fieldset>
+    <legend>{{t "Agent listener"}}</legend>
+    <label>{{t "PROXY protocol sources"}}<textarea name="agent_proxy_protocol" rows="2" class="code" placeholder="10.0.0.5 10.0.0.6">{{join .Set.Ops.AgentProxyFrom "\n"}}</textarea><small class="field-hint">{{t "Load balancers that send a PROXY v2 header; empty: PROXY protocol off. Only these may and must send it."}}</small></label>
+  </fieldset>
+  <fieldset>
+    <legend>{{t "Syslog (SIEM)"}}</legend>
+    <label>{{t "Target"}}<input name="syslog" value="{{.Set.Ops.Syslog}}" placeholder="tcp+tls://siem.example.com:6514" spellcheck="false"><small class="field-hint">{{t "Audit entries and device events as RFC 5424; empty: off"}}</small></label>
+    <label>{{t "CA certificate (PEM)"}}<textarea name="syslog_ca" rows="4" class="code" spellcheck="false" placeholder="-----BEGIN CERTIFICATE-----">{{.Set.Ops.SyslogCA}}</textarea><small class="field-hint">{{t "For tcp+tls with a private CA; empty: system roots"}}</small></label>
+  </fieldset>
+  {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
+</form>
+{{else if eq .Tab "retention"}}
+<form class="card" method="post" action="/settings">
+  {{template "csrf" .CSRF}}<input type="hidden" name="section" value="retention">
+  <div class="card-head stacked"><h2>{{t "Data retention"}}</h2><p class="muted">{{t "Data older than its period is deleted every hour. The audit log is cut only behind a verified hash chain, with a signed checkpoint. Set periods with your data protection officer; the hints name the usual legal basis, they are no legal advice."}} {{template "doclink" "retention.md"}}</p></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Data type"}}</th><th class="num">{{t "Days"}}</th><th>{{t "Reason"}}</th></tr></thead>
+    <tbody>{{range .Retention}}<tr>
+      <td><label for="ret-{{.Key}}">{{t .Label}}</label></td>
+      <td class="num"><input id="ret-{{.Key}}" name="retention_{{.Key}}" type="number" min="{{if .Forever}}0{{else}}{{.Min}}{{end}}" max="{{.Max}}" value="{{.Days}}" {{if not $admin}}readonly{{end}}><small class="field-hint">{{if .Forever}}{{t "0 keeps everything;"}} {{end}}{{.Min}} – {{.Max}}, {{t "default"}} {{.Default}}</small></td>
+      <td class="muted">{{t .Hint}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+  {{if $admin}}<div class="form-foot"><span class="muted">{{t "Expired backups are deleted by the backup schedule (Backup tab)."}}</span><button>{{t "Save"}}</button></div>{{end}}
 </form>
 {{end}}
 </div>

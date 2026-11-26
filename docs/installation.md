@@ -26,7 +26,11 @@ Port 80 is needed for the ACME HTTP challenge.
 | Server | Fedora, CentOS Stream, RHEL and rebuilds (Rocky, Alma), openSUSE Leap, openSUSE Tumbleweed, SLES | `limdm-server_<version>_linux_<arch>.rpm` | systemd |
 | Server | any Linux with Docker | container image `ghcr.io/maltekiefer/limdm-server` | Docker Compose |
 | Server | other Linux (Arch, Alpine, ...) | `limdm-server_<version>_linux_<arch>.tar.gz` (binary, unit file, `server.env.example`), or the image | systemd unit included; write your own for other init systems |
-| Agent | Debian, Ubuntu, Fedora, CentOS Stream, RHEL rebuilds, openSUSE Leap and Tumbleweed, SLES, SLED, Arch, Alpine | deb, rpm, `.pkg.tar.zst`, `.apk` | systemd; OpenRC on Alpine |
+| Agent | Debian 12+, Ubuntu 22.04+, Fedora, CentOS Stream 9+, RHEL rebuilds 9+, openSUSE Leap 16 and Tumbleweed, SLES and SLED 16, Arch, Alpine 3.17+ | deb, rpm, `.pkg.tar.zst`, `.apk` | systemd; OpenRC on Alpine |
+
+Agents need OpenSSL 3 (the installer verifies the release signature with it): systems with
+OpenSSL 1.1.1 as default, such as Ubuntu 20.04, Debian 11, RHEL 8 and its rebuilds,
+openSUSE Leap 15 and SLES 15, are not supported. Details: [agent.md](agent.md#supported-distributions).
 
 Architectures: amd64 and arm64. Feature differences per device family:
 [agent.md](agent.md#supported-distributions).

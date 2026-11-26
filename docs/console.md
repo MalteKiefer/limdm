@@ -220,7 +220,8 @@ See [agent.md](agent.md#enrollment-tokens).
   blocked), signature, devices and failures; **Approve**, **Block**,
   **Check for new versions**, **Show older versions**.
 * **Rollout**: **Update agents automatically**, **Pilot tag**, **Delay for all other
-  devices (days)**.
+  devices (days)**, **Rollout window (hours)** (each device at its own fixed time within the
+  window after the delay; 0 to 720, default 24).
 * **Fleet**: devices per agent version; **Outdated agents** updates single devices to the
   newest approved version (**Update to**).
 
@@ -351,7 +352,13 @@ Device commands of the helpdesk role (`helpdeskCommands` in `internal/server/web
 list for console, bulk actions and API): `sync`, `update`, `reboot`, `shutdown`, `lock`,
 `unlock`, `message`, `user_password`, `user_lock`, `user_unlock` and `diagnostics` (collect
 and download logs). Scripts, lost mode, wipe, retire, delete, agent updates, software,
-tags, account creation, deletion and admin rights stay with admins. The help page and the
+tags, account creation, deletion and admin rights stay with admins. The helpdesk cannot
+reset, lock or unlock accounts that can reach root (uid 0, member of `sudo`, `wheel` or
+`admin`, named in a sudoers rule; the agent also refuses members of `docker`, `lxd`,
+`incus-admin`, `libvirt` and `disk`, which reach root without sudo): the server refuses them from the last inventory with a
+clear message, and the agent refuses them from its own view, because the server signs a
+`no_admin` flag into every user command of the helpdesk. Accounts with uid 0 are refused
+for every role. The help page and the
 Users page show the same role descriptions.
 
 ### Device scopes

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -208,12 +209,12 @@ type catalogRow struct {
 	Installs int
 }
 
-const catalogCols = `slug, name, summary, category, mode, sources, detect, enabled, scope, icon_hash <> '', icon_hash, updated_at`
+const catalogCols = `slug, name, summary, category, mode, sources, detect, enabled, scope, icon_hash <> '', icon_hash, updated_at, signature, seq`
 
 func scanCatalog(row pgx.CollectableRow) (catalogRow, error) {
 	var r catalogRow
 	var src []byte
-	err := row.Scan(&r.ID, &r.Name, &r.Summary, &r.Category, &r.Mode, &src, &r.Detect, &r.Enabled, &r.Scope, &r.HasIcon, &r.IconHash, &r.Updated)
+	err := row.Scan(&r.ID, &r.Name, &r.Summary, &r.Category, &r.Mode, &src, &r.Detect, &r.Enabled, &r.Scope, &r.HasIcon, &r.IconHash, &r.Updated, &r.Signature, &r.Seq)
 	if err == nil {
 		err = json.Unmarshal(src, &r.Sources)
 	}
@@ -243,6 +244,14 @@ func (s *Server) deviceCatalog(ctx context.Context, tx pgx.Tx, deviceID string, 
 	if err != nil {
 		return nil, err
 	}
+	// changed outside the console: never delivered, and loud in the log
+	remotes = slices.DeleteFunc(remotes, func(r api.CatalogRemote) bool {
+		if dataSigOK(api.CatalogRemoteSigned(r), r.Signature) {
+			return false
+		}
+		slog.Error("catalog remote signature invalid, remote not delivered", "remote", r.Name)
+		return true
+	})
 	apps, err := s.catalogApps(ctx, tx, `WHERE enabled`)
 	if err != nil {
 		return nil, err
@@ -282,6 +291,10 @@ func (s *Server) deviceCatalog(ctx context.Context, tx pgx.Tx, deviceID string, 
 			continue
 		}
 		app := a.CatalogApp
+		if !dataSigOK(api.CatalogAppSigned(app), app.Signature) {
+			slog.Error("catalog app signature invalid, app not delivered", "app", app.ID)
+			continue
+		}
 		app.Request = reqs[app.ID]
 		c.Apps = append(c.Apps, app)
 	}
@@ -408,7 +421,7 @@ func appSourcesText(src []api.AppSource) string {
 }
 
 func (s *Server) catalogRemotes(ctx context.Context, q querier) ([]api.CatalogRemote, error) {
-	rows, err := q.Query(ctx, `SELECT name, url, title, state, catalog_only FROM catalog_remotes ORDER BY name`)
+	rows, err := q.Query(ctx, `SELECT name, url, title, state, catalog_only, signature, seq FROM catalog_remotes ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -24,7 +25,13 @@ import (
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// LIMDM_LOG_LEVEL: debug, info (default), warn or error
+	// the initial level; Settings, Operations changes it at runtime
+	if err := server.LogLevel.UnmarshalText([]byte(cmp.Or(os.Getenv("LIMDM_LOG_LEVEL"), "info"))); err != nil {
+		fmt.Fprintln(os.Stderr, "error: LIMDM_LOG_LEVEL must be debug, info, warn or error")
+		os.Exit(1)
+	}
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: server.LogLevel}))
 	cmd := "serve"
 	if len(os.Args) > 1 {
 		cmd = os.Args[1]
@@ -43,11 +50,14 @@ func main() {
 		err = auditCmd(os.Args[2:])
 	case "keys":
 		err = keysCmd(log, os.Args[2:])
+	case "backup":
+		err = backupCmd(log, os.Args[2:])
 	default:
 		err = errors.New(`usage: limdm-server [serve | keygen -out FILE | sign -key FILE|-key-env VAR|-pkcs11 LABEL SHA256SUMS
                      | local-admin [-env FILE] [-role admin|auditor] [-out FILE] add|reset|disable|enable|list [NAME]
                      | audit [-ca DIR] [-key HEX -keyed-from ID] verify FILE.jsonl | audit [-ca DIR] key
-                     | keys [-env FILE] status | rotate KIND [-name NAME] | finish KIND [-force]]`)
+                     | keys [-env FILE] status | rotate KIND [-name NAME] | finish KIND [-force]
+                     | backup [-env FILE] create | list | verify | restore | restore-test ...]`)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -75,11 +85,17 @@ func serve(log *slog.Logger) error {
 	newServer := func(addr string, h http.Handler, tc *tls.Config) *http.Server {
 		return &http.Server{
 			Addr: addr, Handler: h, TLSConfig: tc,
+			// TLS handshake and protocol errors as structured lines, not plain stderr
+			ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 			ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 60 * time.Second, WriteTimeout: 5 * time.Minute, IdleTimeout: 120 * time.Second,
 		}
 	}
 	admin := newServer(cfg.Listen, srv.AdminHandler(), &tls.Config{MinVersion: tls.VersionTLS12})
 	agent := newServer(cfg.AgentListen, srv.AgentHandler(), agentTLS)
+	agentLn, err := srv.AgentListener(cfg.AgentListen)
+	if err != nil {
+		return err
+	}
 
 	errc := make(chan error, 2)
 	go func() {
@@ -91,8 +107,8 @@ func serve(log *slog.Logger) error {
 		}
 	}()
 	go func() {
-		log.Info("agent API listening (mTLS, TLS 1.3)", "addr", cfg.AgentListen)
-		errc <- agent.ListenAndServeTLS("", "")
+		log.Info("agent API listening (mTLS, TLS 1.3)", "addr", cfg.AgentListen, "proxy_protocol_env", len(cfg.AgentProxyFrom) > 0)
+		errc <- agent.ServeTLS(agentLn, "", "")
 	}()
 	select {
 	case <-ctx.Done():
@@ -206,7 +222,7 @@ func localAdmin(args []string) error {
 
 // loadEnvFile applies KEY=VALUE lines (systemd EnvironmentFile syntax subset).
 func loadEnvFile(path string) error {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // the operator names the env file on the command line
 	if err != nil {
 		return err
 	}
@@ -347,4 +363,17 @@ func keysCmd(log *slog.Logger, args []string) error {
 	}
 	fmt.Println(msg)
 	return nil
+}
+
+// backupCmd creates, lists, verifies and restores backups (docs/backup.md).
+func backupCmd(log *slog.Logger, args []string) error {
+	if len(args) >= 2 && args[0] == "-env" {
+		if err := loadEnvFile(args[1]); err != nil {
+			return err
+		}
+		args = args[2:]
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return server.BackupCommand(ctx, log, args, os.Stdout)
 }
