@@ -45,7 +45,9 @@ func openDirNoFollow(dir string, create bool) (*os.File, error) {
 		if errors.Is(err, unix.ENOENT) && create {
 			if err = unix.Mkdirat(fd, c, 0o755); err == nil || errors.Is(err, unix.EEXIST) {
 				if nfd, err = unix.Openat(fd, c, flags, 0); err == nil {
-					err = unix.Fchmod(nfd, 0o755)
+					if err = unix.Fchmod(nfd, 0o755); err != nil {
+						_ = unix.Close(nfd)
+					}
 				}
 			}
 		}
