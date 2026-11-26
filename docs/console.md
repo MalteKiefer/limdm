@@ -351,7 +351,12 @@ Device commands of the helpdesk role (`helpdeskCommands` in `internal/server/web
 list for console, bulk actions and API): `sync`, `update`, `reboot`, `shutdown`, `lock`,
 `unlock`, `message`, `user_password`, `user_lock`, `user_unlock` and `diagnostics` (collect
 and download logs). Scripts, lost mode, wipe, retire, delete, agent updates, software,
-tags, account creation, deletion and admin rights stay with admins. The help page and the
+tags, account creation, deletion and admin rights stay with admins. The helpdesk cannot
+reset, lock or unlock accounts that can reach root (uid 0, member of `sudo`, `wheel` or
+`admin`, named in a sudoers rule): the server refuses them from the last inventory with a
+clear message, and the agent refuses them from its own view, because the server signs a
+`no_admin` flag into every user command of the helpdesk. Accounts with uid 0 are refused
+for every role. The help page and the
 Users page show the same role descriptions.
 
 ### Device scopes

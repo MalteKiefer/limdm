@@ -320,7 +320,9 @@ these controls keep it narrow:
 
 * **Two opt ins.** The device must be enrolled with `allow_remote_shell` (local file, not
   changeable from the server) and **Settings**, **Security**, **Remote shell** must be on.
-  Helpdesk and root need their own switches. With the remote shell option of
+  Helpdesk and root need their own switches. Without the root switch the agent also
+  refuses accounts with admin rights (uid 0, `sudo`, `wheel` or `admin` group, sudoers
+  rules including `NOPASSWD`). With the remote shell option of
   [four eyes approval](#four-eyes-approval) a second admin approves each session first.
 * **Signed and fresh.** The `shell` command is signed like every command, and the agent
   runs it only with a pinned command key and when it is younger than 10 minutes. Someone

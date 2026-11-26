@@ -180,7 +180,7 @@ Other providers (Entra ID, Okta, authentik, Keycloak) work the same way with the
 | Role | May |
 |---|---|
 | `admin` | everything |
-| `helpdesk` | see devices (within its scope); sync, install updates, restart, shut down, lock and unlock, send a message; reset the password of, lock and unlock local accounts on a device; collect logs (diagnostics); reveal disk recovery keys; a remote shell only when **Settings, Security, Remote shell** allows the helpdesk. Not: scripts, lost mode, wipe, retire, software, creating or deleting accounts, configuration, Settings |
+| `helpdesk` | see devices (within its scope); sync, install updates, restart, shut down, lock and unlock, send a message; reset the password of, lock and unlock local accounts without admin rights on a device (accounts with uid 0, membership in `sudo`, `wheel` or `admin` or a sudoers rule are refused by the server from the inventory and by the agent); collect logs (diagnostics); reveal disk recovery keys; a remote shell only when **Settings, Security, Remote shell** allows the helpdesk. Not: scripts, lost mode, wipe, retire, software, creating or deleting accounts, configuration, Settings |
 | `auditor` | read everything including the audit log and Settings, change nothing |
 
 API tokens have their own roles, among them `metrics` ([admin-api.md](admin-api.md#tokens)).

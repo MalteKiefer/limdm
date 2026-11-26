@@ -1391,4 +1391,7 @@ var deCatalog = map[string]string{
 	// review
 	"New administrator":               "Neuer Administrator",
 	"Administrator credentials reset": "Zugangsdaten eines Administrators zurückgesetzt",
+	// S2
+	"The helpdesk role cannot change accounts with admin rights (uid 0, sudo, wheel or admin group).":            "Die Rolle Helpdesk kann keine Konten mit Adminrechten ändern (uid 0, Gruppe sudo, wheel oder admin).",
+	"Accounts with admin rights (uid 0, sudo, wheel or admin group) need root sessions allowed in the settings.": "Konten mit Adminrechten (uid 0, Gruppe sudo, wheel oder admin) erfordern in den Einstellungen erlaubte root Sitzungen.",
 }

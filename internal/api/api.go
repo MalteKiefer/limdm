@@ -876,6 +876,9 @@ type UserCommand struct {
 	Password string `json:"password,omitempty"` // user_create, user_password: must be changed at first login
 	Admin    bool   `json:"admin,omitempty"`    // user_create, user_admin
 	KeepHome bool   `json:"keep_home,omitempty"`
+	// NoAdmin is set by the server for the helpdesk role: the agent refuses
+	// accounts with uid 0, admin group membership or sudo rules.
+	NoAdmin bool `json:"no_admin,omitempty"`
 }
 
 var localUserRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
