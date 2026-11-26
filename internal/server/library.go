@@ -36,19 +36,52 @@ func migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if ok, err := schemaCurrent(ctx, db); err != nil || ok {
 		return err
 	}
-	// one migrator at a time, and the schema inside the same transaction:
-	// SET LOCAL keeps the disabled timeouts out of the pooled connection
-	tx, err := db.Begin(ctx)
+	conn, err := db.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+	// one migrator at a time, for the schema transaction and the index builds
+	// after it. A try lock in a loop: a statement waiting for the lock would
+	// hold a snapshot, and the concurrent index build of the instance that
+	// migrates waits for every older snapshot to end
+	for start := time.Now(); ; {
+		var got bool
+		if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(7364)`).Scan(&got); err != nil {
+			return err
+		}
+		if got {
+			break
+		}
+		if time.Since(start) > 15*time.Minute {
+			return errors.New("another instance has been migrating the schema for 15 minutes")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+	defer func() {
+		// the session keeps the lock and settings otherwise; at worst the
+		// connection is closed with them
+		if _, err := conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(7364); RESET statement_timeout`); err != nil {
+			conn.Conn().Close(context.WithoutCancel(ctx)) //nolint:errcheck // already failing
+		}
+	}()
+	if ok, err := schemaCurrent(ctx, conn); err != nil || ok { // another instance was faster
+		return err
+	}
+	// the schema inside one transaction: SET LOCAL keeps the disabled
+	// timeouts to it
+	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 	// no statement limit, but a bounded lock wait: the schema takes table
 	// locks until the commit, and a running instance must not stall behind them
-	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = '30s'; SELECT pg_advisory_xact_lock(7364)`); err != nil {
-		return err
-	}
-	if ok, err := schemaCurrent(ctx, tx); err != nil || ok { // another instance was faster
+	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = '30s'`); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, schema); err != nil {
@@ -72,15 +105,11 @@ func migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
-	built, err := buildIndexes(ctx, db)
-	if err != nil {
+	if err := buildIndexes(ctx, conn); err != nil {
 		return fmt.Errorf("build indexes: %w", err)
 	}
-	if !built { // another instance builds them and records the schema after
-		return nil
-	}
 	// recorded last: a start that failed to build an index tries again
-	_, err = db.Exec(ctx, `INSERT INTO schema_applied(hash, version) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING`, schemaHash(), Version)
+	_, err = conn.Exec(ctx, `INSERT INTO schema_applied(hash, version) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING`, schemaHash(), Version)
 	return err
 }
 
@@ -108,48 +137,30 @@ var concurrentIndexes = []string{
 	`commands_finished ON commands (updated_at) WHERE status IN ('ok', 'failed', 'expired')`,
 }
 
-// buildIndexes creates the concurrentIndexes that are missing. One instance
-// builds, others starting at the same time go on without (built false): the
-// indexes only speed up queries. An invalid index left by an interrupted
+// buildIndexes creates the concurrentIndexes that are missing, on conn
+// which holds the migration lock. An invalid index left by an interrupted
 // build is built again.
-func buildIndexes(ctx context.Context, db *pgxpool.Pool) (built bool, err error) {
-	conn, err := db.Acquire(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer conn.Release()
-	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, lockIndexes).Scan(&built); err != nil || !built {
-		return false, err
-	}
-	defer func() {
-		// the session keeps the lock and the setting otherwise; at worst the
-		// connection is closed with them
-		if _, uerr := conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, lockIndexes); uerr != nil {
-			conn.Conn().Close(context.WithoutCancel(ctx)) //nolint:errcheck // already failing
-		} else {
-			_, _ = conn.Exec(context.WithoutCancel(ctx), `RESET statement_timeout`)
-		}
-	}()
-	if _, err := conn.Exec(ctx, `SET statement_timeout = 0`); err != nil {
-		return false, err
+func buildIndexes(ctx context.Context, conn *pgxpool.Conn) error {
+	if _, err := conn.Exec(ctx, `SET statement_timeout = 0`); err != nil { // reset by migrate
+		return err
 	}
 	for _, ix := range concurrentIndexes {
 		name, _, _ := strings.Cut(ix, " ")
 		var invalid bool
 		if err := conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
 			WHERE c.relname = $1 AND c.relnamespace = current_schema()::regnamespace AND NOT i.indisvalid)`, name).Scan(&invalid); err != nil {
-			return false, err
+			return err
 		}
 		if invalid {
 			if _, err := conn.Exec(ctx, `DROP INDEX CONCURRENTLY IF EXISTS `+name); err != nil {
-				return false, err
+				return err
 			}
 		}
 		if _, err := conn.Exec(ctx, `CREATE INDEX CONCURRENTLY IF NOT EXISTS `+ix); err != nil {
-			return false, fmt.Errorf("%s: %w", name, err)
+			return fmt.Errorf("%s: %w", name, err)
 		}
 	}
-	return true, nil
+	return nil
 }
 
 // schemaCurrent tells whether this exact schema and set of migrations was
