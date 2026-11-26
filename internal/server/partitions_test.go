@@ -30,6 +30,9 @@ func TestMetricPartitions(t *testing.T) {
 		PRIMARY KEY (device_id, at))`)
 	exec(`CREATE INDEX device_metrics_at ON device_metrics USING brin(at)`)
 	exec(`INSERT INTO device_metrics SELECT 'd1', now() - make_interval(hours => h), 1, 2, 3, 4 FROM generate_series(1, 48) h`)
+	// a row from a clock ahead of this host must not fail the conversion
+	// (it is dropped)
+	exec(`INSERT INTO device_metrics VALUES ('d1', now() + interval '2 days', 1, 2, 3, 4)`)
 	tx := mustBegin(t, db)
 	if err := partitionMetrics(ctx, tx); err != nil {
 		t.Fatal(err)

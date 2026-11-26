@@ -27,6 +27,12 @@ func partitionMetrics(ctx context.Context, tx pgx.Tx) error {
 		return err
 	}
 	tomorrow := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, 1)
+	// rows dated from this host's tomorrow on (the database clock ahead
+	// across midnight) do not fit the legacy partition and would fail the
+	// ATTACH and the start; they are minutes of metrics, dropped
+	if _, err := tx.Exec(ctx, `DELETE FROM device_metrics WHERE at >= $1`, tomorrow); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `ALTER TABLE device_metrics RENAME TO device_metrics_legacy;
 		ALTER TABLE device_metrics_legacy RENAME CONSTRAINT device_metrics_pkey TO device_metrics_legacy_pkey;
 		ALTER INDEX IF EXISTS device_metrics_at RENAME TO device_metrics_legacy_at;
