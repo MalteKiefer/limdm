@@ -304,7 +304,14 @@ removes them; the deletion is one of them (`device.delete`).
 * Generated configuration (sudoers, polkit rules, proxy, GRUB) only contains values
   checked against strict patterns; sudoers are additionally checked with `visudo`, sshd
   with `sshd -t`.
-* The desktop socket authorizes by peer credentials and active local session.
+* The desktop socket authorizes by peer credentials and active local session. A process of
+  the same user in an SSH session (remote logind session or below the SSH service) may
+  read status, catalog and logs, but is refused every change: app install, removal and
+  requests, recovery key escrow, SSO confirmation and reboot deferral. A process started
+  through the user's systemd manager belongs to no session and is not told apart.
+* The SSO device flow starts only at the device: never from `su` or `sudo`, never with
+  `PAM_RHOST`, a pseudo terminal or a remote parent session
+  ([desktop-login.md](desktop-login.md)).
 * Secrets on the device (`device.pem`, login configuration, state) are root only, 0600.
 * **Custom compliance checks** run no shell. A query check starts `osqueryi` with one read
   only `SELECT` over an allowlist of local tables (validated on server and agent, enforced
