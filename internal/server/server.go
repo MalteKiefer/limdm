@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"log/slog"
+	mrand "math/rand/v2"
 	"net"
 	"net/http"
 	"net/netip"
@@ -74,6 +75,7 @@ type Config struct {
 	DBMaxConns     int           // connections in the pool of this instance (LIMDM_DB_MAX_CONNS)
 	// parallel agent package downloads per instance; more wait, then get 503 (LIMDM_UPDATE_DOWNLOADS)
 	UpdateDownloads int
+	MaxCheckins     int // check ins decoded and processed at once per instance (LIMDM_MAX_CHECKINS)
 }
 
 // envInt reads a number setting within [lo, hi]; def when unset.
@@ -147,6 +149,9 @@ func ConfigFromEnv() (Config, error) {
 		return c, err
 	}
 	if c.UpdateDownloads, err = envInt("LIMDM_UPDATE_DOWNLOADS", 20, 1, 10000); err != nil {
+		return c, err
+	}
+	if c.MaxCheckins, err = envInt("LIMDM_MAX_CHECKINS", 64, 1, 10000); err != nil {
 		return c, err
 	}
 	var missing []string
@@ -246,6 +251,9 @@ type Server struct {
 	ha         cluster  // instance identity, notifications, relay (cluster.go)
 	brands     sync.Map // tenant id -> brandEntry (tenant.go)
 	downloads  chan struct{} // agent package downloads running (agentPackage); nil: no limit
+	// check ins running, and those with a body over 1 MiB (inventory, package
+	// list) among them (checkinSlot); nil: no limit
+	checkins, bigCheckins chan struct{}
 }
 
 func pgxPoolConfig(databaseURL string, maxConns int) (*pgxpool.Config, error) {
@@ -330,7 +338,8 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 // openCore loads the keys and the audit chain state: what the server and
 // limdm-server keys need.
 func openCore(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Pool) (*Server, error) {
-	s := &Server{cfg: cfg, db: db, log: log, geoSem: make(chan struct{}, 1), downloads: make(chan struct{}, max(cfg.UpdateDownloads, 1))}
+	s := &Server{cfg: cfg, db: db, log: log, geoSem: make(chan struct{}, 1), downloads: make(chan struct{}, max(cfg.UpdateDownloads, 1)),
+		checkins: make(chan struct{}, max(cfg.MaxCheckins, 1)), bigCheckins: make(chan struct{}, max(cfg.MaxCheckins/8, 1))}
 	if err := s.loadKeys(); err != nil {
 		return nil, err
 	}
@@ -826,8 +835,52 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(api.PollResponse{Pending: pending})
 }
 
+// checkinSlot bounds the check ins decoded and processed at once, and among
+// them those with a big body: memory and database connections stay bounded
+// when the fleet comes back at once or a device floods the server. A check in
+// that gets no slot within a few seconds is asked to come back later.
+func (s *Server) checkinSlot(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
+	var held []chan struct{}
+	release = func() {
+		for _, c := range held {
+			<-c
+		}
+	}
+	sems := []chan struct{}{s.checkins}
+	if r.ContentLength < 0 || r.ContentLength > 1<<20 {
+		sems = append(sems, s.bigCheckins)
+	}
+	t := time.NewTimer(checkinWait)
+	defer t.Stop()
+	for _, c := range sems {
+		if c == nil {
+			continue
+		}
+		select {
+		case c <- struct{}{}:
+			held = append(held, c)
+		case <-t.C:
+			release()
+			retryLater(w, 30+mrand.IntN(90), "too many check ins at once, retry later") //nolint:gosec // jitter, not a secret
+			return nil, false
+		case <-r.Context().Done():
+			release()
+			return nil, false
+		}
+	}
+	return release, true
+}
+
+// checkinWait is how long a check in waits for a slot (checkinSlot).
+var checkinWait = 5 * time.Second
+
 func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	id := r.Context().Value(deviceKey).(string)
+	release, ok := s.checkinSlot(w, r)
+	if !ok {
+		return
+	}
+	defer release()
 	var req api.CheckinRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<20)).Decode(&req); err != nil {
 		problem(w, http.StatusBadRequest, "bad request")
@@ -1187,13 +1240,26 @@ func retryLater(w http.ResponseWriter, seconds int, detail string) {
 	problem(w, http.StatusServiceUnavailable, detail)
 }
 
-// failAPI logs an internal error and answers with a generic problem.
+// failAPI logs an internal error and answers with a generic problem; a busy
+// database (lock or statement timeout, no free connection) is a 503 the
+// agent retries after Retry-After.
 func (s *Server) failAPI(w http.ResponseWriter, err error) {
+	if overloaded(err) {
+		s.log.Warn("agent request: database busy", "err", err)
+		retryLater(w, 30+mrand.IntN(90), "server busy, retry later") //nolint:gosec // jitter, not a secret
+		return
+	}
 	s.log.Error("agent request failed", "err", err)
 	problem(w, http.StatusInternalServerError, "internal error")
 }
 
 func (s *Server) fail(w http.ResponseWriter, err error) {
+	if overloaded(err) {
+		s.log.Warn("request: database busy", "err", err)
+		w.Header().Set("Retry-After", "30")
+		http.Error(w, "server busy, try again in a moment", http.StatusServiceUnavailable)
+		return
+	}
 	s.log.Error("request failed", "err", err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }

@@ -43,6 +43,11 @@ func (s *Server) apiFail(w http.ResponseWriter, err error) {
 		problem(w, code, msg)
 		return
 	}
+	if overloaded(err) {
+		s.log.Warn("admin api request: database busy", "err", err)
+		retryLater(w, 30, "server busy, retry later")
+		return
+	}
 	s.log.Error("admin api request failed", "err", err)
 	problem(w, http.StatusInternalServerError, "internal error")
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/maltekiefer/limdm/internal/api"
@@ -272,4 +274,42 @@ func mustBegin(t *testing.T, db *pgxpool.Pool) pgx.Tx {
 	}
 	t.Cleanup(func() { tx.Rollback(context.Background()) })
 	return tx
+}
+
+// Check ins beyond the limit are asked to come back instead of queuing
+// without bound; a busy database answers 503 as well, not 500.
+func TestCheckinBackpressure(t *testing.T) {
+	s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil)), checkins: make(chan struct{}, 1), bigCheckins: make(chan struct{}, 1)}
+	prev := checkinWait
+	checkinWait = 10 * time.Millisecond
+	t.Cleanup(func() { checkinWait = prev })
+	s.checkins <- struct{}{}
+	w := agentCall(s, s.checkin, "d1", "/api/v1/checkin", api.CheckinRequest{})
+	if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") == "" {
+		t.Fatalf("check in over the limit: %d %q", w.Code, w.Header().Get("Retry-After"))
+	}
+	<-s.checkins
+	// a big body also needs one of the few big slots
+	s.bigCheckins <- struct{}{}
+	r := httptest.NewRequest("POST", "/api/v1/checkin", strings.NewReader("{}"))
+	r.ContentLength = 2 << 20
+	if _, ok := s.checkinSlot(httptest.NewRecorder(), r); ok {
+		t.Fatal("big check in without a big slot")
+	}
+	if len(s.checkins) != 0 {
+		t.Fatal("slot not released")
+	}
+	for _, err := range []error{&pgconn.PgError{Code: "55P03"}, &pgconn.PgError{Code: "57014"}, fmt.Errorf("x: %w", context.DeadlineExceeded)} {
+		if !overloaded(err) {
+			t.Errorf("%v is a busy database", err)
+		}
+	}
+	if overloaded(&pgconn.PgError{Code: "23505"}) {
+		t.Error("a unique violation is no busy database")
+	}
+	w = httptest.NewRecorder()
+	s.failAPI(w, &pgconn.PgError{Code: "55P03"})
+	if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") == "" {
+		t.Fatalf("lock timeout: %d", w.Code)
+	}
 }
