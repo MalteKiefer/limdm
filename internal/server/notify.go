@@ -338,8 +338,11 @@ func notifyDial(ctx context.Context, network, addr string) (net.Conn, error) {
 }
 
 var notifyClient = &http.Client{
-	Timeout:       10 * time.Second,
-	Transport:     &http.Transport{DialContext: notifyDial, Proxy: proxyChecked, TLSHandshakeTimeout: 10 * time.Second},
+	Timeout: 10 * time.Second,
+	// no idle connections: a pooled connection skips the dial check, so a
+	// tenant channel could reuse one a global channel opened to a private
+	// address (NotifyPrivate)
+	Transport:     &http.Transport{DialContext: notifyDial, Proxy: proxyChecked, TLSHandshakeTimeout: 10 * time.Second, DisableKeepAlives: true},
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, // no redirects to internal addresses
 }
 

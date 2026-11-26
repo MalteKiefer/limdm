@@ -167,3 +167,10 @@ func TestTenantWebhookSignature(t *testing.T) {
 		t.Fatalf("tenant header %q, signature %q", tenant, sig)
 	}
 }
+
+// a pooled connection would skip the private network check of the dialer
+func TestNotifyClientNoPooling(t *testing.T) {
+	if tr, ok := notifyClient.Transport.(*http.Transport); !ok || !tr.DisableKeepAlives {
+		t.Fatal("notification transport keeps idle connections")
+	}
+}
