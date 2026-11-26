@@ -2,8 +2,8 @@
 // search, live state and inbox, command palette, toasts. Pages render in
 // the Outlet inside an error boundary, so a crashing page leaves the shell.
 import { Dialog } from '@base-ui/react/dialog'
-import { Link, Outlet, useRouterState } from '@tanstack/react-router'
-import { Bell, Bookmark, Building2, ChevronsUpDown, ExternalLink, Languages, LogOut, Menu as MenuIcon, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Rows3, Rows4, Search, Sun, Users } from 'lucide-react'
+import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router'
+import { Bell, Bookmark, Building2, ChevronsUpDown, CircleHelp, ExternalLink, Languages, LogOut, Menu as MenuIcon, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Rows3, Rows4, Search, Sun, UserRound, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useInboxCount, useLiveState, startLive } from '../api/live'
 import { useMe } from '../api/me'
@@ -155,6 +155,7 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   const me = useMe()
   const p = usePrefs()
   const login = me.login.replace(/^local:/, '')
+  const navigate = useNavigate()
   const themes: [Theme, MessageKey][] = [
     ['system', 'user.themeSystem'],
     ['light', 'user.themeLight'],
@@ -182,6 +183,8 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         { label: 'Deutsch', icon: Languages, checked: currentLocale() === 'de', onClick: () => setPrefs({ locale: 'de' }) },
         { label: 'English', icon: Languages, checked: currentLocale() === 'en', onClick: () => setPrefs({ locale: 'en' }) },
         'sep',
+        { label: t('settings.profile.title'), icon: UserRound, onClick: () => void navigate({ to: '/profile' }) },
+        { label: t('settings.help.title'), icon: CircleHelp, onClick: () => void navigate({ to: '/help' }) },
         { label: t('user.signOut'), icon: LogOut, onClick: () => void signOut() },
       ]}
     />

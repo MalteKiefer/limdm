@@ -6,7 +6,7 @@ import { statePath } from './global-setup'
 
 test.use({ storageState: statePath })
 
-const pages = ['/app/', '/app/inbox', '/app/devices', '/app/devices/x1', '/app/compliance', '/app/config', '/app/activity', '/app/reports', '/app/settings', '/app/dev/components', '/app/no-such-page']
+const pages = ['/app/', '/app/inbox', '/app/devices', '/app/devices/x1', '/app/compliance', '/app/config', '/app/activity', '/app/reports', '/app/settings', ...['general', 'access', 'privacy', 'signin', 'password', 'approvals', 'shell', 'keys', 'users', 'tokens', 'notifications', 'backup', 'retention', 'operations', 'directory', 'network', 'agents'].map((s) => `/app/settings?s=${s}`), '/app/profile', '/app/help', '/app/dev/components', '/app/no-such-page']
 
 async function watch(page: Page) {
   const violations: string[] = []
