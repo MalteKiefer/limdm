@@ -31,9 +31,6 @@ func TestHelpComplete(t *testing.T) {
 			t.Errorf("%s: anchor %q not in docs/declarations.md", typ, info.Anchor)
 		}
 		keys = append(keys, info.Desc)
-		for _, f := range itemMeta("en")[typ].Fields {
-			keys = append(keys, strings.TrimPrefix(strings.TrimPrefix(f[1], "list of "), "object of "))
-		}
 	}
 	for _, g := range glossary {
 		keys = append(keys, g.Term, g.Text)
@@ -57,8 +54,5 @@ func TestHelpComplete(t *testing.T) {
 		if _, ok := deCatalog[k]; !ok {
 			t.Errorf("missing German text for %q", k)
 		}
-	}
-	if got := checkDetail("de", "not encrypted: /home"); got != deCatalog["not encrypted: "]+"/home" {
-		t.Errorf("check detail prefix: %q", got)
 	}
 }

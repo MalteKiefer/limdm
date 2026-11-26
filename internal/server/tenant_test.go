@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -41,7 +40,7 @@ func resetDB(t *testing.T, dsn string) *pgxpool.Pool {
 
 func TestTenantRouteGate(t *testing.T) {
 	tenantAdmin := session{Role: "admin", Tenant: 2}
-	if tenantAllowed(tenantAdmin, "GET /settings/api") != true || tenantAllowed(tenantAdmin, "GET /agents") {
+	if !tenantAllowed(tenantAdmin, "GET /network/ca.pem") || tenantAllowed(tenantAdmin, "GET /software/icons/{id}") {
 		t.Fatal("tenant accounts reach listed routes only")
 	}
 	if !tenantAllowed(session{Role: "admin", Super: true, Tenant: 2}, "GET /agents") || !tenantAllowed(session{Role: "admin", Super: true}, "GET /agents") {
@@ -64,7 +63,7 @@ func TestTenantRouteGate(t *testing.T) {
 	}
 }
 
-// TestTenantIsolation walks every console route as an admin of tenant A
+// TestTenantIsolation walks every console and API route as an admin of tenant A
 // against the data of tenant B and expects 403 or 404 for B's objects, no
 // trace of B in any answer and B's rows unchanged afterwards. Routes are
 // read from the source, so a new route is covered without editing this test.
@@ -145,32 +144,16 @@ func TestTenantIsolation(t *testing.T) {
 	defer admin.Close()
 	sessA := session{Email: "a@a.test", Role: "admin", IAT: time.Now(), Last: time.Now()}
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	do := func(method, path string, form url.Values) (int, string) {
+	// do calls a route as the console app does, as sessA
+	do := func(method, path, body string) (int, string) {
 		t.Helper()
-		if form == nil {
-			form = url.Values{}
-		}
-		form.Set("csrf", s.csrfToken(sessA))
-		body := io.Reader(nil)
-		if method == http.MethodPost {
-			body = strings.NewReader(form.Encode())
-		}
-		req, _ := http.NewRequest(method, admin.URL+path, body)
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: s.seal(sessA)})
-		resp, err := client.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, string(b)
+		return consoleAPI(t, s, admin.URL, sessA)(method, path, body)
 	}
-	if code, body := do("GET", "/devices", nil); code != 200 || !strings.Contains(body, "host-a") {
+	if code, body := do("GET", "/api/v1/devices", ""); code != 200 || !strings.Contains(body, "host-a") {
 		t.Fatalf("tenant admin sees their own devices: %d", code)
 	}
 
-	// every console route registered in the package
+	// every route registered in the package
 	re := regexp.MustCompile(`HandleFunc\("([A-Z]+) (/[^"]*)"`)
 	files, _ := filepath.Glob("*.go")
 	var routes [][2]string
@@ -184,63 +167,62 @@ func TestTenantIsolation(t *testing.T) {
 		}
 	}
 	public := []string{"/healthz", "/login", "/lang/{lang}", "/datefmt/{format}", "/branding/logo.png", "/install.sh", "/login/oidc",
-		"/login/local", "/auth/callback", "/logout", "/static/", "/shell/{sid}/ws"}
-	ids := map[string]string{"/devices/": "devb", "/blueprints/": bpB, "/library/": itemB, "/tokens/": hex.EncodeToString(tokB),
-		"/compliance/exceptions/": excB, "/approvals/": apprB, "/settings/notifications/": chanB, "/settings/api/": apiB, "/tenants/": "3"}
-	ops := map[string]string{"/approvals/": "approve", "/settings/notifications/": "disable"}
-	// form values pointing at B's objects for routes that take them from the body
-	forms := map[string]url.Values{
-		"/devices/bulk":          {"id": {"devb"}, "action": {"tag-add"}, "tag": {"x"}},
-		"/library":               {"id": {itemB}, "name": {"probe-item"}, "type": {"com.limdm.banner"}, "payload": {`{"text":"changed"}`}},
-		"/blueprints":            {"id": {bpB}, "name": {"probe-bp"}, "tree": {"[]"}},
-		"/tokens":                {"uses": {"1"}, "days": {"1"}, "blueprint_id": {bpB}},
-		"/users/update":          {"login": {"local:userb"}, "role": {"auditor"}},
-		"/users/reset":           {"login": {"local:userb"}},
-		"/compliance/exceptions": {"check_id": {"x"}, "mode": {"exclude"}, "reason": {"r"}, "owner": {"o"}, "approver": {"p"}, "expires": {time.Now().AddDate(0, 0, 3).Format("2006-01-02")}},
+		"/login/local", "/auth/callback", "/logout", "/static/", "/shell/{sid}/ws", "/api/v1/openapi.json", "/api/v1/docs",
+		"/api/v1/events/stream"} // a stream that stays open
+	ids := map[string]string{"/api/v1/devices/": "devb", "/api/v1/blueprints/": bpB, "/api/v1/library-items/": itemB, "/api/v1/enrollment-tokens/": hex.EncodeToString(tokB),
+		"/api/v1/exceptions/": excB, "/api/v1/approvals/": apprB, "/api/v1/notification-channels/": chanB, "/api/v1/tokens/": apiB, "/api/v1/tenants/": "3",
+		"/api/v1/commands/": cmdB, "/api/v1/users/": "local:userb", "/api/v1/shell-sessions/": "sidb", "/api/v1/config/library/": itemB, "/api/v1/config/blueprints/": bpB}
+	// bodies pointing at B's objects for routes that take them from the body
+	bodies := map[string]string{
+		"POST /api/v1/devices/bulk":                `{"ids":["devb"],"action":"tag-add","params":{"tag":"x"}}`,
+		"POST /api/v1/enrollment-tokens":           `{"uses":1,"days":1,"blueprint_id":` + bpB + `}`,
+		"PATCH /api/v1/users/{login}":              `{"role":"auditor"}`,
+		"PUT /api/v1/blueprints/{id}":              `{"name":"probe-bp","tree":[]}`,
+		"PUT /api/v1/library-items/{id}":           `{"name":"probe-item","type":"com.limdm.banner","payload":{"text":"changed"}}`,
+		"POST /api/v1/approvals/{id}/reject":       `{"reason":"probe"}`,
+		"PATCH /api/v1/notification-channels/{id}": `{"enabled":false}`,
+		"POST /api/v1/config/{kind}/{id}/rollback": `{"version":1}`,
 	}
+	param := regexp.MustCompile(`\{[a-z]+\}`)
 	tested := 0
 	for _, rt := range routes {
 		method, pattern := rt[0], rt[1]
-		if slices.Contains(public, pattern) || strings.HasPrefix(pattern, "/api/") || strings.HasPrefix(pattern, "/scim/") || pattern == "/metrics" {
-			continue
+		if slices.Contains(public, pattern) || strings.HasPrefix(pattern, "/scim/") || pattern == "/metrics" {
+			continue // public or with its own authentication
 		}
 		path := strings.TrimSuffix(pattern, "{$}")
+		path = strings.Replace(path, "/api/v1/config/{kind}/", "/api/v1/config/library/", 1)
 		ownsB := false
 		for prefix, id := range ids {
-			if strings.HasPrefix(path, prefix+"{id}") {
-				path, ownsB = strings.Replace(path, "{id}", id, 1), true
-				if op, ok := ops[prefix]; ok {
-					path = strings.Replace(path, "{op}", op, 1)
-				}
+			if strings.HasPrefix(path, prefix+"{") {
+				loc := param.FindStringIndex(path[len(prefix):])
+				path, ownsB = path[:len(prefix)+loc[0]]+id+path[len(prefix)+loc[1]:], true
 			}
 		}
-		path = strings.NewReplacer("{cid}", cmdB, "{sid}", "sidb", "{op}", "approve", "{name}", "x", "{version}", "1.0.0", "{file}", "x", "{id}", "x").Replace(path)
+		path = strings.NewReplacer("{cid}", cmdB, "{op}", "approve", "{name}", "x", "{version}", "1.0.0", "{file}", "x", "{section}", "general",
+			"{type}", "x", "{step}", "x", "{uuid}", "x", "{sha}", "x", "{id}", "x").Replace(path)
 		kinds := []string{""}
 		if strings.Contains(path, "{kind}") {
 			kinds = []string{"compliance.csv", "compliance-history.csv", "inventory.csv", "packages.csv", "audit.csv", "audit.jsonl", "exceptions.csv"}
 		}
 		for _, k := range kinds {
 			p := strings.Replace(path, "{kind}", k, 1)
-			form := url.Values{}
-			for key, vals := range forms[pattern] {
-				form[key] = slices.Clone(vals)
+			body := bodies[method+" "+pattern]
+			if body == "" && method != "GET" {
+				body = "{}"
 			}
-			form.Set("version", "1")
-			code, body := do(method, p, form)
+			code, out := do(method, p, body)
 			tested++
-			if strings.Contains(body, "-b-secret") {
+			if strings.Contains(out, "-b-secret") {
 				t.Errorf("%s %s (%d) shows data of tenant B", method, p, code)
 			}
 			denied := code == http.StatusForbidden || code == http.StatusNotFound
-			if pattern == "/shell/{sid}/end" && code == http.StatusSeeOther { // no live session: only a redirect to the (denied) view
-				continue
-			}
 			if (ownsB || pattern == "/network/crl.pem") && !denied {
 				t.Errorf("%s %s: want 403 or 404 for tenant B's object, got %d", method, p, code)
 			}
 		}
 	}
-	if tested < 60 {
+	if tested < 150 {
 		t.Fatalf("only %d routes walked", tested)
 	}
 
@@ -286,7 +268,7 @@ func TestTenantIsolation(t *testing.T) {
 	// a blueprint of tenant A cannot reference B's private item (console
 	// and API), a shared item of the default tenant it can
 	refB := `[{"kind":"assign","items":[` + itemB + `]}]`
-	do("POST", "/blueprints", url.Values{"name": {"bp-a-ref"}, "tree": {refB}})
+	do("POST", "/api/v1/blueprints", `{"name":"bp-a-ref","tree":`+refB+`}`)
 	if code, _ := apiDo("POST", "/api/v1/blueprints", `{"name":"bp-a-ref2","tree":`+refB+`}`); code != http.StatusUnprocessableEntity && code != http.StatusBadRequest {
 		t.Errorf("API blueprint with tenant B's item: %d", code)
 	}
@@ -294,7 +276,7 @@ func TestTenantIsolation(t *testing.T) {
 		t.Fatal("blueprint referencing another tenant's item was saved")
 	}
 	shared := scalar(`INSERT INTO library_items(name, type, payload, tenant_id, shared) VALUES ('shared-item', 'com.limdm.banner', '{"text":"s"}', 1, true) RETURNING id::text`)
-	do("POST", "/blueprints", url.Values{"name": {"bp-a-shared"}, "tree": {`[{"kind":"assign","items":[` + shared + `]}]`}})
+	do("POST", "/api/v1/blueprints", `{"name":"bp-a-shared","tree":[{"kind":"assign","items":[`+shared+`]}]}`)
 	if got := scalar(`SELECT coalesce((SELECT tenant_id::text FROM blueprints WHERE name='bp-a-shared'), 'missing')`); got != "2" {
 		t.Fatalf("blueprint with a shared item: %s", got)
 	}
@@ -326,11 +308,11 @@ func TestTenantIsolation(t *testing.T) {
 
 	// keys belong to the whole installation: tenant admins neither see the
 	// Keys card nor reach the rotation steps
-	if code, body := do("GET", "/settings?tab=security", nil); code != 200 || strings.Contains(body, "/settings/keys/") {
-		t.Fatalf("tenant admin sees the Keys card: %d", code)
+	if code, _ := do("GET", "/api/v1/keys", ""); code != http.StatusForbidden {
+		t.Fatalf("tenant admin sees the keys: %d", code)
 	}
 	for _, op := range []string{"rotate", "finish"} {
-		if code, _ := do("POST", "/settings/keys/"+op+"/ca", url.Values{}); code != http.StatusForbidden {
+		if code, _ := do("POST", "/api/v1/keys/ca/"+op, "{}"); code != http.StatusForbidden {
 			t.Fatalf("tenant admin %s: %d", op, code)
 		}
 	}
@@ -338,22 +320,22 @@ func TestTenantIsolation(t *testing.T) {
 	// a super admin sees both tenants; switching narrows the view
 	root := session{Email: "root@msp.test", Role: "admin", IAT: time.Now(), Last: time.Now()}
 	sessA = root
-	if _, body := do("GET", "/settings?tab=security", nil); !strings.Contains(body, "/settings/keys/rotate/ca") {
-		t.Fatal("super admin misses the Keys card")
+	if code, _ := do("GET", "/api/v1/keys", ""); code != 200 {
+		t.Fatalf("super admin misses the keys: %d", code)
 	}
-	if code, body := do("GET", "/devices", nil); code != 200 || !strings.Contains(body, "host-b-secret") || !strings.Contains(body, "host-a") {
+	if code, body := do("GET", "/api/v1/devices", ""); code != 200 || !strings.Contains(body, "host-b-secret") || !strings.Contains(body, "host-a") {
 		t.Fatalf("global view: %d", code)
 	}
-	if code, _ := do("GET", "/tenants", nil); code != 200 {
+	if code, _ := do("GET", "/api/v1/tenants", ""); code != 200 {
 		t.Fatalf("tenant list: %d", code)
 	}
 	sessA.Tenant = 2
-	if _, body := do("GET", "/devices", nil); strings.Contains(body, "host-b-secret") {
+	if _, body := do("GET", "/api/v1/devices", ""); strings.Contains(body, "host-b-secret") {
 		t.Fatal("super admin switched to tenant A still sees tenant B")
 	}
 	// tenant B's admin sees the audit entry of B
 	sessA = session{Email: "b@b.test", Role: "admin", IAT: time.Now(), Last: time.Now()}
-	if _, body := do("GET", "/audit", nil); !strings.Contains(body, "audit-b-secret") {
+	if _, body := do("GET", "/api/v1/audit", ""); !strings.Contains(body, "audit-b-secret") {
 		t.Fatal("tenant B's audit view misses its entry")
 	}
 	if broken, err := s.verifyAuditFrom(ctx, false); err != nil || broken != 0 {
@@ -361,7 +343,7 @@ func TestTenantIsolation(t *testing.T) {
 	}
 	// a disabled tenant cannot sign in
 	exec(`UPDATE tenants SET disabled=true WHERE id=3`)
-	if code, _ := do("GET", "/classic", nil); code != http.StatusFound {
+	if code, _ := do("GET", "/api/v1/me", ""); code != http.StatusUnauthorized {
 		t.Fatalf("disabled tenant still signed in: %d", code)
 	}
 }

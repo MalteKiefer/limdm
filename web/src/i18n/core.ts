@@ -20,7 +20,6 @@ export const de = {
   'nav.collapse': 'Navigation einklappen',
   'nav.expand': 'Navigation ausklappen',
   'nav.title': 'Navigation',
-  'nav.oldConsole': 'Klassische Konsole',
 
   'tenant.label': 'Mandant',
   'tenant.all': 'Alle Mandanten',
@@ -67,9 +66,6 @@ export const de = {
   'state.notFoundTitle': 'Seite nicht gefunden',
   'state.notFoundBody': 'Diese Adresse gibt es in der Konsole nicht.',
   'state.toHome': 'Zur Lage',
-  'state.stubTitle': 'Noch nicht umgezogen',
-  'state.stubBody': 'Diese Seite entsteht gerade. Bis dahin steht sie in der klassischen Konsole.',
-  'state.openOld': 'In der klassischen Konsole öffnen',
   'state.requestId': 'Anfrage {id}',
 
   'status.compliant': 'konform',
@@ -202,7 +198,6 @@ export const en: Record<keyof typeof de, Msg> = {
   'nav.collapse': 'Collapse navigation',
   'nav.expand': 'Expand navigation',
   'nav.title': 'Navigation',
-  'nav.oldConsole': 'Classic console',
 
   'tenant.label': 'Tenant',
   'tenant.all': 'All tenants',
@@ -249,9 +244,6 @@ export const en: Record<keyof typeof de, Msg> = {
   'state.notFoundTitle': 'Page not found',
   'state.notFoundBody': 'This address does not exist in the console.',
   'state.toHome': 'To the overview',
-  'state.stubTitle': 'Not moved yet',
-  'state.stubBody': 'This page is being built. Until then it lives in the classic console.',
-  'state.openOld': 'Open in the classic console',
   'state.requestId': 'Request {id}',
 
   'status.compliant': 'compliant',

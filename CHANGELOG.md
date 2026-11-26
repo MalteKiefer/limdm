@@ -7,7 +7,7 @@ change behavior they rely on.
 ## Unreleased
 
 ### Upgrade notes
-- The new console app under `/app/` is the default: `/` and a sign in without a target open it. The classic console stays complete as a fallback, its overview moved from `/` to `/classic`; the app links to it (**Classic console**) and back (**New console**).
+- The console app under `/app/` is the only console. The classic server rendered console is removed; its page addresses redirect to the matching console app page.
 - `limdm-server local-admin` needs the CA directory (`LIMDM_CA_DIR`, for example through `-env`) once a server has started, to key its audit entry; without it the command stops instead of breaking the audit chain.
 
 ### Added
@@ -27,7 +27,12 @@ change behavior they rely on.
 - Sign in returns to the page it started from through a checked `next` target.
 - Admin API endpoints for all of the above: session API (`/api/v1/me`, live events, saved views), statistics (`/stats/fleet`, `/stats/compliance`, `/stats/attention`, `/stats/tenants`, `/stats/commands`, `/stats/updates`, `/stats/annotations`), `/onboarding`, `/commands`, `/activity`, `/audit/status`, `/audit/verify`, `/compliance`, `/compliance/history`, `/compliance/policies`, `/exports/{kind}`, `/report-schedules`, `/report-runs/{id}`, device detail, packages, timeline, retire, delete, agent update, recovery key view, remote shell, bulk actions, enrollment tokens, configuration and software, settings, users, tenants, keys, backup, notification channels, directory, network, agents and profile. Every endpoint is in `openapi.json`.
 
+### Removed
+- The classic server rendered console (templates, page handlers, `actions.js`, `blueprint-editor.js`, `shell.js`); old bookmarks redirect to the console app.
+
 ### Changed
+- The tenant isolation test walks every admin API route.
+- `@tanstack/react-table` stays on 8.x; Dependabot skips its major updates until the data grid is migrated.
 - Console and API share one function per action (settings, users, tenants, backup, directory, agents, network, profile, channels, software, packages), so roles, scope, tenant, four eyes and audit are the same; rejected requests carry an HTTP status.
 - Approval decisions take a reason (stored, audited); the console app requires one to reject.
 - With four eyes approval on, adding a risk exception becomes a request; the approving admin is recorded as approver.

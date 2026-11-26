@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -17,15 +16,6 @@ import (
 
 // scriptResultsKept is how many script results a device keeps.
 const scriptResultsKept = 200
-
-// scriptRow is one script result on the device page.
-type scriptRow struct {
-	CommandID      int64
-	Name           string
-	ExitCode       int
-	Stdout, Stderr string
-	Start, End     time.Time
-}
 
 // storeScriptResults keeps the structured results of script commands and
 // recurring scripts a check in carries, the newest scriptResultsKept per device.
@@ -64,16 +54,6 @@ func storeScriptResults(ctx context.Context, tx pgx.Tx, id string, req api.Check
 	_, err := tx.Exec(ctx, `DELETE FROM script_results WHERE device_id=$1 AND id NOT IN
 		(SELECT id FROM script_results WHERE device_id=$1 ORDER BY id DESC LIMIT $2)`, id, scriptResultsKept)
 	return err
-}
-
-// scriptResults are the latest script results of a device.
-func (s *Server) scriptResults(ctx context.Context, id string) ([]scriptRow, error) {
-	rows, err := s.db.Query(ctx, `SELECT COALESCE(command_id, 0), name, exit_code, stdout, stderr, started_at, ended_at
-		FROM script_results WHERE device_id=$1 ORDER BY id DESC LIMIT 50`, id)
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, pgx.RowToStructByPos[scriptRow])
 }
 
 // scriptCommandPayload builds the payload of a script command from the

@@ -143,7 +143,7 @@ func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request, c apiCaller
 				return
 			}
 		}
-		_, where, args := auditFilter(q, sess)
+		where, args := auditFilter(q, sess)
 		if aBefore > 0 {
 			args = append(args, aBefore)
 			where += " AND id < $" + strconv.Itoa(len(args))
@@ -277,7 +277,7 @@ func (s *Server) apiActivityHistogram(w http.ResponseWriter, r *http.Request, c 
 	}
 	withAudit, withEvents := activitySources(q, c)
 	if withAudit {
-		_, where, args := auditFilter(q, c.sess())
+		where, args := auditFilter(q, c.sess())
 		if !add(`SELECT to_char(at, 'YYYY-MM-DD'), action, count(*) FROM audit_log WHERE `+where+` GROUP BY 1, 2`, args, activityCategory) {
 			return
 		}

@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"net/http"
-	"net/url"
 	"slices"
 	"testing"
 
@@ -37,8 +36,8 @@ func TestSignedCatalogAndUsers(t *testing.T) {
 		t.Fatalf("signed again on a second instance: %q (first %q)", sig, firefoxSig)
 	}
 	db.Exec(ctx, `UPDATE catalog_apps SET signature=$1 WHERE slug='firefox'`, firefoxSig)
-	if code, _ := ui("POST", "/software/apps", url.Values{"new": {"1"}, "id": {"tool"}, "name": {"Tool"}, "mode": {"available"},
-		"enabled": {"on"}, "flatpak": {"org.example.Tool"}}); code != http.StatusSeeOther {
+	if code, _ := ui("POST", "/api/v1/software/apps", `{"id":"tool","name":"Tool","mode":"available","enabled":true,
+		"sources":[{"kind":"flatpak","flatpak":"org.example.Tool"}]}`); code != http.StatusOK {
 		t.Fatalf("save app: %d", code)
 	}
 	catalog := func() *api.Catalog {
@@ -65,7 +64,7 @@ func TestSignedCatalogAndUsers(t *testing.T) {
 	if c := catalog(); has(c, "tool") || !has(c, "firefox") || len(c.Remotes) != 0 {
 		t.Fatal("entries changed in the database must not be delivered")
 	}
-	if code, _ := ui("POST", "/software/remotes/flathub/filter", url.Values{}); code != http.StatusConflict {
+	if code, _ := ui("POST", "/api/v1/software/remotes/flathub/filter", ""); code != http.StatusConflict {
 		t.Fatalf("a partial change must not sign a tampered remote: %d", code)
 	}
 

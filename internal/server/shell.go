@@ -7,10 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -66,13 +64,6 @@ func (r RemoteShellSettings) validate() error {
 // allows reports whether a console role may start sessions.
 func (r RemoteShellSettings) allows(role string) bool {
 	return r.Enabled && (role == "admin" || role == "helpdesk" && r.Helpdesk)
-}
-
-func remoteShellForm(r *http.Request) RemoteShellSettings {
-	maxM, _ := strconv.Atoi(r.FormValue("shell_max_minutes"))
-	idleM, _ := strconv.Atoi(r.FormValue("shell_idle_minutes"))
-	return RemoteShellSettings{Enabled: r.FormValue("shell_enabled") == "on", Helpdesk: r.FormValue("shell_helpdesk") == "on",
-		AllowRoot: r.FormValue("shell_root") == "on", MaxMinutes: maxM, IdleMinutes: idleM}
 }
 
 // errAwaitingApproval: the action was requested and waits for a second admin.
@@ -218,10 +209,6 @@ func (h *shellHub) refused(cmdID int64, reason string) bool {
 }
 
 func (s *Server) shellRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /devices/{id}/shell", s.page(s.shellPage))
-	mux.HandleFunc("POST /devices/{id}/shell", s.helpdeskPage(s.shellStart))
-	mux.HandleFunc("GET /shell/{sid}", s.page(s.shellView))
-	mux.HandleFunc("POST /shell/{sid}/end", s.helpdeskPage(s.shellEnd))
 	mux.HandleFunc("GET /shell/{sid}/ws", s.shellWS)
 }
 
@@ -258,68 +245,10 @@ func (s *Server) scanShell(row pgx.Row) (shellRow, error) {
 	return r, err
 }
 
-func (s *Server) shellPage(w http.ResponseWriter, r *http.Request, sess session) {
-	id := r.PathValue("id")
-	var host string
-	var retired bool
-	if err := s.db.QueryRow(r.Context(), `SELECT hostname, retired FROM devices WHERE id=$1`, id).Scan(&host, &retired); err != nil || !s.inScope(r.Context(), sess, id) {
-		http.NotFound(w, r)
-		return
-	}
-	q := `SELECT ` + shellCols + ` FROM shell_sessions s JOIN devices d ON d.id=s.device_id WHERE s.device_id=$1`
-	args := []any{id}
-	if sess.Role == "helpdesk" { // transcripts are for admins and auditors; helpdesk sees its own sessions
-		q += ` AND s.requested_by=$2`
-		args = append(args, sess.Email)
-	}
-	rows, err := s.db.Query(r.Context(), q+` ORDER BY s.created_at DESC LIMIT 100`, args...)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	defer rows.Close()
-	var list []shellRow
-	for rows.Next() {
-		sr, err := s.scanShell(rows)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		list = append(list, sr)
-	}
-	if err := rows.Err(); err != nil {
-		s.fail(w, err)
-		return
-	}
-	set := s.settings().RemoteShell
-	maxM, idleM := set.Limits()
-	s.render(w, r, sess, "shell", map[string]any{"DeviceID": id, "Hostname": host, "Sessions": list,
-		"CanStart": set.allows(sess.Role) && !retired, "Enabled": set.Enabled, "AllowRoot": set.AllowRoot, "Max": maxM, "Idle": idleM,
-		"Error": shellErrors[r.URL.Query().Get("err")]})
-}
-
 // shellErrors are shown after a refused start; only the key travels in the URL.
 var shellErrors = map[string]string{
 	"user": "Invalid user name.", "root": "Root sessions are not allowed in the settings.", "approval": "The session waits for approval.",
 	"admin": privilegedShellAccount,
-}
-
-func (s *Server) shellStart(w http.ResponseWriter, r *http.Request, sess session) {
-	id := r.PathValue("id")
-	sid, refused, err := s.startShell(r.Context(), sess, id, r.FormValue("user"))
-	var ue *userError
-	switch {
-	case errors.Is(err, errNotFound):
-		http.NotFound(w, r)
-	case errors.As(err, &ue):
-		s.errorPage(w, r, sess, ue.Status, ue.Msg)
-	case err != nil:
-		s.fail(w, err)
-	case refused != "":
-		http.Redirect(w, r, "/devices/"+id+"/shell?err="+refused, http.StatusSeeOther)
-	default:
-		http.Redirect(w, r, "/shell/"+sid, http.StatusSeeOther)
-	}
 }
 
 // startShell starts a remote shell session on a device for the caller and
@@ -451,58 +380,6 @@ func (s *Server) finishShell(l *liveShell) {
 	if err != nil {
 		s.log.Error("store remote shell session", "session", l.id, "err", err)
 	}
-}
-
-// shellView shows the live terminal to the user who started the session and
-// the transcript to admins and auditors.
-func (s *Server) shellView(w http.ResponseWriter, r *http.Request, sess session) {
-	sid := r.PathValue("sid")
-	sr, err := s.scanShell(s.db.QueryRow(r.Context(), `SELECT `+shellCols+` FROM shell_sessions s JOIN devices d ON d.id=s.device_id WHERE s.id=$1`, sid))
-	if err != nil || !s.inScope(r.Context(), sess, sr.Device) {
-		http.NotFound(w, r)
-		return
-	}
-	running := sr.State != "ended" && sr.State != "interrupted" // here or on another instance
-	live := running && sr.By == sess.Email
-	if !live && sess.Role != "admin" && sess.Role != "auditor" {
-		s.errorPage(w, r, sess, http.StatusForbidden, "transcripts are available to admins and auditors")
-		return
-	}
-	var text string
-	if !live && sr.Ended != nil {
-		var raw []byte
-		if err := s.db.QueryRow(r.Context(), `SELECT transcript FROM shell_sessions WHERE id=$1`, sid).Scan(&raw); err != nil {
-			s.fail(w, err)
-			return
-		}
-		text = terminalText(raw)
-	}
-	_, vendorErr := fs.Stat(staticFS, "static/vendor/xterm/xterm.js")
-	s.render(w, r, sess, "shellsession", map[string]any{"S": sr, "Live": live, "Transcript": text, "Terminal": vendorErr == nil,
-		"Running": running, "CanEnd": running && (sr.By == sess.Email || sess.Role == "admin")})
-}
-
-func (s *Server) shellEnd(w http.ResponseWriter, r *http.Request, sess session) {
-	sid := r.PathValue("sid")
-	l := s.shells.get(sid)
-	if l == nil {
-		s.shellEndRemote(w, r, sess, sid)
-		return
-	}
-	if !s.inScope(r.Context(), sess, l.device) {
-		s.notFound(w, r, sess)
-		return
-	}
-	if l.owner != sess.Email && sess.Role != "admin" {
-		s.errorPage(w, r, sess, http.StatusForbidden, "only the user who started the session or an admin can end it")
-		return
-	}
-	l.end("ended in the console by " + sess.Email)
-	select { // the page after the redirect shows the stored end
-	case <-l.stored:
-	case <-time.After(5 * time.Second):
-	}
-	http.Redirect(w, r, "/shell/"+sid, http.StatusSeeOther)
 }
 
 // shellWS relays between the browser and the device. Cross site WebSocket

@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"net/http"
-	"sort"
 	"strings"
 
 	"github.com/maltekiefer/limdm/internal/api"
@@ -51,36 +50,6 @@ var typeInfo = map[string]struct{ Desc, Anchor string }{
 	api.TypeCustomChecks:   {"Own compliance checks: read only osquery queries or file, sysctl, package and service conditions.", "comlimdmcustomchecks-list"},
 	api.TypeDconf:          {"GNOME (dconf) defaults for every user, optionally locked.", "comlimdmdconf-list"},
 	api.TypeLocalUsers:     {"Local accounts with groups, shell and SSH keys.", "comlimdmlocalusers-list"},
-}
-
-// typeMeta is what the library item editor needs per type: description,
-// documentation link and field reference, translated.
-type typeMeta struct {
-	Desc   string     `json:"desc"`
-	Doc    string     `json:"doc"`
-	Fields [][]string `json:"fields"` // path, kind
-}
-
-func itemMeta(lang string) map[string]typeMeta {
-	m := make(map[string]typeMeta, len(api.Types))
-	for t := range api.Types {
-		tm := typeMeta{Desc: translate(lang, typeInfo[t].Desc), Doc: docsURL + "declarations.md#" + typeInfo[t].Anchor}
-		for _, f := range api.PayloadFields(t) {
-			tm.Fields = append(tm.Fields, []string{f.Path, kindText(lang, f.Kind)})
-		}
-		m[t] = tm
-	}
-	return m
-}
-
-// kindText translates "list of text" style kinds word by word.
-func kindText(lang, k string) string {
-	for _, p := range []string{"list of ", "object of "} {
-		if rest, ok := strings.CutPrefix(k, p); ok {
-			return translate(lang, strings.TrimSpace(p)) + " " + kindText(lang, rest)
-		}
-	}
-	return translate(lang, k)
 }
 
 // statusHelp explains the device states (pill tooltips, glossary).
@@ -196,47 +165,10 @@ func auditLabel(lang, action string, cmdLabel func(string) string) string {
 	return action
 }
 
-// checkDetail translates the fixed part of a check detail from the agent:
-// the whole text, or a known prefix such as "not encrypted: " before data.
-func checkDetail(lang, d string) string {
-	if lang != "de" || d == "" {
-		return d
-	}
-	if t := translate(lang, d); t != d {
-		return t
-	}
-	best := ""
-	for _, p := range checkDetailPrefixes {
-		if strings.HasPrefix(d, p) && len(p) > len(best) {
-			best = p
-		}
-	}
-	if best == "" {
-		return d
-	}
-	return translate(lang, best) + d[len(best):]
-}
-
 // checkDetailPrefixes are agent detail texts followed by device data.
 var checkDetailPrefixes = []string{"not encrypted: ", "encrypted: ", "missing: ", "not enforced: ", "empty password: ",
 	"other UID 0 accounts: ", "unapproved admins in ", "no recovery key escrowed for ", "update status unknown: ",
 	"osquery is not packaged for ", "GRUB password set in ", "documented exception (risk accepted)"}
-
-// helpPage shows the glossary, the roles and links into the documentation.
-func (s *Server) helpPage(w http.ResponseWriter, r *http.Request, sess session) {
-	lang := requestLang(r)
-	type entry struct{ ID, Term, Text, Doc string }
-	list := make([]entry, 0, len(glossary))
-	for _, g := range glossary {
-		e := entry{ID: strings.ReplaceAll(strings.ToLower(g.Term), " ", "-"), Term: translate(lang, g.Term), Text: translate(lang, g.Text)}
-		if g.Doc != "" {
-			e.Doc = docsURL + g.Doc
-		}
-		list = append(list, e)
-	}
-	sort.SliceStable(list, func(i, j int) bool { return strings.ToLower(list[i].Term) < strings.ToLower(list[j].Term) })
-	s.render(w, r, sess, "help", map[string]any{"Terms": list, "Statuses": []string{"compliant", "in grace", "non-compliant", "stale", "pending", "retired"}})
-}
 
 // bpSource says where the blueprint of a device comes from, in the order
 // resolveDevice applies: set on the device (by an admin or the enrollment
@@ -355,11 +287,4 @@ func (s *Server) onboarding(ctx context.Context, r *http.Request, sess session) 
 		}
 	}
 	return nil, nil
-}
-
-// onboardingDismiss hides the checklist in this browser for a year.
-func (s *Server) onboardingDismiss(w http.ResponseWriter, r *http.Request, _ session) {
-	http.SetCookie(w, &http.Cookie{Name: onboardingCookie, Value: "hidden", Path: "/", Secure: true, HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, MaxAge: 365 * 24 * 3600})
-	http.Redirect(w, r, "/classic", http.StatusSeeOther)
 }

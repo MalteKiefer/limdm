@@ -3,11 +3,9 @@ package server
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -202,8 +200,6 @@ func (s *Server) networkCRL(ctx context.Context) ([]byte, error) {
 }
 
 func (s *Server) networkRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /network", s.page(s.adminOrAuditor(s.unscoped(s.networkPage)))) // every device's certificates
-	mux.HandleFunc("POST /network/crl-token", s.page(s.networkCRLToken))
 	mux.HandleFunc("GET /network/ca.pem", s.page(func(w http.ResponseWriter, r *http.Request, _ session) {
 		w.Header().Set("Content-Type", "application/x-pem-file")
 		w.Header().Set("Content-Disposition", `attachment; filename="limdm-network-ca.pem"`)
@@ -254,15 +250,6 @@ func (s *Server) networkCRLDownload(w http.ResponseWriter, r *http.Request) {
 	serve(w, r, session{})
 }
 
-func (s *Server) networkCRLToken(w http.ResponseWriter, r *http.Request, sess session) {
-	tok, err := s.rotateCRLToken(r.Context(), sess)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.renderNetwork(w, r, sess, tok)
-}
-
 // rotateCRLToken replaces the bearer token of network CRL downloads and
 // returns the new one.
 func (s *Server) rotateCRLToken(ctx context.Context, sess session) (string, error) {
@@ -278,27 +265,6 @@ func (s *Server) rotateCRLToken(ctx context.Context, sess session) (string, erro
 	s.notify(notice{Type: "network.crl_token", Severity: "warning", Title: "Network CRL token rotated",
 		Text: sess.Email + " rotated the bearer token for network CRL downloads; RADIUS servers need the new token.", URL: s.cfg.PublicURL + "/network"})
 	return tok, nil
-}
-
-func (s *Server) networkPage(w http.ResponseWriter, r *http.Request, sess session) {
-	s.renderNetwork(w, r, sess, "")
-}
-
-func (s *Server) renderNetwork(w http.ResponseWriter, r *http.Request, sess session, token string) {
-	certs, err := s.networkCerts(r.Context(), "")
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	var tokenSet bool
-	if err := s.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM settings WHERE key='network_crl')`).Scan(&tokenSet); err != nil {
-		s.fail(w, err)
-		return
-	}
-	sum := sha256.Sum256(s.netCA.cert.Raw)
-	s.render(w, r, sess, "network", map[string]any{"Certs": certs, "Token": token, "TokenSet": tokenSet,
-		"CRLURL": strings.TrimSuffix(s.cfg.PublicURL, "/") + "/network/crl.pem", "CAFingerprint": hex.EncodeToString(sum[:]),
-		"CASubject": s.netCA.cert.Subject.String(), "CANotAfter": s.netCA.cert.NotAfter})
 }
 
 // networkCerts lists issued certificates, newest first: of one device, or

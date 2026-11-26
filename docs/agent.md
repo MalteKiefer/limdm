@@ -515,7 +515,7 @@ carried it out.
   download is in the audit log as `device.diagnostics.download`.
 
 The device list, bulk actions and every action of the device page are described in
-[console.md](console.md#devices).
+[console.md](console.md#areas).
 
 ## Command delivery
 

@@ -41,32 +41,17 @@ func TestKeyProviderSelection(t *testing.T) {
 	}
 }
 
-// Rotation steps are for global admins only, whatever the route wrappers
-// do: helpdesk, auditor and admins limited to a scope get 403 before any
-// key is touched.
-func TestKeysActionRoles(t *testing.T) {
-	s := &Server{cfg: Config{CADir: t.TempDir()}, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	call := func(sess session, op string) int {
-		r := httptest.NewRequest("POST", "/settings/keys/"+op+"/ca", nil)
-		r.SetPathValue("op", op)
-		r.SetPathValue("kind", "ca")
-		w := httptest.NewRecorder()
-		s.keysAction(w, r, sess)
-		return w.Code
-	}
+// Rotation steps are for global admins only (apiKeys, apiKeyAction):
+// helpdesk, auditor and admins limited to a scope or a tenant are refused.
+func TestKeysAllowed(t *testing.T) {
 	for _, sess := range []session{{Role: "helpdesk"}, {Role: "auditor"}, {Role: "admin", Tags: []string{"finance"}}, {Role: "admin", Tenant: 2}} {
-		for _, op := range []string{"rotate", "finish"} {
-			if code := call(sess, op); code != 403 {
-				t.Errorf("%s %v %s: %d", sess.Role, sess.Tags, op, code)
-			}
+		if keysAllowed(sess) {
+			t.Errorf("%s %v tenant %d allowed", sess.Role, sess.Tags, sess.Tenant)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(s.cfg.CADir, keysFile)); err == nil {
-		t.Fatal("a denied request changed keys.json")
-	}
 	for _, sess := range []session{{Role: "admin"}, {Role: "admin", Super: true, Tenant: 2}} {
-		if code := call(sess, "bogus"); code != 404 { // passes the role check
-			t.Fatalf("admin %+v: %d", sess, code)
+		if !keysAllowed(sess) {
+			t.Fatalf("admin %+v refused", sess)
 		}
 	}
 }

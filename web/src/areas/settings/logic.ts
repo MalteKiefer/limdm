@@ -26,7 +26,7 @@ export const badNet = (text: string) => lines(text).find((x) => !isNet(x))
 
 export type RoleGroup = { group: string; role: 'admin' | 'helpdesk' | 'auditor'; tags?: string[] }
 
-/** Reads "group; role; tag,tag" lines, as the classic console does. */
+/** Reads "group; role; tag,tag" lines, as the server parses them. */
 export function parseRoleGroups(text: string): { groups: RoleGroup[]; error?: string } {
   const groups: RoleGroup[] = []
   for (const raw of text.split('\n')) {

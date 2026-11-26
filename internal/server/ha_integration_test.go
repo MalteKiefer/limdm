@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
@@ -138,24 +139,14 @@ func TestHighAvailabilityIntegration(t *testing.T) {
 	// settings saved on one instance become active on the other; a save on
 	// the other right after does not undo it
 	admin := session{Email: "local:admin", Role: "admin", IAT: time.Now(), Last: time.Now()}
-	post := func(srv *httptest.Server, s *Server, path string, form url.Values) (int, string) {
+	post := func(srv *httptest.Server, s *Server, method, path, body string) (int, string) {
 		t.Helper()
-		form.Set("csrf", s.csrfToken(admin))
-		req, _ := http.NewRequest("POST", srv.URL+path, strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: s.seal(admin)})
-		resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		body, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, resp.Header.Get("Location") + string(body)
+		return consoleAPI(t, s, srv.URL, admin)(method, path, body)
 	}
-	if _, body := post(srvA, a, "/settings", url.Values{"section": {"remote_shell"}, "shell_enabled": {"on"}}); !strings.Contains(body, "Settings saved") {
-		t.Fatalf("save on A: %.3000s", body)
+	if code, body := post(srvA, a, "PATCH", "/api/v1/settings/remote_shell", `{"remote_shell":{"enabled":true}}`); code != http.StatusOK {
+		t.Fatalf("save on A: %d %.3000s", code, body)
 	}
-	if _, body := post(srvB, b, "/settings", url.Values{"section": {"general"}, "stale_hours": {"48"}, "local_login": {"on"}}); !strings.Contains(body, "Settings saved") {
+	if code, _ := post(srvB, b, "PATCH", "/api/v1/settings/general", `{"stale_hours":48,"local_login":true}`); code != http.StatusOK {
 		t.Fatal("save on B")
 	}
 	for _, s := range []*Server{a, b} {
@@ -219,14 +210,15 @@ func TestHighAvailabilityIntegration(t *testing.T) {
 		end     func(sid string, agentIn io.Closer)
 		reason  string
 	}{
-		{srvB, agentA, func(sid string, _ io.Closer) { post(srvB, b, "/shell/"+sid+"/end", url.Values{}) }, "ended in the console by local:admin"},
+		{srvB, agentA, func(sid string, _ io.Closer) { post(srvB, b, "POST", "/api/v1/shell-sessions/"+sid+"/end", "") }, "ended in the console by local:admin"},
 		{srvA, agentB, func(_ string, agentIn io.Closer) { agentIn.Close() }, "the session ended on the device"},
 	} {
-		code, loc := post(srvA, a, "/devices/d1/shell", url.Values{"user": {"alice"}})
-		if code != http.StatusSeeOther || !strings.HasPrefix(loc, "/shell/") {
-			t.Fatalf("case %d start: %d %s", i, code, loc)
+		code, body := post(srvA, a, "POST", "/api/v1/devices/d1/shell", `{"user":"alice"}`)
+		var started struct{ ID string }
+		if json.Unmarshal([]byte(body), &started); code != http.StatusCreated || started.ID == "" {
+			t.Fatalf("case %d start: %d %s", i, code, body)
 		}
-		sid := strings.TrimPrefix(loc, "/shell/")
+		sid := started.ID
 		conn, br := wsDialConsole(t, tc.console.URL, "/shell/"+sid+"/ws?csrf="+url.QueryEscape(a.csrfToken(admin)), a.seal(admin))
 		_ = conn.SetDeadline(time.Now().Add(20 * time.Second))
 		if op, p := readServerFrame(t, br); op != wsText || string(p) != "waiting" {
@@ -255,7 +247,9 @@ func TestHighAvailabilityIntegration(t *testing.T) {
 			// a session out of the account's scope cannot end it from the other instance
 			outside := session{Email: "local:help", Role: "helpdesk", Tags: []string{"elsewhere"}, IAT: time.Now(), Last: time.Now()}
 			rec := httptest.NewRecorder()
-			b.shellEndRemote(rec, httptest.NewRequest("POST", "/shell/"+sid+"/end", nil), outside, sid)
+			req := httptest.NewRequest("POST", "/api/v1/shell-sessions/"+sid+"/end", nil)
+			req.SetPathValue("sid", sid)
+			b.apiShellEnd(rec, req, apiCaller{Name: outside.Email, Role: outside.Role, Tags: outside.Tags, Sess: &outside})
 			var ended bool
 			db.QueryRow(ctx, `SELECT ended_at IS NOT NULL FROM shell_sessions WHERE id=$1`, sid).Scan(&ended)
 			if rec.Code != http.StatusNotFound || ended {

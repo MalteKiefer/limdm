@@ -10,7 +10,7 @@ a reference page on the console itself (no token, no scripts, no external resour
 
 ## Tokens
 
-Admins create tokens under Administration, **API tokens** (`/settings/api`). Auditors see the
+Admins create tokens under **Settings**, **API tokens** (`/app/settings?s=tokens`). Auditors see the
 list but cannot create or revoke; the helpdesk role does not see the page.
 
 * **Name**: up to 100 characters, shown in the audit log, for example `ticket system`.
@@ -293,8 +293,8 @@ the browser reconnects; each caller may hold five streams.
 
 ### Settings and administration
 
-The settings area of the console app calls the same functions as the classic pages, so
-every guard holds through the API too:
+The settings area of the console app calls these endpoints, and every guard holds
+for API tokens too:
 
 * `GET /api/v1/settings` and `PATCH /api/v1/settings/{section}` (global admins; auditors
   read). A section saves only its own fields; left out fields keep their value. Secrets
@@ -311,7 +311,7 @@ every guard holds through the API too:
   `/api/v1/agents` and the own `/api/v1/profile` (console sessions only).
 
 Global pages (settings, keys, backup, directory, agents) refuse tenant accounts and
-accounts with a device scope, as the classic console does.
+accounts with a device scope.
 
 ### Audit filters
 

@@ -19,7 +19,7 @@ import { Facts, OnceSecret, SettingsForm, TextField } from '../../components/set
 
 const sample = new Date(2026, 11, 31, 14, 30)
 
-/** Keeps the app's choice and sets the classic console's cookie, so both show the same notation. */
+/** Keeps the app's choice and sets the server's cookie, so /api/v1/me reports the same notation on other devices. */
 function pickDateFormat(f: DateFormat | null) {
   setPrefs({ dateFormat: f })
   if (f) void fetch(`/datefmt/${f}`, { credentials: 'same-origin', redirect: 'manual' }).catch(() => undefined)

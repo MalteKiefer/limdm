@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -23,7 +24,7 @@ import (
 
 // evidenceServer gives a fresh schema, a server and a console client for an
 // admin session.
-func evidenceServer(t *testing.T) (*Server, *pgxpool.Pool, func(method, path string, form url.Values) (int, string)) {
+func evidenceServer(t *testing.T) (*Server, *pgxpool.Pool, func(method, path, body string) (int, string)) {
 	t.Helper()
 	dsn := os.Getenv("LIMDM_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -52,23 +53,7 @@ func evidenceServer(t *testing.T) (*Server, *pgxpool.Pool, func(method, path str
 	web := httptest.NewServer(s.AdminHandler())
 	t.Cleanup(web.Close)
 	sess := session{Email: "admin@firma.de", Role: "admin", IAT: time.Now(), Last: time.Now()}
-	ui := func(method, path string, form url.Values) (int, string) {
-		t.Helper()
-		if form != nil {
-			form.Set("csrf", s.csrfToken(sess))
-		}
-		req, _ := http.NewRequest(method, web.URL+path, strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: s.seal(sess)})
-		resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, string(b)
-	}
-	return s, db, ui
+	return s, db, consoleAPI(t, s, web.URL, sess)
 }
 
 func TestKeyedAuditChain(t *testing.T) {
@@ -106,15 +91,23 @@ func TestKeyedAuditChain(t *testing.T) {
 		t.Fatalf("keyed chain: broken=%d err=%v", broken, err)
 	}
 
-	// paging: the first page links to older entries, which end at entry 1
-	code, body := ui("GET", "/audit", nil)
-	if code != 200 || !strings.Contains(body, "before=") {
-		t.Fatalf("audit page has no paging: %d", code)
+	// paging: the first page has a cursor to older entries, the next page goes on below it
+	type auditPage struct {
+		Items []struct {
+			ID int64 `json:"id"`
+		} `json:"items"`
+		Next string `json:"next_cursor"`
 	}
-	if code, body = ui("GET", "/audit?before=60", nil); code != 200 || strings.Contains(body, ">60<") || !strings.Contains(body, ">59<") {
+	var p1, p2 auditPage
+	code, body := ui("GET", "/api/v1/audit?limit=50", "")
+	if json.Unmarshal([]byte(body), &p1); code != 200 || p1.Next == "" || len(p1.Items) != 50 {
+		t.Fatalf("audit has no paging: %d", code)
+	}
+	code, body = ui("GET", "/api/v1/audit?limit=50&cursor="+url.QueryEscape(p1.Next), "")
+	if json.Unmarshal([]byte(body), &p2); code != 200 || len(p2.Items) == 0 || p2.Items[0].ID != p1.Items[49].ID-1 {
 		t.Fatalf("second page: %d", code)
 	}
-	if code, _ := ui("POST", "/audit/verify", url.Values{}); code != http.StatusSeeOther {
+	if code, _ := ui("POST", "/api/v1/audit/verify", ""); code != http.StatusOK {
 		t.Fatalf("verify action: %d", code)
 	}
 	var verified string
@@ -124,7 +117,7 @@ func TestKeyedAuditChain(t *testing.T) {
 	}
 
 	// the JSON Lines export verifies outside the database, and its SHA-256 is audited
-	code, export := ui("GET", "/export/audit.jsonl?from="+time.Now().Format("2006-01-02"), nil)
+	code, export := ui("GET", "/api/v1/exports/audit.jsonl?from="+time.Now().Format("2006-01-02"), "")
 	if code != 200 {
 		t.Fatalf("export: %d", code)
 	}
@@ -215,22 +208,22 @@ func TestComplianceHistory(t *testing.T) {
 		t.Fatalf("want 4 changes (2 initial, 1 fixed, 1 removed), got %d", n)
 	}
 	twoDaysAgo := time.Now().AddDate(0, 0, -2).Format("2006-01-02")
-	code, body := ui("GET", "/compliance/history?device=d1&at="+twoDaysAgo, nil)
+	code, body := ui("GET", "/api/v1/compliance/history?device=d1&at="+twoDaysAgo, "")
 	if code != 200 || !strings.Contains(body, "firewall.active") || !strings.Contains(body, "time.sync") {
 		t.Fatalf("history two days ago: %d", code)
 	}
-	code, csv := ui("GET", "/export/compliance-history.csv?device=d1", nil)
+	code, csv := ui("GET", "/api/v1/exports/compliance-history.csv?device=d1", "")
 	if code != 200 || !strings.Contains(csv, "firewall.active,pass") || strings.Contains(csv, "time.sync") {
 		t.Fatalf("history today:\n%s", csv)
 	}
-	code, csv = ui("GET", "/export/compliance-history.csv?at="+twoDaysAgo, nil)
+	code, csv = ui("GET", "/api/v1/exports/compliance-history.csv?at="+twoDaysAgo, "")
 	if code != 200 || !strings.Contains(csv, "firewall.active,fail") || !strings.Contains(csv, "2026.11.1") {
 		t.Fatalf("history two days ago:\n%s", csv)
 	}
-	if code, _ := ui("GET", "/export/compliance-history.csv?at=yesterday", nil); code != http.StatusBadRequest {
+	if code, _ := ui("GET", "/api/v1/exports/compliance-history.csv?at=yesterday", ""); code != http.StatusBadRequest {
 		t.Fatalf("bad date accepted: %d", code)
 	}
-	if code, csv = ui("GET", "/export/compliance.csv", nil); code != 200 || !strings.HasPrefix(csv, "device_id,hostname,last_seen,agent_version,catalog_version") {
+	if code, csv = ui("GET", "/api/v1/exports/compliance.csv", ""); code != 200 || !strings.HasPrefix(csv, "device_id,hostname,last_seen,agent_version,catalog_version") {
 		t.Fatalf("evidence export header:\n%s", csv)
 	}
 }

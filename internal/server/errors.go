@@ -59,13 +59,3 @@ func overloaded(err error) bool {
 	}
 	return errors.Is(err, context.DeadlineExceeded)
 }
-
-// failUser answers a console request with the error page for the error's
-// status, or 500.
-func (s *Server) failUser(w http.ResponseWriter, r *http.Request, sess session, err error) {
-	if code, msg := errStatus(err); code != 0 {
-		s.errorPage(w, r, sess, code, msg)
-		return
-	}
-	s.fail(w, err)
-}

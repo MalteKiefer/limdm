@@ -382,34 +382,6 @@ func (s *Server) shellWSRemote(w http.ResponseWriter, r *http.Request, sess sess
 	ws.Close(truncate(reason, 120))
 }
 
-// shellEndRemote ends a session held by another instance and waits until
-// its end is stored, so the page after the redirect shows it.
-func (s *Server) shellEndRemote(w http.ResponseWriter, r *http.Request, sess session, sid string) {
-	ctx := r.Context()
-	if device, owner, ok := s.remoteShell(ctx, sid); ok {
-		if !s.inScope(ctx, sess, device) {
-			s.notFound(w, r, sess)
-			return
-		}
-		if owner != sess.Email && sess.Role != "admin" {
-			s.errorPage(w, r, sess, http.StatusForbidden, "only the user who started the session or an admin can end it")
-			return
-		}
-		if err := s.relaySend(sid, "h", "e", []byte("ended in the console by "+sess.Email)); err != nil {
-			s.fail(w, err)
-			return
-		}
-		for range 50 {
-			var ended bool
-			if err := s.db.QueryRow(ctx, `SELECT ended_at IS NOT NULL FROM shell_sessions WHERE id=$1`, sid).Scan(&ended); err != nil || ended {
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-	http.Redirect(w, r, "/shell/"+sid, http.StatusSeeOther)
-}
-
 // shellRefused ends the session of a shell command the device did not run,
 // wherever the session runs.
 func (s *Server) shellRefused(ctx context.Context, cmdID int64, output string) {

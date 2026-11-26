@@ -166,80 +166,6 @@ func (a artifactRow) Snippet() string {
 	return string(b)
 }
 
-// packageNotes are the messages after a redirect, by key, so no free text
-// travels in the URL.
-var packageNotes = map[string]string{
-	"uploaded": "Uploaded. Reference it in a library item of the type Uploaded packages.",
-	"approval": "Uploaded. Another administrator approves it under Approvals before devices can install it.",
-}
-
-func (s *Server) packagesPage(w http.ResponseWriter, r *http.Request, sess session) {
-	s.renderPackages(w, r, sess, packageNotes[r.URL.Query().Get("done")], "")
-}
-
-func (s *Server) renderPackages(w http.ResponseWriter, r *http.Request, sess session, msg, errMsg string) {
-	ctx := r.Context()
-	tcond, targs := tenantCond(sess, "a.tenant_id", 0)
-	icond, _ := tenantCond(sess, "i.tenant_id", 0) // same $1: only items the viewer may see
-	rows, err := s.db.Query(ctx, `SELECT a.id, a.tenant_id, a.sha256, a.name, a.version, a.kind, a.filename, a.store, a.size, a.uploaded_by, a.approved_by, a.created_at,
-		coalesce((SELECT array_agg(i.name ORDER BY i.name) FROM library_items i WHERE i.type = '`+api.TypeArtifacts+`' AND `+icond+`
-			AND i.payload->'artifacts' @> jsonb_build_array(jsonb_build_object('sha256', a.sha256))), '{}')
-		FROM artifacts a WHERE `+tcond+` ORDER BY a.name, a.created_at DESC`, targs...)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[artifactRow])
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	cfg, err := s.packageConfig(ctx)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	var used int64
-	for _, a := range list {
-		if a.Tenant == ownerTenant(ctx) {
-			used += a.Size
-		}
-	}
-	s.render(w, r, sess, "packages", map[string]any{"Artifacts": list, "Cfg": cfg, "UsedMB": used >> 20, "Kinds": api.ArtifactKinds,
-		"Tabs": softwareTabs, "Tab": "packages", "Msg": msg, "Error": errMsg, "Global": !sess.TenantOnly(), "FourEyes": s.settings().FourEyes,
-		"Type": api.TypeArtifacts})
-}
-
-// packageUpload stores an upload: SHA-256 while copying, type and quota
-// checks, then the store, the row and the audit entry. With four eyes on,
-// the upload is usable only after another admin approved it.
-func (s *Server) packageUpload(w http.ResponseWriter, r *http.Request, sess session) {
-	if sess.Role != "admin" { // also checked by page; uploads install as root
-		s.errorPage(w, r, sess, http.StatusForbidden, "your role cannot change this")
-		return
-	}
-	f, hdr, err := r.FormFile("file")
-	if err != nil {
-		s.renderPackages(w, r, sess, "", "Choose a file (at most the upload limit).")
-		return
-	}
-	defer f.Close()
-	pending, err := s.storeUpload(r.Context(), sess, r.FormValue("name"), r.FormValue("version"), r.FormValue("kind"), hdr.Filename, f, r.FormValue("reason"))
-	if code, msg := errStatus(err); code != 0 && code < 500 {
-		s.renderPackages(w, r, sess, "", msg)
-		return
-	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	done := "uploaded"
-	if pending {
-		done = "approval"
-	}
-	http.Redirect(w, r, "/software/packages?done="+done, http.StatusSeeOther)
-}
-
 // storeUpload stores an upload for the tenant a request acts for: SHA-256
 // while copying, kind and quota checks, then the store, the row and the
 // audit entry. With four eyes on the upload waits for another admin
@@ -337,27 +263,6 @@ func (s *Server) storeUpload(ctx context.Context, sess session, name, version, k
 	return err == nil, err
 }
 
-// packageDelete removes an upload no library item references.
-func (s *Server) packageDelete(w http.ResponseWriter, r *http.Request, sess session) {
-	if sess.Role != "admin" { // also checked by page; tenantCond below limits to own artifacts
-		s.errorPage(w, r, sess, http.StatusForbidden, "your role cannot change this")
-		return
-	}
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	err := s.deletePackage(r.Context(), sess, id)
-	var ue *userError
-	switch {
-	case errors.As(err, &ue) && ue.Status == http.StatusNotFound:
-		s.notFound(w, r, sess)
-	case errors.As(err, &ue):
-		s.renderPackages(w, r, sess, "", ue.Msg)
-	case err != nil:
-		s.fail(w, err)
-	default:
-		http.Redirect(w, r, "/software/packages", http.StatusSeeOther)
-	}
-}
-
 // deletePackage removes an upload of the session's tenant that no library
 // item references, with its audit entry, then its file.
 func (s *Server) deletePackage(ctx context.Context, sess session, id int64) error {
@@ -390,46 +295,6 @@ func (s *Server) deletePackage(ctx context.Context, sess session, id int64) erro
 		}
 	}
 	return nil
-}
-
-// packagesSettings saves the limits and the store (global admins).
-func (s *Server) packagesSettings(w http.ResponseWriter, r *http.Request, sess session) {
-	if !backupAdmin(sess) { // the store and its credentials serve every tenant
-		s.errorPage(w, r, sess, http.StatusForbidden, "the package store is managed by global administrators")
-		return
-	}
-	ctx := r.Context()
-	cur, err := s.packageConfig(ctx)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	c := cur
-	c.MaxUploadMB, _ = strconv.Atoi(r.FormValue("max_upload_mb"))
-	c.QuotaMB, _ = strconv.Atoi(r.FormValue("quota_mb"))
-	c.QuotaCount, _ = strconv.Atoi(r.FormValue("quota_count"))
-	if r.FormValue("store") == "s3" {
-		in := targetFromForm(r)
-		in.Name, in.Kind = "packages", "s3"
-		t, err := s.target(in, cur.S3)
-		if err != nil {
-			s.renderPackages(w, r, sess, "", err.Error())
-			return
-		}
-		c.S3 = &t
-	} else {
-		c.S3 = nil
-	}
-	err = s.savePackageConfig(ctx, sess.Email, cur, c)
-	if code, msg := errStatus(err); code != 0 && code < 500 {
-		s.renderPackages(w, r, sess, "", msg)
-		return
-	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/software/packages", http.StatusSeeOther)
 }
 
 // savePackageConfig validates and stores the package limits and store

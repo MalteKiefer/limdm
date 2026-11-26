@@ -95,21 +95,6 @@ func applyExceptions(ctx context.Context, q pgx.Tx, deviceID string, decls []api
 	return nil
 }
 
-func (s *Server) exceptionAdd(w http.ResponseWriter, r *http.Request, sess session) {
-	e := riskException{CheckID: r.FormValue("check_id"), Mode: r.FormValue("mode"), Tag: r.FormValue("tag"),
-		Reason: r.FormValue("reason"), Owner: r.FormValue("owner"), Approver: r.FormValue("approver")}
-	_, pending, err := s.addOrRequestException(r.Context(), sess, e, r.FormValue("expires"))
-	if err != nil {
-		s.failUser(w, r, sess, err)
-		return
-	}
-	if pending {
-		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
-		return
-	}
-	http.Redirect(w, r, "/compliance#exceptions", http.StatusSeeOther)
-}
-
 // checkException validates a risk exception for the console and the admin
 // API; expires is the last day it applies (YYYY-MM-DD). With approver the
 // approver named by the caller is checked too (four eyes: another person);
@@ -219,24 +204,6 @@ func applyExceptionApproval(ctx context.Context, tx pgx.Tx, a approval, approver
 	}
 	return audit(ctx, tx, a.RequestedBy, "exception.add", c.CheckID, fmt.Sprintf("#%d mode=%s tag=%q owner=%q approver=%q expires=%s reason=%q (approval #%d by %s)",
 		id, c.Mode, c.Tag, c.Owner, approver, c.Expires.Format(time.DateOnly), c.Reason, a.ID, approver))
-}
-
-func (s *Server) exceptionRevoke(w http.ResponseWriter, r *http.Request, sess session) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	err = s.revokeException(r.Context(), sess, id)
-	if errors.Is(err, errNotFound) {
-		s.notFound(w, r, sess)
-		return
-	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/compliance#exceptions", http.StatusSeeOther)
 }
 
 // revokeException ends an exception of the session's tenant; revoking one

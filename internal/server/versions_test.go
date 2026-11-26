@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -31,8 +30,7 @@ func TestVersioning(t *testing.T) {
 	var defID int64
 	db.QueryRow(ctx, `SELECT id FROM blueprints WHERE name='default'`).Scan(&defID)
 
-	save := func(form url.Values) (int, string) { return ui("POST", "/library", form) }
-	if code, _ := save(url.Values{"name": {"tools"}, "type": {"com.limdm.packages"}, "payload": {`{"install":["vim"]}`}}); code != http.StatusSeeOther {
+	if code, _ := ui("POST", "/api/v1/library-items", `{"name":"tools","type":"com.limdm.packages","payload":{"install":["vim"]}}`); code != http.StatusCreated {
 		t.Fatalf("create: %d", code)
 	}
 	var itemID int64
@@ -40,13 +38,14 @@ func TestVersioning(t *testing.T) {
 	id := strconv.FormatInt(itemID, 10)
 	// put the item into the default blueprint, which the device gets
 	tree := `[{"kind":"assign","items":[` + id + `]}]`
-	if code, body := ui("POST", "/blueprints", url.Values{"id": {strconv.FormatInt(defID, 10)}, "name": {"default"}, "tree": {tree}}); code != http.StatusSeeOther {
+	def := strconv.FormatInt(defID, 10)
+	if code, body := ui("PUT", "/api/v1/blueprints/"+def, `{"name":"default","tree":`+tree+`}`); code != http.StatusOK {
 		t.Fatalf("blueprint save: %d %s", code, body)
 	}
 
 	// the preview shows the diff and the reached device, and saves nothing
-	code, body := save(url.Values{"id": {id}, "name": {"tools"}, "type": {"com.limdm.packages"}, "payload": {`{"install":["vim","git"]}`}, "preview": {"1"}})
-	if code != 200 || !strings.Contains(body, "pc1") || !strings.Contains(body, `class="d-add">+     &#34;git&#34;`) {
+	code, body := ui("POST", "/api/v1/config/library/preview", `{"id":`+id+`,"name":"tools","type":"com.limdm.packages","payload":{"install":["vim","git"]}}`)
+	if code != 200 || !strings.Contains(body, "pc1") || !strings.Contains(body, `\"git\"`) {
 		t.Fatalf("preview: %d\n%s", code, body)
 	}
 	var n int
@@ -54,13 +53,13 @@ func TestVersioning(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("preview must not save: %d versions", n)
 	}
-	if code, _ := save(url.Values{"id": {id}, "name": {"tools"}, "type": {"com.limdm.packages"}, "payload": {`{"install":["vim","git"]}`}}); code != http.StatusSeeOther {
+	if code, _ := ui("PUT", "/api/v1/library-items/"+id, `{"name":"tools","type":"com.limdm.packages","payload":{"install":["vim","git"]}}`); code != http.StatusOK {
 		t.Fatalf("save: %d", code)
 	}
-	if code, body := ui("GET", "/library/"+id+"/history", nil); code != 200 || !strings.Contains(body, "d-add") {
+	if code, body := ui("GET", "/api/v1/config/library/"+id+"/versions", ""); code != 200 || !strings.Contains(body, `"version":2`) || !strings.Contains(body, "git") {
 		t.Fatalf("history: %d", code)
 	}
-	if code, _ := ui("POST", "/library/"+id+"/rollback", url.Values{"version": {"1"}}); code != http.StatusSeeOther {
+	if code, _ := ui("POST", "/api/v1/config/library/"+id+"/rollback", `{"version":1}`); code != http.StatusOK {
 		t.Fatalf("rollback: %d", code)
 	}
 	var payload, note string
@@ -71,14 +70,14 @@ func TestVersioning(t *testing.T) {
 	}
 
 	// delete keeps the last payload; restore brings the item back under its ID
-	ui("POST", "/blueprints", url.Values{"id": {strconv.FormatInt(defID, 10)}, "name": {"default"}, "tree": {"[]"}})
-	if code, _ := ui("POST", "/library/"+id+"/delete", url.Values{}); code != http.StatusSeeOther {
+	ui("PUT", "/api/v1/blueprints/"+def, `{"name":"default","tree":[]}`)
+	if code, _ := ui("DELETE", "/api/v1/library-items/"+id, ""); code != http.StatusNoContent {
 		t.Fatalf("delete: %d", code)
 	}
-	if _, body := ui("GET", "/library", nil); !strings.Contains(body, "/library/"+id+"/history") {
-		t.Fatal("deleted item not listed")
+	if _, body := ui("GET", "/api/v1/config/library/"+id+"/versions", ""); !strings.Contains(body, `"deleted":true`) {
+		t.Fatal("deleted item has no history")
 	}
-	if code, _ := ui("POST", "/library/"+id+"/rollback", url.Values{"version": {"3"}}); code != http.StatusSeeOther {
+	if code, _ := ui("POST", "/api/v1/config/library/"+id+"/rollback", `{"version":3}`); code != http.StatusOK {
 		t.Fatalf("restore: %d", code)
 	}
 	if err := db.QueryRow(ctx, `SELECT payload::text FROM library_items WHERE id=$1`, itemID).Scan(&payload); err != nil {
@@ -91,7 +90,7 @@ func TestVersioning(t *testing.T) {
 	}
 
 	// blueprints: rollback of the default map and restore of a deleted one
-	if code, _ := ui("POST", "/blueprints/"+strconv.FormatInt(defID, 10)+"/rollback", url.Values{"version": {"2"}}); code != http.StatusSeeOther {
+	if code, _ := ui("POST", "/api/v1/config/blueprints/"+def+"/rollback", `{"version":2}`); code != http.StatusOK {
 		t.Fatalf("blueprint rollback: %d", code)
 	}
 	var tr string
@@ -99,12 +98,12 @@ func TestVersioning(t *testing.T) {
 	if !strings.Contains(tr, id) {
 		t.Fatalf("blueprint rollback: %s", tr)
 	}
-	ui("POST", "/blueprints", url.Values{"name": {"lab"}, "tree": {"[]"}})
+	ui("POST", "/api/v1/blueprints", `{"name":"lab","tree":[]}`)
 	var labID int64
 	db.QueryRow(ctx, `SELECT id FROM blueprints WHERE name='lab'`).Scan(&labID)
 	lab := strconv.FormatInt(labID, 10)
-	ui("POST", "/blueprints/"+lab+"/delete", url.Values{})
-	if code, _ := ui("POST", "/blueprints/"+lab+"/rollback", url.Values{"version": {"1"}}); code != http.StatusSeeOther {
+	ui("DELETE", "/api/v1/blueprints/"+lab, "")
+	if code, _ := ui("POST", "/api/v1/config/blueprints/"+lab+"/rollback", `{"version":1}`); code != http.StatusOK {
 		t.Fatalf("blueprint restore: %d", code)
 	}
 	if _, err := db.Exec(ctx, `UPDATE library_item_versions SET note='x'`); err == nil {
@@ -121,20 +120,18 @@ func TestNetworkSecretsNotVersioned(t *testing.T) {
 	payload := func(ssid, psk string) string {
 		return `{"profiles":[{"name":"w","type":"wifi","ssid":"` + ssid + `","security":"wpa2-personal","psk":"` + psk + `"}]}`
 	}
-	if code, body := ui("POST", "/library", url.Values{"name": {"wlan"}, "type": {"com.limdm.network"}, "payload": {payload("Corp", secret)}}); code != http.StatusSeeOther {
+	if code, body := ui("POST", "/api/v1/library-items", `{"name":"wlan","type":"com.limdm.network","payload":`+payload("Corp", secret)+`}`); code != http.StatusCreated {
 		t.Fatalf("create: %d %s", code, body)
 	}
 	var itemID int64
 	db.QueryRow(ctx, `SELECT id FROM library_items WHERE name='wlan'`).Scan(&itemID)
 	id := strconv.FormatInt(itemID, 10)
 	// the editor sends the mask back with a changed SSID
-	edit := url.Values{"id": {id}, "name": {"wlan"}, "type": {"com.limdm.network"}, "payload": {payload("Corp2", "••••••")}}
-	edit.Set("preview", "1")
-	if code, body := ui("POST", "/library", edit); code != 200 || strings.Contains(body, secret) {
+	edit := `{"id":` + id + `,"name":"wlan","type":"com.limdm.network","payload":` + payload("Corp2", "••••••") + `}`
+	if code, body := ui("POST", "/api/v1/config/library/preview", edit); code != 200 || strings.Contains(body, secret) {
 		t.Fatalf("preview shows the secret: %d", code)
 	}
-	edit.Del("preview")
-	if code, body := ui("POST", "/library", edit); code != http.StatusSeeOther {
+	if code, body := ui("PUT", "/api/v1/library-items/"+id, edit); code != http.StatusOK {
 		t.Fatalf("save: %d %s", code, body)
 	}
 	var stored string
@@ -148,10 +145,10 @@ func TestNetworkSecretsNotVersioned(t *testing.T) {
 	if leaks != 0 {
 		t.Fatalf("secret in versions or audit log: %d", leaks)
 	}
-	if code, body := ui("GET", "/library/"+id+"/history", nil); code != 200 || strings.Contains(body, secret) {
+	if code, body := ui("GET", "/api/v1/config/library/"+id+"/versions", ""); code != 200 || strings.Contains(body, secret) {
 		t.Fatalf("history shows the secret: %d", code)
 	}
-	if code, body := ui("POST", "/library/"+id+"/rollback", url.Values{"version": {"1"}}); code != http.StatusSeeOther {
+	if code, body := ui("POST", "/api/v1/config/library/"+id+"/rollback", `{"version":1}`); code != http.StatusOK {
 		t.Fatalf("rollback: %d %s", code, body)
 	}
 	db.QueryRow(ctx, `SELECT payload::text FROM library_items WHERE id=$1`, itemID).Scan(&stored)

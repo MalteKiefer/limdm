@@ -4,17 +4,14 @@ import (
 	"cmp"
 	"context"
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -458,157 +455,6 @@ func consoleAllowed(rt *runtimeState, ip string) bool {
 }
 
 // ---- settings page ----
-
-func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, sess session) {
-	if r.URL.Query().Get("tab") == "backup" && !sess.TenantOnly() { // its own page (backup.go)
-		http.Redirect(w, r, "/settings/backup", http.StatusSeeOther)
-		return
-	}
-	s.renderSettings(w, r, sess, s.settings(), "", "")
-}
-
-func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess session, set Settings, msg, errMsg string) {
-	tab := r.FormValue("section")
-	if tab == "" {
-		tab = r.URL.Query().Get("tab")
-	}
-	if tab == "monitoring" || tab == "integrations" { // both forms live on the notifications tab
-		tab = "notifications"
-	}
-	if !slices.Contains(settingsTabs, tab) {
-		tab = "general"
-	}
-	tabs := settingsTabLabels
-	if sess.TenantOnly() { // tenant accounts manage their notification channels only
-		tab, set = "notifications", Settings{}
-		tabs = slices.DeleteFunc(slices.Clone(tabs), func(t struct{ Key, Label string }) bool { return t.Key != tab })
-	}
-	data := map[string]any{}
-	if tab == "notifications" {
-		views, err := s.channelViews(r.Context())
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		data["Channels"], data["NotifyEvents"] = views, notifyEvents
-		if t := ctxTenant(r.Context()); t != 0 && sess.Role == "admin" { // signed webhook channels of this tenant
-			data["TenantWebhookSecret"] = hex.EncodeToString(s.tenantWebhookKey(t))
-			data["TenantID"] = t
-		}
-	}
-	if tab == "security" && keysAllowed(sess) {
-		if keys, err := s.KeysStatus(r.Context()); err != nil {
-			s.log.Error("key status", "err", err)
-		} else {
-			data["Keys"] = keys
-		}
-	}
-	s.render(w, r, sess, "settings", map[string]any{"Set": set, "ClientIP": clientIP(r), "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
-		"Tab": tab, "Tabs": tabs, "Channels": data["Channels"], "NotifyEvents": data["NotifyEvents"], "Keys": data["Keys"], "TenantOnly": sess.TenantOnly(),
-		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": map[bool]string{false: hex.EncodeToString(s.whKey)}[sess.TenantOnly()],
-		"RoleGroupsText": roleGroupsText(set.RoleGroups), "TenantWebhookSecret": data["TenantWebhookSecret"], "TenantID": data["TenantID"], "Retention": retentionRows(set)})
-}
-
-// settingsTabs are the sections of the settings page; each tab saves only
-// its own fields.
-var settingsTabs = []string{"general", "security", "sso", "notifications", "branding", "retention", "operations", "backup"}
-
-var settingsTabLabels = []struct{ Key, Label string }{
-	{"general", "General"}, {"security", "Security"}, {"sso", "SSO"}, {"notifications", "Notifications"}, {"branding", "Branding"},
-	{"retention", "Data retention"}, {"operations", "Operations"}, {"backup", "Backup"},
-}
-
-func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess session) {
-	if !backupAdmin(sess) { // server settings are global; tenants save their channels elsewhere
-		s.errorPage(w, r, sess, http.StatusForbidden, "settings are managed by global administrators")
-		return
-	}
-	section := r.FormValue("section")
-	in := s.settings()
-	switch section {
-	case "general":
-		in.LocalLogin = r.FormValue("local_login") == "on"
-		in.StaleHours, _ = strconv.Atoi(r.FormValue("stale_hours"))
-	case "sso":
-		in.OIDCIssuer, in.OIDCClientID, in.AllowedDomain = r.FormValue("oidc_issuer"), r.FormValue("oidc_client_id"), r.FormValue("allowed_domain")
-		in.RequireMFA = r.FormValue("require_mfa") == "on"
-		in.MFAACR = strings.Fields(r.FormValue("mfa_acr"))
-		groups, err := parseRoleGroups(r.FormValue("role_groups"))
-		if err != nil {
-			s.renderSettings(w, r, sess, in, "", err.Error())
-			return
-		}
-		in.RoleGroups = groups
-		if v := r.FormValue("oidc_client_secret"); v != "" {
-			in.OIDCClientSecret = v
-		}
-		if r.FormValue("clear_secret") == "on" {
-			in.OIDCClientSecret = ""
-		}
-	case "monitoring":
-		in.WebhookURL = r.FormValue("webhook_url")
-		in.NotifyPrivate = r.FormValue("notify_private") == "on"
-	case "network":
-		in.ConsoleAllow, in.ConsoleBlock = strings.Fields(r.FormValue("console_allow")), strings.Fields(r.FormValue("console_block"))
-		in.SCIMAllow = strings.Fields(r.FormValue("scim_allow"))
-	case "branding":
-		in.CompanyName = r.FormValue("company_name")
-		if f, _, err := r.FormFile("logo"); err == nil {
-			b, err := io.ReadAll(io.LimitReader(f, maxLogo+1))
-			f.Close()
-			if err != nil {
-				s.fail(w, err)
-				return
-			}
-			in.Logo = b
-		}
-		if r.FormValue("remove_logo") == "on" {
-			in.Logo = nil
-		}
-	case "security":
-		n, _ := strconv.Atoi(r.FormValue("min_length"))
-		in.Rules = PasswordPolicy{MinLength: n, Upper: r.FormValue("upper") == "on", Lower: r.FormValue("lower") == "on",
-			Digit: r.FormValue("digit") == "on", Symbol: r.FormValue("symbol") == "on", NoName: r.FormValue("no_name") == "on"}
-		in.FourEyes = r.FormValue("four_eyes") == "on"
-		in.FourEyesRecovery, in.FourEyesShell = r.FormValue("four_eyes_recovery") == "on", r.FormValue("four_eyes_shell") == "on"
-		in.Geolocation, in.FallbackDNS = r.FormValue("geolocation") == "on", r.FormValue("fallback_dns") == "on"
-	case "remote_shell":
-		in.RemoteShell = remoteShellForm(r)
-	case "operations":
-		dl, err1 := strconv.Atoi(r.FormValue("update_downloads"))
-		ci, err2 := strconv.Atoi(r.FormValue("max_checkins"))
-		if err1 != nil || err2 != nil {
-			s.renderSettings(w, r, sess, in, "", "parallel downloads and check ins: 1 to 10000")
-			return
-		}
-		in.Ops = OpsSettings{LogLevel: r.FormValue("log_level"), AccessLog: r.FormValue("access_log") == "on",
-			AuditAPIReads: r.FormValue("audit_api_reads"), UpdateDownloads: dl, MaxCheckins: ci,
-			AgentProxyFrom: strings.Fields(r.FormValue("agent_proxy_protocol")), Syslog: r.FormValue("syslog"),
-			SyslogCA: r.FormValue("syslog_ca")}
-	case "retention":
-		in.Retention = map[string]int{}
-		for _, k := range retentionKinds {
-			d, err := strconv.Atoi(r.FormValue("retention_" + k.Key))
-			if err != nil {
-				s.renderSettings(w, r, sess, in, "", "retention: whole days only")
-				return
-			}
-			in.Retention[k.Key] = d
-		}
-	}
-	set, err := s.saveSettings(r.Context(), sess, clientIP(r), section, in)
-	var ue *userError
-	switch {
-	case errors.As(err, &ue) && ue.Status == http.StatusBadRequest:
-		s.errorPage(w, r, sess, ue.Status, ue.Msg)
-	case ue != nil:
-		s.renderSettings(w, r, sess, set, "", ue.Msg)
-	case err != nil:
-		s.fail(w, err)
-	default:
-		s.renderSettings(w, r, sess, set, "Settings saved and active.", "")
-	}
-}
 
 // settingsSections are the sections saveSettings accepts.
 var settingsSections = []string{"general", "sso", "monitoring", "network", "branding", "security", "remote_shell", "operations", "retention"}

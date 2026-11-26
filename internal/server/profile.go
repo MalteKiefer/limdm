@@ -10,7 +10,6 @@ import (
 	"html/template"
 	"net/http"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
@@ -30,9 +29,6 @@ const recoveryCount = 10
 // NIST SP 800-63B 5.1.2.2 requires for lookup secrets stored as plain hashes.
 // Codes from v0.6.0 (12 characters) are still accepted until they are replaced.
 var recoveryCodeRe = regexp.MustCompile(`^[a-z2-7]{4}(-[a-z2-7]{4}){5}$|^[a-z2-7]{4}(-[a-z2-7]{4}){2}$`)
-
-// selfPage lets every role post to its own profile.
-func (s *Server) selfPage(h handler) http.HandlerFunc { return s.pageFor(h, "self") }
 
 func newRecoveryCode() string {
 	b := make([]byte, 15) // 120 bits, exactly 24 base32 characters
@@ -79,63 +75,6 @@ func qrSVG(text string) template.HTML {
 	return template.HTML(b.String()) //nolint:gosec // numbers only
 }
 
-type profileView struct {
-	Tab            string
-	Local          bool
-	Name           string
-	RecoveryLeft   int
-	PendingURI     string
-	PendingSecret  string
-	PendingQR      template.HTML
-	NewCodes       []string
-	PasswordStatus string
-}
-
-func (s *Server) profile(w http.ResponseWriter, r *http.Request, sess session) {
-	s.renderProfile(w, r, sess, profileView{}, "", "")
-}
-
-func (s *Server) renderProfile(w http.ResponseWriter, r *http.Request, sess session, v profileView, msg, errMsg string) {
-	name, local := strings.CutPrefix(sess.Email, localPrefix)
-	v.Local, v.Name = local, name
-	if local {
-		var pending *string
-		err := s.db.QueryRow(r.Context(), `SELECT (SELECT count(*) FROM local_recovery_codes WHERE name=$1 AND used_at IS NULL), totp_pending
-			FROM local_admins WHERE name=$1`, name).Scan(&v.RecoveryLeft, &pending)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		if pending != nil && v.PendingSecret == "" {
-			v.PendingSecret = *pending
-		}
-		if v.PendingSecret != "" {
-			v.PendingURI = totpURI(name, v.PendingSecret)
-			v.PendingQR = qrSVG(v.PendingURI)
-		}
-	}
-	tabs := []string{"language"}
-	if local {
-		tabs = append(tabs, "password", "authenticator", "recovery")
-	}
-	tab := v.Tab
-	if tab == "" {
-		tab = r.URL.Query().Get("tab")
-	}
-	if !slices.Contains(tabs, tab) {
-		tab = "language"
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	type dateChoice struct{ Key, Sample string }
-	now := time.Now()
-	var formats []dateChoice
-	for _, k := range []string{"iso", "de", "uk", "us"} {
-		formats = append(formats, dateChoice{k, now.Format(dateFormats[k])})
-	}
-	s.render(w, r, sess, "profile", map[string]any{"P": v, "Msg": msg, "Error": errMsg, "Tab": tab, "Tabs": tabs, "PwMin": s.settings().Rules.Min(),
-		"DateFormats": formats, "DateFmt": requestDateFormat(r)})
-}
-
 // checkCurrent verifies the current password, with the same lockout as the login.
 func (s *Server) checkCurrent(ctx context.Context, tx pgx.Tx, name, password string) error {
 	var hash string
@@ -179,24 +118,6 @@ func profileName(sess session) (string, error) {
 	return name, nil
 }
 
-// profileDone answers a profile form: the error or the note on the tab,
-// with a renewed session after a change that ended the others.
-func (s *Server) profileDone(w http.ResponseWriter, r *http.Request, sess session, v profileView, renew bool, msg string, err error) {
-	if err != nil {
-		s.renderProfile(w, r, sess, v, "", err.Error())
-		return
-	}
-	if renew {
-		s.renewSession(w, r, sess) // other sessions of this account end
-	}
-	s.renderProfile(w, r, sess, v, msg, "")
-}
-
-func (s *Server) profilePassword(w http.ResponseWriter, r *http.Request, sess session) {
-	err := s.changePassword(r.Context(), sess, clientIP(r), r.FormValue("current"), r.FormValue("new"), r.FormValue("repeat"))
-	s.profileDone(w, r, sess, profileView{Tab: "password"}, true, "Password changed.", err)
-}
-
 // changePassword sets a new password of the local account of sess after
 // checking the current one. The caller renews the session.
 func (s *Server) changePassword(ctx context.Context, sess session, ip, current, pw, again string) error {
@@ -233,24 +154,6 @@ func (s *Server) profileErr(ctx context.Context, sess session, name, ip, current
 		return sess.Email, "profile.password_check_failed", sess.Email, ip, err
 	})
 	return err
-}
-
-// profileTOTP starts (secret generated, not active) or confirms a new TOTP secret.
-func (s *Server) profileTOTP(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	v := profileView{Tab: "authenticator"}
-	switch r.FormValue("step") {
-	case "start":
-		secret, err := s.startTOTP(ctx, sess, clientIP(r), r.FormValue("current"))
-		v.PendingSecret = secret
-		s.profileDone(w, r, sess, v, false, "", err)
-	case "confirm":
-		s.profileDone(w, r, sess, v, true, "Authenticator app replaced.", s.confirmTOTP(ctx, sess, r.FormValue("code")))
-	case "cancel":
-		s.profileDone(w, r, sess, v, false, "", s.cancelTOTP(ctx, sess))
-	default:
-		s.errorPage(w, r, sess, http.StatusBadRequest, "bad request")
-	}
 }
 
 // startTOTP checks the current password and stores a pending TOTP secret,
@@ -307,12 +210,6 @@ func (s *Server) cancelTOTP(ctx context.Context, sess session) error {
 	}
 	_, err = s.db.Exec(ctx, `UPDATE local_admins SET totp_pending=NULL WHERE name=$1`, name)
 	return err
-}
-
-// profileRecovery replaces all recovery codes; they are shown once.
-func (s *Server) profileRecovery(w http.ResponseWriter, r *http.Request, sess session) {
-	codes, err := s.newRecoveryCodes(r.Context(), sess, clientIP(r), r.FormValue("current"))
-	s.profileDone(w, r, sess, profileView{Tab: "recovery", NewCodes: codes}, false, "", err)
 }
 
 // newRecoveryCodes checks the current password and replaces all recovery

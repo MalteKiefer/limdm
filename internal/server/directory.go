@@ -82,62 +82,6 @@ func groupBlueprint(ctx context.Context, q pgx.Tx, deviceID string) (*int64, err
 
 // ---- directory pages ----
 
-func (s *Server) directoryPage(w http.ResponseWriter, r *http.Request, sess session) {
-	s.renderDirectory(w, r, sess, "", "", "")
-}
-
-// dirTab picks the tab of the directory page. Results of the connection
-// forms show on the settings tab.
-func dirTab(r *http.Request, sess session, fromSettings bool) string {
-	tab := r.FormValue("tab")
-	if r.Method == http.MethodPost && fromSettings && tab == "" {
-		tab = "settings"
-	}
-	if tab == "groups" || (tab == "settings" && sess.Role == "admin") {
-		return tab
-	}
-	return "people"
-}
-
-func (s *Server) renderDirectory(w http.ResponseWriter, r *http.Request, sess session, token, msg, errMsg string) {
-	ctx := r.Context()
-	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-	rows, err := s.db.Query(ctx, `SELECT `+dirUserCols+` FROM dir_users u WHERE $1 = '' OR lower(u.email || ' ' || u.display_name || ' ' || u.department) LIKE '%' || $1 || '%'
-		ORDER BY u.active DESC, u.display_name, u.email LIMIT 500`, q)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	users, err := pgx.CollectRows(rows, pgx.RowToStructByPos[dirUser])
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	groups, err := s.dirGroups(ctx)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	bps, err := s.allBlueprints(ctx, "")
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	gs, err := s.googleSettings(ctx)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	var scimSet bool
-	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM settings WHERE key='scim')`).Scan(&scimSet); err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.render(w, r, sess, "directory", map[string]any{"Users": users, "Groups": groups, "Blueprints": bps, "Q": q,
-		"Token": token, "Msg": msg, "Error": errMsg, "SCIMSet": scimSet, "SCIMURL": s.cfg.PublicURL + "/scim/v2",
-		"Google": gs, "GoogleConfigured": gs.KeyEnc != "", "Tab": dirTab(r, sess, token != "" || msg != "" || errMsg != "")})
-}
-
 func (s *Server) dirGroups(ctx context.Context) ([]dirGroup, error) {
 	rows, err := s.db.Query(ctx, `SELECT g.id, g.external_id, g.source, g.name,
 		(SELECT count(*) FROM dir_members m WHERE m.group_id=g.id), a.blueprint_id, a.priority
@@ -146,25 +90,6 @@ func (s *Server) dirGroups(ctx context.Context) ([]dirGroup, error) {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[dirGroup])
-}
-
-// groupAssign maps a directory group to a blueprint, or removes the mapping.
-func (s *Server) groupAssign(w http.ResponseWriter, r *http.Request, sess session) {
-	gid, err := strconv.ParseInt(r.FormValue("group_id"), 10, 64)
-	if err != nil {
-		s.errorPage(w, r, sess, http.StatusBadRequest, "invalid group")
-		return
-	}
-	bp, _ := strconv.ParseInt(r.FormValue("blueprint_id"), 10, 64)
-	prio, err := strconv.Atoi(r.FormValue("priority"))
-	if err != nil {
-		prio = 100
-	}
-	if err := s.assignGroup(r.Context(), sess, gid, bp, prio); err != nil {
-		s.renderDirectory(w, r, sess, "", "", err.Error())
-		return
-	}
-	http.Redirect(w, r, "/directory?tab=groups", http.StatusSeeOther)
 }
 
 // assignGroup maps a directory group to a blueprint with a priority
@@ -182,16 +107,6 @@ func (s *Server) assignGroup(ctx context.Context, sess session, gid, bp int64, p
 			ON CONFLICT (group_id) DO UPDATE SET blueprint_id=EXCLUDED.blueprint_id, priority=EXCLUDED.priority`, gid, bp, prio)
 		return err
 	})
-}
-
-// scimToken creates a new SCIM bearer token; only its hash is stored.
-func (s *Server) scimToken(w http.ResponseWriter, r *http.Request, sess session) {
-	tok, err := s.rotateSCIMToken(r.Context(), sess)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.renderDirectory(w, r, sess, tok, "New SCIM token created; the previous one stopped working.", "")
 }
 
 // rotateSCIMToken replaces the SCIM bearer token and returns the new one.
@@ -240,19 +155,6 @@ type serviceAccount struct {
 	TokenURI     string `json:"token_uri"`
 }
 
-func (s *Server) googleConfigure(w http.ResponseWriter, r *http.Request, sess session) {
-	err := s.configureGoogle(r.Context(), sess, r.FormValue("admin_email"), r.FormValue("service_account"))
-	if ue := (*userError)(nil); errors.As(err, &ue) {
-		s.renderDirectory(w, r, sess, "", "", ue.Msg)
-		return
-	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.googleSyncNow(w, r, sess)
-}
-
 // configureGoogle stores the delegated admin and, when given, a new
 // service account key (sealed) of the Google Workspace sync.
 func (s *Server) configureGoogle(ctx context.Context, sess session, adminEmail, key string) error {
@@ -274,15 +176,6 @@ func (s *Server) configureGoogle(ctx context.Context, sess session, adminEmail, 
 		return &userError{http.StatusUnprocessableEntity, "service account key and an admin email for delegation are required"}
 	}
 	return s.auditAction(ctx, sess.Email, "directory.google_configure", g.AdminEmail, "service account updated", func(tx pgx.Tx) error { return saveGoogle(ctx, tx, g) })
-}
-
-func (s *Server) googleSyncNow(w http.ResponseWriter, r *http.Request, sess session) {
-	res, err := s.syncGoogle(r.Context())
-	if err != nil {
-		s.renderDirectory(w, r, sess, "", "", "Google sync failed: "+err.Error())
-		return
-	}
-	s.renderDirectory(w, r, sess, "", "Google sync: "+res, "")
 }
 
 // googleSyncLoop syncs hourly while configured.

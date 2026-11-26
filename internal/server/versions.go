@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -350,95 +349,6 @@ func (s *Server) blueprintPreview(ctx context.Context, bp blueprintRec) (*previe
 
 // ---- web: history and rollback ----
 
-func versionID(r *http.Request) (int64, bool) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	return id, err == nil && id > 0
-}
-
-// pickVersions chooses the two versions to compare: ?a=old&b=new, by
-// default the latest and the one before.
-func pickVersions(r *http.Request, vs []version) (a, b *version) {
-	find := func(key string) *version {
-		n, err := strconv.Atoi(r.URL.Query().Get(key))
-		if err != nil {
-			return nil
-		}
-		for i := range vs {
-			if vs[i].Version == n {
-				return &vs[i]
-			}
-		}
-		return nil
-	}
-	if b = find("b"); b == nil && len(vs) > 0 {
-		b = &vs[0]
-	}
-	if a = find("a"); a == nil && b != nil {
-		for i := range vs {
-			if vs[i].Version < b.Version {
-				a = &vs[i]
-				break
-			}
-		}
-	}
-	return a, b
-}
-
-func (s *Server) renderVersions(w http.ResponseWriter, r *http.Request, sess session, kind string, id int64, vs []version, exists bool) {
-	if len(vs) == 0 {
-		http.NotFound(w, r)
-		return
-	}
-	a, b := pickVersions(r, vs)
-	old := ""
-	if a != nil {
-		old = a.Doc
-	}
-	name := firstNonEmpty(vs[0].Item.Name, vs[0].BP.Name)
-	s.render(w, r, sess, "versions", map[string]any{"Kind": kind, "ID": id, "Name": name, "Versions": vs, "A": a, "B": b,
-		"Diff": lineDiff(old, b.Doc), "Exists": exists})
-}
-
-func (s *Server) libraryHistory(w http.ResponseWriter, r *http.Request, sess session) {
-	id, ok := versionID(r)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	if !s.tenantOwns(r.Context(), sess, "library_items", id, true) {
-		s.notFound(w, r, sess)
-		return
-	}
-	vs, err := s.itemVersions(r.Context(), id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	var exists bool
-	_ = s.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM library_items WHERE id=$1)`, id).Scan(&exists)
-	s.renderVersions(w, r, sess, "library", id, vs, exists)
-}
-
-func (s *Server) blueprintHistory(w http.ResponseWriter, r *http.Request, sess session) {
-	id, ok := versionID(r)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	if !s.tenantOwns(r.Context(), sess, "blueprints", id, true) {
-		s.notFound(w, r, sess)
-		return
-	}
-	vs, err := s.blueprintVersions(r.Context(), id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	var exists bool
-	_ = s.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM blueprints WHERE id=$1)`, id).Scan(&exists)
-	s.renderVersions(w, r, sess, "blueprints", id, vs, exists)
-}
-
 // versionByNumber returns version n from a list.
 func versionByNumber(vs []version, n int) (version, error) {
 	for _, v := range vs {
@@ -447,69 +357,6 @@ func versionByNumber(vs []version, n int) (version, error) {
 		}
 	}
 	return version{}, errors.New("version not found")
-}
-
-func (s *Server) libraryRollback(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	id, ok := versionID(r)
-	n, err := strconv.Atoi(r.FormValue("version"))
-	if !ok || err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	if !s.tenantOwns(ctx, sess, "library_items", id, false) {
-		s.notFound(w, r, sess)
-		return
-	}
-	vs, err := s.itemVersions(ctx, id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	v, err := versionByNumber(vs, n)
-	if err == nil {
-		err = s.storeItem(ctx, sess.Email, "library.rollback", fmt.Sprintf("rollback to version %d", n), &v.Item, true)
-	}
-	if _, ok := pendingApproval(err); ok {
-		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
-		return
-	}
-	if err != nil {
-		s.errorPage(w, r, sess, http.StatusConflict, err.Error())
-		return
-	}
-	http.Redirect(w, r, fmt.Sprintf("/library/%d/history", id), http.StatusSeeOther)
-}
-
-func (s *Server) blueprintRollback(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	id, ok := versionID(r)
-	n, err := strconv.Atoi(r.FormValue("version"))
-	if !ok || err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	if !s.tenantOwns(ctx, sess, "blueprints", id, false) {
-		s.notFound(w, r, sess)
-		return
-	}
-	vs, err := s.blueprintVersions(ctx, id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	v, err := versionByNumber(vs, n)
-	if err == nil {
-		err = s.validateBlueprint(ctx, v.BP)
-	}
-	if err == nil {
-		err = s.storeBlueprint(ctx, sess.Email, "blueprint.rollback", fmt.Sprintf("rollback to version %d", n), &v.BP, true)
-	}
-	if err != nil {
-		s.errorPage(w, r, sess, http.StatusConflict, err.Error())
-		return
-	}
-	http.Redirect(w, r, fmt.Sprintf("/blueprints/%d/history", id), http.StatusSeeOther)
 }
 
 type deletedObject struct {

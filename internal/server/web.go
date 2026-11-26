@@ -39,97 +39,15 @@ var dateFormats = map[string]string{
 	"us":  "01/02/2006 3:04 PM",
 }
 
-// pages holds the parsed templates per language and date format ("de/iso").
-var pages = func() map[string]map[string]*template.Template {
-	m := map[string]map[string]*template.Template{}
-	for _, lang := range []string{"en", "de"} {
-		for f, layout := range dateFormats {
-			m[lang+"/"+f] = parsePages(lang, layout)
-		}
-	}
-	return m
-}()
+// pages holds the parsed templates (sign in and error page) per language.
+var pages = map[string]map[string]*template.Template{"en": parsePages("en"), "de": parsePages("de")}
 
-func parsePages(lang, layout string) map[string]*template.Template {
-	T := func(s string) string { return translate(lang, s) }
-	actionLabel := func(a string) string {
-		return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot",
-			"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script",
-			"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour", "message": "Message",
-			"app_install": "Install app", "app_remove": "Remove app",
-			"user_create": "Create user", "user_admin": "Change admin rights", "user_lock": "Lock user", "user_unlock": "Unlock user",
-			"user_password": "Reset password", "user_delete": "Delete user", "software_remove": "Remove software", "diagnostics": "Collect logs", "shell": "Remote shell"}[a])
-	}
+func parsePages(lang string) map[string]*template.Template {
 	funcs := template.FuncMap{
-		"dict": func(kv ...any) map[string]any { // arguments for shared partials
-			m := make(map[string]any, len(kv)/2)
-			for i := 0; i+1 < len(kv); i += 2 {
-				m[kv[i].(string)] = kv[i+1]
-			}
-			return m
-		},
-		"t":       T,
+		"t":       func(s string) string { return translate(lang, s) },
 		"errmsg":  func(msg string) friendlyMsg { return friendlyError(lang, msg) },
 		"lang":    func() string { return lang },
 		"version": func() string { return Version },
-		"ago": func(t *time.Time) string {
-			if t == nil {
-				return T("never")
-			}
-			switch d := time.Since(*t); {
-			case d < time.Minute:
-				return T("just now")
-			case d < time.Hour:
-				return fmt.Sprintf(T("%d min ago"), int(d.Minutes()))
-			case d < 48*time.Hour:
-				return fmt.Sprintf(T("%d h ago"), int(d.Hours()))
-			default:
-				return fmt.Sprintf(T("%d d ago"), int(d.Hours()/24))
-			}
-		},
-		"frac":       func(v uint64, pct uint64) uint64 { return v * pct / 100 },
-		"add":        func(a, b int) int { return a + b },
-		"inc":        func(n int) int { return n + 1 },
-		"sub":        func(a, b int) int { return a - b },
-		"dec":        func(n int) int { return n - 1 },
-		"list":       func(v ...string) []string { return v },
-		"deref":      func(p *int64) int64 { return *p },
-		"derefStr":   func(p *string) string { return *p },
-		"appSources": appSourcesText,
-		"hasID":      func(ids []int64, id int64) bool { return slices.Contains(ids, id) },
-		"derefTime":  func(p *time.Time) time.Time { return *p },
-		"derefBool":  func(p *bool) bool { return p != nil && *p },
-		"deref2":     func(p *string) string { return *p },
-		"typeLabel": func(t string) string {
-			if l, ok := typeLabels[t]; ok {
-				return T(l)
-			}
-			return t
-		},
-		"actionLabel": actionLabel,
-		"auditLabel":  func(a string) string { return auditLabel(lang, a, actionLabel) },
-		"statusHelp":  func(st string) string { return T(statusHelp[st]) },
-		"checkDetail": func(d string) string { return checkDetail(lang, d) },
-		"itemMeta":    func() map[string]typeMeta { return itemMeta(lang) },
-		"typeDesc":    func(t string) string { return T(typeInfo[t].Desc) },
-		"docs":        func(p string) string { return docsURL + p },
-		"join":        strings.Join,
-		"hasPrefix":   strings.HasPrefix,
-		"fmtTime":     func(t time.Time) string { return t.Local().Format(layout) },
-		"gib": func(mb uint64) string {
-			if mb == 0 {
-				return T("n/a")
-			}
-			return fmt.Sprintf("%.1f GiB", float64(mb)/1024)
-		},
-		"unix": func(sec int64) time.Time { return time.Unix(sec, 0) },
-		"used": func(size, free uint64) uint64 { return size - min(free, size) },
-		"pct": func(part, total int) int {
-			if total == 0 {
-				return 0
-			}
-			return part * 100 / total
-		},
 	}
 	m := map[string]*template.Template{}
 	names, _ := fs.Glob(webFS, "web/*.html")
@@ -147,9 +65,6 @@ type handler func(w http.ResponseWriter, r *http.Request, sess session)
 
 // page enforces login, admin role for every state change, and CSRF.
 func (s *Server) page(h handler) http.HandlerFunc { return s.pageFor(h, "admin") }
-
-// helpdeskPage additionally lets the helpdesk role post (device commands).
-func (s *Server) helpdeskPage(h handler) http.HandlerFunc { return s.pageFor(h, "helpdesk") }
 
 // adminOrAuditor hides administration pages from the helpdesk role.
 func (s *Server) adminOrAuditor(h handler) handler {
@@ -221,7 +136,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, na
 	data["Page"] = name
 	s.consoleBrand(r.Context(), sess, data)
 	var buf bytes.Buffer
-	if err := pages[requestLang(r)+"/"+requestDateFormat(r)][name].Execute(&buf, data); err != nil {
+	if err := pages[requestLang(r)][name].Execute(&buf, data); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -229,98 +144,36 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, na
 	buf.WriteTo(w)
 }
 
+// classicPaths maps the pages of the former server rendered console to the
+// matching console app page, so bookmarks keep working; {id} carries over.
+var classicPaths = map[string]string{ //nolint:gosec // page paths, no credentials
+	"/classic": "/app/", "/help": "/app/help", "/profile": "/app/profile",
+	"/devices": "/app/devices", "/devices/{id}": "/app/devices/{id}", "/devices/{id}/shell": "/app/devices/{id}",
+	"/compliance": "/app/compliance", "/compliance/history": "/app/compliance/history",
+	"/blueprints": "/app/config", "/blueprints/{id}": "/app/config/blueprints/{id}", "/blueprints/{id}/history": "/app/config/blueprints/{id}",
+	"/library": "/app/config?tab=library", "/library/{id}": "/app/config/library/{id}", "/library/{id}/history": "/app/config/library/{id}",
+	"/software": "/app/config?tab=software", "/software/new": "/app/config/software/new", "/software/apps/{id}": "/app/config/software/{id}",
+	"/software/packages": "/app/config?tab=packages", "/tokens": "/app/devices/enroll",
+	"/audit": "/app/activity", "/approvals": "/app/inbox", "/export/{kind}": "/app/reports",
+	"/settings": "/app/settings", "/settings/api": "/app/settings?s=tokens", "/settings/backup": "/app/settings?s=backup",
+	"/users": "/app/settings?s=users", "/directory": "/app/settings?s=directory", "/agents": "/app/settings?s=agents",
+	"/network": "/app/settings?s=network", "/tenants": "/app/settings?s=tenants", "/tenants/{id}": "/app/settings?s=tenants",
+	"/shell/{sid}": "/app/",
+}
+
 func (s *Server) webRoutes(mux *http.ServeMux) {
 	s.networkRoutes(mux)
-	s.tenantPages(mux)
 	s.shellRoutes(mux)
-	// the console app is the default; the classic overview stays under /classic
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/app/", http.StatusFound) })
-	mux.HandleFunc("GET /classic", s.page(s.overview))
-	mux.HandleFunc("GET /help", s.page(s.helpPage))
-	mux.HandleFunc("POST /onboarding/dismiss", s.page(s.onboardingDismiss))
-	mux.HandleFunc("GET /devices", s.page(s.devices))
-	mux.HandleFunc("GET /devices/{id}", s.page(s.device))
-	mux.HandleFunc("POST /devices/bulk", s.helpdeskPage(s.devicesBulk))
-	mux.HandleFunc("POST /devices/{id}/command", s.helpdeskPage(s.deviceCommand))
-	mux.HandleFunc("GET /devices/{id}/diagnostics/{cid}", s.page(s.diagnosticsDownload))
-	mux.HandleFunc("POST /devices/{id}/agent-update", s.page(s.deviceAgentUpdate))
-	mux.HandleFunc("POST /devices/{id}/recovery", s.helpdeskPage(s.recoveryView))
-	mux.HandleFunc("GET /directory", s.page(s.adminOrAuditor(s.unscoped(s.directoryPage))))
-	mux.HandleFunc("POST /directory/groups", s.page(s.groupAssign))
-	mux.HandleFunc("POST /directory/scim-token", s.page(s.scimToken))
-	mux.HandleFunc("POST /directory/google", s.page(s.googleConfigure))
-	mux.HandleFunc("POST /directory/google/sync", s.page(s.googleSyncNow))
-	mux.HandleFunc("GET /users", s.page(s.adminOrAuditor(s.usersPage)))
-	mux.HandleFunc("GET /agents", s.page(s.adminOrAuditor(s.unscoped(s.agentsPage))))
-	mux.HandleFunc("GET /software", s.page(s.adminOrAuditor(s.unscoped(s.softwarePage))))
-	mux.HandleFunc("GET /software/new", s.page(s.adminOrAuditor(s.appEdit)))
-	mux.HandleFunc("GET /software/apps/{id}", s.page(s.adminOrAuditor(s.appEdit)))
+	for from, to := range classicPaths {
+		mux.HandleFunc("GET "+from, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, strings.ReplaceAll(to, "{id}", url.PathEscape(r.PathValue("id"))), http.StatusFound)
+		})
+	}
+	// files the console app links to
 	mux.HandleFunc("GET /software/icons/{id}", s.page(func(w http.ResponseWriter, r *http.Request, _ session) { s.catalogIcon(w, r) }))
-	mux.HandleFunc("POST /software/apps", s.page(s.appSave))
-	mux.HandleFunc("POST /software/import", s.page(s.appImport))
-	mux.HandleFunc("POST /software/flathub", s.page(s.flathubAdd))
-	mux.HandleFunc("GET /software/flathub/search", s.page(s.adminOrAuditor(func(w http.ResponseWriter, r *http.Request, _ session) { s.flathubSearchJSON(w, r) })))
 	mux.HandleFunc("GET /software/flathub/icon", s.page(s.adminOrAuditor(func(w http.ResponseWriter, r *http.Request, _ session) { s.flathubIcon(w, r) })))
-	mux.HandleFunc("POST /software/remotes", s.page(s.remoteSave))
-	mux.HandleFunc("POST /software/remotes/{name}/{op}", s.page(s.remoteOp))
-	mux.HandleFunc("POST /software/apps/{id}/delete", s.page(s.appDelete))
-	mux.HandleFunc("POST /software/requests/{id}/{op}", s.page(s.requestDecide))
-	mux.HandleFunc("POST /software/settings", s.page(s.softwareSettingsSave))
-	mux.HandleFunc("GET /software/packages", s.page(s.adminOrAuditor(s.packagesPage))) // packages.go
-	mux.HandleFunc("POST /software/packages", s.page(s.packageUpload))
-	mux.HandleFunc("POST /software/packages/{id}/delete", s.page(s.packageDelete))
-	mux.HandleFunc("POST /software/packages/settings", s.page(s.packagesSettings))
-	mux.HandleFunc("GET /settings/backup", s.page(s.unscoped(s.backupPage))) // backup_web.go
-	mux.HandleFunc("POST /settings/backup", s.page(s.unscoped(s.backupSave)))
-	mux.HandleFunc("POST /settings/backup/targets", s.page(s.unscoped(s.backupTargetSave)))
-	mux.HandleFunc("POST /settings/backup/targets/{name}/{op}", s.page(s.unscoped(s.backupTargetOp)))
-	mux.HandleFunc("POST /settings/backup/run", s.page(s.unscoped(s.backupRunNow)))
-	mux.HandleFunc("POST /settings/backup/schedules", s.page(s.unscoped(s.backupScheduleSave)))
-	mux.HandleFunc("POST /settings/backup/schedules/{name}/{op}", s.page(s.unscoped(s.backupScheduleOp)))
-	mux.HandleFunc("POST /settings/backup/{id}/verify", s.page(s.unscoped(s.backupVerifyNow)))
-	mux.HandleFunc("POST /agents/policy", s.page(s.agentsPolicy))
-	mux.HandleFunc("POST /agents/fetch", s.page(s.agentsFetch))
-	mux.HandleFunc("POST /agents/{version}/{op}", s.page(s.agentsRelease))
-	mux.HandleFunc("GET /profile", s.selfPage(s.profile))
-	mux.HandleFunc("POST /profile/password", s.selfPage(s.profilePassword))
-	mux.HandleFunc("POST /profile/totp", s.selfPage(s.profileTOTP))
-	mux.HandleFunc("POST /profile/recovery", s.selfPage(s.profileRecovery))
-	mux.HandleFunc("POST /users", s.page(s.userAdd))
-	mux.HandleFunc("POST /users/update", s.page(s.userUpdate))
-	mux.HandleFunc("POST /users/reset", s.page(s.userReset))
-	mux.HandleFunc("GET /settings", s.page(s.adminOrAuditor(s.settingsPage)))
-	mux.HandleFunc("POST /settings/notifications", s.page(s.channelSave))
-	mux.HandleFunc("POST /settings/notifications/{id}/{op}", s.page(s.channelOp))
-	mux.HandleFunc("POST /settings", s.page(s.settingsSave))
-	mux.HandleFunc("POST /settings/keys/{op}/{kind}", s.page(s.unscoped(s.keysAction))) // keys.go
-	mux.HandleFunc("POST /devices/{id}/assign", s.page(s.deviceAssign))
-	mux.HandleFunc("POST /devices/{id}/retire", s.page(s.deviceRetire))
-	mux.HandleFunc("GET /blueprints", s.page(s.blueprints))
-	mux.HandleFunc("GET /blueprints/{id}", s.page(s.blueprintEdit))
-	mux.HandleFunc("POST /blueprints", s.page(s.blueprintSave))
-	mux.HandleFunc("POST /blueprints/{id}/delete", s.page(s.blueprintDelete))
-	mux.HandleFunc("GET /blueprints/{id}/history", s.page(s.unscoped(s.blueprintHistory)))
-	mux.HandleFunc("POST /blueprints/{id}/rollback", s.page(s.blueprintRollback))
-	mux.HandleFunc("GET /library", s.page(s.library))
-	mux.HandleFunc("GET /library/{id}", s.page(s.libraryEdit))
-	mux.HandleFunc("POST /library", s.page(s.librarySave))
-	mux.HandleFunc("POST /library/{id}/delete", s.page(s.libraryDelete))
-	mux.HandleFunc("GET /library/{id}/history", s.page(s.unscoped(s.libraryHistory)))
-	mux.HandleFunc("POST /library/{id}/rollback", s.page(s.libraryRollback))
-	mux.HandleFunc("GET /tokens", s.page(s.tokens))
-	mux.HandleFunc("POST /tokens", s.page(s.tokenCreate))
-	mux.HandleFunc("POST /tokens/{id}/revoke", s.page(s.tokenRevoke))
-	mux.HandleFunc("GET /compliance", s.page(s.compliance))
-	mux.HandleFunc("GET /audit", s.page(s.adminOrAuditor(s.auditPage)))
-	mux.HandleFunc("POST /audit/verify", s.selfPage(s.adminOrAuditor(s.auditVerify)))
-	mux.HandleFunc("GET /compliance/history", s.page(s.complianceHistory))
-	mux.HandleFunc("GET /export/{kind}", s.page(s.adminOrAuditor(s.export)))
-	// W2 governance
-	mux.HandleFunc("GET /approvals", s.page(s.approvalsPage))
-	mux.HandleFunc("POST /approvals/{id}/{op}", s.page(s.approvalDecide))
-	mux.HandleFunc("POST /devices/{id}/delete", s.page(s.deviceDelete))
-	mux.HandleFunc("POST /compliance/exceptions", s.page(s.exceptionAdd))
-	mux.HandleFunc("POST /compliance/exceptions/{id}/revoke", s.page(s.exceptionRevoke))
+	mux.HandleFunc("GET /tenants/{id}/logo.png", s.page(s.tenantLogo))
 }
 
 // ---- devices ----
@@ -398,87 +251,6 @@ var deviceFilters = []struct{ Key, Label, Where string }{
 	{"blueprint", "Blueprint", `(SELECT name FROM blueprints WHERE id = ` + effectiveBlueprintSQL + `) = $1`},
 	{"agent", "Agent version", `d.agent_version = $1`},
 	{"failing", "Failing check", `d.checks @> jsonb_build_array(jsonb_build_object('id', $1::text, 'status', 'fail'))`},
-}
-
-// devicesPageSize is the number of devices per page of the device list.
-const devicesPageSize = 200
-
-func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	dq, err := parseDeviceQuery(r.URL.Query(), s.staleAfter())
-	if err != nil {
-		s.errorPage(w, r, sess, http.StatusBadRequest, err.Error())
-		return
-	}
-	cond, sargs := scopeCond(sess, 0)
-	dq.filters.add(cond, sargs...)
-	counts, total, err := s.deviceCounts(ctx, dq)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	matching := total
-	if dq.Status != "" {
-		matching = counts[dq.Status]
-	}
-	pages := max(1, (matching+devicesPageSize-1)/devicesPageSize)
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	page = min(max(page, 1), pages)
-	where := dq.where()
-	shown, err := s.listDevicesQuery(ctx, where.sql(), fmt.Sprintf(" ORDER BY d.retired, d.hostname, d.id LIMIT %d OFFSET %d", devicesPageSize, (page-1)*devicesPageSize), where.args...)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	var tags []string
-	cond, sargs = scopeCond(sess, 0)
-	if err := s.db.QueryRow(ctx, `SELECT coalesce(array_agg(DISTINCT t ORDER BY t), '{}') FROM devices d, unnest(d.tags) t WHERE NOT d.retired AND `+cond, sargs...).Scan(&tags); err != nil {
-		s.fail(w, err)
-		return
-	}
-	apps, err := s.catalogApps(ctx, s.db, `WHERE enabled`)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	keepURL := template.URL(dq.Keep.Encode()) //nolint:gosec // url.Values.Encode escapes every key and value
-	pageKeep := dq.Keep.Encode()
-	if dq.Status != "" {
-		pageKeep = url.Values{"status": {dq.Status}}.Encode() + "&" + pageKeep
-	}
-	s.render(w, r, sess, "devices", map[string]any{"Devices": shown, "Total": total, "Counts": counts, "Q": dq.Q, "Status": dq.Status,
-		"Statuses": deviceStatuses, "Chips": dq.Chips, "Tag": dq.Keep.Get("tag"), "Pkg": dq.Keep.Get("pkg"), "Keep": keepURL, "Tags": tags, "Apps": apps,
-		"Page": page, "Pages": pages, "PageKeep": template.URL(pageKeep), //nolint:gosec // url.Values.Encode escapes every key and value
-		"Back": r.URL.RequestURI()})
-}
-
-// devicesBulk runs one action on the selected devices: a command, an
-// agent update, or adding and removing a tag. Destructive commands (lost
-// mode, wipe) stay single device actions; scripts need the admin role
-// (commandPayload).
-func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess session) {
-	if err := r.ParseForm(); err != nil {
-		s.errorPage(w, r, sess, http.StatusBadRequest, "bad form")
-		return
-	}
-	approvals, err := s.bulkAction(r, sess, r.Form["id"], r.FormValue("action"))
-	if code, msg := errStatus(err); code != 0 {
-		s.errorPage(w, r, sess, code, msg)
-		return
-	} else if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if approvals > 0 {
-		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
-		return
-	}
-	// back to the list with its filters; only the query is taken over
-	back := "/devices"
-	if u, err := url.Parse(r.FormValue("back")); err == nil && u.Path == "/devices" && len(u.Query()) > 0 {
-		back += "?" + u.Query().Encode()
-	}
-	http.Redirect(w, r, back, http.StatusSeeOther)
 }
 
 // bulkAction runs one action ("command:<type>", "agent-update", "tag-add",
@@ -560,113 +332,6 @@ func (s *Server) bulkAction(r *http.Request, sess session, ids []string, action 
 	return 0, nil
 }
 
-// overview is the landing page: fleet state, OS mix, weakest controls, recent activity.
-func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	cond, sargs := scopeCond(sess, 0)
-	list, err := s.listDevicesWhere(ctx, cond, sargs...)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	counts, osMix := map[string]int{}, map[string]int{}
-	active := 0
-	for _, d := range list {
-		counts[d.Status]++
-		if !d.Retired {
-			active++
-			osMix[firstNonEmpty(d.OS, "unknown")]++
-		}
-	}
-	type share struct {
-		Name  string
-		Count int
-	}
-	var oses []share
-	for n, c := range osMix {
-		oses = append(oses, share{n, c})
-	}
-	sort.Slice(oses, func(i, j int) bool {
-		return oses[i].Count > oses[j].Count || oses[i].Count == oses[j].Count && oses[i].Name < oses[j].Name
-	})
-	fc, err := s.fleetComplianceFor(ctx, sess)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	var failing []*checkAgg
-	for _, c := range fc.Checks {
-		if c.Fail > 0 {
-			failing = append(failing, c)
-		}
-	}
-	sort.SliceStable(failing, func(i, j int) bool { return failing[i].Fail > failing[j].Fail })
-	if len(failing) > 6 {
-		failing = failing[:6]
-	}
-	var recent []auditRow
-	if sess.Role != "helpdesk" { // the audit log (script bodies included) is not theirs to read
-		acond, aargs := auditScope(sess, 0)
-		rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash, tenant_id FROM audit_log WHERE `+acond+` ORDER BY id DESC LIMIT 8`, aargs...)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		if recent, err = pgx.CollectRows(rows, pgx.RowToStructByPos[auditRow]); err != nil {
-			s.fail(w, err)
-			return
-		}
-	}
-	donut := donutChart([]donutPart{{"compliant", counts["compliant"], "ok"}, {"non-compliant", counts["non-compliant"], "bad"},
-		{"in grace", counts["in grace"], "warn"}, {"stale", counts["stale"], "warn"}, {"pending", counts["pending"], "na"}})
-	var trend template.HTML
-	var steps []onboardingStep
-	if sess.Tenant == 0 { // fleet history and first steps are installation wide
-		if trend, err = s.fleetChart(ctx); err != nil {
-			s.fail(w, err)
-			return
-		}
-		if steps, err = s.onboarding(ctx, r, sess); err != nil {
-			s.fail(w, err)
-			return
-		}
-	}
-	s.render(w, r, sess, "overview", map[string]any{"Steps": steps, "Trend": trend, "Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
-		"Recent": recent, "StaleHours": s.settings().StaleHours})
-}
-
-type donutPart struct {
-	Label string
-	Value int
-	Class string
-}
-
-// donutChart renders a ring chart as inline SVG. Only numbers and fixed class
-// names go into the markup, so returning template.HTML is safe; colours come
-// from CSS classes because the CSP forbids inline styles.
-func donutChart(parts []donutPart) template.HTML {
-	total := 0
-	for _, p := range parts {
-		total += p.Value
-	}
-	const r, c = 15.915494, 100.0 // circumference 100 makes dash lengths percentages
-	var b strings.Builder
-	b.WriteString(`<svg class="donut" viewBox="0 0 42 42" role="img" aria-label="Device status distribution">`)
-	fmt.Fprintf(&b, `<circle class="track" cx="21" cy="21" r="%.6f"/>`, r)
-	offset := 25.0 // start at 12 o'clock
-	for _, p := range parts {
-		if p.Value == 0 || total == 0 {
-			continue
-		}
-		pct := float64(p.Value) * c / float64(total)
-		fmt.Fprintf(&b, `<circle class="seg %s" cx="21" cy="21" r="%.6f" stroke-dasharray="%.3f %.3f" stroke-dashoffset="%.3f"/>`,
-			p.Class, r, pct, c-pct, offset)
-		offset -= pct
-	}
-	fmt.Fprintf(&b, `<text x="21" y="22.5" class="donut-total">%d</text></svg>`, total)
-	return template.HTML(b.String()) //nolint:gosec // numbers and constant class names only
-}
-
 func firstNonEmpty(v ...string) string {
 	for _, s := range v {
 		if s != "" {
@@ -674,270 +339,6 @@ func firstNonEmpty(v ...string) string {
 		}
 	}
 	return ""
-}
-
-func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	id := r.PathValue("id")
-	if !s.inScope(ctx, sess, id) {
-		http.NotFound(w, r)
-		return
-	}
-	var d deviceRow
-	var inv, checks, decl, users []byte
-	var enrolled, certExp time.Time
-	var since *time.Time
-	err := s.db.QueryRow(ctx, `SELECT id, hostname, agent_version, failing, jsonb_array_length(checks), last_seen, retired,
-		inventory, checks, decl_status, users, enrolled_at, cert_not_after, grace_until, auto_locked, noncompliant_since,
-		update_state, update_version, update_requested, external_ip, geo FROM devices WHERE id=$1`, id).
-		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &enrolled, &certExp, &d.GraceUntil, &d.AutoLocked, &since,
-			&d.UpdateState, &d.UpdateVersion, &d.UpdateRequested, &d.ExternalIP, &d.Geo)
-	if err != nil {
-		s.notFound(w, r, sess)
-		return
-	}
-	s.status(&d)
-	var data struct {
-		Inv      api.Inventory
-		Checks   []api.CheckResult
-		Decl     []api.DeclarationStatus
-		Users    []api.User
-		Packages []api.Package
-	}
-	if err := errors.Join(json.Unmarshal(inv, &data.Inv), json.Unmarshal(checks, &data.Checks), json.Unmarshal(decl, &data.Decl),
-		json.Unmarshal(users, &data.Users)); err != nil {
-		s.fail(w, err)
-		return
-	}
-	data.Packages, err = devicePackages(ctx, s.db, id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	sort.SliceStable(data.Checks, func(i, j int) bool { return data.Checks[i].Status == "fail" && data.Checks[j].Status != "fail" })
-	var userLines []string
-	for _, u := range data.Users {
-		l := u.Username + " " + u.Email
-		if u.Admin {
-			l += " admin"
-		}
-		userLines = append(userLines, l)
-	}
-	tab := r.URL.Query().Get("tab")
-	type cmd struct {
-		ID                       int64
-		Type, Status, Output, By string
-		At                       time.Time
-	}
-	var cmds []cmd
-	var scripts []scriptRow
-	var diags []diagRow
-	if tab == "commands" { // outputs can be large; only the commands tab shows them
-		var err error
-		if scripts, err = s.scriptResults(ctx, id); err != nil {
-			s.fail(w, err)
-			return
-		}
-		if sess.Role == "admin" || sess.Role == "helpdesk" {
-			if diags, err = s.diagnosticsList(ctx, id); err != nil {
-				s.fail(w, err)
-				return
-			}
-		}
-		rows, err := s.db.Query(ctx, `SELECT id, type, status, output, created_by, created_at FROM commands WHERE device_id=$1 ORDER BY id DESC LIMIT 50`, id)
-		if err == nil {
-			cmds, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (cmd, error) {
-				var c cmd
-				return c, row.Scan(&c.ID, &c.Type, &c.Status, &c.Output, &c.By, &c.At)
-			})
-		}
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-	}
-	bps, err := s.allBlueprints(ctx, id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	var charts []template.HTML
-	if tab == "" || tab == "overview" {
-		if charts, err = s.deviceCharts(ctx, id); err != nil {
-			s.fail(w, err)
-			return
-		}
-	}
-	recovery, err := s.recoveryKeys(ctx, id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	type deviceEvent struct {
-		At     time.Time
-		Detail string
-	}
-	var events []deviceEvent
-	const evSize = 50
-	evPage, evTotal := 1, 0
-	if r.URL.Query().Get("tab") == "commands" {
-		if err := s.db.QueryRow(ctx, `SELECT count(*) FROM device_events WHERE device_id=$1`, id).Scan(&evTotal); err != nil {
-			s.fail(w, err)
-			return
-		}
-		if n, err := strconv.Atoi(r.URL.Query().Get("evpage")); err == nil && n > 1 {
-			evPage = min(n, max(1, (evTotal+evSize-1)/evSize))
-		}
-		rows, err := s.db.Query(ctx, `SELECT at, detail FROM device_events WHERE device_id=$1 ORDER BY id DESC LIMIT $2 OFFSET $3`, id, evSize, (evPage-1)*evSize)
-		if err == nil {
-			events, err = pgx.CollectRows(rows, pgx.RowToStructByPos[deviceEvent])
-		}
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-	}
-	evPages := max(1, (evTotal+evSize-1)/evSize)
-	protect, err := s.protectiveActions(ctx, id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	var tampered *time.Time
-	if err := s.db.QueryRow(ctx, `SELECT tampered_at FROM devices WHERE id=$1 AND tampered_at > now() - interval '30 days'`, id).Scan(&tampered); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		s.fail(w, err)
-		return
-	}
-	// expected declarations, to show what the device has not confirmed yet
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	defer tx.Rollback(ctx)
-	res, err := resolveDevice(ctx, tx, id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	want := res.Decls
-	var tags, people []string
-	var primary string
-	if err := tx.QueryRow(ctx, `SELECT d.tags, coalesce(u.email,'') FROM devices d LEFT JOIN dir_users u ON u.id=d.primary_user_id WHERE d.id=$1`, id).Scan(&tags, &primary); err != nil {
-		s.fail(w, err)
-		return
-	}
-	pcond, pargs := dirPeopleCond(sess, 0)
-	rowsP, err := tx.Query(ctx, `SELECT u.email FROM dir_users u WHERE u.active AND `+pcond+` ORDER BY u.email LIMIT 2000`, pargs...)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if people, err = pgx.CollectRows(rowsP, pgx.RowTo[string]); err != nil {
-		s.fail(w, err)
-		return
-	}
-	encExcluded := func(string) bool { return false }
-	if tab == "hardware" {
-		if decls, err := effectiveDeclarations(ctx, tx, id); err == nil {
-			if pol, _ := api.Compose(decls); pol.Extra.DiskEncryption != nil {
-				encExcluded = pol.Extra.DiskEncryption.Excluded
-			}
-		}
-	}
-	// end the transaction before the queries below take further pool
-	// connections: holding one while waiting for another starves the pool
-	// under many parallel page loads
-	_ = tx.Rollback(ctx)
-	sub := r.URL.Query().Get("sub")
-	switch {
-	case tab == "software" && sub != "sources" && sub != "flatpak" && sub != "catalog":
-		sub = "packages"
-	case tab == "accounts" && sub != "groups":
-		sub = "users"
-	}
-	if !slices.Contains([]string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"}, tab) {
-		tab = "overview"
-	}
-	pkgQ := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-	var pkgView []api.Package
-	for _, p := range data.Packages {
-		if pkgQ == "" || strings.Contains(strings.ToLower(p.Name), pkgQ) {
-			pkgView = append(pkgView, p)
-		}
-	}
-	const pageSize = 100
-	pageNo, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	pages := max(1, (len(pkgView)+pageSize-1)/pageSize)
-	pageNo = min(max(pageNo, 1), pages)
-	matched := len(pkgView)
-	pkgView = pkgView[(pageNo-1)*pageSize : min(pageNo*pageSize, matched)]
-	failingChecks := 0
-	for _, c := range data.Checks {
-		if c.Status == "fail" {
-			failingChecks++
-		}
-	}
-	declRows := declarationRows(want, data.Decl)
-	var agentVersions []string
-	if rows, err := s.db.Query(ctx, `SELECT version FROM agent_releases WHERE NOT blocked`); err == nil {
-		agentVersions, _ = pgx.CollectRows(rows, pgx.RowTo[string])
-		slices.SortFunc(agentVersions, func(a, b string) int { return api.CompareVersions(b, a) })
-	}
-	appNames, catalogFlatpaks := map[string]string{}, map[string]string{}
-	if tab == "software" && sub == "flatpak" {
-		if apps, err := s.catalogApps(ctx, s.db, ""); err == nil {
-			for _, a := range apps {
-				for _, src := range a.Sources {
-					if src.Kind == "flatpak" {
-						catalogFlatpaks[src.Flatpak] = a.ID
-					}
-				}
-			}
-		}
-	}
-	var appBusy map[string]string // app → "install" | "remove" while it runs
-	var appNotes []appNote
-	if tab == "software" && sub == "catalog" {
-		if apps, err := s.catalogApps(ctx, s.db, ""); err == nil {
-			for _, a := range apps {
-				appNames[a.ID] = a.Name
-			}
-		}
-		if appBusy, appNotes, err = s.appProgress(ctx, id, data.Inv.Apps, appNames); err != nil {
-			s.fail(w, err)
-			return
-		}
-	}
-	var netCerts []netCertRow
-	if tab == "network" {
-		if netCerts, err = s.networkCerts(ctx, id); err != nil {
-			s.fail(w, err)
-			return
-		}
-	}
-	bpSrc, err := s.blueprintSource(ctx, id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	// what happens after the grace period: the compliance item of this device
-	comp, _ := api.Compose(want)
-	var lockAt *time.Time
-	if since != nil && comp.Compliance.LockAfterHours > 0 {
-		t := since.Add(time.Duration(comp.Compliance.LockAfterHours) * time.Hour)
-		lockAt = &t
-	}
-	s.render(w, r, sess, "device", map[string]any{"NetCerts": netCerts, "BPSource": bpSrc, "LockAt": lockAt, "Notify": comp.Compliance.Notify, "EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames, "AppBusy": appBusy, "AppNotes": appNotes, "CatalogFlatpaks": catalogFlatpaks,
-		"PwError": pwError(r), "PwMin": s.settings().Rules.Min(),
-		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
-		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
-		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
-		"Commands": cmds, "Scripts": scripts, "Diagnostics": diags, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
-		"Resolved": res, "Tags": strings.Join(tags, ", "), "TagList": tags, "Protective": protect, "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery, "Tampered": tampered, "Events": events, "EvPage": evPage, "EvPages": evPages, "EvTotal": evTotal, "EvFrom": min((evPage-1)*evSize+1, evTotal), "EvTo": min(evPage*evSize, evTotal),
-		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"},
-		"Sub": sub, "ShowSystem": r.URL.Query().Get("system") == "1", "NetworkInfo": len(data.Inv.DNS)+len(data.Inv.Routes) > 0 || hasIPs(data.Inv.Interfaces),
-	})
 }
 
 // protective is the latest protective action of one kind on a device.
@@ -998,55 +399,6 @@ func declarationRows(want []api.Declaration, got []api.DeclarationStatus) []decl
 		out = append(out, row)
 	}
 	return out
-}
-
-// pwError is the password policy message a redirect named, if any.
-func pwError(r *http.Request) string {
-	if i, err := strconv.Atoi(r.URL.Query().Get("pwerr")); err == nil && i >= 0 && i < len(passwordErrors) {
-		return passwordErrors[i]
-	}
-	return ""
-}
-
-func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess session) {
-	id, typ := r.PathValue("id"), r.FormValue("type")
-	if !s.inScope(r.Context(), sess, id) {
-		http.NotFound(w, r)
-		return
-	}
-	payload, code, msg := s.commandPayload(r, sess, id, typ)
-	if i := slices.Index(passwordErrors, msg); i >= 0 {
-		http.Redirect(w, r, "/devices/"+url.PathEscape(id)+"?tab=accounts&pwerr="+strconv.Itoa(i), http.StatusSeeOther)
-		return
-	}
-	if code != 0 {
-		s.errorPage(w, r, sess, code, msg)
-		return
-	}
-	if s.needsApproval(typ) {
-		_, err := s.requestApproval(r.Context(), sess, "command", id, commandApproval{Type: typ, Payload: payload}, strings.TrimSpace(r.FormValue("reason")))
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
-		return
-	}
-	if err := s.queueCommand(r.Context(), sess.Email, id, typ, payload); err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.notifyCommand(sess.Email, id, typ)
-	back := "/devices/" + id
-	switch {
-	case typ == "app_install" || typ == "app_remove":
-		back += "?tab=software&sub=catalog"
-	case strings.HasPrefix(typ, "user_"):
-		back += "?tab=accounts"
-	case typ == "software_remove":
-		back += "?tab=software&sub=" + url.QueryEscape(r.FormValue("back_sub"))
-	}
-	http.Redirect(w, r, back, http.StatusSeeOther)
 }
 
 // queueCommand stores a command for a device and audits it. The entry names
@@ -1180,30 +532,6 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 	return payload, 0, ""
 }
 
-func parseUsers(text string) ([]api.User, error) {
-	users := []api.User{}
-	seen := map[string]bool{}
-	for _, line := range strings.Split(text, "\n") {
-		f := strings.Fields(line)
-		if len(f) == 0 {
-			continue
-		}
-		if len(f) < 2 || len(f) > 3 || (len(f) == 3 && f[2] != "admin") {
-			return nil, fmt.Errorf("line %q: expected 'username email [admin]'", line)
-		}
-		u := api.User{Username: f[0], Email: strings.ToLower(f[1]), Admin: len(f) == 3}
-		if err := u.Validate(); err != nil {
-			return nil, err
-		}
-		if seen[u.Username] {
-			return nil, fmt.Errorf("user %s listed twice", u.Username)
-		}
-		seen[u.Username] = true
-		users = append(users, u)
-	}
-	return users, nil
-}
-
 // parseTags accepts a comma separated list of short labels.
 func parseTags(text string) ([]string, error) {
 	tags := []string{}
@@ -1220,59 +548,6 @@ func parseTags(text string) ([]string, error) {
 	return tags, nil
 }
 
-func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess session) {
-	id := r.PathValue("id")
-	users, err := parseUsers(r.FormValue("users"))
-	if err != nil {
-		s.errorPage(w, r, sess, http.StatusBadRequest, err.Error())
-		return
-	}
-	var bpID *int64
-	if v, err := strconv.ParseInt(r.FormValue("blueprint_id"), 10, 64); err == nil && v > 0 {
-		if !s.tenantOwns(r.Context(), sess, "blueprints", v, true) {
-			s.errorPage(w, r, sess, http.StatusBadRequest, "unknown blueprint")
-			return
-		}
-		bpID = &v
-	}
-	tags, err := parseTags(r.FormValue("tags"))
-	if err != nil {
-		s.errorPage(w, r, sess, http.StatusBadRequest, err.Error())
-		return
-	}
-	var primary *int64
-	if email := strings.ToLower(strings.TrimSpace(r.FormValue("primary_user"))); email != "" {
-		uid, err := s.dirPersonID(r.Context(), sess, email)
-		if err != nil {
-			s.errorPage(w, r, sess, http.StatusBadRequest, "primary user not found in the directory")
-			return
-		}
-		primary = &uid
-	}
-	ub, _ := json.Marshal(users)
-	err = s.auditAction(r.Context(), sess.Email, "device.assign", id, fmt.Sprintf("blueprint=%v tags=%v users=%s", r.FormValue("blueprint_id"), tags, ub), func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `UPDATE devices SET users=$2, blueprint_id=$3, tags=$4, primary_user_id=$5 WHERE id=$1`, id, string(ub), bpID, tags, primary)
-		if err == nil {
-			err = signDeviceUsers(r.Context(), tx, id)
-		}
-		return err
-	})
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/devices/"+id, http.StatusSeeOther)
-}
-
-func (s *Server) deviceRetire(w http.ResponseWriter, r *http.Request, sess session) {
-	id := r.PathValue("id")
-	if err := s.retireDevice(r.Context(), sess.Email, id); err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/devices/"+id, http.StatusSeeOther)
-}
-
 // retireDevice ends the management of a device: its client certificate and
 // network certificates are revoked, its history stays.
 func (s *Server) retireDevice(ctx context.Context, actor, id string) error {
@@ -1285,75 +560,6 @@ func (s *Server) retireDevice(ctx context.Context, actor, id string) error {
 }
 
 // ---- enrollment tokens ----
-
-// tokenRevoke deletes an enrollment token; devices already enrolled with it stay.
-func (s *Server) tokenRevoke(w http.ResponseWriter, r *http.Request, sess session) {
-	id, err := hex.DecodeString(r.PathValue("id"))
-	if err != nil || len(id) != sha256.Size {
-		s.notFound(w, r, sess)
-		return
-	}
-	err = s.revokeEnrollToken(r.Context(), sess, id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		s.notFound(w, r, sess)
-		return
-	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/tokens", http.StatusSeeOther)
-}
-
-func (s *Server) tokens(w http.ResponseWriter, r *http.Request, sess session) {
-	s.tokenPage(w, r, sess, "")
-}
-
-func (s *Server) tokenPage(w http.ResponseWriter, r *http.Request, sess session, created string) {
-	type tok struct {
-		ID, Note, Blueprint, By string
-		Uses                    int
-		Expires                 time.Time
-	}
-	tcond, targs := tenantCond(sess, "t.tenant_id", 0)
-	rows, err := s.db.Query(r.Context(), `SELECT encode(t.token_hash, 'hex'), t.note, coalesce(b.name,'default'), t.created_by, t.uses_left, t.expires_at
-		FROM enroll_tokens t LEFT JOIN blueprints b ON b.id=t.blueprint_id WHERE t.expires_at > now() AND t.uses_left > 0 AND `+tcond+` ORDER BY t.expires_at`, targs...)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[tok])
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	bps, err := s.allBlueprints(r.Context(), "")
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.render(w, r, sess, "tokens", map[string]any{"Tokens": list, "Blueprints": bps, "Created": created,
-		"AgentURL": s.cfg.AgentURL, "Fingerprint": s.tlsCA().Fingerprint(), "PublicURL": s.cfg.PublicURL, "Repo": s.cfg.ReleaseRepo})
-}
-
-func (s *Server) tokenCreate(w http.ResponseWriter, r *http.Request, sess session) {
-	uses, err1 := strconv.Atoi(r.FormValue("uses"))
-	days, err2 := strconv.Atoi(r.FormValue("days"))
-	if err1 != nil || err2 != nil {
-		uses = 0
-	}
-	bpID, _ := strconv.ParseInt(r.FormValue("blueprint_id"), 10, 64)
-	token, err := s.createEnrollToken(r.Context(), sess, r.FormValue("note"), bpID, uses, days)
-	var ue *userError
-	if errors.As(err, &ue) {
-		s.errorPage(w, r, sess, ue.Status, ue.Msg)
-		return
-	} else if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.tokenPage(w, r, sess, token)
-}
 
 // createEnrollToken creates an enrollment token for 1..10000 uses and
 // 1..90 days, optionally binding new devices to a blueprint (0: default),
@@ -1410,70 +616,6 @@ type fleetStats struct {
 	Checks                                     []*checkAgg
 	Controls                                   []*controlAgg
 	Total, Compliant, Stale, Pending, Noncompl int
-}
-
-func (s *Server) compliance(w http.ResponseWriter, r *http.Request, sess session) {
-	fc, err := s.fleetComplianceFor(r.Context(), sess)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	exceptions, err := s.riskExceptions(r.Context())
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	q := r.URL.Query()
-	f := complianceFilter{Q: strings.ToLower(strings.TrimSpace(q.Get("q"))), State: q.Get("state"), Level: q.Get("level"),
-		Framework: q.Get("framework"), Sort: q.Get("sort")}
-	checks, controls := f.apply(fc.Checks, fc.Controls)
-	s.render(w, r, sess, "compliance", map[string]any{
-		"F": f, "Shown": len(checks), "All": len(fc.Checks),
-		"Checks": checks, "Controls": controls, "Total": fc.Total, "Compliant": fc.Compliant, "Stale": fc.Stale,
-		"NonCompliant": fc.Noncompl, "Pending": fc.Pending, "StaleHours": s.settings().StaleHours,
-		"Exceptions": exceptions,
-	})
-}
-
-// complianceFilter narrows and orders the compliance page via query parameters.
-type complianceFilter struct {
-	Q, State, Level, Framework, Sort string
-}
-
-var frameworkNames = map[string]string{"bsi": "BSI IT-Grundschutz", "cis": "CIS Benchmark", "iso": "ISO/IEC 27001:2022"}
-
-func (f complianceFilter) apply(checks []*checkAgg, controls []*controlAgg) ([]*checkAgg, []*controlAgg) {
-	var out []*checkAgg
-	for _, c := range checks {
-		switch {
-		case f.State == "failing" && c.Fail == 0, f.State == "passing" && (c.Fail > 0 || c.Pass == 0):
-			continue
-		case f.Level != "" && strconv.Itoa(c.Level) != f.Level:
-			continue
-		case f.Q != "" && !strings.Contains(strings.ToLower(c.ID+" "+c.Title), f.Q):
-			continue
-		case f.Framework == "bsi" && len(c.Refs.BSI) == 0, f.Framework == "cis" && len(c.Refs.CIS) == 0, f.Framework == "iso" && len(c.Refs.ISO) == 0:
-			continue
-		}
-		out = append(out, c)
-	}
-	switch f.Sort {
-	case "fail":
-		sort.SliceStable(out, func(i, j int) bool { return out[i].Fail > out[j].Fail })
-	case "title":
-		sort.SliceStable(out, func(i, j int) bool { return out[i].Title < out[j].Title })
-	case "level":
-		sort.SliceStable(out, func(i, j int) bool { return out[i].Level < out[j].Level })
-	}
-	var ctl []*controlAgg
-	for _, c := range controls {
-		if name := frameworkNames[f.Framework]; f.Framework == "" || c.Framework == name {
-			if f.State != "failing" || c.Fail > 0 {
-				ctl = append(ctl, c)
-			}
-		}
-	}
-	return out, ctl
 }
 
 // fleetCompliance aggregates the latest check results of all active devices.
@@ -1605,64 +747,6 @@ type auditRow struct {
 	Tenant                        *int64 // nil: a global entry
 }
 
-func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	q := r.URL.Query()
-	f, where, args := auditFilter(q, sess)
-	filter := url.Values{}
-	for k, v := range f {
-		if v != "" {
-			filter.Set(k, v)
-		}
-	}
-	const pageSize = 100
-	before, _ := strconv.ParseInt(q.Get("before"), 10, 64)
-	if before > 0 {
-		args = append(args, before)
-		where += " AND id < $" + strconv.Itoa(len(args))
-	}
-	rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target, detail, prev, hash, tenant_id FROM audit_log WHERE `+where+
-		` ORDER BY id DESC LIMIT `+strconv.Itoa(pageSize+1), args...)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[auditRow])
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	var older, newest string
-	if len(list) > pageSize {
-		list = list[:pageSize]
-		v := url.Values{}
-		for k := range filter {
-			v.Set(k, filter.Get(k))
-		}
-		v.Set("before", strconv.FormatInt(list[len(list)-1].ID, 10))
-		older = "/audit?" + v.Encode()
-	}
-	if before > 0 {
-		newest = "/audit?" + filter.Encode()
-	}
-	brokenAt, err := s.verifyAudit(ctx)
-	full, verifiedAt := s.auditVerification(ctx)
-	if err == nil && brokenAt == 0 && full != 0 {
-		brokenAt = full
-	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	var actions []string
-	if rows, err := s.db.Query(ctx, `SELECT DISTINCT action FROM audit_log ORDER BY 1`); err == nil {
-		actions, _ = pgx.CollectRows(rows, pgx.RowTo[string])
-	}
-	s.render(w, r, sess, "audit", map[string]any{"Entries": list, "BrokenAt": brokenAt, "F": f, "Actions": actions,
-		"Older": older, "Newest": newest, "CSV": "/export/audit.csv?" + filter.Encode(), "JSONL": "/export/audit.jsonl?" + filter.Encode(),
-		"VerifiedAt": verifiedAt, "Keyed": auditKeyedFrom > 0, "KeyedFrom": auditKeyedFrom})
-}
-
 // verifyAudit checks the hash chain and returns the first broken entry (0 =
 // intact). The audit page verifies incrementally from the last checkpoint;
 // the daily background run and the "verify whole chain" action verify
@@ -1767,7 +851,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 			WHERE NOT d.retired AND ` + cond + ` ORDER BY d.hostname, d.id, p.name, p.arch, p.version`
 	case "audit.csv":
 		var where string
-		_, where, args = auditFilter(r.URL.Query(), sess)
+		where, args = auditFilter(r.URL.Query(), sess)
 		header = []string{"id", "at", "actor", "action", "target", "detail", "prev", "hash", "tenant_id"}
 		q = `SELECT id::text, at::text, actor, action, target, detail, encode(prev,'hex'), encode(hash,'hex'), coalesce(tenant_id::text, '') FROM audit_log WHERE ` + where + ` ORDER BY id`
 	case "audit.jsonl":
@@ -1859,15 +943,6 @@ func (s *Server) streamExport(w http.ResponseWriter, r *http.Request, sess sessi
 	if err := s.auditAction(context.WithoutCancel(ctx), sess.Email, "export.done", kind, detail, nil); err != nil {
 		s.log.Error("audit export.done", "err", err)
 	}
-}
-
-func hasIPs(nics []api.NIC) bool {
-	for _, n := range nics {
-		if len(n.IPs) > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 // helpdeskCommands are the device commands the helpdesk role may send, as

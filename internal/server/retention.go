@@ -207,24 +207,6 @@ func (s *Server) auditStart(ctx context.Context) (int64, []byte, error) {
 	return 0, make([]byte, 32), nil
 }
 
-// deviceDelete removes a retired device and its personal data: events,
-// metrics, commands, recovery keys and app requests. Audit entries about it
-// stay (they follow the audit retention); the deletion is one of them.
-func (s *Server) deviceDelete(w http.ResponseWriter, r *http.Request, sess session) {
-	err := s.deleteDevice(r.Context(), sess.Email, r.PathValue("id"), r.FormValue("confirm"))
-	var ue *userError
-	switch {
-	case errors.Is(err, errNotFound):
-		http.NotFound(w, r)
-	case errors.As(err, &ue):
-		s.errorPage(w, r, sess, ue.Status, ue.Msg)
-	case err != nil:
-		s.fail(w, err)
-	default:
-		http.Redirect(w, r, "/devices", http.StatusSeeOther)
-	}
-}
-
 // deleteDevice deletes a retired device whose host name confirm repeats.
 func (s *Server) deleteDevice(ctx context.Context, actor, id, confirm string) error {
 	var host string

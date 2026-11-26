@@ -35,7 +35,7 @@ variable is switched off again later.
 A console user without a tenant is global. Accounts from `LIMDM_ADMINS`, `LIMDM_AUDITORS`,
 from directory group mappings and from `limdm-server local-admin` are global.
 
-* **Tenants** (`/tenants`): create tenants, open one to rename, disable or brand it, and
+* **Tenants** (`/app/settings?s=tenants`): create tenants, open one to rename, disable or brand it, and
   choose the **shared objects** (below).
 * **Tenant switcher**: "All tenants (global)" shows every tenant; choosing a tenant narrows
   every page to it. The choice lives in the signed session cookie and is checked on every

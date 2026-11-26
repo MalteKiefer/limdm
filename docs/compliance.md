@@ -306,19 +306,19 @@ refused. For retries and a delivery log use a webhook [notification channel](not
 Exports are open to admins and auditors and follow the device scope and tenant of the
 account.
 
-* **Evidence CSV** (`/export/compliance.csv`): every current check result of every active
+* **Evidence CSV** (`/api/v1/exports/compliance.csv`): every current check result of every active
   device (custom checks included): device, host name, last seen, agent version, catalog
   version, check, level, status, detail, BSI, CIS and ISO references, CIS benchmark edition,
   the reason, owner, approver and expiry of the active risk exception that covers it, and the
   generation time.
-* **Exceptions CSV** (`/export/exceptions.csv`): every risk exception with its state
+* **Exceptions CSV** (`/api/v1/exports/exceptions.csv`): every risk exception with its state
   (`active`, `expired`, `revoked`), creator and creation time.
-* **Compliance history** (Compliance page, **History**, `/compliance/history`): devices
+* **Compliance history** (Compliance page, **History**, `/app/compliance/history`): devices
   report only changes, and the server stores every change of a check result
   (`compliance_changes`, 365 days; the last state before the cutoff is kept, so the state at
   any date stays known). The page shows the state of all devices, or of one device with its
   changes, at the end of a chosen day. **Report as CSV**
-  (`/export/compliance-history.csv?at=YYYY-MM-DD&device=ID`) has the same data with the time
+  (`/api/v1/exports/compliance-history.csv?at=YYYY-MM-DD&device=ID`) has the same data with the time
   each state began, the catalog version and the generation time. Devices that reported before
   the history existed start with their last report as baseline.
 * **Inventory CSV**, **Packages CSV** (device list), **Audit CSV** and the audit

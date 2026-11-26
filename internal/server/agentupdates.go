@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -491,10 +490,6 @@ type releaseView struct {
 	Devices, Failed int
 }
 
-func (s *Server) agentsPage(w http.ResponseWriter, r *http.Request, sess session) {
-	s.renderAgents(w, r, sess, "", "")
-}
-
 // outdatedDevice is a device behind the newest approved agent version.
 type outdatedDevice struct {
 	ID, Hostname, Version string
@@ -567,41 +562,6 @@ func (s *Server) agentsOverview(ctx context.Context) (agentsView, error) {
 	return v, nil
 }
 
-func (s *Server) renderAgents(w http.ResponseWriter, r *http.Request, sess session, msg, errMsg string) {
-	v, err := s.agentsOverview(r.Context())
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	current, older := splitOlder(v.Releases, v.Fleet)
-	if r.URL.Query().Get("older") == "1" {
-		current, older = v.Releases, nil
-	}
-	s.render(w, r, sess, "agents", map[string]any{"Policy": v.Policy, "Releases": current, "Older": len(older), "ShowingAll": r.URL.Query().Get("older") == "1",
-		"Fleet": v.Fleet, "Repo": s.cfg.ReleaseRepo, "Msg": msg, "Error": errMsg, "Latest": v.Latest, "Outdated": v.Outdated})
-}
-
-func (s *Server) agentsPolicy(w http.ResponseWriter, r *http.Request, sess session) {
-	delay, err := strconv.Atoi(r.FormValue("delay_days"))
-	spread, serr := strconv.Atoi(r.FormValue("spread_hours"))
-	if err != nil {
-		delay = -1
-	}
-	if serr != nil {
-		spread = -1
-	}
-	pol := UpdatePolicy{Auto: r.FormValue("auto") == "on", DelayDays: delay, SpreadHours: spread, PilotTag: r.FormValue("pilot_tag")}
-	if err := s.saveUpdatePolicy(r.Context(), sess, pol); err != nil {
-		if ue := (*userError)(nil); errors.As(err, &ue) {
-			s.renderAgents(w, r, sess, "", ue.Msg)
-			return
-		}
-		s.fail(w, err)
-		return
-	}
-	s.renderAgents(w, r, sess, "Settings saved and active.", "")
-}
-
 // saveUpdatePolicy validates and stores the agent update policy.
 func (s *Server) saveUpdatePolicy(ctx context.Context, sess session, pol UpdatePolicy) error {
 	pol.PilotTag = strings.ToLower(strings.TrimSpace(pol.PilotTag))
@@ -617,17 +577,6 @@ func (s *Server) saveUpdatePolicy(ctx context.Context, sess session, pol UpdateP
 		_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('agent_updates', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
 		return err
 	})
-}
-
-func (s *Server) agentsFetch(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
-	defer cancel()
-	if _, err := s.fetchReleases(ctx); err != nil {
-		s.log.Warn("agent releases", "err", err)
-		s.renderAgents(w, r, sess, "", "Fetching the releases failed, see the server log.")
-		return
-	}
-	s.renderAgents(w, r, sess, "Versions checked.", "")
 }
 
 // versionCount is the number of devices running an agent version.
@@ -662,31 +611,6 @@ func splitOlder(rels []releaseView, fleet []versionCount) (current, older []rele
 	return current, older
 }
 
-// deviceAgentUpdate lets the device take the newest approved version at its
-// next check in, regardless of policy and delay.
-func (s *Server) deviceAgentUpdate(w http.ResponseWriter, r *http.Request, sess session) {
-	id, target := r.PathValue("id"), strings.TrimSpace(r.FormValue("version"))
-	err := s.requestAgentUpdate(r.Context(), sess.Email, id, target)
-	var ue *userError
-	if errors.As(err, &ue) {
-		s.errorPage(w, r, sess, ue.Status, ue.Msg)
-		return
-	}
-	if errors.Is(err, errNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	back := "/devices/" + id
-	if r.FormValue("back") == "agents" {
-		back = "/agents"
-	}
-	http.Redirect(w, r, back, http.StatusSeeOther)
-}
-
 // requestAgentUpdate marks a device for an agent update at its next check
 // in: target is an approved, unblocked version, or empty for the newest.
 // errNotFound when the device is unknown or retired.
@@ -710,22 +634,6 @@ var (
 	errNotFound       = errors.New("not found")
 	errUnknownVersion = errors.New("unknown version")
 )
-
-// agentsRelease approves, blocks or unblocks a version.
-func (s *Server) agentsRelease(w http.ResponseWriter, r *http.Request, sess session) {
-	err := s.releaseOp(r.Context(), sess, r.PathValue("version"), r.PathValue("op"))
-	var ue *userError
-	switch {
-	case errors.As(err, &ue) && ue.Status == http.StatusNotFound && ue.Msg == "not found":
-		http.NotFound(w, r)
-	case ue != nil:
-		s.renderAgents(w, r, sess, "", ue.Msg)
-	case err != nil:
-		s.fail(w, err)
-	default:
-		http.Redirect(w, r, "/agents", http.StatusSeeOther)
-	}
-}
 
 // releaseOp approves or blocks an agent version.
 func (s *Server) releaseOp(ctx context.Context, sess session, version, op string) error {

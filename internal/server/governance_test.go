@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -128,60 +127,47 @@ func TestGovernance(t *testing.T) {
 
 	srv := httptest.NewServer(s.AdminHandler())
 	defer srv.Close()
-	ui := func(method, path string, form url.Values, email, role string) (int, string) {
+	ui := func(method, path, body, email, role string) (int, string) {
 		t.Helper()
-		sess := session{Email: email, Role: role, IAT: time.Now(), Last: time.Now()}
-		if form != nil {
-			form.Set("csrf", s.csrfToken(sess))
-		}
-		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: s.seal(sess)})
-		resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, string(b)
+		return consoleAPI(t, s, srv.URL, session{Email: email, Role: role, IAT: time.Now(), Last: time.Now()})(method, path, body)
 	}
 
 	// ---- role scopes ----
-	if code, body := ui("GET", "/devices", nil, "h@x.de", "helpdesk"); code != 200 || !strings.Contains(body, "pc1") || strings.Contains(body, "pc2") {
+	if code, body := ui("GET", "/api/v1/devices", "", "h@x.de", "helpdesk"); code != 200 || !strings.Contains(body, "pc1") || strings.Contains(body, "pc2") {
 		t.Fatalf("scoped device list: %d", code)
 	}
-	if code, _ := ui("GET", "/devices/d2", nil, "h@x.de", "helpdesk"); code != http.StatusNotFound {
+	if code, _ := ui("GET", "/api/v1/devices/d2", "", "h@x.de", "helpdesk"); code != http.StatusNotFound {
 		t.Fatalf("device outside the scope: %d", code)
 	}
-	if code, _ := ui("POST", "/devices/d2/command", url.Values{"type": {"sync"}}, "h@x.de", "helpdesk"); code != http.StatusNotFound {
+	if code, _ := ui("POST", "/api/v1/devices/d2/commands", `{"type":"sync"}`, "h@x.de", "helpdesk"); code != http.StatusNotFound {
 		t.Fatalf("command outside the scope: %d", code)
 	}
-	if code, _ := ui("POST", "/devices/d1/command", url.Values{"type": {"sync"}}, "h@x.de", "helpdesk"); code != http.StatusSeeOther {
+	if code, _ := ui("POST", "/api/v1/devices/d1/commands", `{"type":"sync"}`, "h@x.de", "helpdesk"); code != http.StatusAccepted {
 		t.Fatalf("command inside the scope: %d", code)
 	}
-	if code, _ := ui("GET", "/devices/d2", nil, "a@x.de", "admin"); code != 200 {
+	if code, _ := ui("GET", "/api/v1/devices/d2", "", "a@x.de", "admin"); code != 200 {
 		t.Fatalf("admins are not scoped: %d", code)
 	}
-	if code, body := ui("GET", "/compliance/history", nil, "h@x.de", "helpdesk"); code != 200 || strings.Contains(body, "pc2") {
+	if code, body := ui("GET", "/api/v1/compliance/history", "", "h@x.de", "helpdesk"); code != 200 || strings.Contains(body, "pc2") {
 		t.Fatalf("scoped compliance history: %d", code)
 	}
-	if code, _ := ui("GET", "/compliance/history?device=d2", nil, "h@x.de", "helpdesk"); code != http.StatusNotFound {
+	if code, _ := ui("GET", "/api/v1/compliance/history?device=d2", "", "h@x.de", "helpdesk"); code != http.StatusNotFound {
 		t.Fatalf("compliance history outside the scope: %d", code)
 	}
-	if code, _ := ui("GET", "/library/1/history", nil, "h@x.de", "helpdesk"); code != http.StatusForbidden {
+	if code, _ := ui("GET", "/api/v1/config/library/1/versions", "", "h@x.de", "helpdesk"); code != http.StatusForbidden {
 		t.Fatalf("scoped version history: %d", code)
 	}
 
 	// ---- four eyes ----
 	must(`UPDATE console_users SET disabled=true WHERE email='b@x.de'`)
-	if _, body := ui("POST", "/settings", url.Values{"section": {"security"}, "four_eyes": {"on"}}, "a@x.de", "admin"); !strings.Contains(body, "two active administrators") {
+	if _, body := ui("PATCH", "/api/v1/settings/security", `{"four_eyes":true}`, "a@x.de", "admin"); !strings.Contains(body, "two active administrators") {
 		t.Fatal("four eyes enabled with a single admin")
 	}
 	must(`UPDATE console_users SET disabled=false WHERE email='b@x.de'`)
-	if code, body := ui("POST", "/settings", url.Values{"section": {"security"}, "four_eyes": {"on"}}, "a@x.de", "admin"); code != 200 || !s.settings().FourEyes {
+	if code, body := ui("PATCH", "/api/v1/settings/security", `{"four_eyes":true}`, "a@x.de", "admin"); code != 200 || !s.settings().FourEyes {
 		t.Fatalf("enable four eyes: %d %s", code, body)
 	}
-	if code, _ := ui("POST", "/devices/d1/command", url.Values{"type": {"wipe"}, "confirm": {"pc1"}}, "a@x.de", "admin"); code != http.StatusSeeOther {
+	if code, _ := ui("POST", "/api/v1/devices/d1/commands", `{"type":"wipe","params":{"confirm":"pc1"}}`, "a@x.de", "admin"); code != http.StatusAccepted {
 		t.Fatalf("wipe request: %d", code)
 	}
 	var n int
@@ -191,11 +177,11 @@ func TestGovernance(t *testing.T) {
 	if n != 0 || id == 0 {
 		t.Fatalf("wipe ran without approval: %d commands, approval %d", n, id)
 	}
-	idPath := "/approvals/" + strconv.FormatInt(id, 10)
-	if _, body := ui("POST", idPath+"/approve", url.Values{}, "a@x.de", "admin"); !strings.Contains(body, "own request") {
+	idPath := "/api/v1/approvals/" + strconv.FormatInt(id, 10)
+	if _, body := ui("POST", idPath+"/approve", "", "a@x.de", "admin"); !strings.Contains(body, "own request") {
 		t.Fatal("requester approved their own request")
 	}
-	if code, _ := ui("POST", idPath+"/approve", url.Values{}, "b@x.de", "admin"); code != http.StatusSeeOther {
+	if code, _ := ui("POST", idPath+"/approve", "", "b@x.de", "admin"); code != http.StatusOK {
 		t.Fatalf("approve: %d", code)
 	}
 	var by string
@@ -204,7 +190,7 @@ func TestGovernance(t *testing.T) {
 		t.Fatalf("approved wipe: %d by %q", n, by)
 	}
 	// bulk scripts wait too: one request per device
-	if code, _ := ui("POST", "/devices/bulk", url.Values{"id": {"d1", "d2"}, "action": {"command:script"}, "payload": {"echo hi"}}, "a@x.de", "admin"); code != http.StatusSeeOther {
+	if code, _ := ui("POST", "/api/v1/devices/bulk", `{"ids":["d1","d2"],"action":"command:script","params":{"payload":"echo hi"}}`, "a@x.de", "admin"); code != http.StatusAccepted {
 		t.Fatalf("bulk script request: %d", code)
 	}
 	db.QueryRow(ctx, `SELECT count(*) FROM approvals WHERE status='pending' AND action='command' AND payload->>'type'='script'`).Scan(&n)
@@ -227,7 +213,7 @@ func TestGovernance(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("shell requests: %d", n)
 	}
-	ui("POST", "/approvals/"+strconv.FormatInt(shellID, 10)+"/approve", url.Values{}, "b@x.de", "admin")
+	ui("POST", "/api/v1/approvals/"+strconv.FormatInt(shellID, 10)+"/approve", "", "b@x.de", "admin")
 	if _, err := s.requireApproval(ctx, asA, "remote_shell", "d1", "root"); !errors.Is(err, errAwaitingApproval) {
 		t.Fatal("an approval for alice opened a shell as root")
 	}
@@ -253,12 +239,12 @@ func TestGovernance(t *testing.T) {
 		t.Fatal("a shell approval was used twice")
 	}
 	// role changes wait too, and the last two admins stay admins
-	ui("POST", "/users/update", url.Values{"login": {"h@x.de"}, "role": {"auditor"}}, "a@x.de", "admin")
+	ui("PATCH", "/api/v1/users/h@x.de", `{"role":"auditor"}`, "a@x.de", "admin")
 	if s.currentRole(ctx, "h@x.de") != "helpdesk" {
 		t.Fatal("role changed without approval")
 	}
 	db.QueryRow(ctx, `SELECT id FROM approvals WHERE status='pending' AND action='user.update'`).Scan(&id)
-	ui("POST", "/approvals/"+strconv.FormatInt(id, 10)+"/approve", url.Values{}, "b@x.de", "admin")
+	ui("POST", "/api/v1/approvals/"+strconv.FormatInt(id, 10)+"/approve", "", "b@x.de", "admin")
 	if s.currentRole(ctx, "h@x.de") != "auditor" {
 		t.Fatal("approved role change not applied")
 	}
@@ -273,25 +259,25 @@ func TestGovernance(t *testing.T) {
 	}
 
 	// ---- account management cannot get around four eyes ----
-	ui("POST", "/users", url.Values{"kind": {"local"}, "login": {"second"}, "role": {"admin"}}, "a@x.de", "admin")
+	ui("POST", "/api/v1/users", `{"kind":"local","login":"second","role":"admin"}`, "a@x.de", "admin")
 	if s.currentRole(ctx, "local:second") != "" {
 		t.Fatal("an admin account was created without approval")
 	}
 	var addID int64
 	db.QueryRow(ctx, `SELECT id FROM approvals WHERE status='pending' AND action='user.add'`).Scan(&addID)
-	if code, body := ui("POST", "/approvals/"+strconv.FormatInt(addID, 10)+"/approve", url.Values{}, "b@x.de", "admin"); code != http.StatusOK || !strings.Contains(body, "creds") {
+	if code, body := ui("POST", "/api/v1/approvals/"+strconv.FormatInt(addID, 10)+"/approve", "", "b@x.de", "admin"); code != http.StatusOK || !strings.Contains(body, "otpauth://") {
 		t.Fatalf("approved admin account: %d, credentials not shown to the approver", code)
 	}
 	if s.currentRole(ctx, "local:second") != "admin" {
 		t.Fatal("approved admin account not created")
 	}
-	ui("POST", "/users/reset", url.Values{"login": {"local:second"}}, "a@x.de", "admin")
+	ui("POST", "/api/v1/users/local:second/reset", "", "a@x.de", "admin")
 	var resetN int
 	db.QueryRow(ctx, `SELECT count(*) FROM approvals WHERE status='pending' AND action='user.reset' AND target='local:second'`).Scan(&resetN)
 	if resetN != 1 {
 		t.Fatal("an admin's credentials were reset without approval")
 	}
-	ui("POST", "/users/update", url.Values{"login": {"local:second"}, "role": {"admin"}, "disabled": {"on"}}, "a@x.de", "admin")
+	ui("PATCH", "/api/v1/users/local:second", `{"role":"admin","disabled":true}`, "a@x.de", "admin")
 	var disabled bool
 	db.QueryRow(ctx, `SELECT disabled FROM local_admins WHERE name='second'`).Scan(&disabled)
 	if disabled {
@@ -305,7 +291,7 @@ func TestGovernance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ui("POST", "/approvals/"+strconv.FormatInt(tokReq, 10)+"/approve", url.Values{}, "a@x.de", "admin")
+	ui("POST", "/api/v1/approvals/"+strconv.FormatInt(tokReq, 10)+"/approve", "", "a@x.de", "admin")
 	db.QueryRow(ctx, `SELECT status FROM approvals WHERE id=$1`, tokReq).Scan(&st)
 	if st != "pending" {
 		t.Fatalf("the token creator approved their own request: %s", st)
@@ -330,11 +316,11 @@ func TestGovernance(t *testing.T) {
 	if _, err := db.Exec(ctx, `DELETE FROM device_events`); err == nil {
 		t.Fatal("device_events deletable outside the retention job")
 	}
-	if code, _ := ui("POST", "/devices/d2/delete", url.Values{"confirm": {"pc2"}}, "a@x.de", "admin"); code != http.StatusBadRequest {
+	if code, _ := ui("DELETE", "/api/v1/devices/d2?confirm=pc2", "", "a@x.de", "admin"); code != http.StatusConflict {
 		t.Fatalf("active device deleted: %d", code)
 	}
 	must(`UPDATE devices SET retired=true WHERE id='d2'`)
-	if code, _ := ui("POST", "/devices/d2/delete", url.Values{"confirm": {"pc2"}}, "a@x.de", "admin"); code != http.StatusSeeOther {
+	if code, _ := ui("DELETE", "/api/v1/devices/d2?confirm=pc2", "", "a@x.de", "admin"); code != http.StatusNoContent {
 		t.Fatalf("delete device: %d", code)
 	}
 	db.QueryRow(ctx, `SELECT count(*) FROM devices WHERE id='d2'`).Scan(&n)
