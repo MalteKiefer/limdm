@@ -124,7 +124,7 @@
     <label><input type="radio" name="kind" value="webhook"><strong>{{t "Webhook"}}</strong><span>{{t "Signed JSON to any HTTPS endpoint"}}</span></label>
   </fieldset>
   <label>{{t "Name"}}<input name="name" required maxlength="80" placeholder="{{t "IT on call"}}"></label>
-  <label class="kind-url">{{t "Webhook URL"}}<input name="url" type="url" spellcheck="false" placeholder="https://…"><small class="field-hint">{{t "Stored encrypted. Only https targets on public addresses are accepted."}}</small></label>
+  <label class="kind-url">{{t "Webhook URL"}}<input name="url" type="url" spellcheck="false" placeholder="https://…"><small class="field-hint">{{t "Stored encrypted. Only https targets; loopback, link local and metadata addresses are refused."}}</small></label>
   <div class="kind-email">
     <div class="form-row">
       <label class="grow">{{t "SMTP server"}}<input name="smtp_host" spellcheck="false" placeholder="smtp.example.com"></label>
