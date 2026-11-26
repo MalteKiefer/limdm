@@ -36,7 +36,7 @@ func (s *Server) webappRoutes(mux *http.ServeMux) {
 		}
 		// the public build of the open source app: no session needed
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		http.ServeFileFS(w, r, dist, name)
+		http.ServeFileFS(w, r, dist, name) //nolint:gosec // an embedded fs.FS: io/fs refuses paths outside it
 	})
 	mux.HandleFunc("GET /app/", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.session(w, r); !ok {
@@ -46,7 +46,7 @@ func (s *Server) webappRoutes(mux *http.ServeMux) {
 		name := strings.TrimPrefix(r.URL.Path, "/app/")
 		if fi, err := fs.Stat(dist, name); name != "" && name != "index.html" && err == nil && !fi.IsDir() {
 			w.Header().Set("Cache-Control", "no-cache") // favicon and the like: not hashed
-			http.ServeFileFS(w, r, dist, name)
+			http.ServeFileFS(w, r, dist, name)          //nolint:gosec // an embedded fs.FS: io/fs refuses paths outside it
 			return
 		}
 		if index == nil {
