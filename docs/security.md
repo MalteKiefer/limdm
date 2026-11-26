@@ -207,7 +207,8 @@ root on devices without a second one:
 * saving or rolling back a library item (console and admin API) of the types
   `com.limdm.scripts`, `com.limdm.sudo`, `com.limdm.localusers`, `com.limdm.repositories`,
   `com.limdm.login` (desktop login and its PAM setup), `com.limdm.ssh`, `com.limdm.polkit`,
-  `com.limdm.certificates` (system trust anchors), and `com.limdm.files` when a path needs
+  `com.limdm.certificates` (system trust anchors), `com.limdm.artifacts` (installs uploaded
+  packages as root; the upload itself needs its own approval), and `com.limdm.files` when a path needs
   `allow_scripts` on the device (outside `/etc/motd`, `/etc/issue`, `/etc/issue.net`,
   `/etc/motd.d/`, `/srv/`, `/etc/opt/`, `/var/opt/`). Other types (packages from the
   configured repositories, firewall, updates, compliance and so on) are saved directly;

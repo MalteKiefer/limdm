@@ -148,3 +148,13 @@ func TestSCIMNetworkList(t *testing.T) {
 		t.Fatal("netsContain")
 	}
 }
+
+// TestFourEyesArtifacts: an item that installs uploaded packages as root
+// needs a second admin like a script.
+func TestFourEyesArtifacts(t *testing.T) {
+	s := &Server{}
+	s.rt.Store(&runtimeState{set: Settings{FourEyes: true}})
+	if !s.itemNeedsApproval(api.LibraryItem{Type: api.TypeArtifacts, Payload: []byte(`{"artifacts": []}`)}) {
+		t.Fatal("com.limdm.artifacts saved without approval")
+	}
+}

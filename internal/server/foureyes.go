@@ -24,6 +24,7 @@ import (
 var rootTypes = map[string]bool{
 	api.TypeScripts: true, api.TypeSudo: true, api.TypeLocalUsers: true, api.TypeRepositories: true,
 	api.TypeLogin: true, api.TypeSSH: true, api.TypePolkit: true, api.TypeCertificates: true,
+	api.TypeArtifacts: true, // installs uploaded packages as root
 }
 
 // itemNeedsApproval reports whether saving it needs a second admin.

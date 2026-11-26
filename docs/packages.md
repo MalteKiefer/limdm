@@ -85,6 +85,10 @@ server could set would be weaker. Devices without `allow_scripts` report the ite
 With **Settings, Security, Four eyes approval** on, every upload (all kinds act as root)
 waits for a second admin under **Approvals** (`artifact.upload`). Until then it is marked
 **awaiting approval**, library items cannot reference it and devices cannot download it.
+Saving or rolling back a `com.limdm.artifacts` library item is a second request of its own:
+the upload decides what may be installed, the item decides where. The item, with the
+SHA-256 of every package it names, is signed with the command key like every library item,
+so a database write cannot point devices at another package.
 
 ## Audit
 
