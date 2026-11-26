@@ -154,8 +154,13 @@ func TestAppAPI(t *testing.T) {
 
 	// the app needs a session; without one the login page
 	req, _ := http.NewRequest("GET", srv.URL+"/app/devices", nil)
-	if resp, err := noRedirect.Do(req); err != nil || resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/login" {
-		t.Fatalf("app without session: %v %v", err, resp)
+	resp0, err := noRedirect.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp0.Body.Close()
+	if resp0.StatusCode != http.StatusFound || resp0.Header.Get("Location") != "/login" {
+		t.Fatalf("app without session: %d %s", resp0.StatusCode, resp0.Header.Get("Location"))
 	}
 	if code, body := call(admin, "GET", "/app/devices", "", nil); code != 200 || !strings.Contains(body, "<html") && !strings.Contains(body, "<!doctype") {
 		t.Fatalf("app: %d", code)
@@ -349,7 +354,7 @@ func TestAppAPI(t *testing.T) {
 	}
 	sc := bufio.NewScanner(resp.Body)
 	var got []string
-	for sc.Scan() && !(strings.Contains(sc.Text(), `"gamma"`) && strings.Contains(strings.Join(got, "\n"), "event: device")) {
+	for sc.Scan() && (!strings.Contains(sc.Text(), `"gamma"`) || !strings.Contains(strings.Join(got, "\n"), "event: device")) {
 		got = append(got, sc.Text())
 	}
 	if !strings.Contains(strings.Join(got, "\n"), "event: inbox") {

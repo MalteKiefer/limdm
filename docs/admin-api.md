@@ -116,6 +116,10 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 * Lists take `limit` (1 to 500, default 100) and return `{"items": [...], "next_cursor": "..."}`.
   Pass `next_cursor` as `cursor` for the next page; it is absent on the last page.
   `GET /api/v1/tags` is not paged.
+* Lists of the console app follow more conventions, implemented for devices first:
+  `filter` takes the [query language](#query-language), `sort` a field (`-field` for
+  descending; the cursor belongs to the sort it came with) and `<list>/facets` counts the
+  matching objects per value.
 
 ## Endpoints
 
@@ -150,6 +154,16 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `DELETE /api/v1/tokens/{id}` | admin | | `204`; audited as `api_token.revoke` |
 | `GET /api/v1/tenants` | admin, global token | | `200` `{"items": [...]}` tenants with device counts; `404` without multi tenancy |
 | `POST /api/v1/tenants` | admin, global token | `{"name"}` | `201` `{"id"}`; `409` name taken; audited as `tenant.add` |
+| `GET /api/v1/devices/facets` | read | [filters](#query-language) | `200` counts per status, OS, agent, blueprint and tag |
+| `GET /api/v1/me` | read | | `200` the caller: `login`, `role`, `tenant`, `super`, scope, `scopes`, `permissions` (`read`, `audit`, `commands`, `admin`, `tenants`), `four_eyes`, `locale`, `company_name`, `accent`, and for sessions `csrf_token` |
+| `GET /api/v1/events/stream` | read | | server sent events, see [Console app](#console-app) |
+| `GET /api/v1/views` | read | `list` | `200` own and shared saved views |
+| `POST /api/v1/views` | self | `{"list", "name", "query", "sort", "columns", "shared"}` | `201` view; only admins share; shared views are audited as `view.save` |
+| `PUT /api/v1/views/{id}`, `DELETE /api/v1/views/{id}` | self | | `200` view or `204`; own views, admins also delete shared ones (`view.delete`) |
+| `GET /api/v1/schemas`, `GET /api/v1/schemas/{type}` | read | | declaration types; JSON Schema (draft 2020-12) of a payload, derived from the Go types |
+| `GET /api/v1/stats/fleet` | read | | `200` devices per status, online, agent versions, OS, one fleet grid cell per device |
+| `GET /api/v1/stats/compliance` | read | `days` (1 to 400, default 30) | `200` score, frameworks, most failing checks, daily history (global view only) |
+| `GET /api/v1/stats/attention` | read | | `200` pending approvals, failed and sent commands of 24 hours, non compliant and stale devices, exceptions expiring in 7 days, last backup (global view, admin and auditor) |
 | `GET /api/v1/openapi.json` | none | | the OpenAPI document |
 | `GET /api/v1/docs` | none | | the reference page |
 | `GET /metrics` | metrics | | Prometheus text format, see [Metrics](#metrics) |
@@ -170,6 +184,45 @@ curl -G -H "Authorization: Bearer $LIMDM_TOKEN" https://mdm.example.com/api/v1/d
 
 Versions compare by their runs of digits; the epoch is ignored, letters and the Debian `~`
 ordering are not evaluated.
+
+### Query language
+
+`filter` holds free words and `key:value` terms (`key:"value with spaces"`); every term
+must match. Free words search host name, OS, id, blueprint and tags. Keys of devices:
+`status` (`compliant`, `in-grace`, `non-compliant`, `stale`, `pending`, `retired`), `os`
+(part of the name), `tag`, `blueprint`, `agent`, `check` (id of a failing check), `pkg` (as
+above, `pkg:openssl<3.0.13`), `app`, `flatpak`, `remote` and `seen` (`>7d` last check in
+older than, `<2h` newer than; `m`, `h`, `d`). At most 20 terms of 200 characters; an
+unknown key or value is a 400. `sort` takes `hostname`, `os`, `agent`, `failing` or
+`last_seen`. `GET /api/v1/devices/facets` takes the same filters and answers
+`{"total", "facets": {"status", "os", "agent", "blueprint", "tag"}, "keys"}` with at most 25
+values per facet and the keys with a help text for the query bar.
+
+```sh
+curl -G -H "Authorization: Bearer $LIMDM_TOKEN" https://mdm.example.com/api/v1/devices \
+  --data-urlencode 'filter=status:non-compliant os:"Ubuntu 24" seen:<1d' --data-urlencode 'sort=-last_seen'
+```
+
+### Console app
+
+The console app (`/app/`) uses this API with the console session instead of a token. A
+request with the session cookie and without `Authorization` is checked like a console
+page: the session must be valid, `Sec-Fetch-Site` (when sent) must be `same-origin`, `Origin`
+(when sent) must be `LIMDM_PUBLIC_URL`, and every request other than `GET`, `HEAD` and
+`OPTIONS` must carry the session's CSRF token (`csrf_token` of `GET /api/v1/me`) in
+`X-CSRF-Token`. The session acts under its login with its role, tenant and device scope,
+600 requests a minute; audit entries name the login, not a token.
+
+Access levels beyond a route's own (audit entries in the event stream, sharing a view)
+check role and token scopes together, so a token limited to `read` never receives audit
+data.
+
+`GET /api/v1/events/stream` sends server sent events, each limited to the caller's tenant
+and device scope: `device` (a check in: `id`, `hostname`, `status`, `last_seen`),
+`activity` (new audit entries: `id`, `at`, `actor`, `action`, `target`; admin and auditor
+with the `audit` scope; opening such a stream is an audited read of the audit log) and
+`inbox` (`pending` approvals, when the number changes). A stream ends after four minutes and
+the browser reconnects; each caller may hold five streams.
 
 ### Audit filters
 

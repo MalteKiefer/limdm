@@ -24,14 +24,17 @@ test('sign in and open the console app', async ({ page }) => {
 
   // a state change without the CSRF header is refused, with it the API accepts it
   const csrf = await page.evaluate(async () => (await (await fetch('/api/v1/me')).json()).csrf_token as string)
-  const body = { list: 'devices', name: 'Smoke', query: 'status:stale' }
+  const name = `Smoke ${Date.now()}`
+  const body = { list: 'devices', name, query: 'status:stale' }
   const refused = await page.evaluate(async (b) => (await fetch('/api/v1/views', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) })).status, body)
   expect(refused).toBe(403)
-  const created = await page.evaluate(
-    async ([b, token]) => (await fetch('/api/v1/views', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token }, body: JSON.stringify(b) })).status,
-    [body, csrf] as const,
-  )
-  expect(created).toBe(201)
+  const created = await page.evaluate(async ([b, token]) => {
+    const r = await fetch('/api/v1/views', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token }, body: JSON.stringify(b) })
+    return { status: r.status, id: ((await r.json()) as { id: number }).id }
+  }, [body, csrf] as const)
+  expect(created.status).toBe(201)
   await page.reload()
-  await expect(page.getByRole('link', { name: 'Smoke' })).toBeVisible()
+  await expect(page.getByRole('link', { name })).toBeVisible()
+  const deleted = await page.evaluate(async ([id, token]) => (await fetch(`/api/v1/views/${id}`, { method: 'DELETE', headers: { 'X-CSRF-Token': token } })).status, [created.id, csrf] as const)
+  expect(deleted).toBe(204)
 })
