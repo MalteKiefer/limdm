@@ -168,6 +168,17 @@ export const de = {
   'error.session': 'Die Sitzung ist abgelaufen. Bitte neu anmelden.',
   'error.forbidden': 'Deine Rolle darf das nicht.',
   'error.network': 'Der Server ist nicht erreichbar.',
+
+  'result.pass': 'bestanden',
+  'result.fail': 'Verstoß',
+  'result.na': 'n. a.',
+  'result.excepted': 'Ausnahme',
+  'result.advisory': 'beratend',
+  'result.removed': 'entfernt',
+  'severity.low': 'niedrig',
+  'severity.medium': 'mittel',
+  'severity.high': 'hoch',
+  'severity.critical': 'kritisch',
 } satisfies Catalog
 
 export const en: Record<keyof typeof de, Msg> = {
@@ -336,4 +347,15 @@ export const en: Record<keyof typeof de, Msg> = {
   'error.session': 'The session expired. Please sign in again.',
   'error.forbidden': 'Your role may not do this.',
   'error.network': 'The server cannot be reached.',
+
+  'result.pass': 'pass',
+  'result.fail': 'fail',
+  'result.na': 'n/a',
+  'result.excepted': 'exception',
+  'result.advisory': 'advisory',
+  'result.removed': 'removed',
+  'severity.low': 'low',
+  'severity.medium': 'medium',
+  'severity.high': 'high',
+  'severity.critical': 'critical',
 }
