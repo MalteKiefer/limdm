@@ -151,7 +151,15 @@ func hostOrIPName(s string) bool { return net.ParseIP(s) != nil || hostNameRe.Ma
 func storeClient() *http.Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.ResponseHeaderTimeout = 5 * time.Minute
-	return &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	// through a proxy the target is resolved and pinned here (dialPinned):
+	// private networks are fine for a backup target, loopback and link
+	// local (cloud metadata) are not
+	tr.Proxy = nil
+	direct := (&net.Dialer{Timeout: 30 * time.Second}).DialContext
+	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return dialPinned(withPrivate(ctx, true), network, addr, direct)
+	}
+	return &http.Client{Transport: pinnedTransport{tr}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
 // openStore builds the store of a target with its secrets opened.

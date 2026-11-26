@@ -51,6 +51,11 @@ the schema. For PITR or a dump of the whole cluster, use `pg_dump` or pgBackRest
    | Backblaze B2 | B2 buckets | its own target kind: region (from the bucket endpoint, for example `eu-central-003`), bucket, application key id and application key. Uses B2's S3 compatible API (see below); **file lock** works like Object Lock when the bucket has it enabled |
    | WebDAV | Nextcloud, ownCloud, Hetzner Storage Box, Apache `mod_dav` | https only; the folder URL (Nextcloud: `https://HOST/remote.php/dav/files/USER/limdm`, Storage Box: `https://uXXXXX.your-storagebox.de/limdm`); with a user name the secret is the password (use an app password), without one a bearer token. Folders are created with `MKCOL`, archives streamed with `PUT`, listed with `PROPFIND` (depth 1), expired with `DELETE` |
 
+   S3, B2 and WebDAV requests follow no redirects. Through an outbound proxy from the
+   environment (`HTTPS_PROXY`, `http` or `https` proxies) the server resolves the target
+   itself and tunnels to that address; private networks are fine, loopback and link local
+   addresses (cloud metadata) are refused.
+
    Large archives go to S3 and B2 as multipart uploads in parts of 256 MiB (a single PUT
    takes at most 5 GiB); every part carries its Content-MD5, the lock retention is set when
    the upload starts, and a failed upload is aborted so no parts stay behind.

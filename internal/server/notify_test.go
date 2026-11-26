@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/hmac"
@@ -12,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -170,7 +172,51 @@ func TestTenantWebhookSignature(t *testing.T) {
 
 // a pooled connection would skip the private network check of the dialer
 func TestNotifyClientNoPooling(t *testing.T) {
-	if tr, ok := notifyClient.Transport.(*http.Transport); !ok || !tr.DisableKeepAlives {
+	if tr, ok := notifyClient.Transport.(pinnedTransport); !ok || !tr.DisableKeepAlives {
 		t.Fatal("notification transport keeps idle connections")
+	}
+}
+
+// Through a proxy the target is resolved and checked here and the tunnel
+// goes to the checked address, so the proxy cannot resolve it again to a
+// refused one (DNS rebinding).
+func TestDialPinnedThroughProxy(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	seen := make(chan string, 4)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			req, err := http.ReadRequest(bufio.NewReader(c))
+			if err == nil {
+				seen <- req.Method + " " + req.Host + " " + req.Header.Get("Proxy-Authorization")
+				c.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
+			}
+			c.Close()
+		}
+	}()
+	proxy, _ := url.Parse("http://u:p@" + ln.Addr().String())
+	ctx := context.WithValue(context.Background(), proxyKey{}, proxy)
+	if _, err := dialPinned(ctx, "tcp", "localhost:443", safeDialer.DialContext); err == nil {
+		t.Fatal("a name resolving to loopback was tunneled")
+	}
+	c, err := dialPinned(withPrivate(ctx, true), "tcp", "203.0.113.7:443", safeDialer.DialContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	if got := <-seen; got != "CONNECT 203.0.113.7:443 Basic dTpw" {
+		t.Fatalf("proxy saw %q", got)
+	}
+	select {
+	case got := <-seen:
+		t.Fatalf("refused target reached the proxy: %q", got)
+	default:
 	}
 }

@@ -85,9 +85,13 @@ address space 100.64.0.0/10 with metadata services such as 100.100.100.200) are 
 unless a global administrator turns on **Global channels and this webhook may reach private
 networks** in the Compliance webhook card (an internal SIEM or mail relay). That switch
 covers global channels and the compliance webhook only; tenant channels never reach private
-networks. An outbound proxy from the environment (`HTTPS_PROXY`) is used, and the target is
-checked before the request goes to it; a target name the server cannot resolve itself is
-refused unless private networks are allowed. Redirects are not followed.
+networks. An outbound proxy from the environment (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`;
+`http` or `https` proxies) is used without letting it resolve the target: the server
+resolves the name, checks every address and opens a `CONNECT` tunnel to the checked address
+(TLS still verifies the certificate for the name), so the proxy cannot be steered to an
+internal address by a second DNS answer. A target name the server cannot resolve itself is
+refused unless private networks are allowed; then the proxy resolves it. Redirects are not
+followed.
 
 Tenant accounts get no network details of a failed delivery (connection refused, timeout,
 TLS or SMTP errors): the test answers that the target did not accept the message and the

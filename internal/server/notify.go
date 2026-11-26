@@ -1,11 +1,13 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -286,55 +288,109 @@ func (s *Server) notifyPrivate() bool {
 	return rt != nil && rt.set.NotifyPrivate
 }
 
-// proxyChecked uses the proxy from the environment, but checks the target
-// itself first: through a proxy, the dialer only sees the proxy's address.
-// The proxy, configured by the operator, may be on loopback.
-func proxyChecked(req *http.Request) (*url.URL, error) {
-	u, err := http.ProxyFromEnvironment(req)
-	if u == nil || err != nil {
-		return u, err
-	}
-	host := req.URL.Hostname()
-	if ip := net.ParseIP(host); ip != nil {
-		if !targetAllowed(req.Context(), ip) {
-			return nil, fmt.Errorf("notification target %s is not allowed", host)
-		}
-		return u, nil
-	}
-	ips, err := net.DefaultResolver.LookupIP(req.Context(), "ip", host)
+type proxyKey struct{}
+
+// pinnedTransport routes requests through the proxy of the environment
+// (HTTPS_PROXY, HTTP_PROXY, NO_PROXY) without letting the proxy resolve
+// the target: the proxy is only chosen here and dialPinned opens the
+// tunnel to an address this host resolved and checked. A proxy resolving
+// the name again could get another answer (DNS rebinding) and reach an
+// address targetAllowed refuses.
+type pinnedTransport struct{ *http.Transport }
+
+func (t pinnedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	p, err := http.ProxyFromEnvironment(req)
 	if err != nil {
-		if !privateAllowed(req.Context()) {
-			return nil, fmt.Errorf("notification target %s cannot be resolved to check it", host)
+		return nil, err
+	}
+	return t.Transport.RoundTrip(req.WithContext(context.WithValue(req.Context(), proxyKey{}, p)))
+}
+
+// dialPinned dials addr with direct, or through the proxy pinnedTransport
+// chose: the name is resolved here, every address must pass
+// targetAllowed, and a CONNECT tunnel goes to the first one (TLS still
+// checks the certificate for the name). Without local DNS a request that
+// may reach private networks lets the proxy resolve, as egress only
+// through the proxy needs.
+func dialPinned(ctx context.Context, network, addr string, direct func(context.Context, string, string) (net.Conn, error)) (net.Conn, error) {
+	p, _ := ctx.Value(proxyKey{}).(*url.URL)
+	if p == nil {
+		return direct(ctx, network, addr)
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	target := addr
+	ips := []net.IP{net.ParseIP(host)}
+	if ips[0] == nil {
+		if ips, err = net.DefaultResolver.LookupIP(ctx, "ip", host); err != nil && !privateAllowed(ctx) {
+			return nil, fmt.Errorf("target %s cannot be resolved to check it: %w", host, err)
 		}
-		// egress only through the proxy, without outside DNS on this host: the
-		// proxy resolves and enforces its own rules (global channels with
-		// private networks allowed only)
-		return u, nil //nolint:nilerr // see above
 	}
 	for _, ip := range ips {
-		if !targetAllowed(req.Context(), ip) {
-			return nil, fmt.Errorf("notification target %s is not allowed", req.URL.Hostname())
+		if !targetAllowed(ctx, ip) {
+			return nil, fmt.Errorf("target %s is not allowed", host)
 		}
 	}
-	return u, nil
+	if len(ips) > 0 {
+		target = net.JoinHostPort(ips[0].String(), port)
+	}
+	return proxyConnect(ctx, p, target)
 }
 
-// proxyAddr is the host:port the transport dials for proxy p (the scheme's
-// default port when the URL names none).
-func proxyAddr(p *url.URL) string {
+// proxyConnect opens a CONNECT tunnel to target through an http or https
+// proxy (with the credentials of its URL).
+func proxyConnect(ctx context.Context, p *url.URL, target string) (net.Conn, error) {
 	port := p.Port()
-	if port == "" {
-		port = map[string]string{"http": "80", "https": "443", "socks5": "1080", "socks5h": "1080"}[p.Scheme]
+	switch {
+	case p.Scheme != "http" && p.Scheme != "https":
+		return nil, fmt.Errorf("proxy scheme %s is not supported, use an http or https proxy", p.Scheme)
+	case port == "" && p.Scheme == "https":
+		port = "443"
+	case port == "":
+		port = "80"
 	}
-	return net.JoinHostPort(p.Hostname(), port)
+	conn, err := (&net.Dialer{Timeout: 15 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(p.Hostname(), port))
+	if err != nil {
+		return nil, err
+	}
+	if p.Scheme == "https" {
+		tc := tls.Client(conn, &tls.Config{ServerName: p.Hostname(), MinVersion: tls.VersionTLS12})
+		if err := tc.HandshakeContext(ctx); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		conn = tc
+	}
+	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	req := &http.Request{Method: http.MethodConnect, URL: &url.URL{Opaque: target}, Host: target, Header: http.Header{}}
+	if u := p.User; u != nil {
+		pw, _ := u.Password()
+		req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(u.Username()+":"+pw)))
+	}
+	if err := req.Write(conn); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	// the target speaks only after the client, so the reader holds nothing
+	// beyond the answer
+	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		conn.Close()
+		return nil, fmt.Errorf("proxy refused the tunnel to %s: %s", target, resp.Status)
+	}
+	_ = conn.SetDeadline(time.Time{})
+	return conn, nil
 }
 
-// notifyDial dials the target through safeDialer, a configured proxy directly.
 func notifyDial(ctx context.Context, network, addr string) (net.Conn, error) {
-	if p, _ := http.ProxyFromEnvironment(&http.Request{URL: &url.URL{Scheme: "https", Host: "limdm.invalid"}}); p != nil && proxyAddr(p) == addr {
-		return (&net.Dialer{Timeout: 15 * time.Second}).DialContext(ctx, network, addr)
-	}
-	return safeDialer.DialContext(ctx, network, addr)
+	return dialPinned(ctx, network, addr, safeDialer.DialContext)
 }
 
 var notifyClient = &http.Client{
@@ -342,7 +398,7 @@ var notifyClient = &http.Client{
 	// no idle connections: a pooled connection skips the dial check, so a
 	// tenant channel could reuse one a global channel opened to a private
 	// address (NotifyPrivate)
-	Transport:     &http.Transport{DialContext: notifyDial, Proxy: proxyChecked, TLSHandshakeTimeout: 10 * time.Second, DisableKeepAlives: true},
+	Transport:     pinnedTransport{&http.Transport{DialContext: notifyDial, TLSHandshakeTimeout: 10 * time.Second, DisableKeepAlives: true}},
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, // no redirects to internal addresses
 }
 
