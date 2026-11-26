@@ -204,7 +204,7 @@ var schemaHints = map[string]map[string]schemaHint{
 		"scripts[].params":          h("Environment", "Umgebung").d("Environment variables for the script.", "Umgebungsvariablen für das Skript."),
 		"scripts[].timeout_minutes": h("Timeout (minutes)", "Zeitlimit (Minuten)").d("1 to 240, 30 when empty.", "1 bis 240, 30 wenn leer.").max(240),
 		"scripts[].schedule": h("Schedule", "Zeitplan").d("Fixed local times instead of the interval (leave the interval empty); at most one run per slot, a missed slot runs once at the next chance.",
-			"Feste lokale Zeiten statt des Intervalls (Intervall leer lassen); höchstens ein Lauf je Zeitpunkt, ein verpasster läuft einmal bei nächster Gelegenheit."),
+			"Feste lokale Zeiten statt Intervall (das Feld Intervall leer lassen); höchstens ein Lauf je Zeitpunkt, ein verpasster läuft einmal bei nächster Gelegenheit."),
 		"scripts[].schedule.times": h("Times", "Uhrzeiten").d("HH:MM in the device's local time, up to 24.", "HH:MM in lokaler Zeit des Geräts, bis zu 24."),
 		"scripts[].schedule.days": h("Weekdays", "Wochentage").d("Empty means every day.", "Leer bedeutet jeden Tag.").w("checkboxes").enum(strs("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
 			tr{"Mon", "Mo"}, tr{"Tue", "Di"}, tr{"Wed", "Mi"}, tr{"Thu", "Do"}, tr{"Fri", "Fr"}, tr{"Sat", "Sa"}, tr{"Sun", "So"}),

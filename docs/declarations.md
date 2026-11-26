@@ -328,6 +328,7 @@ Console: **Files**.
 | `files[].mode` | text | octal `0000` to `0777`, default `0644`; no setuid, setgid or sticky bits |
 | `files[].owner` | text | user name, default root |
 | `files[].group` | text | group name, default root |
+| `files[].template` | true or false | render `content` per device (see [Templates](#templates)) |
 
 Merged by path, a later item wins. Owner and group must exist on the device. Files removed
 from the declaration are deleted from the device: the agent remembers the paths it wrote
@@ -351,6 +352,35 @@ redirect the write, owner change or removal (declare the real path, for example
 from `/` with `O_NOFOLLOW`, writes a temporary file in the opened directory, sets mode and
 owner on the open file and renames it in place, so swapping a directory for a link between
 check and write has no effect.
+
+#### Templates
+
+With `template` set, the server renders `content` (files) or every rule text (firewall) for
+each device with Go `text/template` before it sends the declaration, so the agent only ever
+gets the result and the declarations token changes when a value changes. The values are:
+
+| Value | Content |
+|---|---|
+| `{{.Hostname}}` | host name the device reported |
+| `{{.ID}}` | device ID |
+| `{{.Tags}}` | tags (list) |
+| `{{.Tenant}}` | tenant name |
+| `{{.PrimaryUser}}` | mail address of the primary user, empty without one |
+| `{{.Attributes.name}}` | custom device attribute, set in the console under **Edit** on the device page or with `PATCH /api/v1/devices/{id}` (`attributes`) |
+
+Functions: `lower`, `upper`, `trim`, `replace s old new`, `join list sep`,
+`hasTag .Tags "x"`, `default "fallback" value`, plus the built in `if`, `with`, `range`,
+`eq`, `index`, `len`, `and`, `or`, `not`. A missing attribute is an error; for an optional
+one write `{{default "none" (index .Attributes "site")}}`. Nothing outside these values is
+reachable: no files, commands or environment. `define`, `block` and `template` are refused
+(recursion), `range` only works over `.Tags` or `.Attributes`, `printf` and `call` are not
+available, and the output is limited to 1 MiB. The syntax is checked when the item is saved;
+the editor shows a preview for one device (`POST /api/v1/config/library/render`).
+
+When a template does not render for a device (a missing attribute, a firewall rule that is
+not valid afterwards), that file or the whole firewall declaration goes out still marked as
+template and the agent leaves the device as it is and reports the problem. A template file is
+never written with its raw template text.
 
 ### `com.limdm.certificates` (list)
 
@@ -442,13 +472,19 @@ Console: **Recurring scripts**.
 
 ```json
 {"scripts": [{"name": "cleanup", "interval_hours": 24, "body": "#!/bin/sh\njournalctl --vacuum-time=$KEEP",
-              "params": {"KEEP": "30d"}, "timeout_minutes": 10}]}
+              "params": {"KEEP": "30d"}, "timeout_minutes": 10},
+             {"name": "report", "schedule": {"times": ["02:00"], "days": ["mon", "thu"], "jitter_minutes": 30},
+              "run_on_change": true, "body": "#!/bin/sh\n/usr/local/bin/report"}]}
 ```
 
 | Field | Type | Rules |
 |---|---|---|
 | `scripts[].name` | text | lower case letters, digits, `.`, `_`, `-` |
-| `scripts[].interval_hours` | number | 1 to 720 |
+| `scripts[].interval_hours` | number | 1 to 720; absent (0) with a schedule |
+| `scripts[].schedule.times` | list of text | local `HH:MM` of the device, 1 to 24, each once |
+| `scripts[].schedule.days` | list of text | `mon` … `sun`; empty is every day |
+| `scripts[].schedule.jitter_minutes` | number | 0 to 120 |
+| `scripts[].run_on_change` | true or false | also run once when body, params or timeout change |
 | `scripts[].body` | text | up to 64 KiB |
 | `scripts[].params` | object of text | environment variables: up to 50, names of letters, digits and `_`, values up to 4096 characters, 32 KiB in total |
 | `scripts[].timeout_minutes` | number | 1 to 240; 0 or absent means 30 |
@@ -461,6 +497,17 @@ similar) and everything starting with `LD_`, `LC_` or `DYLD_`. Each run is repor
 server with exit code, start, end and the last 16 KiB of stdout and stderr, and shown under
 **Script results** on the device page. While the device is offline it keeps the last 50
 results.
+
+A script runs either every `interval_hours` (the first time right after it is declared) or
+on a `schedule`. A scheduled script runs at most once per slot: at the first agent loop after
+the slot time plus the jitter. A slot missed while the device was off or asleep runs once at
+the next chance; several missed slots collapse into one run. A new schedule waits for its
+next slot. The jitter is a fixed delay per device and script (a hash of both), so a fleet
+spreads over the jitter window but each device keeps its own time. `run_on_change` runs the
+script once more when its body, params or timeout change, the first declaration included.
+Agents before 0.19 reject `schedule` and `run_on_change` as unknown keys and report the
+declaration as invalid instead of running the script. The item editor shows the last run per
+device (`GET /api/v1/config/scripts/results?name=`).
 
 ### `com.limdm.network` (list)
 
@@ -527,7 +574,9 @@ up with `lpadmin` (separate arguments, no shell).
 Console: **Firewall**.
 
 ```json
-{"enforce": true, "allow": ["22/tcp"], "rules": [{"port": "5432/tcp", "from": "10.0.0.0/8"}]}
+{"enforce": true, "allow": ["22/tcp"], "rules": [{"port": "5432/tcp", "from": "10.0.0.0/8"}],
+ "zones": [{"name": "internal", "interfaces": ["wg0"], "sources": ["10.0.0.0/8"], "allow": ["9100/tcp"]}],
+ "outbound": {"policy": "deny", "allow": [{"to": "192.0.2.0/24", "port": "443/tcp"}, {"port": "80/tcp"}]}}
 ```
 
 | Field | Type | Rules |
@@ -536,9 +585,37 @@ Console: **Firewall**.
 | `allow` | list of text | `port/proto` or `low:high/proto`, ports 1 to 65535, proto `tcp` or `udp` |
 | `rules[].port` | text | as in `allow` |
 | `rules[].from` | text | source network (CIDR) or address |
+| `zones[].name` | text | lower case, up to 17 characters, each once |
+| `zones[].interfaces` | list of text | interface names, for example `wg0` |
+| `zones[].sources` | list of text | networks (CIDR) or addresses; a zone needs interfaces or sources |
+| `zones[].allow` | list of text | ports as in `allow` |
+| `outbound.policy` | text | `allow` or `deny`; without `outbound` outgoing traffic is left alone |
+| `outbound.allow[].to` | text | destination network (CIDR) or address, empty is any |
+| `outbound.allow[].port` | text | as in `allow`, empty is any; `to` or `port` is required |
+| `template` | true or false | render every rule text per device (see [Templates](#templates)) |
 
-Merged as a union; `enforce` is on when any item sets it. `allow` opens ports for
-everybody, `rules` opens a port only for a source network or address.
+Merged as a union; `enforce` is on when any item sets it, zones of the same name are
+combined, and outbound `deny` wins over `allow`. `allow` opens ports for everybody, `rules`
+opens a port only for a source network or address, `zones` open ports only for traffic that
+arrives on the listed interfaces or from the listed sources.
+
+Zones per backend:
+
+* firewalld: the zone of that name (created when missing). Interfaces are moved into it with
+  `--change-interface`, sources added with `--add-source`, ports with `--zone=… --add-port`.
+* ufw and nftables have no zones; the closest equivalent is one rule per port, interface and
+  source: `ufw allow in on wg0 from 10.0.0.0/8 to any port 9100 proto tcp`. The zone name
+  only groups the rules.
+
+Outbound `deny` allows only the listed destinations plus what the device needs to stay
+managed: DNS (53 udp and tcp), DHCP (67/udp, 547/udp), NTP (123/udp) and the LiMDM server, or
+the proxy the agent reaches it through, resolved at each run. Established connections and
+loopback always pass. The allow rules go in first, the deny policy last, and when outbound
+deny is no longer declared the policy is switched back before the rules go. With ufw it is
+`ufw default deny outgoing` plus `ufw allow out …`; with firewalld a policy object
+`limdm-egress` (ingress zone HOST, egress zone ANY, target REJECT, firewalld 0.9 or newer)
+holding the allow rules as rich rules; on Alpine the output chain of the LiMDM table. If the
+server address cannot be resolved, nothing is changed.
 
 * Debian family: ufw (installed when missing). Allow rules are added first, then
   `ufw default deny incoming` and `ufw --force enable`, so an active SSH session is never cut.
@@ -546,7 +623,15 @@ everybody, `rules` opens a port only for a source network or address.
   active nftables service and no ufw is reported instead of being overwritten.
 * Other families: firewalld (installed and enabled when missing); ports in the default zone,
   rules with a source as rich rules.
-* Alpine is not supported.
+* Alpine: nftables (installed and enabled when missing). The agent writes one table it owns,
+  `inet limdm`, to `/etc/nftables.d/limdm.nft` (loaded by the stock nftables service at boot)
+  and loads it atomically with `nft -f` whenever it changes or is missing. Input policy drop
+  with established traffic, loopback, ICMP and DHCP replies allowed, then the declared rules;
+  output policy drop only with outbound deny. nftables was chosen over awall because it is the
+  kernel's current firewall, needs no second policy language on top of iptables, and is what
+  the `firewall.active` check reads. Other tables still apply: a packet must pass every input
+  chain, so a stock `/etc/nftables.nft` with its own drop policy must allow the same ports or
+  be reduced to the include.
 
 The agent keeps the rules in line with the declaration also while the firewall is active:
 new rules are added first, rules it added earlier and that are no longer declared are

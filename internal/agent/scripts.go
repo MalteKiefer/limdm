@@ -116,7 +116,7 @@ func scriptJitter(deviceID string, sc api.Script) time.Duration {
 	}
 	h := fnv.New32a()
 	h.Write([]byte(deviceID + "\x00" + sc.Name))
-	return time.Duration(h.Sum32()%uint32(sc.Schedule.JitterMinutes*60)) * time.Second
+	return time.Duration(int64(h.Sum32())%int64(sc.Schedule.JitterMinutes*60)) * time.Second
 }
 
 // scriptDue reports whether a recurring script runs now: its content

@@ -117,7 +117,8 @@ declaration per type:
 * **List types** are combined:
   * packages and services: union, removal and disabling win over installation and enabling;
   * files: by path, a later item wins;
-  * firewall rules: union, `enforce` if any item enforces;
+  * firewall rules: union, `enforce` if any item enforces, zones of the same name combined,
+    outbound `deny` wins over `allow`;
   * OS minimum versions;
   * package sources, CA certificates, recurring scripts, local accounts, polkit rules and
     sudo rules: by name, a later item wins; switched off package sources are combined;

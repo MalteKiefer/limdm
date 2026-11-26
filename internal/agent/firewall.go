@@ -1,12 +1,14 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/maltekiefer/limdm/internal/api"
 )
@@ -92,7 +94,9 @@ func egressDeny(f api.Firewall) bool { return f.Outbound != nil && f.Outbound.Po
 // serverEgress are the outbound rules to the LiMDM server, or to the proxy
 // the agent reaches it through.
 func (a *Agent) serverEgress() ([]fwRule, error) {
-	req, err := http.NewRequest(http.MethodGet, a.cfg.Server, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.cfg.Server, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +108,7 @@ func (a *Agent) serverEgress() ([]fwRule, error) {
 	if port == "" {
 		port = map[bool]string{true: "443", false: "80"}[u.Scheme == "https"]
 	}
-	ips, err := net.LookupHost(u.Hostname())
+	ips, err := net.DefaultResolver.LookupHost(ctx, u.Hostname())
 	if err != nil {
 		return nil, fmt.Errorf("outbound deny needs the server address: %w", err)
 	}

@@ -66,7 +66,7 @@ func ParseTemplate(s string) (*template.Template, error) {
 		return nil, errors.New("define and block are not allowed")
 	}
 	if t.Tree != nil {
-		if err := checkNode(t.Tree.Root); err != nil {
+		if err := checkNode(t.Root); err != nil {
 			return nil, err
 		}
 	}
