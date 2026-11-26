@@ -1,6 +1,6 @@
 {{define "title"}}{{t "Enrollment · LiMDM"}}{{end}}
 {{define "content"}}
-<div class="page-head"><div><h1>{{t "Enrollment"}}</h1><div class="meta"><span>{{t "One time tokens bind new devices to the device CA"}}</span></div></div></div>
+<div class="page-head"><div><h1>{{t "Enrollment"}} {{template "doclink" "installation.md#after-the-first-sign-in"}}</h1><div class="meta"><span>{{t "One time tokens bind new devices to the device CA"}}</span></div></div></div>
 {{if .Created}}
 <div class="notice ok" role="status">
   <strong>{{t "Token created."}}</strong> {{t "It is shown only once."}}

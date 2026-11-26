@@ -30,6 +30,7 @@
       <a href="/users" {{if eq .Page "users"}}class="on" aria-current="page"{{end}}>{{t "Users"}}</a>
       <a href="/settings" {{if eq .Page "settings"}}class="on" aria-current="page"{{end}}>{{t "Settings"}}</a>
       {{end}}
+      <a class="nav-help{{if eq .Page "help"}} on{{end}}" href="/help" {{if eq .Page "help"}}aria-current="page"{{end}}>{{t "Help"}}</a>
     </nav>
     <div class="who">
       <a class="who-user {{if eq .Page "profile"}}on{{end}}" href="/profile" title="{{t "Profile"}}">
@@ -67,3 +68,4 @@
 <div class="pwgen js-only"><button type="button" class="secondary small" data-pwgen="{{.Min}}">{{t "Generate password"}}</button><code data-pwgen-out hidden></code><button type="button" class="secondary small" data-copy="" data-copied="{{t "Copied"}}" hidden>{{t "Copy"}}</button></div>{{end}}
 {{/* an error notice: translated text, the technical message folded away */}}
 {{define "err"}}{{with .}}{{$m := errmsg .}}<div class="notice error" role="alert">{{$m.Text}}{{with $m.Detail}}<details class="err-detail"><summary>{{t "Technical detail"}}</summary><code>{{.}}</code></details>{{end}}</div>{{end}}{{end}}
+{{define "doclink"}}<a class="doclink" href="{{docs .}}" rel="noopener" target="_blank" title="{{t "Open the documentation"}}" aria-label="{{t "Open the documentation"}}">?</a>{{end}}

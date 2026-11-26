@@ -1,7 +1,7 @@
 {{define "title"}}{{t "Library · LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>{{t "Library"}}</h1><div class="meta"><span>{{t "Reusable configuration items, assigned to devices through blueprints"}}</span></div></div>
+  <div><h1>{{t "Library"}} {{template "doclink" "declarations.md"}}</h1><div class="meta"><span>{{t "Reusable configuration items, assigned to devices through blueprints"}}</span></div></div>
   {{if eq .Sess.Role "admin"}}
   <form class="actions" method="get" action="/library/new">
     <select name="type" aria-label="{{t "Item type"}}">{{range .AllTypes}}<option value="{{.}}">{{typeLabel .}}</option>{{end}}</select>

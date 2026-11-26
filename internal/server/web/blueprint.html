@@ -1,7 +1,7 @@
 {{define "title"}}{{if .BP.Name}}{{.BP.Name}}{{else}}{{t "New blueprint"}}{{end}} {{t "· LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><div class="eyebrow"><a href="/blueprints">{{t "Blueprints"}}</a></div><h1>{{if .BP.Name}}{{.BP.Name}}{{else}}{{t "New blueprint"}}{{end}}</h1></div>
+  <div><div class="eyebrow"><a href="/blueprints">{{t "Blueprints"}}</a></div><h1>{{if .BP.Name}}{{.BP.Name}}{{else}}{{t "New blueprint"}}{{end}} {{template "doclink" "concepts.md#blueprints"}}</h1></div>
 </div>
 {{template "err" .Error}}
 <form method="post" action="/blueprints" id="bp-form">
@@ -25,7 +25,7 @@
 </form>
 {{if and .BP.ID (ne .BP.Name "default") (eq .Sess.Role "admin")}}
 <form class="card" method="post" action="/blueprints/{{.BP.ID}}/delete">{{template "csrf" .CSRF}}
-  <h2>{{t "Delete blueprint"}}</h2><p class="muted">{{t "Devices assigned to it fall back to default."}}</p><button class="danger">{{t "Delete"}}</button></form>
+  <h2>{{t "Delete blueprint"}}</h2><p class="muted">{{t "Devices assigned to it fall back to default."}}</p><button class="danger" data-confirm="{{t "Delete this blueprint? Its devices get the default blueprint at their next check in."}}">{{t "Delete"}}</button></form>
 {{end}}
 <script type="application/json" id="bp-items">{{.ItemsJSON}}</script>
 <script type="application/json" id="bp-fields">{{.FieldsJSON}}</script>

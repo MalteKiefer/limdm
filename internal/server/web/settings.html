@@ -1,6 +1,6 @@
 {{define "title"}}{{t "Settings · LiMDM"}}{{end}}
 {{define "content"}}
-<div class="page-head"><div><h1>{{t "Settings"}}</h1><div class="meta"><span>{{t "Database, listeners and keys stay in the server environment"}}</span></div></div></div>
+<div class="page-head"><div><h1>{{t "Settings"}} {{template "doclink" "configuration.md"}}</h1><div class="meta"><span>{{t "Database, listeners and keys stay in the server environment"}}</span></div></div></div>
 <nav class="tabs" aria-label="{{t "Settings"}}">
   {{range .Tabs}}<a href="/settings?tab={{.Key}}" {{if eq $.Tab .Key}}class="on" aria-current="page"{{end}}>{{t .Label}}</a>{{end}}
 </nav>

@@ -1,7 +1,7 @@
 {{define "title"}}{{t "Agents"}} · LiMDM{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>{{t "Agents"}}</h1><div class="meta"><span>{{t "Versions from"}} <a href="https://github.com/{{.Repo}}/releases" rel="noopener">github.com/{{.Repo}}</a></span></div></div>
+  <div><h1>{{t "Agents"}} {{template "doclink" "operations.md#releases-and-agent-updates"}}</h1><div class="meta"><span>{{t "Versions from"}} <a href="https://github.com/{{.Repo}}/releases" rel="noopener">github.com/{{.Repo}}</a></span></div></div>
   <div class="actions">
     {{if .Latest}}<a class="button secondary" href="#dlg-outdated" data-open="dlg-outdated">{{t "Outdated agents"}} <span class="n">{{len .Outdated}}</span></a>{{end}}
     {{if eq .Sess.Role "admin"}}<form method="post" action="/agents/fetch">{{template "csrf" .CSRF}}<button class="secondary">{{t "Check for new versions"}}</button></form>{{end}}
@@ -19,8 +19,8 @@
         <td class="num">{{if .Devices}}<a class="count" href="/devices?agent={{.Version}}">{{.Devices}}</a>{{else}}0{{end}}</td><td class="num">{{if .Failed}}<span class="pill bad">{{.Failed}}</span>{{else}}0{{end}}</td>
         <td>{{if .SumsSig}}<span class="pill ok">{{t "signed"}}</span>{{else}}<span class="pill warn">{{t "unsigned"}}</span>{{end}}</td>
         {{if eq $.Sess.Role "admin"}}<td class="row-actions inline-actions">
-          {{if or (not .ApprovedAt) .Blocked}}<form method="post" action="/agents/{{.Version}}/approve">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Approve"}}</button></form>{{end}}
-          {{if not .Blocked}}<form method="post" action="/agents/{{.Version}}/block">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Block"}}</button></form>{{end}}
+          {{if or (not .ApprovedAt) .Blocked}}<form method="post" action="/agents/{{.Version}}/approve">{{template "csrf" $.CSRF}}<button class="secondary small" aria-label="{{t "Approve"}} {{.Version}}">{{t "Approve"}}</button></form>{{end}}
+          {{if not .Blocked}}<form method="post" action="/agents/{{.Version}}/block">{{template "csrf" $.CSRF}}<button class="secondary small" aria-label="{{t "Block"}} {{.Version}}" data-confirm="{{t "Block this agent version? Devices no longer receive it."}}">{{t "Block"}}</button></form>{{end}}
         </td>{{end}}
       </tr>{{else}}<tr><td colspan="7" class="empty">{{t "No versions fetched yet. The server checks every six hours."}}</td></tr>{{end}}</tbody>
       {{if .Older}}<tbody><tr><td colspan="7" class="more"><a href="/agents?older=1">{{t "Show older versions"}} <span class="n">{{.Older}}</span></a> <span class="muted">{{t "older than every agent in use"}}</span></td></tr></tbody>

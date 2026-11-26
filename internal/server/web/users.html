@@ -1,6 +1,6 @@
 {{define "title"}}{{t "Users · LiMDM"}}{{end}}
 {{define "content"}}
-<div class="page-head"><div><h1>{{t "Users"}}</h1><div class="meta"><span>{{t "Console access: OIDC identities and local accounts"}}</span></div></div></div>
+<div class="page-head"><div><h1>{{t "Users"}} {{template "doclink" "configuration.md#console-users-and-roles"}}</h1><div class="meta"><span>{{t "Console access: OIDC identities and local accounts"}}</span></div></div></div>
 {{template "err" .Error}}
 {{if .Creds}}<div class="notice ok" role="status"><strong>{{t "Credentials created."}}</strong> {{t "Shown only once; hand them over securely and add the TOTP secret to an authenticator app."}}<div class="copy-block"><pre id="creds">{{.Creds}}</pre><button type="button" class="secondary small js-only" data-copy-from="creds" data-copied="{{t "Copied"}}">{{t "Copy"}}</button></div></div>{{end}}
 <div class="grid side-right">

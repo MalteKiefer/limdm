@@ -51,6 +51,14 @@ var pages = func() map[string]map[string]*template.Template {
 
 func parsePages(lang, layout string) map[string]*template.Template {
 	T := func(s string) string { return translate(lang, s) }
+	actionLabel := func(a string) string {
+		return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot",
+			"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script",
+			"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour", "message": "Message",
+			"app_install": "Install app", "app_remove": "Remove app",
+			"user_create": "Create user", "user_admin": "Change admin rights", "user_lock": "Lock user", "user_unlock": "Unlock user",
+			"user_password": "Reset password", "user_delete": "Delete user", "software_remove": "Remove software"}[a])
+	}
 	funcs := template.FuncMap{
 		"dict": func(kv ...any) map[string]any { // arguments for shared partials
 			m := make(map[string]any, len(kv)/2)
@@ -97,17 +105,16 @@ func parsePages(lang, layout string) map[string]*template.Template {
 			}
 			return t
 		},
-		"actionLabel": func(a string) string {
-			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot",
-				"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script",
-				"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour", "message": "Message",
-				"app_install": "Install app", "app_remove": "Remove app",
-				"user_create": "Create user", "user_admin": "Change admin rights", "user_lock": "Lock user", "user_unlock": "Unlock user",
-				"user_password": "Reset password", "user_delete": "Delete user", "software_remove": "Remove software"}[a])
-		},
-		"join":      strings.Join,
-		"hasPrefix": strings.HasPrefix,
-		"fmtTime":   func(t time.Time) string { return t.Local().Format(layout) },
+		"actionLabel": actionLabel,
+		"auditLabel":  func(a string) string { return auditLabel(lang, a, actionLabel) },
+		"statusHelp":  func(st string) string { return T(statusHelp[st]) },
+		"checkDetail": func(d string) string { return checkDetail(lang, d) },
+		"itemMeta":    func() map[string]typeMeta { return itemMeta(lang) },
+		"typeDesc":    func(t string) string { return T(typeInfo[t].Desc) },
+		"docs":        func(p string) string { return docsURL + p },
+		"join":        strings.Join,
+		"hasPrefix":   strings.HasPrefix,
+		"fmtTime":     func(t time.Time) string { return t.Local().Format(layout) },
 		"gib": func(mb uint64) string {
 			if mb == 0 {
 				return T("n/a")
@@ -208,6 +215,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, na
 
 func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", s.page(s.overview))
+	mux.HandleFunc("GET /help", s.page(s.helpPage))
 	mux.HandleFunc("GET /devices", s.page(s.devices))
 	mux.HandleFunc("GET /devices/{id}", s.page(s.device))
 	mux.HandleFunc("POST /devices/bulk", s.helpdeskPage(s.devicesBulk))

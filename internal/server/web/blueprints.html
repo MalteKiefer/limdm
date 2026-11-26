@@ -1,7 +1,7 @@
 {{define "title"}}{{t "Blueprints · LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>{{t "Blueprints"}}</h1><div class="meta"><span>{{t "Assignment maps: which library items a device gets, under which conditions"}}</span></div></div>
+  <div><h1>{{t "Blueprints"}} {{template "doclink" "concepts.md#blueprints"}}</h1><div class="meta"><span>{{t "Assignment maps: which library items a device gets, under which conditions"}}</span></div></div>
   {{if eq .Sess.Role "admin"}}<div class="actions"><a class="button" href="/blueprints/new">{{t "New blueprint"}}</a></div>{{end}}
 </div>
 <div class="notice">Every device has exactly one blueprint; devices without one use <code>default</code>. A blueprint can inherit from a parent, whose map is evaluated first.</div>

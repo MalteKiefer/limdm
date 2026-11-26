@@ -1,7 +1,7 @@
 {{define "title"}}{{t "Devices · LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>{{t "Devices"}}</h1><div class="meta"><span>{{.Total}} {{if .Filter}}{{t "match"}}{{else}}{{t "enrolled"}}{{end}}</span><span>{{len .Devices}} {{t "shown"}}</span></div></div>
+  <div><h1>{{t "Devices"}} {{template "doclink" "concepts.md#status"}}</h1><div class="meta"><span>{{.Total}} {{if .Filter}}{{t "match"}}{{else}}{{t "enrolled"}}{{end}}</span><span>{{len .Devices}} {{t "shown"}}</span></div></div>
   <div class="actions"><a class="button secondary" href="/export/inventory.csv">{{t "Inventory CSV"}}</a><a class="button" href="/tokens">{{t "Enroll device"}}</a></div>
 </div>
 <form class="filters" method="get" action="/devices">
@@ -14,7 +14,7 @@
     {{$keep := .Keep}}
     <a href="/devices{{if $keep}}?{{$keep}}{{end}}" {{if not .Status}}class="on"{{end}}>{{t "All"}}<span class="n">{{.Total}}</span></a>
     {{$cur := .Status}}{{$counts := .Counts}}
-    {{range .Statuses}}<a href="/devices?status={{.}}{{if $keep}}&amp;{{$keep}}{{end}}" {{if eq $cur .}}class="on"{{end}}>{{t .}}<span class="n">{{index $counts .}}</span></a>{{end}}
+    {{range .Statuses}}<a href="/devices?status={{.}}{{if $keep}}&amp;{{$keep}}{{end}}" title="{{statusHelp .}}" {{if eq $cur .}}class="on"{{end}}>{{t .}}<span class="n">{{index $counts .}}</span></a>{{end}}
   </div>
 </form>
 {{if .Filter}}<div class="active-filter"><span>{{t .Filter}}: <strong class="mono">{{.FilterVal}}</strong></span><a class="clear" href="/devices{{if .Q}}?q={{.Q}}{{end}}" aria-label="{{t "Remove filter"}}">×</a></div>{{end}}
@@ -56,7 +56,7 @@
   <tr>
     <td class="sel">{{if not .Retired}}<input type="checkbox" form="bulk" name="id" value="{{.ID}}" aria-label="{{.Hostname}}">{{end}}</td>
     <td><a class="rowlink" href="/devices/{{.ID}}">{{.Hostname}}</a><span class="sub mono">{{.ID}}</span>{{if .Tags}}<span class="tagrow">{{range .Tags}}<a class="tag" href="/devices?tag={{.}}">#{{.}}</a>{{end}}</span>{{end}}</td>
-    <td><span class="pill {{.Class}}">{{t .Status}}</span></td>
+    <td><span class="pill {{.Class}}" title="{{statusHelp .Status}}">{{t .Status}}</span></td>
     <td class="num">{{if .Failing}}<span class="pill fail">{{.Failing}}</span>{{else}}<span class="muted">0</span>{{end}}</td>
     <td>{{.OS}}{{if .Desktop}}<span class="sub">{{.Desktop}}</span>{{end}}</td>
     <td>{{gib .MemoryMB}}</td>

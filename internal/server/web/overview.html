@@ -1,7 +1,7 @@
 {{define "title"}}{{t "Overview · LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>{{t "Overview"}}</h1><div class="meta"><span>{{.Active}} {{t "active devices"}}</span></div></div>
+  <div><h1>{{t "Overview"}} {{template "doclink" "concepts.md"}}</h1><div class="meta"><span>{{.Active}} {{t "active devices"}}</span></div></div>
   <div class="actions"><a class="button secondary" href="/export/compliance.csv">{{t "Evidence CSV"}}</a><a class="button" href="/tokens">{{t "Enroll device"}}</a></div>
 </div>
 <div class="stats">

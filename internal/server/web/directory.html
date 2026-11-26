@@ -1,6 +1,6 @@
 {{define "title"}}{{t "Directory · LiMDM"}}{{end}}
 {{define "content"}}
-<div class="page-head"><div><h1>{{t "Directory"}}</h1><div class="meta"><span>{{len .Users}} {{t "people"}}</span><span>{{len .Groups}} {{t "groups"}}</span><span>{{t "from SCIM or Google Workspace"}}</span></div></div></div>
+<div class="page-head"><div><h1>{{t "Directory"}} {{template "doclink" "concepts.md#directory"}}</h1><div class="meta"><span>{{len .Users}} {{t "people"}}</span><span>{{len .Groups}} {{t "groups"}}</span><span>{{t "from SCIM or Google Workspace"}}</span></div></div></div>
 <nav class="tabs" aria-label="{{t "Directory"}}">
   <a href="/directory?tab=people" {{if eq .Tab "people"}}class="on" aria-current="page"{{end}}>{{t "People"}}</a>
   <a href="/directory?tab=groups" {{if eq .Tab "groups"}}class="on" aria-current="page"{{end}}>{{t "Groups"}}</a>

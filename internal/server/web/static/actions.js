@@ -165,6 +165,51 @@
     sel.dataset.prevExample = ex;
   };
 
+  // library item editor: description, documentation link and field
+  // reference follow the type picker
+  const swapMeta = (sel) => {
+    let meta;
+    try { meta = JSON.parse(document.getElementById(sel.dataset.meta).textContent)[sel.value]; } catch { return; }
+    if (!meta) return;
+    const form = sel.closest('form').parentElement;
+    const desc = form.querySelector('[data-type-desc]'), doc = form.querySelector('[data-type-doc]'), body = form.querySelector('[data-type-fields]');
+    if (desc) desc.textContent = meta.desc;
+    if (doc) doc.href = meta.doc;
+    if (body) body.replaceChildren(...(meta.fields || []).map(([p, k]) => {
+      const tr = el('tr'); tr.append(el('td', 'mono', p), el('td', 'muted', k)); return tr;
+    }));
+  };
+
+  // JSON settings: live syntax check and a format button
+  const jsonCheck = (area) => {
+    const state = area.form && area.form.querySelector('[data-json-state]');
+    if (!state) return null;
+    try {
+      const v = area.value.trim() === '' ? null : JSON.parse(area.value);
+      state.textContent = v === null ? '' : state.dataset.ok;
+      state.classList.remove('bad');
+      area.setCustomValidity('');
+      return v;
+    } catch (err) {
+      state.textContent = state.dataset.bad + ' ' + err.message;
+      state.classList.add('bad');
+      return undefined;
+    }
+  };
+  let jsonTimer = null;
+  document.addEventListener('input', (e) => {
+    if (!e.target.matches('textarea[data-json-check]')) return;
+    clearTimeout(jsonTimer);
+    jsonTimer = setTimeout(() => jsonCheck(e.target), 250);
+  });
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-json-format]');
+    const area = b && b.form && b.form.querySelector('textarea[data-json-check]');
+    if (!area) return;
+    const v = jsonCheck(area);
+    if (v !== undefined && v !== null) area.value = JSON.stringify(v, null, 2);
+  });
+
   // ---- change ----
   document.addEventListener('change', (e) => {
     const t = e.target;
@@ -178,6 +223,7 @@
       t.form.submit();
     } else if (t.matches('select[data-examples]')) {
       swapExample(t);
+      if (t.dataset.meta) swapMeta(t);
     }
   });
 

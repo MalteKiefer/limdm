@@ -1,7 +1,7 @@
 {{define "title"}}{{t "Audit log · LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>{{t "Audit log"}}</h1><div class="meta"><span>{{t "Append only, hash chained"}}</span><span>{{t "latest 300 entries"}}</span></div></div>
+  <div><h1>{{t "Audit log"}} {{template "doclink" "security.md#audit-log"}}</h1><div class="meta"><span>{{t "Append only, hash chained"}}</span><span>{{t "latest 300 entries"}}</span></div></div>
   <div class="actions"><a class="button secondary" href="/export/audit.csv">{{t "Full log as CSV"}}</a></div>
 </div>
 {{if .BrokenAt}}<div class="notice error" role="alert"><strong>{{t "Integrity failure."}}</strong> {{t "The hash chain breaks at entry"}} {{.BrokenAt}}{{t "; the log was modified outside LiMDM."}}</div>
