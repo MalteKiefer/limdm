@@ -333,7 +333,7 @@ func (s *Server) apiAuditStatus(w http.ResponseWriter, r *http.Request, c apiCal
 // apiAuditVerify verifies the whole chain on demand, as the console's
 // "Verify whole chain" (admins and auditors).
 func (s *Server) apiAuditVerify(w http.ResponseWriter, r *http.Request, c apiCaller) {
-	if _, err := s.verifyAuditChain(r.Context(), c.actor()); err != nil {
+	if err := s.verifyAuditChain(r.Context(), c.actor()); err != nil {
 		s.apiFail(w, err)
 		return
 	}

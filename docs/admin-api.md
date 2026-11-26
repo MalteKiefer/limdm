@@ -145,7 +145,7 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `GET /api/v1/audit` | audit | `q`, `actor`, `action`, `target`, `from`, `to`, `limit`, `cursor` | `200` page of entries (`id`, `at`, `actor`, `action`, `target`, `detail`, `prev`, `hash`, `tenant_id`), newest first |
 | `GET /api/v1/approvals` | read | `status`, `limit`, `cursor` | `200` page of approval requests (`id`, `action`, `target`, `payload`, `reason`, `requested_by`, `status`, `decided_by`, `decided_at`, `created_at`, `expires_at`), newest first; helpdesk tokens see their own |
 | `GET /api/v1/approvals/{id}` | read | | `200` approval request |
-| `POST /api/v1/approvals/{id}/approve`, `.../reject` | admin | | `200` approval request (with `credentials` of an approved local account); `409` for an own, decided or expired request; audited as `approval.approve` or `approval.reject` |
+| `POST /api/v1/approvals/{id}/approve`, `.../reject` | admin | optional `{"reason"}` (up to 500 characters; a console session must give one to reject, `422` otherwise) | `200` approval request with `decision_reason` (and `credentials` of an approved local account or token); `409` for an own, decided or expired request; audited as `approval.approve` or `approval.reject` with the reason |
 | `GET /api/v1/exceptions` | read | | `200` `{"items": [...]}` risk exceptions with `state` |
 | `POST /api/v1/exceptions` | admin | `{"check_id", "mode", "tag", "reason", "owner", "approver", "expires": "YYYY-MM-DD"}` | `201` `{"id"}`; audited as `exception.add` |
 | `DELETE /api/v1/exceptions/{id}` | admin | | `204`; audited as `exception.revoke` |
@@ -164,6 +164,15 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `GET /api/v1/stats/fleet` | read | | `200` devices per status, online, agent versions, OS, one fleet grid cell per device |
 | `GET /api/v1/stats/compliance` | read | `days` (1 to 400, default 30) | `200` score, frameworks, most failing checks, daily history (global view only) |
 | `GET /api/v1/stats/attention` | read | | `200` pending approvals, failed and sent commands of 24 hours, non compliant and stale devices, exceptions expiring in 7 days, last backup (global view, admin and auditor) |
+| `GET /api/v1/stats/tenants` | admin, super admin in the all tenants view | | `200` per tenant: devices, compliant, non compliant, stale, pending, score, pending approvals; `404` without multi tenancy |
+| `GET /api/v1/stats/commands` | read | `days` (1 to 90, default 14) | `200` failed and all commands per day, devices in scope |
+| `GET /api/v1/onboarding` | read | | `200` first steps of a new installation (admins in the global view until done), else empty |
+| `GET /api/v1/commands` | read | `status`, `days` (1 to 90, default 7), `limit`, `cursor` | `200` commands of every device in scope with host name, newest first, never the payload |
+| `GET /api/v1/activity` | read | `kind`, `category`, `q`, `actor`, `action`, `target`, `from`, `to`, `limit`, `cursor` | `200` audit log (admins and auditors, audited as a read like `/api/v1/audit`) and device events (device scope) as one stream, newest first |
+| `GET /api/v1/activity/histogram` | read | the filters of `/api/v1/activity` | `200` counts per day and category, default the last 30 days, at most 400 |
+| `GET /api/v1/audit/status`, `POST /api/v1/audit/verify` | audit | | `200` first broken entry (0 = intact), last full verification, keyed from, known actions; `verify` checks the whole chain now (audited as `audit.verify`) |
+| `GET /api/v1/compliance/history` | read | `at` (date, default today), `device` | `200` state at the end of the day per device, or per check of one device with its changes |
+| `GET /api/v1/exports/{kind}` | audit | `compliance.csv`, `compliance-history.csv` (`at`, `device`), `inventory.csv`, `packages.csv`, `exceptions.csv`, `audit.csv` and `audit.jsonl` (the audit filters) | the console's evidence exports, audited as `export` and `export.done` with row count and SHA-256 |
 | `GET /api/v1/openapi.json` | none | | the OpenAPI document |
 | `GET /api/v1/docs` | none | | the reference page |
 | `GET /metrics` | metrics | | Prometheus text format, see [Metrics](#metrics) |
