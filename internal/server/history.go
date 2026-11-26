@@ -88,7 +88,10 @@ func (s *Server) snapshotFleet(ctx context.Context) error {
 	_, err = s.db.Exec(ctx, `INSERT INTO fleet_history(day, compliant, noncompliant, in_grace, stale, pending) VALUES (current_date,$1,$2,$3,$4,$5)
 		ON CONFLICT (day) DO UPDATE SET compliant=EXCLUDED.compliant, noncompliant=EXCLUDED.noncompliant, in_grace=EXCLUDED.in_grace,
 		stale=EXCLUDED.stale, pending=EXCLUDED.pending`, c["compliant"], c["non-compliant"], c["in grace"], c["stale"], c["pending"])
-	return err
+	if err != nil {
+		return err
+	}
+	return s.snapshotUpdates(ctx) // security updates and agent versions (app_home_updates.go)
 }
 
 type point struct {

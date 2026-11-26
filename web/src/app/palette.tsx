@@ -12,6 +12,7 @@ import { useMe } from '../api/me'
 import { useT } from '../i18n'
 import { currentLocale } from '../i18n'
 import { resolvedTheme, setPrefs, usePrefs } from '../lib/prefs'
+import { SearchResults } from '../areas/home/search'
 import { areas } from './areas'
 import { switchTenant, useTenants } from './tenants'
 
@@ -103,6 +104,7 @@ export function Palette({ open, setOpen }: { open: boolean; setOpen: (v: boolean
                   ))}
                 </Command.Group>
               )}
+              <SearchResults term={term} group={group} go={(to, s) => close(() => go(to, s))()} />
             </Command.List>
           </Command>
         </Dialog.Popup>

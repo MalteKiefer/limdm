@@ -1299,6 +1299,19 @@
           },
           "503": {
             "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionInput"
+              }
+            }
           }
         }
       }
@@ -1307,7 +1320,7 @@
       "post": {
         "operationId": "rejectApproval",
         "summary": "Reject an approval request",
-        "description": "Admin tokens, not read only. Never a request of the same token or of the person who created it (409); an approved command is queued at once. Audited as approval.reject.",
+        "description": "Admin tokens, not read only. Never a request of the same token or of the person who created it (409); an approved command is queued at once. Audited as approval.reject. A console session must give a reason (422 otherwise); it is stored as decision_reason and audited.",
         "parameters": [
           {
             "name": "id",
@@ -1348,6 +1361,19 @@
           },
           "503": {
             "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionInput"
+              }
+            }
           }
         }
       }
@@ -2596,6 +2622,56 @@
               "default": 90
             },
             "description": "evidence.json and evidence.pdf: history window"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Text in any field",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "description": "Actor contains",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "description": "Action starts with",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "target",
+            "in": "query",
+            "description": "Target or device id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "First day",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Last day",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
           }
         ],
         "responses": {
@@ -2616,6 +2692,11 @@
                 "schema": {
                   "type": "string",
                   "format": "binary"
+                }
+              },
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -2702,6 +2783,811 @@
             "$ref": "#/components/responses/Problem"
           },
           "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/stats/tenants": {
+      "get": {
+        "operationId": "statsTenants",
+        "summary": "Tenant comparison: devices, score, non compliant, stale, pending approvals per tenant",
+        "description": "Super admins in the all tenants view only; 404 without multi tenancy.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsTenantList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/stats/commands": {
+      "get": {
+        "operationId": "statsCommands",
+        "summary": "Commands per day by their last change: failed and all, devices in scope",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "description": "1..90, default 14",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 90
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsCommandDays"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/onboarding": {
+      "get": {
+        "operationId": "onboarding",
+        "summary": "First steps of a new installation (admins in the global view until done or hidden); empty else",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/commands": {
+      "get": {
+        "operationId": "listCommands",
+        "summary": "Commands of every device in scope, newest first; never the payload",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "One status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "sent",
+                "ok",
+                "failed",
+                "expired"
+              ]
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "description": "Changed within 1..90 days, default 7",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 90
+            }
+          },
+          {
+            "$ref": "#/components/parameters/limit"
+          },
+          {
+            "$ref": "#/components/parameters/cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetCommandPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/activity": {
+      "get": {
+        "operationId": "listActivity",
+        "summary": "Audit log and device events as one stream, newest first",
+        "description": "The audit log only for admins and auditors (and audit scoped tokens), audited as a read like /api/v1/audit; device events in the device scope.",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "audit or device",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "audit",
+                "device"
+              ]
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "description": "One category",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "commands",
+                "changes",
+                "approvals",
+                "access",
+                "devices",
+                "audit",
+                "events"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Text in any field",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "description": "Actor contains",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "description": "Action starts with",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "target",
+            "in": "query",
+            "description": "Target or device id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "First day",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Last day",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/limit"
+          },
+          {
+            "$ref": "#/components/parameters/cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/activity/histogram": {
+      "get": {
+        "operationId": "activityHistogram",
+        "summary": "The filtered stream counted per day and category (default the last 30 days, at most 400)",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "audit or device",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "audit",
+                "device"
+              ]
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "description": "One category",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "commands",
+                "changes",
+                "approvals",
+                "access",
+                "devices",
+                "audit",
+                "events"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Text in any field",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "description": "Actor contains",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "description": "Action starts with",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "target",
+            "in": "query",
+            "description": "Target or device id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "First day",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Last day",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityHistogram"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/audit/status": {
+      "get": {
+        "operationId": "auditStatus",
+        "summary": "State of the audit hash chain (checked from the last checkpoint), last full verification, known actions",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/audit/verify": {
+      "post": {
+        "operationId": "auditVerify",
+        "summary": "Verify the whole audit chain now (admins and auditors); audited as audit.verify",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/stats/updates": {
+      "get": {
+        "operationId": "statsUpdates",
+        "summary": "Pending security updates and devices on the newest approved agent release, devices in scope; daily history in the global view",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "description": "1..400, default 30",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 400
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsUpdates"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/stats/annotations": {
+      "get": {
+        "operationId": "statsAnnotations",
+        "summary": "Events the history charts mark: key rotations, approved agent releases, blueprint changes, failed backups (audit log, admins and auditors)",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "description": "1..400, default 30",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 400
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsAnnotationList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/report-schedules": {
+      "get": {
+        "operationId": "listReportSchedules",
+        "summary": "Own report schedules (admins: all of the tenant view) and the channels a schedule may use",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportScheduleList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "saveReportSchedule",
+        "summary": "Schedule a saved report preset (create or replace the caller's schedule of it)",
+        "description": "People with the admin or auditor role, not tokens. The report runs as its owner with the role and scope the owner has at run time, in the tenant view it was scheduled in; recipients get a link, never the file. Audited as report.schedule, each run as report.run.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportScheduleInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportSchedule"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/report-schedules/{id}": {
+      "delete": {
+        "operationId": "deleteReportSchedule",
+        "summary": "Delete a schedule (owner or admin of the tenant view); audited as report.unschedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/report-schedules/{id}/run": {
+      "post": {
+        "operationId": "runReportSchedule",
+        "summary": "Run a schedule now and send it",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportRun"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/report-schedules/{id}/runs": {
+      "get": {
+        "operationId": "listReportRuns",
+        "summary": "The kept runs of a schedule (last 10)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportRunList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/report-runs/{id}": {
+      "get": {
+        "operationId": "downloadReportRun",
+        "summary": "The file of a run: its owner, or admins and auditors without a device scope in the same or the all tenants view; audited as report.download",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -3320,7 +4206,9 @@
             "type": "string"
           },
           "payload": {
-            "type": "object"
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The request as stored; its shape depends on action"
           },
           "reason": {
             "type": "string"
@@ -3362,8 +4250,26 @@
           "credentials": {
             "type": "string",
             "description": "new local credentials of an approved user.add or user.reset, only in the decision's answer"
+          },
+          "decision_reason": {
+            "type": "string",
+            "description": "Why the deciding admin approved or rejected"
           }
-        }
+        },
+        "required": [
+          "id",
+          "action",
+          "target",
+          "payload",
+          "reason",
+          "requested_by",
+          "status",
+          "decided_by",
+          "decided_at",
+          "created_at",
+          "expires_at",
+          "decision_reason"
+        ]
       },
       "ApprovalPage": {
         "type": "object",
@@ -4749,6 +5655,724 @@
             "type": "string",
             "format": "date",
             "description": "last day it applies, within three years"
+          }
+        }
+      },
+      "DecisionInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Why; required to reject from the console app"
+          }
+        }
+      },
+      "StatsTenant": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "devices",
+          "compliant",
+          "noncompliant",
+          "stale",
+          "pending",
+          "score",
+          "approvals_pending"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "devices": {
+            "type": "integer"
+          },
+          "compliant": {
+            "type": "integer"
+          },
+          "noncompliant": {
+            "type": "integer"
+          },
+          "stale": {
+            "type": "integer"
+          },
+          "pending": {
+            "type": "integer"
+          },
+          "score": {
+            "type": "number",
+            "description": "Compliant share of reporting devices, percent"
+          },
+          "approvals_pending": {
+            "type": "integer"
+          }
+        }
+      },
+      "StatsTenantList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatsTenant"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "StatsCommandDay": {
+        "type": "object",
+        "required": [
+          "day",
+          "failed",
+          "total"
+        ],
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "StatsCommandDays": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatsCommandDay"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "OnboardingStep": {
+        "type": "object",
+        "required": [
+          "id",
+          "done"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "branding",
+              "sso",
+              "token",
+              "blueprint",
+              "device"
+            ]
+          },
+          "done": {
+            "type": "boolean"
+          }
+        }
+      },
+      "OnboardingList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OnboardingStep"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "FleetCommand": {
+        "type": "object",
+        "required": [
+          "id",
+          "device_id",
+          "hostname",
+          "type",
+          "status",
+          "output",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "sent",
+              "ok",
+              "failed",
+              "expired"
+            ]
+          },
+          "output": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FleetCommandPage": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetCommand"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "ActivityItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "category",
+          "at",
+          "actor",
+          "action",
+          "label",
+          "target",
+          "detail"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "a<audit id> or e<device event id>"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "audit",
+              "device"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "commands",
+              "changes",
+              "approvals",
+              "access",
+              "devices",
+              "audit",
+              "events"
+            ]
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string",
+            "description": "Readable action in the request language"
+          },
+          "target": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "ActivityPage": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityItem"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "ActivityHistogram": {
+        "type": "object",
+        "required": [
+          "days",
+          "categories"
+        ],
+        "properties": {
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "day",
+                "counts"
+              ],
+              "properties": {
+                "day": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "counts": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "commands",
+                "changes",
+                "approvals",
+                "access",
+                "devices",
+                "audit",
+                "events"
+              ]
+            }
+          }
+        }
+      },
+      "AuditStatus": {
+        "type": "object",
+        "required": [
+          "broken_at",
+          "verified_at",
+          "keyed_from",
+          "actions"
+        ],
+        "properties": {
+          "broken_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "First broken entry, 0 = intact"
+          },
+          "verified_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Last full verification"
+          },
+          "keyed_from": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "StatsUpdatesDay": {
+        "type": "object",
+        "required": [
+          "day",
+          "security_devices",
+          "security_old",
+          "agent_current",
+          "agent_total"
+        ],
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date"
+          },
+          "security_devices": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "security_old": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "agent_current": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "agent_total": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
+      "StatsUpdates": {
+        "type": "object",
+        "required": [
+          "security_devices",
+          "security_updates",
+          "security_old",
+          "agent_newest",
+          "agent_approved",
+          "agent_current",
+          "agent_total",
+          "history"
+        ],
+        "properties": {
+          "security_devices": {
+            "type": "integer",
+            "description": "Devices with pending security updates"
+          },
+          "security_updates": {
+            "type": "integer",
+            "description": "Pending security updates in total"
+          },
+          "security_old": {
+            "type": "integer",
+            "description": "Devices failing updates.security for more than 14 days"
+          },
+          "agent_newest": {
+            "type": "string",
+            "description": "Newest approved agent release, else the newest version reported"
+          },
+          "agent_approved": {
+            "type": "boolean"
+          },
+          "agent_current": {
+            "type": "integer"
+          },
+          "agent_total": {
+            "type": "integer"
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatsUpdatesDay"
+            },
+            "description": "Global view only, oldest first"
+          }
+        }
+      },
+      "StatsAnnotation": {
+        "type": "object",
+        "required": [
+          "day",
+          "action",
+          "label",
+          "target",
+          "count"
+        ],
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date"
+          },
+          "action": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          }
+        }
+      },
+      "StatsAnnotationList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatsAnnotation"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "ReportSchedule": {
+        "type": "object",
+        "required": [
+          "id",
+          "view_id",
+          "name",
+          "query",
+          "owner",
+          "tenant_id",
+          "cadence",
+          "channels",
+          "emails",
+          "next_run",
+          "last_run",
+          "last_error"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "view_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cadence": {
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly",
+              "monthly"
+            ]
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "emails": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "next_run": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_run": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_error": {
+            "type": "string"
+          }
+        }
+      },
+      "ReportScheduleList": {
+        "type": "object",
+        "required": [
+          "items",
+          "channels"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReportSchedule"
+            }
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "kind"
+              ],
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ReportScheduleInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "view_id",
+          "cadence"
+        ],
+        "properties": {
+          "view_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "A saved view of the list reports"
+          },
+          "cadence": {
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly",
+              "monthly"
+            ]
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "emails": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "format": "email"
+            }
+          }
+        }
+      },
+      "ReportRun": {
+        "type": "object",
+        "required": [
+          "id",
+          "schedule_id",
+          "at",
+          "kind",
+          "rows",
+          "sha256",
+          "error"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "schedule_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "rows": {
+            "type": "integer"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "ReportRunList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReportRun"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
           }
         }
       }

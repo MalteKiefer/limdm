@@ -1617,4 +1617,10 @@ var deCatalog = map[string]string{
 	"This report was rendered from a signed evidence bundle. Download evidence.json and check it with limdm-server evidence verify FILE; the bundle written for this report is in the audit log as evidence.sign with this SHA-256.": "Dieser Bericht wurde aus einem signierten Nachweis erstellt. Lade evidence.json herunter und prüfe sie mit limdm-server evidence verify DATEI; der Nachweis zu diesem Bericht steht im Audit Log als evidence.sign mit dieser SHA-256.",
 	"Command key (SHA-256 of the Ed25519 public key)": "Befehlsschlüssel (SHA-256 des öffentlichen Ed25519 Schlüssels)",
 	"Signature (Ed25519)":                             "Signatur (Ed25519)",
+	// UI-D
+	"Device event":            "Geräteereignis",
+	"Report scheduled":        "Bericht eingeplant",
+	"Report schedule deleted": "Berichtszeitplan gelöscht",
+	"Scheduled report run":    "Geplanter Bericht erzeugt",
+	"Report downloaded":       "Bericht heruntergeladen",
 }

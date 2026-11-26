@@ -449,7 +449,8 @@ func (s *Server) Close() {
 // Background runs periodic jobs until ctx ends.
 func (s *Server) Background(ctx context.Context) {
 	for name, loop := range map[string]func(context.Context){"google sync": s.googleSyncLoop, "history": s.historyLoop,
-		"catalog icons": s.iconLoop, "syslog": s.syslogLoop, "reseal": s.resealLoop, "backup": s.backupLoop} {
+		"catalog icons": s.iconLoop, "syslog": s.syslogLoop, "reseal": s.resealLoop, "backup": s.backupLoop,
+		"reports": s.reportLoop} {
 		go s.background(ctx, name, loop, true)
 	}
 	// every instance serves agent packages from its own release directory

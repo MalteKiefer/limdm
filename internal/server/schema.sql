@@ -880,3 +880,40 @@ CREATE INDEX IF NOT EXISTS saved_views_owner ON saved_views(owner, list);
 CREATE INDEX IF NOT EXISTS saved_views_shared ON saved_views(tenant_id, list) WHERE shared;
 -- the console app counts failed commands of the last day (appstats.go)
 CREATE INDEX IF NOT EXISTS commands_updated ON commands(updated_at);
+
+-- UI-D
+-- why an approval was approved or rejected (app inbox, approvals.go)
+ALTER TABLE approvals ADD COLUMN IF NOT EXISTS decision_reason TEXT NOT NULL DEFAULT '';
+-- daily security update and agent version counts (app_home_updates.go); NULL before recorded
+ALTER TABLE fleet_history ADD COLUMN IF NOT EXISTS security_devices INT;
+ALTER TABLE fleet_history ADD COLUMN IF NOT EXISTS security_old INT;
+ALTER TABLE fleet_history ADD COLUMN IF NOT EXISTS agent_current INT;
+ALTER TABLE fleet_history ADD COLUMN IF NOT EXISTS agent_total INT;
+-- scheduled reports (app_reports_schedule.go): a saved report preset run
+-- as its owner in the tenant view it was scheduled in, sent as a link
+CREATE TABLE IF NOT EXISTS report_schedules (
+    id         BIGSERIAL PRIMARY KEY,
+    view_id    BIGINT NOT NULL REFERENCES saved_views(id) ON DELETE CASCADE,
+    owner      TEXT NOT NULL,
+    tenant_id  BIGINT REFERENCES tenants(id) ON DELETE CASCADE, -- NULL: the all tenants view
+    cadence    TEXT NOT NULL CHECK (cadence IN ('daily', 'weekly', 'monthly')),
+    channels   BIGINT[] NOT NULL DEFAULT '{}',
+    emails     TEXT[] NOT NULL DEFAULT '{}',
+    next_run   TIMESTAMPTZ NOT NULL,
+    last_run   TIMESTAMPTZ,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (view_id, owner)
+);
+CREATE INDEX IF NOT EXISTS report_schedules_due ON report_schedules(next_run);
+CREATE TABLE IF NOT EXISTS report_runs (
+    id          BIGSERIAL PRIMARY KEY,
+    schedule_id BIGINT NOT NULL REFERENCES report_schedules(id) ON DELETE CASCADE,
+    at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    kind        TEXT NOT NULL,
+    rows        INT NOT NULL DEFAULT 0,
+    sha256      TEXT NOT NULL DEFAULT '',
+    content     BYTEA NOT NULL DEFAULT '',
+    error       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS report_runs_schedule ON report_runs(schedule_id, id DESC);
