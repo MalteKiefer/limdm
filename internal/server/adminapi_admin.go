@@ -324,14 +324,15 @@ func (s *Server) apiTokenDelete(w http.ResponseWriter, r *http.Request, c apiCal
 // ---- tenants ----
 
 // superAPI limits a route to global tokens while multi tenancy is on, as
-// superOnly does for console pages.
+// superOnly does for console pages (a super admin's session keeps the
+// right while it looks at one tenant).
 func (s *Server) superAPI(h apiHandlerFunc) apiHandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request, c apiCaller) {
 		if !s.cfg.MultiTenant {
 			problem(w, http.StatusNotFound, "multi tenancy is off")
 			return
 		}
-		if c.Tenant != 0 {
+		if c.Tenant != 0 && (c.Sess == nil || !c.Sess.Super) {
 			s.deny(w, r, c, "only global tokens manage tenants")
 			return
 		}

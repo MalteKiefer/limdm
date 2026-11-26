@@ -28,9 +28,9 @@ import (
 
 // The admin REST API lives on the console listener under /api/v1/. Every
 // action goes through the same functions the console uses, so rules,
-// validation and audit entries stay identical. Callers authenticate with a
-// bearer token created on the API tokens page; there are no cookies, so
-// there is nothing for CSRF to abuse.
+// validation and audit entries stay identical. Automation authenticates
+// with a bearer token created on the API tokens page; the console app under
+// /app/ sends the session cookie plus the CSRF header (sessionCaller).
 
 //go:embed openapi.json
 var openAPIDoc []byte
@@ -68,14 +68,24 @@ type apiCaller struct {
 	Tags     []string // device scope of a helpdesk or auditor token; empty: every device
 	Tenant   int64    // tenant of the token, 0 for global tokens (tenant.go)
 	Scopes   []string // tokenScopes it is limited to; empty: all its role allows
+	Sess     *session // console session of a cookie authenticated caller (sessionCaller), nil for tokens
 }
 
-// actor names the token in the audit log and as creator of commands.
-func (c apiCaller) actor() string { return fmt.Sprintf("api:%s#%d", c.Name, c.ID) }
+// actor names the token in the audit log and as creator of commands; a
+// console session acts under its login, as on the console pages.
+func (c apiCaller) actor() string {
+	if c.Sess != nil {
+		return c.Sess.Email
+	}
+	return fmt.Sprintf("api:%s#%d", c.Name, c.ID)
+}
 
 // sess is the session the shared console functions check roles against.
 // It carries the token's device scope, so the W2 scope rules apply.
 func (c apiCaller) sess() session {
+	if c.Sess != nil {
+		return *c.Sess
+	}
 	return session{Email: c.actor(), Role: c.Role, Tags: c.Tags, Tenant: c.Tenant, Super: c.Tenant == 0}
 }
 
@@ -196,7 +206,7 @@ func routeScope(r *http.Request, level string) string {
 		return "audit"
 	case level == "helpdesk":
 		return "commands"
-	case level == "read":
+	case level == "read", level == "self":
 		return "read"
 	case strings.HasPrefix(path, "/api/v1/library-items"), strings.HasPrefix(path, "/api/v1/blueprints"), strings.HasPrefix(path, "/api/v1/devices"):
 		return "library"
@@ -222,24 +232,32 @@ func (s *Server) auditRead(r *http.Request, level string) bool {
 
 type apiHandlerFunc func(w http.ResponseWriter, r *http.Request, c apiCaller)
 
-// need guards an API handler. Levels: read (every API role), audit (admin
-// and auditor, as the console's audit page), helpdesk (admin and helpdesk
-// writes, as device commands), admin (admin writes).
+// allows tells whether the caller's role passes an access level: read
+// (every API role), self (changes to the caller's own data, as saved
+// views), audit (admin and auditor, as the console's audit page), helpdesk
+// (admin and helpdesk writes, as device commands), admin (admin writes).
+func (c apiCaller) allows(level string) bool {
+	switch level {
+	case "read":
+		return true
+	case "self":
+		return !c.ReadOnly
+	case "audit":
+		return c.Role == "admin" || c.Role == "auditor"
+	case "helpdesk":
+		return !c.ReadOnly && (c.Role == "admin" || c.Role == "helpdesk")
+	case "admin":
+		return !c.ReadOnly && c.Role == "admin"
+	}
+	return false
+}
+
+// need guards an API handler with an access level (allows) and the
+// token's scopes.
 func (s *Server) need(level string, h apiHandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c, _ := r.Context().Value(apiCallerKey).(apiCaller)
-		var ok bool
-		switch level {
-		case "read":
-			ok = true
-		case "audit":
-			ok = c.Role == "admin" || c.Role == "auditor"
-		case "helpdesk":
-			ok = !c.ReadOnly && (c.Role == "admin" || c.Role == "helpdesk")
-		case "admin":
-			ok = !c.ReadOnly && c.Role == "admin"
-		}
-		if !ok {
+		if !c.allows(level) {
 			s.deny(w, r, c, "the token's role cannot do this")
 			return
 		}
@@ -317,9 +335,16 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/tags", s.need("read", s.apiTags))
 	m.HandleFunc("GET /api/v1/audit", s.need("audit", s.apiAudit))
 	s.apiAdminRoutes(mux, m)
+	s.appAPIRoutes(m) // console app endpoints (appapi.go)
 	mux.Handle("/api/v1/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pw := &problemWriter{ResponseWriter: w}
-		c, ok := s.bearer(pw, r)
+		var c apiCaller
+		var ok bool
+		if _, err := r.Cookie(sessionCookie); err == nil && r.Header.Get("Authorization") == "" {
+			c, ok = s.sessionCaller(pw, r)
+		} else {
+			c, ok = s.bearer(pw, r)
+		}
 		if !ok {
 			return
 		}
@@ -601,7 +626,7 @@ func toAPIDevice(d deviceRow) apiDevice {
 }
 
 func (s *Server) apiDevices(w http.ResponseWriter, r *http.Request, c apiCaller) {
-	dq, err := parseDeviceQuery(r.URL.Query(), s.staleAfter())
+	where, err := s.apiDeviceWhere(r, c)
 	if err != nil {
 		problem(w, http.StatusBadRequest, err.Error())
 		return
@@ -610,18 +635,12 @@ func (s *Server) apiDevices(w http.ResponseWriter, r *http.Request, c apiCaller)
 	if !ok {
 		return
 	}
-	where := dq.where()
-	scope, sargs := scopeCond(c.sess(), 0)
-	where.add(scope, sargs...)
-	if cur != "" {
-		host, id, ok := strings.Cut(cur, "\x00")
-		if !ok {
-			problem(w, http.StatusBadRequest, "invalid cursor")
-			return
-		}
-		where.add(`(d.hostname, d.id) > ($1, $2)`, host, id)
+	order, so, err := deviceOrder(r.URL.Query().Get("sort"), cur, &where)
+	if err != nil {
+		problem(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	list, err := s.listDevicesQuery(r.Context(), where.sql(), fmt.Sprintf(" ORDER BY d.hostname, d.id LIMIT %d", limit+1), where.args...)
+	list, err := s.listDevicesQuery(r.Context(), where.sql(), fmt.Sprintf("%s LIMIT %d", order, limit+1), where.args...)
 	if err != nil {
 		s.apiFail(w, err)
 		return
@@ -629,7 +648,7 @@ func (s *Server) apiDevices(w http.ResponseWriter, r *http.Request, c apiCaller)
 	page := listPage{}
 	if len(list) > limit {
 		list = list[:limit]
-		page.NextCursor = cursor(list[limit-1].Hostname + "\x00" + list[limit-1].ID)
+		page.NextCursor = deviceCursor(so, list[limit-1])
 	}
 	items := make([]apiDevice, len(list))
 	for i, d := range list {
