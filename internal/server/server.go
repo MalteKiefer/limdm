@@ -553,6 +553,7 @@ func (s *Server) AdminHandler() http.Handler {
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	s.webRoutes(mux)
 	s.apiRoutes(mux)
+	s.webappRoutes(mux) // console app under /app/ (webapp.go)
 	return s.countRequests("console", securityHeaders(s.consoleFilter(mux)))
 }
 

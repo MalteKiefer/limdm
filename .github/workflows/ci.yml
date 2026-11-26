@@ -85,6 +85,53 @@ jobs:
           go-version-file: go.mod
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
+  web:
+    name: Console app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/package.json
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --ignore-scripts
+      - name: API types are generated from openapi.json
+        run: npm run api && git diff --exit-code -- src/api/schema.d.ts
+      - run: npm run lint
+      - run: npm test
+      - name: Build, bundle budget, committed build is current
+        run: |
+          npm run build
+          git add -N ../internal/server/webapp/dist
+          git diff --exit-code --stat -- ../internal/server/webapp/dist || { echo "run make web and commit internal/server/webapp/dist"; exit 1; }
+      - name: Start PostgreSQL
+        run: |
+          sudo systemctl start postgresql.service
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE limdm LOGIN SUPERUSER PASSWORD 'limdm'" -c "CREATE DATABASE limdm_e2e OWNER limdm"
+      - run: npx playwright install --with-deps chromium
+      - name: End to end tests (CSP, sign in)
+        run: npm run e2e
+        env:
+          LIMDM_E2E_DATABASE_URL: postgres://limdm:limdm@127.0.0.1:5432/limdm_e2e
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-report
+          path: web/playwright-report
+          retention-days: 7
+
   release-config:
     name: Release config
     runs-on: ubuntu-latest
@@ -138,4 +185,6 @@ jobs:
           comment-summary-in-pr: on-failure
           # MIT is this project's license; the rest are the permissive set Go modules use.
           # LicenseRef-scancode-google-patent-license-golang is the PATENTS grant of golang.org/x modules.
-          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, LicenseRef-scancode-google-patent-license-golang
+          # npm (web/): OFL-1.1 for the bundled fonts; BlueOak, 0BSD, Unlicense, CC0, Python-2.0 (argparse)
+          # and CC-BY-4.0 (caniuse-lite data) are permissive build tool licenses.
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, LicenseRef-scancode-google-patent-license-golang, OFL-1.1, BlueOak-1.0.0, 0BSD, Unlicense, CC0-1.0, Python-2.0, CC-BY-4.0

@@ -3,7 +3,7 @@
   "info": {
     "title": "LiMDM admin API",
     "version": "1",
-    "description": "REST API of the LiMDM console. Every action runs through the same functions as the console, with the same role rules, validation and audit entries. Authenticate with an API token from the console (Administration, API tokens) as a bearer token. Errors are RFC 9457 problem details. Lists are paged with limit and an opaque cursor. Each token may send 600 requests per minute; failed authentications are limited to 20 per client address in five minutes. Tenants: a token created in a tenant (multi tenancy, see docs/tenants.md) sees and changes only that tenant's devices, commands, library items, blueprints, tags and audit entries; shared library items and blueprints of the Default tenant are readable but not writable, and objects of other tenants answer 404. Global tokens see every tenant. Metrics need a global token."
+    "description": "REST API of the LiMDM console. Every action runs through the same functions as the console, with the same role rules, validation and audit entries. Authenticate with an API token from the console (Administration, API tokens) as a bearer token. The console app (/app/) uses the session cookie instead: every request must come from the console origin (Origin, Sec-Fetch-Site) and every state change must carry the CSRF token of GET /api/v1/me in the X-CSRF-Token header. Errors are RFC 9457 problem details. Lists are paged with limit and an opaque cursor. Each token may send 600 requests per minute; failed authentications are limited to 20 per client address in five minutes. Tenants: a token created in a tenant (multi tenancy, see docs/tenants.md) sees and changes only that tenant's devices, commands, library items, blueprints, tags and audit entries; shared library items and blueprints of the Default tenant are readable but not writable, and objects of other tenants answer 404. Global tokens see every tenant. Metrics need a global token. List conventions (devices is the reference): filter takes the query language (free words, key:value, key:\"quoted value\", every term must match), sort takes a field with - for descending, cursor continues a page from next_cursor, and <list>/facets answers counts per value for the same filter."
   },
   "servers": [
     {
@@ -14,6 +14,9 @@
   "security": [
     {
       "bearer": []
+    },
+    {
+      "session": []
     }
   ],
   "paths": {
@@ -23,6 +26,35 @@
         "summary": "List devices",
         "description": "All filters given apply together. Any API role except metrics.",
         "parameters": [
+          {
+            "name": "filter",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "description": "Query language: free words match host name, OS, id, blueprint or tags; keys status (compliant, in-grace, non-compliant, stale, pending, retired), os, tag, blueprint, agent, check (failing check id), pkg (name with optional version comparison), app, flatpak, remote, seen (>7d older, <2h newer; m, h, d). Example: status:non-compliant os:\"Ubuntu 24\" tag:prod. Unknown keys are an error."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hostname",
+                "-hostname",
+                "os",
+                "-os",
+                "agent",
+                "-agent",
+                "failing",
+                "-failing",
+                "last_seen",
+                "-last_seen"
+              ]
+            },
+            "description": "Sort field, - for descending; default hostname. The cursor belongs to the sort it came with."
+          },
           {
             "name": "q",
             "in": "query",
@@ -1707,6 +1739,570 @@
           }
         }
       }
+    },
+    "/api/v1/devices/facets": {
+      "get": {
+        "operationId": "deviceFacets",
+        "summary": "Count devices per status, OS, agent, blueprint and tag",
+        "description": "Takes the filters of listDevices; also lists the filter keys with help texts. Any API role except metrics.",
+        "parameters": [
+          {
+            "name": "filter",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "description": "Query language: free words match host name, OS, id, blueprint or tags; keys status (compliant, in-grace, non-compliant, stale, pending, retired), os, tag, blueprint, agent, check (failing check id), pkg (name with optional version comparison), app, flatpak, remote, seen (>7d older, <2h newer; m, h, d). Example: status:non-compliant os:\"Ubuntu 24\" tag:prod. Unknown keys are an error."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Substring of host name, OS, id, blueprint or tag, case insensitive"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "compliant",
+                "in grace",
+                "non-compliant",
+                "stale",
+                "pending",
+                "retired"
+              ]
+            },
+            "description": "Device status"
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Device tag"
+          },
+          {
+            "name": "app",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Catalog app id that is installed"
+          },
+          {
+            "name": "flatpak",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Installed Flatpak application id"
+          },
+          {
+            "name": "remote",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Configured Flatpak remote name"
+          },
+          {
+            "name": "blueprint",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Effective blueprint name"
+          },
+          {
+            "name": "agent",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Agent version"
+          },
+          {
+            "name": "failing",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Id of a failing compliance check"
+          },
+          {
+            "name": "pkg",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Installed package, optionally with a version comparison: openssl, openssl < 3.0.13 (operators < <= = != >= >). Versions compare by their runs of digits; the epoch is ignored."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceFacets"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "operationId": "getMe",
+        "summary": "The caller: role, tenant, scope, permissions, locale",
+        "description": "Permissions name what the caller may do by the rules every endpoint applies: read, audit, commands, admin, tenants. Session callers get the CSRF token.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/events/stream": {
+      "get": {
+        "operationId": "eventStream",
+        "summary": "Live updates (server sent events)",
+        "description": "Events device (id, hostname, status, last_seen), activity (new audit entries: id, at, actor, action, target; admin and auditor) and inbox (pending approvals: pending), limited to the caller's tenant and scope. The stream ends after four minutes; EventSource reconnects. At most five open streams per caller.",
+        "responses": {
+          "200": {
+            "description": "event stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/views": {
+      "get": {
+        "operationId": "listViews",
+        "summary": "Own and shared saved views",
+        "parameters": [
+          {
+            "name": "list",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "only views of this list, e.g. devices"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedViewPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createView",
+        "summary": "Save a view",
+        "description": "Every role with write access to its own data; only admins share. At most 100 views per person.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavedViewInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedView"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "415": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/views/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "put": {
+        "operationId": "updateView",
+        "summary": "Replace an own view",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavedViewInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedView"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "415": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteView",
+        "summary": "Delete an own view, or (admins) a shared one",
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/schemas": {
+      "get": {
+        "operationId": "listSchemas",
+        "summary": "Declaration types with a payload schema",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/schemas/{type}": {
+      "get": {
+        "operationId": "getSchema",
+        "summary": "JSON Schema of a declaration payload",
+        "description": "Draft 2020-12, derived from the Go types the server and agent decode the payload into. x-order keeps the field order.",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "com.limdm.firewall"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/stats/fleet": {
+      "get": {
+        "operationId": "statsFleet",
+        "summary": "Fleet health: devices per status, online, agent versions, OS, fleet grid",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsFleet"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/stats/compliance": {
+      "get": {
+        "operationId": "statsCompliance",
+        "summary": "Compliance score, frameworks, most failing checks and history",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 400,
+              "default": 30
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsCompliance"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/stats/attention": {
+      "get": {
+        "operationId": "statsAttention",
+        "summary": "What needs attention: approvals, failed commands, non compliant and stale devices, expiring exceptions, last backup",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsAttention"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1715,6 +2311,12 @@
         "type": "http",
         "scheme": "bearer",
         "description": "API token (lma_...) from the console"
+      },
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-limdm_session",
+        "description": "Console session (console app only). State changes also need the X-CSRF-Token header with csrf_token from GET /api/v1/me."
       }
     },
     "parameters": {
@@ -2616,6 +3218,568 @@
         "properties": {
           "id": {
             "type": "integer"
+          }
+        }
+      },
+      "FacetCount": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "value",
+          "count"
+        ]
+      },
+      "DeviceFacets": {
+        "type": "object",
+        "required": [
+          "total",
+          "facets",
+          "keys"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer"
+          },
+          "facets": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/FacetCount"
+              }
+            },
+            "description": "status, os, agent, blueprint, tag: at most 25 values each, most first"
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "help": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "help"
+              ]
+            }
+          }
+        }
+      },
+      "Me": {
+        "type": "object",
+        "required": [
+          "login",
+          "role",
+          "tenant",
+          "super",
+          "multi_tenant",
+          "scope_tags",
+          "scope_groups",
+          "scopes",
+          "permissions",
+          "four_eyes",
+          "locale",
+          "date_format",
+          "stale_hours",
+          "version",
+          "company_name",
+          "accent"
+        ],
+        "properties": {
+          "login": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "helpdesk",
+              "auditor"
+            ]
+          },
+          "tenant": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              }
+            ],
+            "description": "null: the global view"
+          },
+          "super": {
+            "type": "boolean",
+            "description": "may see every tenant and switch between them"
+          },
+          "multi_tenant": {
+            "type": "boolean"
+          },
+          "scope_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scope_groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "token scopes; empty: all the role allows"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "read",
+                "audit",
+                "commands",
+                "admin",
+                "tenants"
+              ]
+            }
+          },
+          "four_eyes": {
+            "type": "boolean"
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "de",
+              "en"
+            ]
+          },
+          "date_format": {
+            "type": "string"
+          },
+          "stale_hours": {
+            "type": "integer"
+          },
+          "version": {
+            "type": "string"
+          },
+          "company_name": {
+            "type": "string"
+          },
+          "accent": {
+            "type": "string",
+            "description": "tenant color #rrggbb or empty; the app adjusts it to keep 4.5:1 contrast"
+          },
+          "csrf_token": {
+            "type": "string",
+            "description": "session callers only: send as X-CSRF-Token on state changes"
+          }
+        }
+      },
+      "SavedViewInput": {
+        "type": "object",
+        "required": [
+          "list",
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "list": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,31}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "sort": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "columns": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "shared": {
+            "type": "boolean",
+            "description": "visible to everybody in the tenant; admins only, audited"
+          }
+        }
+      },
+      "SavedView": {
+        "type": "object",
+        "required": [
+          "id",
+          "list",
+          "name",
+          "query",
+          "sort",
+          "columns",
+          "shared",
+          "owner",
+          "mine",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "list": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "sort": {
+            "type": "string"
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "shared": {
+            "type": "boolean"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "mine": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SavedViewPage": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SavedView"
+            }
+          }
+        }
+      },
+      "SchemaList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "type",
+                "title"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "StatsFleet": {
+        "type": "object",
+        "required": [
+          "total",
+          "online",
+          "status",
+          "agent_versions",
+          "os",
+          "cells",
+          "truncated"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "description": "active devices"
+          },
+          "online": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "agent_versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacetCount"
+            }
+          },
+          "os": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacetCount"
+            }
+          },
+          "cells": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "hostname",
+                "status"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "hostname": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "one per device, worst status first, at most 5000"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "StatsCompliance": {
+        "type": "object",
+        "required": [
+          "score",
+          "reporting",
+          "compliant",
+          "frameworks",
+          "top_failing",
+          "history"
+        ],
+        "properties": {
+          "score": {
+            "type": "number",
+            "description": "percent of reporting devices that pass every check"
+          },
+          "reporting": {
+            "type": "integer"
+          },
+          "compliant": {
+            "type": "integer"
+          },
+          "frameworks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "pass",
+                "fail",
+                "rate"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "enum": [
+                    "bsi",
+                    "cis",
+                    "iso"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "pass": {
+                  "type": "integer"
+                },
+                "fail": {
+                  "type": "integer"
+                },
+                "rate": {
+                  "type": "number",
+                  "description": "percent of passing check results"
+                }
+              }
+            }
+          },
+          "top_failing": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "title",
+                "fail"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "fail": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "history": {
+            "type": "array",
+            "description": "global view only, oldest first",
+            "items": {
+              "type": "object",
+              "required": [
+                "day",
+                "compliant",
+                "noncompliant",
+                "in_grace",
+                "stale",
+                "pending",
+                "score"
+              ],
+              "properties": {
+                "day": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "compliant": {
+                  "type": "integer"
+                },
+                "noncompliant": {
+                  "type": "integer"
+                },
+                "in_grace": {
+                  "type": "integer"
+                },
+                "stale": {
+                  "type": "integer"
+                },
+                "pending": {
+                  "type": "integer"
+                },
+                "score": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        }
+      },
+      "StatsAttention": {
+        "type": "object",
+        "required": [
+          "approvals_pending",
+          "commands_failed_24h",
+          "commands_sent_24h",
+          "noncompliant",
+          "stale",
+          "exceptions_expiring_7d",
+          "last_backup"
+        ],
+        "properties": {
+          "approvals_pending": {
+            "type": "integer"
+          },
+          "commands_failed_24h": {
+            "type": "integer"
+          },
+          "commands_sent_24h": {
+            "type": "integer"
+          },
+          "noncompliant": {
+            "type": "integer"
+          },
+          "stale": {
+            "type": "integer"
+          },
+          "exceptions_expiring_7d": {
+            "type": "integer"
+          },
+          "last_backup": {
+            "description": "global view, admin and auditor only",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "status",
+                  "started_at",
+                  "size",
+                  "error"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string"
+                  },
+                  "started_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "size": {
+                    "type": "integer"
+                  },
+                  "error": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
           }
         }
       }
