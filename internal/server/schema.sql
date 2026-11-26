@@ -402,3 +402,19 @@ END $$;
 DROP TRIGGER IF EXISTS dir_users_tombstone ON dir_users;
 CREATE TRIGGER dir_users_tombstone AFTER INSERT OR UPDATE OF email OR DELETE ON dir_users
     FOR EACH ROW EXECUTE FUNCTION dir_users_tombstone();
+
+-- E1
+-- EAP-TLS device certificates issued by the network CA. No foreign key: a
+-- revoked certificate stays on the CRL until it expires, also when the
+-- device record is gone.
+CREATE TABLE IF NOT EXISTS network_certs (
+    serial        TEXT PRIMARY KEY,
+    device_id     TEXT NOT NULL,
+    subject       TEXT NOT NULL,
+    sans          TEXT NOT NULL DEFAULT '',
+    not_before    TIMESTAMPTZ NOT NULL,
+    not_after     TIMESTAMPTZ NOT NULL,
+    revoked_at    TIMESTAMPTZ,
+    revoke_reason TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS network_certs_device ON network_certs(device_id);

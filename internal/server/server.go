@@ -189,6 +189,7 @@ type Server struct {
 	cfg    Config
 	db     *pgxpool.Pool
 	ca     *deviceCA
+	netCA  *deviceCA          // issues EAP-TLS device certificates (devicecerts.go)
 	cmdKey ed25519.PrivateKey // signs commands (command.key next to the CA)
 	log    *slog.Logger
 	limit  limiter
@@ -257,7 +258,11 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	if err := signExistingItems(ctx, db, cfg.CADir); err != nil {
 		return nil, fmt.Errorf("signing library items: %w", err)
 	}
-	s := &Server{cfg: cfg, db: db, ca: ca, cmdKey: cmdKey, log: log, geoSem: make(chan struct{}, 1)}
+	netCA, err := loadOrCreateNetworkCA(cfg.CADir)
+	if err != nil {
+		return nil, fmt.Errorf("network CA: %w", err)
+	}
+	s := &Server{cfg: cfg, db: db, ca: ca, netCA: netCA, cmdKey: cmdKey, log: log, geoSem: make(chan struct{}, 1)}
 	if err := s.seedConsoleUsers(ctx); err != nil {
 		return nil, err
 	}
@@ -347,6 +352,7 @@ func (s *Server) AgentHandler() http.Handler {
 	mux.HandleFunc("POST /api/v1/renew", s.deviceAuth(s.renew, true))
 	mux.HandleFunc("POST /api/v1/checkin", s.deviceAuth(s.checkin, false))
 	mux.HandleFunc("POST /api/v1/poll", s.deviceAuth(s.poll, false))
+	mux.HandleFunc("POST /api/v1/network-cert", s.deviceAuth(s.deviceLimit(5, s.networkCert), false))
 	mux.HandleFunc("GET /api/v1/agent-packages/{version}/{file}", s.deviceAuth(s.agentPackage, false))
 	mux.HandleFunc("GET /api/v1/catalog/icons/{id}", s.deviceAuth(s.catalogIcon, false))
 	mux.HandleFunc("GET /api/v1/catalog/search", s.deviceAuth(s.deviceLimit(30, s.flathubSearchJSON), false))

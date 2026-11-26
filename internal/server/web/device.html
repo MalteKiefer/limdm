@@ -321,6 +321,21 @@
     <tbody>{{range .Inv.VPNs}}<tr><td>{{.Name}}</td><td class="mono muted">{{.Service}}</td><td class="mono">{{.Interface}}</td><td>{{if .Active}}<span class="pill ok">{{t "active"}}</span>{{else}}<span class="pill">{{t "inactive"}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="4" class="empty">{{t "No VPN client found."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
+{{if .Inv.WireGuardKeys}}<section class="tablecard">
+  <div class="card-head"><h2>{{t "WireGuard keys"}}</h2><span class="muted">{{t "generated on the device; add the public key as a peer on the VPN server"}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Profile"}}</th><th>{{t "Interface"}}</th><th>{{t "Public key"}}</th></tr></thead>
+    <tbody>{{range .Inv.WireGuardKeys}}<tr><td>{{.Profile}}</td><td class="mono">{{.Interface}}</td><td class="mono">{{.PublicKey}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>{{end}}
+{{if .NetCerts}}<section class="tablecard">
+  <div class="card-head"><h2>{{t "Network certificates"}}</h2><a class="muted" href="/network">{{t "Network CA and revocation list"}}</a></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Serial"}}</th><th>{{t "Subject alternative names"}}</th><th>{{t "Issued"}}</th><th>{{t "Expires"}}</th><th>{{t "State"}}</th></tr></thead>
+    <tbody>{{range .NetCerts}}<tr><td class="mono muted">{{.Serial}}</td><td class="mono">{{.SANs}}</td><td>{{fmtTime .NotBefore}}</td><td>{{fmtTime .NotAfter}}</td>
+      <td>{{if eq .State "revoked"}}<span class="pill bad">{{t "revoked"}}</span><span class="sub">{{.Reason}}</span>{{else if eq .State "expired"}}<span class="pill">{{t "expired"}}</span>{{else}}<span class="pill ok">{{t "valid"}}</span>{{end}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>{{end}}
 <div class="grid two">
   <section class="tablecard">
     <div class="card-head"><h2>{{t "DNS"}}</h2></div>

@@ -37,7 +37,13 @@ const (
 )
 
 func loadOrCreateCA(dir string) (*deviceCA, error) {
-	certPath, keyPath := filepath.Join(dir, "ca.crt"), filepath.Join(dir, "ca.key")
+	return loadOrCreateRoot(dir, "ca", "LiMDM Device CA")
+}
+
+// loadOrCreateRoot loads the self signed CA <base>.crt and <base>.key from
+// dir, creating it on first start.
+func loadOrCreateRoot(dir, base, commonName string) (*deviceCA, error) {
+	certPath, keyPath := filepath.Join(dir, base+".crt"), filepath.Join(dir, base+".key")
 	if _, err := os.Stat(certPath); errors.Is(err, os.ErrNotExist) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, err
@@ -47,7 +53,7 @@ func loadOrCreateCA(dir string) (*deviceCA, error) {
 			return nil, err
 		}
 		tmpl := &x509.Certificate{
-			SerialNumber: serial(), Subject: pkix.Name{CommonName: "LiMDM Device CA", Organization: []string{"LiMDM"}},
+			SerialNumber: serial(), Subject: pkix.Name{CommonName: commonName, Organization: []string{"LiMDM"}},
 			NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().AddDate(15, 0, 0),
 			IsCA: true, BasicConstraintsValid: true, MaxPathLenZero: true,
 			KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
@@ -147,25 +153,9 @@ func (ca *deviceCA) serverCert(hosts []string) (tls.Certificate, error) {
 // signCSR issues a client certificate for deviceID. The subject from the CSR
 // is ignored; only the public key is taken, and only strong key types.
 func (ca *deviceCA) signCSR(csrPEM, deviceID string) (certPEM string, serialHex string, notAfter time.Time, err error) {
-	b, _ := pem.Decode([]byte(csrPEM))
-	if b == nil || b.Type != "CERTIFICATE REQUEST" {
-		return "", "", notAfter, errors.New("invalid CSR")
-	}
-	csr, err := x509.ParseCertificateRequest(b.Bytes)
+	csr, err := parseCSR(csrPEM)
 	if err != nil {
 		return "", "", notAfter, err
-	}
-	if err := csr.CheckSignature(); err != nil {
-		return "", "", notAfter, errors.New("CSR signature invalid")
-	}
-	switch k := csr.PublicKey.(type) {
-	case *ecdsa.PublicKey:
-		if k.Curve != elliptic.P256() && k.Curve != elliptic.P384() {
-			return "", "", notAfter, errors.New("unsupported curve")
-		}
-	case ed25519.PublicKey:
-	default:
-		return "", "", notAfter, errors.New("key type must be ECDSA P-256/P-384 or Ed25519")
 	}
 	sn := serial()
 	notAfter = time.Now().Add(deviceCertTTL)
@@ -179,6 +169,32 @@ func (ca *deviceCA) signCSR(csrPEM, deviceID string) (certPEM string, serialHex 
 		return "", "", notAfter, err
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})), sn.Text(16), notAfter, nil
+}
+
+// parseCSR decodes a PEM CSR, checks its signature and accepts only strong
+// key types.
+func parseCSR(csrPEM string) (*x509.CertificateRequest, error) {
+	b, _ := pem.Decode([]byte(csrPEM))
+	if b == nil || b.Type != "CERTIFICATE REQUEST" {
+		return nil, errors.New("invalid CSR")
+	}
+	csr, err := x509.ParseCertificateRequest(b.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	if err := csr.CheckSignature(); err != nil {
+		return nil, errors.New("CSR signature invalid")
+	}
+	switch k := csr.PublicKey.(type) {
+	case *ecdsa.PublicKey:
+		if k.Curve != elliptic.P256() && k.Curve != elliptic.P384() {
+			return nil, errors.New("unsupported curve")
+		}
+	case ed25519.PublicKey:
+	default:
+		return nil, errors.New("key type must be ECDSA P-256/P-384 or Ed25519")
+	}
+	return csr, nil
 }
 
 // loadOrCreateCommandKey is the Ed25519 key commands are signed with. It
