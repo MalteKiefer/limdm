@@ -36,6 +36,13 @@ const (
 
 var reportCadences = []string{"daily", "weekly", "monthly"}
 
+func init() {
+	for a, l := range map[string]string{"report.schedule": "Report scheduled", "report.unschedule": "Report schedule deleted",
+		"report.run": "Scheduled report run", "report.download": "Report downloaded"} {
+		auditActions[a] = l
+	}
+}
+
 func (s *Server) appReportScheduleRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/report-schedules", s.need("audit", s.apiReportSchedules))
 	m.HandleFunc("POST /api/v1/report-schedules", s.need("self", s.apiReportScheduleSave))
@@ -554,7 +561,7 @@ func (s *Server) sendReport(ctx context.Context, tenant int64, name string, run 
 	}
 	for _, c := range chans {
 		if slices.Contains(chanIDs, c.ID) {
-			go s.deliverWithRetry(c, n)
+			go s.deliverWithRetry(c, n) //nolint:gosec // delivery outlives the request, with its own timeouts
 		}
 	}
 	if len(emails) == 0 {
@@ -567,7 +574,7 @@ func (s *Server) sendReport(ctx context.Context, tenant int64, name string, run 
 	}
 	c := chans[i]
 	c.Config.To = emails
-	go s.deliverWithRetry(c, n)
+	go s.deliverWithRetry(c, n) //nolint:gosec // delivery outlives the request, with its own timeouts
 }
 
 // reportLoop runs the due schedules (leader only, Background).

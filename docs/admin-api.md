@@ -173,6 +173,12 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `GET /api/v1/audit/status`, `POST /api/v1/audit/verify` | audit | | `200` first broken entry (0 = intact), last full verification, keyed from, known actions; `verify` checks the whole chain now (audited as `audit.verify`) |
 | `GET /api/v1/compliance/history` | read | `at` (date, default today), `device` | `200` state at the end of the day per device, or per check of one device with its changes |
 | `GET /api/v1/exports/{kind}` | audit | `compliance.csv`, `compliance-history.csv` (`at`, `device`), `inventory.csv`, `packages.csv`, `exceptions.csv`, `audit.csv` and `audit.jsonl` (the audit filters) | the console's evidence exports, audited as `export` and `export.done` with row count and SHA-256 |
+| `GET /api/v1/stats/updates` | read | `days` (1 to 400, default 30) | `200` devices with pending security updates (from the detail of the check `updates.security`), their sum, devices failing it for more than 14 days, devices on the newest approved agent release (else the newest reported); daily history in the global view |
+| `GET /api/v1/stats/annotations` | audit | `days` | `200` key rotations, approved agent releases, blueprint changes and failed backups per day, for the history charts |
+| `GET /api/v1/report-schedules` | audit | | `200` own schedules (admins: all of the tenant view) and the channels a schedule may use |
+| `POST /api/v1/report-schedules` | admin or auditor person, not a token | `{"view_id", "cadence", "channels", "emails"}` | `200` schedule of a saved report (list `reports`); audited as `report.schedule`; see [Scheduled reports](#scheduled-reports) |
+| `DELETE /api/v1/report-schedules/{id}`, `POST .../{id}/run`, `GET .../{id}/runs` | owner, or admin of the tenant view | | `204`, the new run, or the kept runs; audited as `report.unschedule` and `report.run` |
+| `GET /api/v1/report-runs/{id}` | audit | | the file of a run: its owner, or admins and auditors without a device scope in the same or the all tenants view; audited as `report.download` |
 | `GET /api/v1/openapi.json` | none | | the OpenAPI document |
 | `GET /api/v1/docs` | none | | the reference page |
 | `GET /metrics` | metrics | | Prometheus text format, see [Metrics](#metrics) |
@@ -314,3 +320,21 @@ scoped and tenant tokens get `403` (`api.denied`). Setup and alerts:
 | `limdm_audit_chain_intact` | gauge | |
 | `limdm_audit_verified_timestamp_seconds` | gauge | (only after a first verification) |
 | `limdm_http_requests_total` | counter | `listener` (`console`, `agent`), `method`, `code`; per instance |
+
+## Scheduled reports
+
+A saved report preset (a saved view of the list `reports`, query
+`kind=<export>&...`, `days=N` for the last N days) can run daily, weekly on
+Monday or monthly on the first, at 06:00 server time. The leader instance runs
+it as its owner with the role, device scope and tenant the owner has at that
+moment, in the tenant view it was scheduled in, through the same export as the
+console (audited as `export` and `export.done`). An owner who is disabled or no
+longer admin or auditor gets a failed run instead of a file.
+
+The server keeps the last 10 files of a schedule (at most 64 MB each) and sends
+the chosen notification channels a link with the row count and the SHA-256,
+never the file; e-mail addresses go through the first e-mail channel of the
+tenant view. Downloading needs a sign in. Scheduling (`report.schedule`,
+`report.unschedule`), every run (`report.run`, with the recipients) and every
+download (`report.download`) are audited.
+

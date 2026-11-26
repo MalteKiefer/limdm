@@ -1599,5 +1599,9 @@ var deCatalog = map[string]string{
 	"syslog target: udp://host:port, tcp://host:port or tcp+tls://host:port": "Syslog Ziel: udp://host:port, tcp://host:port oder tcp+tls://host:port",
 	"syslog CA: no PEM certificate found":                                    "Syslog CA: kein PEM Zertifikat gefunden",
 	// UI-D
-	"Device event": "Geräteereignis",
+	"Device event":            "Geräteereignis",
+	"Report scheduled":        "Bericht eingeplant",
+	"Report schedule deleted": "Berichtszeitplan gelöscht",
+	"Scheduled report run":    "Geplanter Bericht erzeugt",
+	"Report downloaded":       "Bericht heruntergeladen",
 }
