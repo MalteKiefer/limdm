@@ -182,6 +182,10 @@ func TestAdminAPIManagement(t *testing.T) {
 	if resp, _ = call(created.Token, "POST", "/api/v1/devices/d1/commands", `{"type":"unlock"}`); resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("command without the commands scope: %d", resp.StatusCode)
 	}
+	approver := mkToken("approver", "admin", "admin")
+	if resp, body = call(approver, "POST", "/api/v1/tokens", `{"name":"wider","role":"helpdesk","days":7,"scopes":[]}`); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("a scoped token minted an unscoped one: %d %s", resp.StatusCode, body)
+	}
 	if resp, _ = call(alice, "POST", "/api/v1/tokens", `{"name":"x","role":"admin","days":7,"scopes":["everything"]}`); resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("unknown scope: %d", resp.StatusCode)
 	}

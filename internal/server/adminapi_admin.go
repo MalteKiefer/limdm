@@ -278,6 +278,11 @@ func (s *Server) apiTokenAdd(w http.ResponseWriter, r *http.Request, c apiCaller
 		return
 	}
 	t.ScopeTags = tags
+	// a scoped token cannot mint a token with scopes it does not have
+	if len(c.Scopes) > 0 && (len(t.Scopes) == 0 || slices.ContainsFunc(t.Scopes, func(sc string) bool { return !slices.Contains(c.Scopes, sc) })) {
+		problem(w, http.StatusForbidden, "scopes: a subset of this token's scopes ("+strings.Join(c.Scopes, ", ")+")")
+		return
+	}
 	tok, id, err := s.createAPIToken(r.Context(), c.sess(), t)
 	var pending approvalPending
 	if errors.As(err, &pending) {

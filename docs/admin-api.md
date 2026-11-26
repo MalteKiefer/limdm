@@ -52,7 +52,8 @@ API); without scopes it can do everything its role allows. `read`: the `GET` end
 devices, commands, library items, blueprints and tags; `commands`: send device commands;
 `library`: change library items, blueprints and devices; `audit`: the audit log; `admin`:
 approvals, exceptions, tokens and tenants. A request outside the scopes answers `403` and is
-audited as `api.denied`. Tokens are rotated by creating the successor and deleting the old
+audited as `api.denied`. A token with scopes creates only tokens limited to some of its own
+scopes. Tokens are rotated by creating the successor and deleting the old
 one (`POST` and `DELETE /api/v1/tokens`); they are valid for at most 365 days.
 
 ### Roles
