@@ -726,10 +726,12 @@ func (s *Server) verifyStored(ctx context.Context, id int64, actor string) error
 		return err
 	}
 	var errs []string
+	checked := 0
 	for _, t := range cfg.Targets {
 		if !slices.Contains(targets, t.Name) {
 			continue
 		}
+		checked++
 		err := func() error {
 			st, err := s.openStore(t)
 			if err != nil {
@@ -752,6 +754,9 @@ func (s *Server) verifyStored(ctx context.Context, id int64, actor string) error
 		if err != nil {
 			errs = append(errs, t.Name+": "+err.Error())
 		}
+	}
+	if checked == 0 {
+		errs = append(errs, "no configured target holds the archive")
 	}
 	verr := strings.Join(errs, "; ")
 	action := "backup.verify"

@@ -151,6 +151,12 @@ func TestBackupRestore(t *testing.T) {
 	if err := s.verifyStored(ctx, backupID, "admin"); err != nil {
 		t.Fatal(err)
 	}
+	var verr string
+	var goneID int64
+	s.db.QueryRow(ctx, `INSERT INTO backups(name, sha256, targets, status) VALUES ($1, $2, '{gone}', 'ok') RETURNING id`, res.Name+".gone", res.SHA256).Scan(&goneID)
+	if err := s.verifyStored(ctx, goneID, "admin"); err != nil || s.db.QueryRow(ctx, `SELECT verify_error FROM backups WHERE id=$1`, goneID).Scan(&verr) != nil || verr == "" {
+		t.Fatalf("verified an archive on no configured target: %q %v", verr, err)
+	}
 	// after the backup: d2 is retired (in the audit log only, as after a loss)
 	if err := s.auditAction(ctx, "admin", "device.retire", "d2", "client certificate revoked", func(pgx.Tx) error { return nil }); err != nil {
 		t.Fatal(err)
