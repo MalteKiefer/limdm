@@ -1095,7 +1095,7 @@ func signItem(name, typ string, payload []byte) string {
 	}
 	sig, err := signEd25519(itemKey, api.ItemSigned(name, typ, canonicalJSON(payload)))
 	if err != nil {
-		slog.Error("signing library item", "item", strconv.Quote(name), "err", err) // unsigned: withheld from devices
+		slog.Error("signing library item", "item", logSafe(name), "err", err) // unsigned: withheld from devices
 		return ""
 	}
 	return hex.EncodeToString(sig)

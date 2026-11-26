@@ -875,8 +875,8 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		}
 		var typ string
 		err := tx.QueryRow(ctx, `UPDATE commands SET status=$3, output=$4, updated_at=now(),
-			payload=CASE WHEN type IN ('user_create','user_password') THEN '' ELSE payload END WHERE id=$1 AND device_id=$2 AND status='sent'
-			RETURNING type`, res.ID, id, status, truncate(res.Output, 64<<10)).Scan(&typ)
+			payload=CASE WHEN type = ANY($5) THEN '' ELSE payload END WHERE id=$1 AND device_id=$2 AND status='sent'
+			RETURNING type`, res.ID, id, status, truncate(res.Output, 64<<10), secretCommands).Scan(&typ)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			s.failAPI(w, err)
 			return
@@ -1318,4 +1318,13 @@ func (s *Server) notifyDevice(id string, notices []notice) {
 		}
 		s.notify(n)
 	}
+}
+
+// secretCommands carry a credential in their payload, cleared once the
+// device answered.
+var secretCommands = []string{"user_create", "user_password"}
+
+// logSafe keeps a value on one log line.
+func logSafe(v string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(v, "\n", ""), "\r", "")
 }
