@@ -748,6 +748,7 @@ CREATE TABLE IF NOT EXISTS backups (
     deleted_at         TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS backups_started ON backups(started_at DESC);
+ALTER TABLE backups ADD COLUMN IF NOT EXISTS schedule TEXT NOT NULL DEFAULT '';
 -- the last restore: while window_until lies ahead, a device certificate of
 -- our CA issued after backup_at is pinned again (restoreRepin)
 CREATE TABLE IF NOT EXISTS restore_state (

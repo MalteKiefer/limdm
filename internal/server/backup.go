@@ -48,31 +48,49 @@ var backupSkip = []string{"server_instances", "schema_applied"}
 
 // BackupConfig is the backup setup (settings key "backup").
 type BackupConfig struct {
-	Enabled    bool          `json:"enabled"`
-	Hour       int           `json:"hour"`       // daily run, server local time
-	Recipients []string      `json:"recipients"` // age X25519 public keys (age1...)
-	Daily      int           `json:"daily"`      // GFS: newest backup of this many days,
-	Weekly     int           `json:"weekly"`     // weeks
-	Monthly    int           `json:"monthly"`    // and months stay on every target
-	Targets    []StoreTarget `json:"targets"`
+	Recipients []string         `json:"recipients"`          // age X25519 public keys (age1...)
+	TimeZone   string           `json:"time_zone,omitempty"` // IANA name; empty: server local time
+	Targets    []StoreTarget    `json:"targets"`
+	Schedules  []BackupSchedule `json:"schedules"`
+	// Keep is the retention of archives outside a schedule: manual runs,
+	// runs after key rotations and before upgrades.
+	Keep KeepRule `json:"keep"`
+
+	// the single daily schedule of the first version; backupConfig turns it
+	// into a schedule named daily
+	Enabled bool `json:"enabled,omitempty"`
+	Hour    int  `json:"hour,omitempty"`
+	Daily   int  `json:"daily,omitempty"`
+	Weekly  int  `json:"weekly,omitempty"`
+	Monthly int  `json:"monthly,omitempty"`
 }
 
 func defaultBackupConfig() BackupConfig {
-	return BackupConfig{Hour: 2, Daily: 7, Weekly: 4, Monthly: 12}
+	return BackupConfig{Keep: KeepRule{Last: 3, Daily: 7, Weekly: 4, Monthly: 12}}
+}
+
+// location is the schedule time zone.
+func (c BackupConfig) location() *time.Location {
+	if loc, err := time.LoadLocation(c.TimeZone); err == nil && c.TimeZone != "" {
+		return loc
+	}
+	return time.Local
 }
 
 func (c BackupConfig) validate() error {
-	if c.Hour < 0 || c.Hour > 23 {
-		return errors.New("backup hour: 0 to 23")
+	if c.TimeZone != "" {
+		if _, err := time.LoadLocation(c.TimeZone); err != nil || c.TimeZone == "Local" {
+			return fmt.Errorf("time zone %q: an IANA name such as Europe/Berlin, or empty for the server time", c.TimeZone)
+		}
 	}
-	if c.Daily < 1 || c.Daily > 366 || c.Weekly < 0 || c.Weekly > 520 || c.Monthly < 0 || c.Monthly > 240 {
-		return errors.New("backup retention: 1 to 366 daily, 0 to 520 weekly, 0 to 240 monthly")
-	}
-	if len(c.Recipients) > 10 || len(c.Targets) > 10 {
-		return errors.New("at most 10 recipients and 10 targets")
+	if len(c.Recipients) > 10 || len(c.Targets) > 10 || len(c.Schedules) > 20 {
+		return errors.New("at most 10 recipients, 10 targets and 20 schedules")
 	}
 	if _, err := parseRecipients(c.Recipients); err != nil {
 		return err
+	}
+	if err := c.Keep.validate(); err != nil {
+		return fmt.Errorf("archives outside a schedule: %w", err)
 	}
 	names := map[string]bool{}
 	for _, t := range c.Targets {
@@ -84,8 +102,20 @@ func (c BackupConfig) validate() error {
 		}
 		names[t.Name] = true
 	}
-	if c.Enabled && (len(c.Recipients) == 0 || len(c.Targets) == 0) {
-		return errors.New("scheduled backups need at least one recipient and one target")
+	scheds := map[string]bool{}
+	active := false
+	for _, sc := range c.Schedules {
+		if err := sc.validate(c.Targets); err != nil {
+			return fmt.Errorf("schedule %s: %w", sc.Name, err)
+		}
+		if scheds[sc.Name] {
+			return fmt.Errorf("schedule %q exists twice", sc.Name)
+		}
+		scheds[sc.Name] = true
+		active = active || !sc.Paused
+	}
+	if active && len(c.Recipients) == 0 {
+		return errors.New("active schedules need at least one recipient")
 	}
 	return nil
 }
@@ -112,7 +142,19 @@ func (s *Server) backupConfig(ctx context.Context, q querier) (BackupConfig, err
 	if err != nil {
 		return c, err
 	}
-	return c, json.Unmarshal(raw, &c)
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return c, err
+	}
+	if c.Schedules == nil && (c.Enabled || c.Daily > 0) { // the first version's daily run
+		var targets []string
+		for _, t := range c.Targets {
+			targets = append(targets, t.Name)
+		}
+		c.Schedules = []BackupSchedule{{Name: "daily", Paused: !c.Enabled || len(targets) == 0, Kind: "weekly", Days: []int{0, 1, 2, 3, 4, 5, 6},
+			Times: []string{fmt.Sprintf("%02d:00", c.Hour)}, Targets: targets, Keep: KeepRule{Daily: max(c.Daily, 1), Weekly: c.Weekly, Monthly: c.Monthly}}}
+	}
+	c.Enabled, c.Hour, c.Daily, c.Weekly, c.Monthly = false, 0, 0, 0, 0
+	return c, nil
 }
 
 // backupManifest describes an archive. It lists every other entry with its
@@ -168,38 +210,49 @@ type backupResult struct {
 
 var hostToken = regexp.MustCompile(`[^a-z0-9.-]+`)
 
-// backupName is limdm-<public host>-<UTC time>.lbk.
-func (s *Server) backupName(at time.Time) string {
+// backupName is limdm-<public host>-<UTC time>[-<schedule>].lbk.
+func (s *Server) backupName(at time.Time, schedule string) string {
 	host := "server"
 	if u, err := url.Parse(s.cfg.PublicURL); err == nil && u.Hostname() != "" {
 		host = hostToken.ReplaceAllString(strings.ToLower(u.Hostname()), "-")
 	}
-	return "limdm-" + host + "-" + at.UTC().Format("20060102T150405Z") + backupSuffix
+	name := "limdm-" + host + "-" + at.UTC().Format("20060102T150405Z")
+	if schedule != "" {
+		name += "-" + schedule
+	}
+	return name + backupSuffix
 }
 
-var backupNameRe = regexp.MustCompile(`^limdm-[a-z0-9.-]+-(\d{8}T\d{6}Z)\.lbk$`)
+var backupNameRe = regexp.MustCompile(`^limdm-[a-z0-9.-]+-(\d{8}T\d{6}Z)(?:-([a-z0-9_]{1,32}))?\.lbk$`)
 
-// backupTime reads the time from an archive name.
+// backupTime reads the time and the schedule from an archive name.
 func backupTime(name string) (time.Time, bool) {
+	t, _, ok := parseBackupName(name)
+	return t, ok
+}
+
+func parseBackupName(name string) (time.Time, string, bool) {
 	m := backupNameRe.FindStringSubmatch(name)
 	if m == nil {
-		return time.Time{}, false
+		return time.Time{}, "", false
 	}
 	t, err := time.Parse("20060102T150405Z", m[1])
-	return t, err == nil
+	return t, m[2], err == nil
 }
 
 // runBackup creates an archive, stores it on every target, prunes old
 // archives (GFS), and records and audits the run. A failure notifies.
-func (s *Server) runBackup(ctx context.Context, actor, reason string) (backupResult, error) {
-	res, err := s.backupOnce(ctx, reason)
+// schedule names the schedule whose targets get the archive; "" sends it
+// to every target (manual, key rotation, upgrade).
+func (s *Server) runBackup(ctx context.Context, actor, reason, schedule string) (backupResult, error) {
+	res, err := s.backupOnce(ctx, reason, schedule)
 	status, detail := "ok", fmt.Sprintf("%s reason=%q size=%d sha256=%s targets=%v", res.Name, reason, res.Size, res.SHA256, res.Targets)
 	if err != nil {
 		status, detail = "failed", fmt.Sprintf("%s reason=%q: %v", res.Name, reason, err)
 	}
 	keysHash, _ := s.keysHash()
-	if _, dbErr := s.db.Exec(ctx, `INSERT INTO backups(name, reason, actor, size, sha256, targets, status, error, keys_hash, server_version, started_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())`, res.Name, reason, actor, res.Size, res.SHA256, res.Targets, status, errText(err), keysHash, Version); dbErr != nil {
+	if _, dbErr := s.db.Exec(ctx, `INSERT INTO backups(name, reason, actor, size, sha256, targets, status, error, keys_hash, server_version, started_at, schedule)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now(), $11)`, res.Name, reason, actor, res.Size, res.SHA256, res.Targets, status, errText(err), keysHash, Version, schedule); dbErr != nil {
 		s.log.Error("record backup", "err", dbErr)
 	}
 	action := "backup.create"
@@ -229,7 +282,7 @@ func errText(err error) string {
 	return truncate(err.Error(), 2000)
 }
 
-func (s *Server) backupOnce(ctx context.Context, reason string) (backupResult, error) {
+func (s *Server) backupOnce(ctx context.Context, reason, schedule string) (backupResult, error) {
 	var res backupResult
 	cfg, err := s.backupConfig(ctx, s.db)
 	if err != nil {
@@ -239,7 +292,15 @@ func (s *Server) backupOnce(ctx context.Context, reason string) (backupResult, e
 	if err != nil {
 		return res, err
 	}
-	if len(recipients) == 0 || len(cfg.Targets) == 0 {
+	targets := cfg.Targets
+	if schedule != "" {
+		i := slices.IndexFunc(cfg.Schedules, func(sc BackupSchedule) bool { return sc.Name == schedule })
+		if i < 0 {
+			return res, fmt.Errorf("no schedule %q", schedule)
+		}
+		targets = slices.DeleteFunc(slices.Clone(targets), func(t StoreTarget) bool { return !slices.Contains(cfg.Schedules[i].Targets, t.Name) })
+	}
+	if len(recipients) == 0 || len(targets) == 0 {
 		return res, errors.New("configure at least one age recipient and one target first (Settings, Backup)")
 	}
 	unlock, err := clusterLock(ctx, s.db, lockBackup, 5*time.Second)
@@ -248,7 +309,7 @@ func (s *Server) backupOnce(ctx context.Context, reason string) (backupResult, e
 	}
 	defer unlock()
 	now := time.Now()
-	res.Name = s.backupName(now)
+	res.Name = s.backupName(now, schedule)
 	f, err := os.CreateTemp("", "limdm-backup-*"+backupSuffix)
 	if err != nil {
 		return res, fmt.Errorf("temporary file (set TMPDIR to a writable directory): %w", err)
@@ -260,7 +321,7 @@ func (s *Server) backupOnce(ctx context.Context, reason string) (backupResult, e
 		return res, err
 	}
 	res.Size, res.SHA256 = n, hex.EncodeToString(h.Sum(nil))
-	for _, t := range cfg.Targets {
+	for _, t := range targets {
 		st, err := s.openStore(t)
 		if err == nil {
 			err = st.Put(ctx, res.Name, f.Name())
@@ -551,39 +612,21 @@ func (s *Server) keysHash() (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// gfsKeep decides which archives stay: the newest per day for daily days,
-// per ISO week for weekly weeks and per month for monthly months. times
-// are sorted newest first; the newest archive always stays.
-func gfsKeep(times []time.Time, daily, weekly, monthly int) []bool {
-	keep := make([]bool, len(times))
-	seen := map[string]bool{}
-	counts := map[byte]int{}
-	limit := map[byte]int{'d': daily, 'w': weekly, 'm': monthly}
-	for i, t := range times {
-		t = t.UTC()
-		y, wk := t.ISOWeek()
-		for kind, key := range map[byte]string{'d': t.Format("d2006-01-02"), 'w': fmt.Sprintf("w%d-%02d", y, wk), 'm': t.Format("m2006-01")} {
-			if !seen[key] && counts[kind] < limit[kind] {
-				seen[key] = true
-				counts[kind]++
-				keep[i] = true
-			}
-		}
-	}
-	if len(keep) > 0 {
-		keep[0] = true
-	}
-	return keep
-}
-
-// pruneBackups deletes archives the GFS rule no longer keeps, on every
-// target. An archive under S3 Object Lock cannot be deleted before its
-// retention ends; that is logged and retried at the next run.
+// pruneBackups deletes archives their retention rule no longer keeps, on
+// every target: each schedule's archives by its rule, archives outside a
+// schedule (or of a deleted one) by the general rule. An archive under
+// Object Lock cannot be deleted before its lock ends; that is logged and
+// retried at the next run.
 func (s *Server) pruneBackups(ctx context.Context, actor string) error {
 	cfg, err := s.backupConfig(ctx, s.db)
 	if err != nil {
 		return err
 	}
+	rules := map[string]KeepRule{}
+	for _, sc := range cfg.Schedules {
+		rules[sc.Name] = sc.Keep
+	}
+	loc, now := cfg.location(), time.Now()
 	var errs []error
 	for _, t := range cfg.Targets {
 		st, err := s.openStore(t)
@@ -600,29 +643,39 @@ func (s *Server) pruneBackups(ctx context.Context, actor string) error {
 			name string
 			at   time.Time
 		}
-		var archives []arch
+		groups := map[string][]arch{}
 		for _, o := range list {
-			if at, ok := backupTime(o.Name); ok {
-				archives = append(archives, arch{o.Name, at})
+			if at, sched, ok := parseBackupName(o.Name); ok {
+				if _, known := rules[sched]; !known {
+					sched = ""
+				}
+				groups[sched] = append(groups[sched], arch{o.Name, at})
 			}
-		}
-		slices.SortFunc(archives, func(a, b arch) int { return b.at.Compare(a.at) })
-		times := make([]time.Time, len(archives))
-		for i, a := range archives {
-			times[i] = a.at
 		}
 		var deleted []string
-		for i, keep := range gfsKeep(times, cfg.Daily, cfg.Weekly, cfg.Monthly) {
-			if keep {
-				continue
+		for sched, archives := range groups {
+			rule, ok := rules[sched]
+			if !ok {
+				rule = cfg.Keep
 			}
-			if err := st.Delete(ctx, archives[i].name); err != nil {
-				errs = append(errs, fmt.Errorf("%s: delete %s: %w", t.Name, archives[i].name, err))
-				continue
+			slices.SortFunc(archives, func(a, b arch) int { return b.at.Compare(a.at) })
+			times := make([]time.Time, len(archives))
+			for i, a := range archives {
+				times[i] = a.at
 			}
-			deleted = append(deleted, archives[i].name)
+			for i, keep := range keepArchives(times, rule, now, loc) {
+				if keep {
+					continue
+				}
+				if err := st.Delete(ctx, archives[i].name); err != nil {
+					errs = append(errs, fmt.Errorf("%s: delete %s: %w", t.Name, archives[i].name, err))
+					continue
+				}
+				deleted = append(deleted, archives[i].name)
+			}
 		}
 		if len(deleted) > 0 {
+			slices.Sort(deleted)
 			if err := s.auditAction(ctx, actor, "backup.prune", t.Name, "deleted "+strings.Join(deleted, ", "), func(tx pgx.Tx) error {
 				_, err := tx.Exec(ctx, `UPDATE backups SET deleted_at=now() WHERE name = ANY($1) AND deleted_at IS NULL
 					AND NOT EXISTS (SELECT 1 FROM unnest(targets) t WHERE t <> $2)`, deleted, t.Name)
@@ -709,34 +762,53 @@ func (s *Server) backupLoop(ctx context.Context) {
 
 func (s *Server) backupTick(ctx context.Context, now time.Time) error {
 	cfg, err := s.backupConfig(ctx, s.db)
-	if err != nil || !cfg.Enabled {
+	if err != nil {
 		return err
 	}
-	var lastOK, lastTry *time.Time
+	loc := cfg.location()
+	for _, sc := range cfg.Schedules {
+		if sc.Paused {
+			continue
+		}
+		var lastOK, lastTry *time.Time
+		if err := s.db.QueryRow(ctx, `SELECT (SELECT max(started_at) FROM backups WHERE schedule=$1 AND status='ok'),
+			(SELECT max(started_at) FROM backups WHERE schedule=$1)`, sc.Name).Scan(&lastOK, &lastTry); err != nil {
+			return err
+		}
+		base := sc.Since
+		if lastOK != nil && lastOK.After(base) {
+			base = *lastOK
+		}
+		if base.IsZero() {
+			base = now.Add(-time.Minute) // created before Since existed: from now on
+		}
+		due := sc.next(base, loc)
+		// a failed run is retried an hour later, not every five minutes
+		if due.IsZero() || now.Before(due) || lastTry != nil && !lastTry.Before(due) && now.Sub(*lastTry) < time.Hour {
+			continue
+		}
+		if _, err := s.runBackup(ctx, "system", "schedule "+sc.Name, sc.Name); err != nil {
+			s.log.Error("scheduled backup", "schedule", sc.Name, "err", err)
+		}
+	}
 	var lastKeys *string
-	if err := s.db.QueryRow(ctx, `SELECT (SELECT max(started_at) FROM backups WHERE status='ok'), (SELECT max(started_at) FROM backups),
-		(SELECT keys_hash FROM backups WHERE status='ok' ORDER BY started_at DESC LIMIT 1)`).Scan(&lastOK, &lastTry, &lastKeys); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT keys_hash FROM backups WHERE status='ok' ORDER BY started_at DESC LIMIT 1`).Scan(&lastKeys); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
-	}
-	due := time.Date(now.Year(), now.Month(), now.Day(), cfg.Hour, 0, 0, 0, now.Location())
-	if now.Before(due) {
-		due = due.AddDate(0, 0, -1)
 	}
 	keys, err := s.keysHash()
 	if err != nil {
 		return err
 	}
-	reason := ""
-	switch {
-	case lastOK == nil || lastOK.Before(due):
-		reason = "schedule"
-	case lastKeys != nil && *lastKeys != keys:
-		reason = "key rotation"
-	}
-	// a failed run is retried an hour later, not every five minutes
-	if reason != "" && (lastTry == nil || now.Sub(*lastTry) > time.Hour || lastOK != nil && !lastOK.Before(*lastTry)) {
-		_, err := s.runBackup(ctx, "system", reason)
-		return err
+	if lastKeys != nil && *lastKeys != keys && len(cfg.Recipients) > 0 && len(cfg.Targets) > 0 {
+		var lastTry *time.Time
+		if err := s.db.QueryRow(ctx, `SELECT max(started_at) FROM backups WHERE reason='key rotation'`).Scan(&lastTry); err != nil {
+			return err
+		}
+		if lastTry == nil || now.Sub(*lastTry) > time.Hour {
+			if _, err := s.runBackup(ctx, "system", "key rotation", ""); err != nil {
+				return err
+			}
+		}
 	}
 	var id int64
 	err = s.db.QueryRow(ctx, `SELECT id FROM backups WHERE status='ok' AND deleted_at IS NULL

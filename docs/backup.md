@@ -1,7 +1,8 @@
 # Backup and restore
 
 LiMDM backs itself up: a scheduled job writes an encrypted, signed archive to one or more
-storage targets, keeps a GFS series of archives, verifies them and reports failures. Restores
+storage targets on freely configurable schedules, keeps archives by a retention rule per
+schedule, verifies them and reports failures. Restores
 run on the command line. Point in time recovery of PostgreSQL stays a database task
 ([high-availability.md](high-availability.md#backup)); the archive is the complete, portable
 copy of one moment.
@@ -65,27 +66,77 @@ the schema. For PITR or a dump of the whole cluster, use `pg_dump` or pgBackRest
    remote: /srv/backup`) or point an rclone `serve sftp` / `serve s3` / `serve webdav` at them
    and use the matching target. **Test** writes, reads and deletes a probe object and shows
    whether Object Lock is on.
-3. Set the hour and the GFS counts (default 7 daily, 4 weekly, 12 monthly per target) and
-   switch on the schedule.
+3. Add one or more schedules (below), each with its targets and retention. Without a
+   schedule, backups run only by hand, after key rotations and before upgrades.
 
 The **3-2-1 rule** indicator turns green with two or more targets, one of them not local and
 one with Object Lock: a compromised server or admin account can then not delete the last
 copies.
 
-## Schedule
+## Schedules
 
-The backup job runs on one instance (the leader, like retention and syslog):
+**Settings, Backup, Schedules** creates, edits, pauses, resumes, runs and deletes schedules
+(every change is a `backup.settings` audit entry). Each schedule has a name, its own targets
+and its own retention, and one of four kinds:
 
-| When | Reason in the history |
+| Kind | Settings | Example |
+|---|---|---|
+| Every N hours | 1 to 168 hours, offset in minutes after midnight | every 6 hours at 00:30, 06:30, 12:30, 18:30 |
+| Weekdays at times | weekdays and one or more times of day (HH:MM) | Monday to Friday at 02:00 and 14:00 |
+| Monthly on a day | day 1 to 31 (the last day in shorter months) and times | the 31st at 03:00 runs on 28 or 29 February |
+| Cron expression | five fields: minute, hour, day of month, month, day of week | `30 1 * * 1-5` |
+
+The cron syntax is strict: numbers with `*`, lists (`0,30`), ranges (`1-5`) and steps (`*/15`,
+`8-18/2`); day of week 0 to 7 (0 and 7 are Sunday). Names, `@daily` style shortcuts and
+second fields are refused instead of guessed. With both day fields restricted, a day matches
+when either does (as in cron). The console lists the next five runs of every schedule.
+
+**Time zone.** All schedules use one time zone, an IANA name such as `Europe/Berlin` (default:
+the server's). The image carries its own time zone data. Schedules are computed per local
+date: every date and time of day maps to exactly one instant, so the change to and from
+daylight saving time never runs a slot twice and never skips a day. A time in the spring
+forward gap (02:30 on the last Sunday of March in Europe) runs once, an hour later; a time in
+the repeated hour in autumn runs once. Intervals that divide a day (1, 2, 3, 4, 6, 8, 12, 24
+hours) run at the same local times every day; other intervals (5, 7, 36, 168 hours ...) count
+absolute hours from midnight UTC plus the offset, so their local times drift by an hour at
+DST changes.
+
+**Missed runs and retries.** A run that was due while the server was down runs once when the
+job starts again, not once per missed slot. A failed run is retried after an hour until one
+succeeds or the next slot comes. Paused schedules do not catch up when resumed.
+
+Besides the schedules:
+
+| When | Targets | Reason in the history |
+|---|---|---|
+| a schedule's slot | the schedule's targets | `schedule NAME` |
+| **Run now** of a schedule | the schedule's targets | `manual, schedule NAME` |
+| after every key rotation step (`keys.json` or the audit key files changed) | all targets | `key rotation` |
+| **Back up now** or `limdm-server backup create` | all targets | `manual` |
+| before an upgrade (see below) | all targets | `upgrade` |
+
+Archives carry the schedule in their name (`limdm-HOST-20261126T020000Z-nightly.lbk`);
+runs outside a schedule have none.
+
+## Retention of archives
+
+After every successful run each target is pruned: archives of a schedule by that schedule's
+rule, archives outside a schedule (and of a deleted schedule) by the general rule set next to
+the recipients. A rule combines:
+
+| Part | Keeps |
 |---|---|
-| daily at the set hour; a failed run is retried every hour until one succeeds | `schedule` |
-| after every key rotation step (`keys.json` or the audit key files changed) | `key rotation` |
-| **Back up now** in the console or `limdm-server backup create` | `manual` |
-| before an upgrade (see below) | `upgrade` |
+| Keep last | the newest N archives |
+| Keep for days | every archive younger than D days |
+| Daily, Weekly, Monthly, Yearly | the newest archive of each of the last N days, ISO weeks, months, years that have one (GFS) |
 
-After every successful run, archives the GFS rule no longer keeps are deleted on each target
-(also their personal data: retention in backups ends with the archive, GDPR Art. 17). An
-archive still under Object Lock is kept and deleted at a later run.
+An archive stays when **any** part keeps it, so whichever part keeps more wins; the newest
+archive always stays. Days, weeks, months and years are counted in the schedule time zone.
+The default for archives outside a schedule is keep last 3, 7 daily, 4 weekly, 12 monthly. The
+schedule list shows a preview: how many archives of a simulated year of runs the rule keeps,
+and which ones. Deleting expired archives also deletes their personal data (retention in
+backups ends with the archive, GDPR Art. 17). An archive still under Object Lock is kept and
+deleted at a later run.
 
 Once a week the newest archive is downloaded from every target and compared with the
 recorded SHA-256 (**Checksum verified**); **Verify** does it at once. This needs no private
@@ -113,6 +164,23 @@ The deb and rpm packages do this themselves: their pre install script runs
 the `limdm` user when backups are configured, and stops the upgrade when it fails. Set
 `LIMDM_SKIP_UPGRADE_BACKUP=1` in the environment of the package manager to skip it once.
 With Docker, run the command above before pulling the new image.
+
+## What is set where
+
+Everything about backups, data retention and the package repository is managed in the
+console (**Settings, Backup**, **Settings, Data retention**, **Software, Packages**), except:
+
+| Setting | Where | Why not in the console |
+|---|---|---|
+| `LIMDM_SESSION_KEY` | environment | bootstrap secret; it opens the sealed values the console itself needs |
+| age private key | offline, `-identity` of the CLI | must never reach the server |
+| restore, restore test, verify with decryption | `limdm-server backup` CLI | need the age private key; a restore runs while no console exists |
+| restore window | `restore -window` | belongs to the restore, which runs on the command line |
+| `-replay` file | `restore -replay` | the audit copy is read on the restore host |
+| scheduling `restore-test` | cron or a systemd timer on a host with the age key | the server never holds the key |
+| `LIMDM_ARTIFACT_DIR` | environment | a server file system path; letting the console choose paths for server writes would let an admin account write anywhere the service user may |
+| `TMPDIR` | environment | where the process stages files; a property of the host or container |
+| `LIMDM_SKIP_UPGRADE_BACKUP` | environment of apt or dnf | read by the package script, before the new server exists |
 
 ## Command line
 

@@ -26,7 +26,7 @@ Not configurable:
 | Approval requests | expire after 24 hours; decided requests stay with the audit log |
 | Library item and blueprint versions | forever (append only); they hold configuration, no personal data |
 | Retired devices | until deleted on the device page; the deletion removes events, metrics, commands, recovery keys and app requests |
-| Backups | per target by the GFS counts under **Settings, Backup** ([backup.md](backup.md#schedule)) |
+| Backups | per target by the retention rule of each schedule under **Settings, Backup** ([backup.md](backup.md#retention-of-archives)) |
 
 ## Why the audit log is no longer kept forever
 
@@ -46,7 +46,7 @@ deletion is itself an audit entry ([security.md](security.md#audit-log)). `audit
 ## Retention in backups
 
 Deleting a record does not reach into archives already written. The backup schedule deletes
-archives the GFS counts no longer keep (default: 7 daily, 4 weekly, 12 monthly), so personal
+archives the retention rules no longer keep (keep last, keep for days and GFS counts per schedule), so personal
 data in backups ends at the latest about a year after it was deleted from the database. This
 expiry instead of deleting single records inside archives is the common practice for GDPR
 Art. 17 in backups; document it in the record of processing activities (Art. 30). Archives

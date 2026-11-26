@@ -505,7 +505,7 @@ func BackupCommand(ctx context.Context, log *slog.Logger, args []string, out io.
 				return nil
 			}
 		}
-		res, err := s.runBackup(ctx, actor, *reason)
+		res, err := s.runBackup(ctx, actor, *reason, "")
 		if err != nil {
 			return err
 		}

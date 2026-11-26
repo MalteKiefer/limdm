@@ -273,6 +273,8 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /settings/backup/targets", s.page(s.unscoped(s.backupTargetSave)))
 	mux.HandleFunc("POST /settings/backup/targets/{name}/{op}", s.page(s.unscoped(s.backupTargetOp)))
 	mux.HandleFunc("POST /settings/backup/run", s.page(s.unscoped(s.backupRunNow)))
+	mux.HandleFunc("POST /settings/backup/schedules", s.page(s.unscoped(s.backupScheduleSave)))
+	mux.HandleFunc("POST /settings/backup/schedules/{name}/{op}", s.page(s.unscoped(s.backupScheduleOp)))
 	mux.HandleFunc("POST /settings/backup/{id}/verify", s.page(s.unscoped(s.backupVerifyNow)))
 	mux.HandleFunc("POST /agents/policy", s.page(s.agentsPolicy))
 	mux.HandleFunc("POST /agents/fetch", s.page(s.agentsFetch))

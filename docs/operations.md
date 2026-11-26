@@ -3,9 +3,10 @@
 ## Backup
 
 LiMDM backs up database, CA directory (with `keys.json` and the audit key files) and local
-uploads itself: daily, after every key rotation and before package upgrades, encrypted with
-age, signed with the command key, to local, S3 (with Object Lock) or SFTP targets, with GFS
-expiry, weekly checksum verification and restore tests. Set it up under **Settings, Backup**;
+uploads itself: on configurable schedules, after every key rotation and before package
+upgrades, encrypted with age, signed with the command key, to local, S3 (with Object Lock),
+Backblaze B2, SFTP or WebDAV targets, with retention rules per schedule, weekly checksum
+verification and restore tests. Set it up under **Settings, Backup**;
 the full description is [backup.md](backup.md).
 
 | What | In the archive | Why |

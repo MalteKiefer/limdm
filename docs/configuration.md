@@ -173,8 +173,9 @@ security evidence and a hint on the legal reasoning. Defaults, bounds and the re
 
 ### Backup
 
-Targets (local directory, S3 with Object Lock, SFTP) with a connection test, the daily hour,
-the age recipients, the GFS counts and the history of runs with size, checksum verification
+Targets (local directory, S3 with Object Lock, Backblaze B2, SFTP, WebDAV) with a connection test,
+the age recipients, the time zone, schedules (every N hours, weekdays at times, monthly,
+cron) with their own targets and retention, and the history of runs with size, checksum verification
 and restore test. **Back up now** starts a run. Only global administrators see the tab;
 restores run on the command line ([backup.md](backup.md)).
 

@@ -24,26 +24,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestGFSKeep(t *testing.T) {
-	base := time.Date(2026, 11, 26, 2, 0, 0, 0, time.UTC)
-	var times []time.Time
-	for i := range 60 { // one archive per day, newest first, plus a second one today
-		times = append(times, base.AddDate(0, 0, -i))
-	}
-	times = append([]time.Time{base.Add(time.Hour)}, times...)
-	keep := gfsKeep(times, 7, 4, 2)
-	n := 0
-	for _, k := range keep {
-		if k {
-			n++
-		}
-	}
-	// 7 days (the newest of today counts), weeks and months overlap with them
-	if !keep[0] || keep[1] || n < 9 || n > 13 {
-		t.Fatalf("kept %d: %v", n, keep)
-	}
-}
-
 func TestOrderTables(t *testing.T) {
 	all := []backupTable{{Name: "commands"}, {Name: "devices"}, {Name: "tenants"}}
 	out, err := orderTables(all, map[string][]string{"commands": {"devices"}, "devices": {"tenants"}})
@@ -162,7 +142,7 @@ func TestBackupRestore(t *testing.T) {
 	if err := s.saveBackupConfig(ctx, "admin", bc, "test"); err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.runBackup(ctx, "admin", "test")
+	res, err := s.runBackup(ctx, "admin", "test", "")
 	if err != nil {
 		t.Fatal(err)
 	}

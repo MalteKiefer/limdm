@@ -12,24 +12,23 @@
   <div class="card-head"><h2>{{t "State"}}</h2>
     <form method="post" action="/settings/backup/run">{{template "csrf" .CSRF}}<button class="small">{{t "Back up now"}}</button></form></div>
   <dl class="kv">
-    <dt>{{t "Schedule"}}</dt><dd>{{if .Cfg.Enabled}}{{t "daily at"}} {{.Cfg.Hour}}:00{{else}}<span class="pill warn">{{t "off"}}</span>{{end}}</dd>
+    <dt>{{t "Schedules"}}</dt><dd>{{len .Schedules}}</dd>
+    <dt>{{t "Time zone"}}</dt><dd class="mono">{{.Zone}}</dd>
     <dt>{{t "3-2-1 rule"}}</dt><dd>{{if .Rule321}}<span class="pill ok">{{t "met"}}</span>{{else}}<span class="pill warn">{{t "not met"}}</span> <span class="muted">{{t "two or more targets, one off site, one with S3 Object Lock"}}</span>{{end}}</dd>
   </dl>
+  <p class="muted">{{t "Besides the schedules, a backup runs after every key rotation and before package upgrades; the newest archive is verified weekly."}}</p>
 </section>
 
 <form class="card" method="post" action="/settings/backup">
   {{template "csrf" .CSRF}}
-  <div class="card-head stacked"><h2>{{t "Schedule and encryption"}}</h2><p class="muted">{{t "Archives are encrypted with age to these public keys. Keep the private keys offline (password safe, hardware key); the server never holds them. Two recipients let two people restore independently."}}</p></div>
-  <label class="check"><input type="checkbox" name="enabled" {{if .Cfg.Enabled}}checked{{end}}> {{t "Back up every day, after every key rotation, and verify the newest archive weekly"}}</label>
-  <label>{{t "Hour (server time)"}}<input name="hour" type="number" min="0" max="23" value="{{.Cfg.Hour}}"></label>
+  <div class="card-head stacked"><h2>{{t "Encryption, time zone and general retention"}}</h2><p class="muted">{{t "Archives are encrypted with age to these public keys. Keep the private keys offline (password safe, hardware key); the server never holds them. Two recipients let two people restore independently."}}</p></div>
   <label>{{t "age recipients (public keys, one per line)"}}<textarea name="recipients" rows="3" class="code" placeholder="age1...">{{.Recipients}}</textarea><small class="field-hint">{{t "Create a key pair offline with age-keygen."}}</small></label>
+  <label>{{t "Time zone of the schedules"}}<input name="time_zone" value="{{.Cfg.TimeZone}}" placeholder="Europe/Berlin"><small class="field-hint">{{t "IANA name; empty uses the server time zone. Changes of daylight saving time never run a slot twice."}}</small></label>
   <fieldset class="event-grid">
-    <legend>{{t "Keep archives (per target)"}}</legend>
-    <label>{{t "Daily"}}<input name="daily" type="number" min="1" max="366" value="{{.Cfg.Daily}}"></label>
-    <label>{{t "Weekly"}}<input name="weekly" type="number" min="0" max="520" value="{{.Cfg.Weekly}}"></label>
-    <label>{{t "Monthly"}}<input name="monthly" type="number" min="0" max="240" value="{{.Cfg.Monthly}}"></label>
+    <legend>{{t "Keep archives outside a schedule (manual, key rotation, upgrade)"}}</legend>
+    {{template "keepfields" .Cfg.Keep}}
   </fieldset>
-  <div class="form-foot"><span class="muted">{{t "Older archives are deleted after each run, unless S3 Object Lock still protects them."}}</span><button>{{t "Save"}}</button></div>
+  <div class="form-foot"><span class="muted">{{t "An archive stays when any rule keeps it. Older archives are deleted after each run, unless S3 Object Lock still protects them."}}</span><button>{{t "Save"}}</button></div>
 </form>
 
 <section class="tablecard">
@@ -79,6 +78,58 @@
 </form>
 
 <section class="tablecard">
+  <div class="card-head"><h2>{{t "Schedules"}}</h2></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Name"}}</th><th>{{t "When"}}</th><th>{{t "Targets"}}</th><th>{{t "Next runs"}}</th><th>{{t "Retention preview"}}</th><th></th></tr></thead>
+    <tbody>{{range .Schedules}}<tr>
+      <td class="mono">{{.Name}}{{if .Paused}} <span class="pill warn">{{t "paused"}}</span>{{end}}</td>
+      <td>{{.Describe}}</td>
+      <td>{{join .Targets ", "}}</td>
+      <td class="mono">{{range .Next}}{{.}}<br>{{else}}<span class="muted">{{t "none"}}</span>{{end}}</td>
+      <td>{{.Preview.Kept}} {{t "of"}} {{.Preview.Runs}} {{t "archives of a year"}}{{if .Kept}}<details><summary>{{t "kept"}}</summary><span class="mono">{{join .Kept ", "}}</span></details>{{end}}</td>
+      <td class="actions">
+        <a class="button secondary small" href="/settings/backup?edit={{.Name}}#schedule-form">{{t "Edit"}}</a>
+        <form method="post" action="/settings/backup/schedules/{{.Name}}/run">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Run now"}}</button></form>
+        {{if .Paused}}<form method="post" action="/settings/backup/schedules/{{.Name}}/resume">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Resume"}}</button></form>
+        {{else}}<form method="post" action="/settings/backup/schedules/{{.Name}}/pause">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Pause"}}</button></form>{{end}}
+        <form method="post" action="/settings/backup/schedules/{{.Name}}/delete">{{template "csrf" $.CSRF}}<button class="secondary small" data-confirm="{{t "Delete this schedule? Its archives stay and follow the general retention."}}">{{t "Delete"}}</button></form>
+      </td>
+    </tr>{{else}}<tr><td colspan="6" class="empty">{{t "No schedule yet: backups run only by hand."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+
+<form class="card" id="schedule-form" method="post" action="/settings/backup/schedules">
+  {{template "csrf" .CSRF}}
+  <div class="card-head stacked"><h2>{{t "Add or change a schedule"}}</h2><p class="muted">{{t "Saving with an existing name replaces that schedule. Times are in the time zone above."}}</p></div>
+  <label>{{t "Name"}}<input name="name" required pattern="[a-z0-9_]{1,32}" value="{{.Edit.Name}}" placeholder="nightly"></label>
+  <label>{{t "Kind"}}<select name="kind">
+    <option value="interval" {{if eq .Edit.Kind "interval"}}selected{{end}}>{{t "Every N hours"}}</option>
+    <option value="weekly" {{if eq .Edit.Kind "weekly"}}selected{{end}}>{{t "Weekdays at times"}}</option>
+    <option value="monthly" {{if eq .Edit.Kind "monthly"}}selected{{end}}>{{t "Monthly on a day"}}</option>
+    <option value="cron" {{if eq .Edit.Kind "cron"}}selected{{end}}>{{t "Cron expression"}}</option></select></label>
+  <fieldset><legend>{{t "Every N hours"}}</legend>
+    <label>{{t "Hours (1 to 168)"}}<input name="every" type="number" min="1" max="168" value="{{if .Edit.Every}}{{.Edit.Every}}{{end}}"></label>
+    <label>{{t "Offset (minutes after midnight)"}}<input name="offset" type="number" min="0" max="1439" value="{{.Edit.Offset}}"><small class="field-hint">{{t "Intervals that divide a day run at the same local times every day; others count hours from midnight UTC."}}</small></label>
+  </fieldset>
+  <fieldset><legend>{{t "Weekdays at times"}}, {{t "Monthly on a day"}}</legend>
+    <div class="event-grid">{{range $i, $d := .Weekdays}}<label class="check"><input type="checkbox" name="days" value="{{$i}}" {{range $.Edit.Days}}{{if eq . $i}}checked{{end}}{{end}}> {{t $d}}</label>{{end}}</div>
+    <label>{{t "Times (HH:MM, several separated by spaces)"}}<input name="times" class="code" value="{{join .Edit.Times " "}}" placeholder="02:00 14:00"></label>
+    <label>{{t "Day of month (1 to 31; the last day in shorter months)"}}<input name="day" type="number" min="1" max="31" value="{{if .Edit.Day}}{{.Edit.Day}}{{end}}"></label>
+  </fieldset>
+  <fieldset><legend>{{t "Cron expression"}}</legend>
+    <label>{{t "minute hour day-of-month month day-of-week"}}<input name="cron" class="code" value="{{.Edit.Cron}}" placeholder="30 1 * * 1-5"><small class="field-hint">{{t "Numbers with *, lists, ranges and steps; no names, no @ shortcuts. With both day fields set, either matches."}}</small></label>
+  </fieldset>
+  <fieldset class="event-grid"><legend>{{t "Targets"}}</legend>
+    {{range .Cfg.Targets}}<label class="check"><input type="checkbox" name="targets" value="{{.Name}}" {{if index $.EditTargets .Name}}checked{{end}}> {{.Name}}</label>{{else}}<span class="muted">{{t "No target yet."}}</span>{{end}}
+  </fieldset>
+  <fieldset class="event-grid"><legend>{{t "Retention of this schedule's archives (per target)"}}</legend>
+    {{template "keepfields" .Edit.Keep}}
+  </fieldset>
+  <label class="check"><input type="checkbox" name="paused" {{if .Edit.Paused}}checked{{end}}> {{t "Paused"}}</label>
+  <div class="form-foot"><span class="muted">{{t "The list shows the next five runs and which archives of a simulated year the retention keeps."}}</span><button>{{t "Save schedule"}}</button></div>
+</form>
+
+<section class="tablecard">
   <div class="card-head"><h2>{{t "History"}}</h2></div>
   <div class="scroll"><table>
     <thead><tr><th>{{t "Started"}}</th><th>{{t "Archive"}}</th><th>{{t "Reason"}}</th><th class="num">{{t "Size"}}</th><th>{{t "Targets"}}</th><th>{{t "Result"}}</th><th>{{t "Checksum verified"}}</th><th>{{t "Restore tested"}}</th></tr></thead>
@@ -103,4 +154,12 @@ limdm-server backup restore-test -identity backup.agekey -from TARGET ARCHIVE.lb
   <p class="muted">{{t "Devices that renewed their certificate after the backup are let in again during the restore window (7 days) and audited. Revocations after the backup are applied again from the audit export or syslog copy with -replay."}}</p>
 </section>
 </div>
+{{end}}
+{{define "keepfields"}}
+    <label>{{t "Keep last"}}<input name="keep_last" type="number" min="0" max="3660" value="{{.Last}}"></label>
+    <label>{{t "Keep for days"}}<input name="keep_days" type="number" min="0" max="3660" value="{{.Days}}"></label>
+    <label>{{t "Daily"}}<input name="keep_daily" type="number" min="0" max="3660" value="{{.Daily}}"></label>
+    <label>{{t "Weekly"}}<input name="keep_weekly" type="number" min="0" max="3660" value="{{.Weekly}}"></label>
+    <label>{{t "Monthly"}}<input name="keep_monthly" type="number" min="0" max="3660" value="{{.Monthly}}"></label>
+    <label>{{t "Yearly"}}<input name="keep_yearly" type="number" min="0" max="3660" value="{{.Yearly}}"></label>
 {{end}}
