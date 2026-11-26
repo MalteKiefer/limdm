@@ -298,16 +298,26 @@ Console: **Files**.
 
 Merged by path, a later item wins. Owner and group must exist on the device. Files removed
 from the declaration are deleted from the device: the agent remembers the paths it wrote
-(since 0.16) and removes the undeclared ones, except while a files declaration is invalid.
+(since 0.16) with the SHA-256 sum of their content and removes the undeclared ones, except
+while a files declaration is invalid. It removes a file only when it is still a regular file
+reached without symlinks and its content still matches the sum; a file someone changed, a
+link, or a file written by an agent before the sums existed is left in place and reported as
+kept.
 
 On devices enrolled without `allow_scripts` (the opt in remote scripts need) only plain text
 locations are accepted: `/etc/motd`, `/etc/issue`, `/etc/issue.net`, and files below
 `/etc/motd.d`, `/srv`, `/etc/opt` and `/var/opt`. Everything else is refused, because almost
 every other system path is read as code by something running as root (cron, systemd, sudo,
 PAM, shell profiles, the dynamic linker, D-Bus, package manager hooks …). There the agent
-also refuses files with an execute bit and paths with a symlink in any component, the file
-itself included, so a link cannot redirect the write. With `allow_scripts` any allowed
-absolute path works.
+also refuses files with an execute bit. With `allow_scripts` any allowed absolute path works.
+
+On every device, with or without `allow_scripts`, a path with a symlink in any component,
+the file itself included, is refused, so a local user who owns a parent directory cannot
+redirect the write, owner change or removal (declare the real path, for example
+`/usr/bin/x` instead of `/bin/x` on merged `/usr` systems). The agent opens each directory
+from `/` with `O_NOFOLLOW`, writes a temporary file in the opened directory, sets mode and
+owner on the open file and renames it in place, so swapping a directory for a link between
+check and write has no effect.
 
 ### `com.limdm.certificates` (list)
 
