@@ -360,7 +360,10 @@ func placeStaged(staged, dir string) error {
 // restoreRepin lets a device in whose certificate is newer than the
 // restored backup: while the restore window is open, a certificate of our
 // CA (verifyDevice checked the chain) issued after the backup becomes the
-// device's pinned certificate. Retired and unknown devices stay out.
+// device's pinned certificate. Retired and unknown devices stay out. Only
+// a certificate that outlives the pinned one replaces it, so an older
+// certificate of the same device (a stolen one, say) cannot take the pin
+// back from the newest one.
 func (s *Server) restoreRepin(ctx context.Context, id string, leaf *x509.Certificate) bool {
 	var backupAt time.Time
 	if err := s.db.QueryRow(ctx, `SELECT backup_at FROM restore_state WHERE window_until > now()`).Scan(&backupAt); err != nil {
@@ -375,7 +378,7 @@ func (s *Server) restoreRepin(ctx context.Context, id string, leaf *x509.Certifi
 	err := s.auditAction(ctx, "device:"+id, "device.cert_repin", id,
 		fmt.Sprintf("certificate %s issued %s, after the restored backup of %s, pinned during the restore window", serial, leaf.NotBefore.UTC().Format(time.RFC3339), backupAt.UTC().Format(time.RFC3339)),
 		func(tx pgx.Tx) error {
-			tag, err := tx.Exec(ctx, `UPDATE devices SET cert_serial=$2, cert_not_after=$3, pending_serial=NULL, pending_not_after=NULL WHERE id=$1 AND NOT retired`,
+			tag, err := tx.Exec(ctx, `UPDATE devices SET cert_serial=$2, cert_not_after=$3, pending_serial=NULL, pending_not_after=NULL WHERE id=$1 AND NOT retired AND cert_not_after < $3`,
 				id, serial, leaf.NotAfter)
 			if err == nil && tag.RowsAffected() == 0 {
 				err = pgx.ErrNoRows

@@ -221,6 +221,11 @@ func TestBackupRestore(t *testing.T) {
 	if !rs.restoreRepin(ctx, "d1", newer) || rs.db.QueryRow(ctx, `SELECT cert_serial FROM devices WHERE id='d1'`).Scan(&serial) != nil || serial != newer.SerialNumber.Text(16) {
 		t.Fatal("renewed certificate not pinned")
 	}
+	superseded := cert(time.Now().Add(-6 * time.Minute))
+	superseded.NotAfter = newer.NotAfter.Add(-time.Minute)
+	if rs.restoreRepin(ctx, "d1", superseded) {
+		t.Fatal("a certificate older than the pinned one took the pin back")
+	}
 	applied, manual, err := rs.replay(ctx, "admin", m.AuditHead.ID, []replayEntry{{ID: 1, Action: "device.retire", Target: "d1"},
 		{ID: retireID, Action: "device.retire", Target: "d2"}, {ID: retireID + 1, Action: "user.update", Target: "x"}})
 	var retired bool
