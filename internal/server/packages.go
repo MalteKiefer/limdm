@@ -297,11 +297,28 @@ func (s *Server) packageUpload(w http.ResponseWriter, r *http.Request, sess sess
 	}
 	filename := filepath.Base(hdr.Filename)
 	detail := fmt.Sprintf("%s %s kind=%s size=%d sha256=%s file=%q", name, version, kind, size, sha, truncate(filename, 200))
+	errQuota := errors.New("quota")
 	err = s.auditAction(ctx, sess.Email, "artifact.upload", sha, detail, func(tx pgx.Tx) error {
+		// the check above runs before the slow store write; parallel
+		// uploads of a tenant are counted again here, one at a time
+		// (two key lock space, apart from the cluster locks)
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7371, $1::int)`, tenant); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT coalesce(sum(size), 0), count(*) FROM artifacts WHERE tenant_id=$1`, tenant).Scan(&usedBytes, &count); err != nil {
+			return err
+		}
+		if usedBytes+size > int64(cfg.QuotaMB)<<20 || count+1 > int64(cfg.QuotaCount) {
+			return errQuota
+		}
 		_, err := tx.Exec(ctx, `INSERT INTO artifacts(tenant_id, sha256, name, version, kind, filename, size, store, uploaded_by, approved_by)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, tenant, sha, name, version, kind, truncate(filename, 200), size, store, sess.Email, approver)
 		return err
 	})
+	if errors.Is(err, errQuota) {
+		fail(fmt.Sprintf("The package quota of this tenant (%d MiB, %d files) would be exceeded.", cfg.QuotaMB, cfg.QuotaCount))
+		return
+	}
 	if err != nil {
 		s.fail(w, err)
 		return
