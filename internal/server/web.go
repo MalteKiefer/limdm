@@ -455,33 +455,56 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 // mode, wipe) stay single device actions; scripts need the admin role
 // (commandPayload).
 func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
 	if err := r.ParseForm(); err != nil {
 		s.errorPage(w, r, sess, http.StatusBadRequest, "bad form")
 		return
 	}
-	ids := slices.Compact(slices.Sorted(slices.Values(r.Form["id"])))
-	if len(ids) == 0 || len(ids) > 1000 {
-		s.errorPage(w, r, sess, http.StatusBadRequest, "select 1 to 1000 devices")
+	approvals, err := s.bulkAction(r, sess, r.Form["id"], r.FormValue("action"))
+	if code, msg := errStatus(err); code != 0 {
+		s.errorPage(w, r, sess, code, msg)
 		return
+	} else if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if approvals > 0 {
+		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+		return
+	}
+	// back to the list with its filters; only the query is taken over
+	back := "/devices"
+	if u, err := url.Parse(r.FormValue("back")); err == nil && u.Path == "/devices" && len(u.Query()) > 0 {
+		back += "?" + u.Query().Encode()
+	}
+	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
+// bulkAction runs one action ("command:<type>", "agent-update", "tag-add",
+// "tag-remove") on 1 to 1000 devices of the caller's scope, with the form
+// fields of r as parameters (tag, payload, reason, ...). Commands that need
+// four eyes become one approval request per device; their count is
+// returned. Refusals are userErrors. The console list and the admin API
+// share it.
+func (s *Server) bulkAction(r *http.Request, sess session, ids []string, action string) (int, error) {
+	ctx := r.Context()
+	ids = slices.Compact(slices.Sorted(slices.Values(ids)))
+	if len(ids) == 0 || len(ids) > 1000 {
+		return 0, &userError{http.StatusBadRequest, "select 1 to 1000 devices"}
 	}
 	var known int
 	cond, sargs := scopeCond(sess, 1)
 	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM devices d WHERE d.id = ANY($1) AND NOT d.retired AND `+cond, append([]any{ids}, sargs...)...).Scan(&known); err != nil || known != len(ids) {
-		s.errorPage(w, r, sess, http.StatusBadRequest, "unknown or retired device selected")
-		return
+		return 0, &userError{http.StatusBadRequest, "unknown or retired device selected"}
 	}
-	op, typ, _ := strings.Cut(r.FormValue("action"), ":")
+	op, typ, _ := strings.Cut(action, ":")
 	switch op {
 	case "tag-add", "tag-remove":
 		if sess.Role != "admin" {
-			s.errorPage(w, r, sess, http.StatusForbidden, "this action requires the admin role")
-			return
+			return 0, &userError{http.StatusForbidden, "this action requires the admin role"}
 		}
 		tags, err := parseTags(r.FormValue("tag"))
 		if err != nil || len(tags) != 1 {
-			s.errorPage(w, r, sess, http.StatusBadRequest, "one tag: up to 32 letters, digits, dot, dash, underscore")
-			return
+			return 0, &userError{http.StatusBadRequest, "one tag: up to 32 letters, digits, dot, dash, underscore"}
 		}
 		sql := `UPDATE devices SET tags = array_append(tags, $2) WHERE id = $1 AND NOT $2 = ANY(tags)`
 		if op == "tag-remove" {
@@ -492,61 +515,47 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 				_, err := tx.Exec(ctx, sql, id, tags[0])
 				return err
 			}); err != nil {
-				s.fail(w, err)
-				return
+				return 0, err
 			}
 		}
 	case "agent-update":
 		if sess.Role != "admin" {
-			s.errorPage(w, r, sess, http.StatusForbidden, "this action requires the admin role")
-			return
+			return 0, &userError{http.StatusForbidden, "this action requires the admin role"}
 		}
 		for _, id := range ids {
 			if err := s.auditAction(ctx, sess.Email, "agent_update.request", id, "", func(tx pgx.Tx) error {
 				_, err := tx.Exec(ctx, `UPDATE devices SET update_requested=true, update_target='' WHERE id=$1`, id)
 				return err
 			}); err != nil {
-				s.fail(w, err)
-				return
+				return 0, err
 			}
 		}
 	case "command":
 		if typ == "lost" || typ == "wipe" {
-			s.errorPage(w, r, sess, http.StatusBadRequest, "lost mode and wipe are sent to one device at a time")
-			return
+			return 0, &userError{http.StatusBadRequest, "lost mode and wipe are sent to one device at a time"}
 		}
 		payload, code, msg := s.commandPayload(r, sess, ids[0], typ)
 		if code != 0 {
-			s.errorPage(w, r, sess, code, msg)
-			return
+			return 0, &userError{code, msg}
 		}
 		if s.needsApproval(typ) { // bulk scripts: one four eyes request per device
 			for _, id := range ids {
 				if _, err := s.requestApproval(ctx, sess, "command", id, commandApproval{Type: typ, Payload: payload}, strings.TrimSpace(r.FormValue("reason"))); err != nil {
-					s.fail(w, err)
-					return
+					return 0, err
 				}
 			}
-			http.Redirect(w, r, "/approvals", http.StatusSeeOther)
-			return
+			return len(ids), nil
 		}
 		for _, id := range ids {
 			if err := s.queueCommand(ctx, sess.Email, id, typ, payload); err != nil {
-				s.fail(w, err)
-				return
+				return 0, err
 			}
 			s.notifyCommand(sess.Email, id, typ)
 		}
 	default:
-		s.errorPage(w, r, sess, http.StatusBadRequest, "unknown action")
-		return
+		return 0, &userError{http.StatusBadRequest, "unknown action"}
 	}
-	// back to the list with its filters; only the query is taken over
-	back := "/devices"
-	if u, err := url.Parse(r.FormValue("back")); err == nil && u.Path == "/devices" && len(u.Query()) > 0 {
-		back += "?" + u.Query().Encode()
-	}
-	http.Redirect(w, r, back, http.StatusSeeOther)
+	return 0, nil
 }
 
 // overview is the landing page: fleet state, OS mix, weakest controls, recent activity.
@@ -1235,17 +1244,22 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 
 func (s *Server) deviceRetire(w http.ResponseWriter, r *http.Request, sess session) {
 	id := r.PathValue("id")
-	err := s.auditAction(r.Context(), sess.Email, "device.retire", id, "client certificate revoked", func(tx pgx.Tx) error {
-		if _, err := tx.Exec(r.Context(), `UPDATE devices SET retired=true, cert_serial='', pending_serial=NULL WHERE id=$1`, id); err != nil {
-			return err
-		}
-		return revokeNetworkCerts(r.Context(), tx, id, "retired")
-	})
-	if err != nil {
+	if err := s.retireDevice(r.Context(), sess.Email, id); err != nil {
 		s.fail(w, err)
 		return
 	}
 	http.Redirect(w, r, "/devices/"+id, http.StatusSeeOther)
+}
+
+// retireDevice ends the management of a device: its client certificate and
+// network certificates are revoked, its history stays.
+func (s *Server) retireDevice(ctx context.Context, actor, id string) error {
+	return s.auditAction(ctx, actor, "device.retire", id, "client certificate revoked", func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE devices SET retired=true, cert_serial='', pending_serial=NULL WHERE id=$1`, id); err != nil {
+			return err
+		}
+		return revokeNetworkCerts(ctx, tx, id, "retired")
+	})
 }
 
 // ---- enrollment tokens ----
