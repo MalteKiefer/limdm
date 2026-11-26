@@ -143,6 +143,9 @@ func auditCmd(args []string) error {
 		if err != nil {
 			return err
 		}
+		if n == 0 {
+			return errors.New("no entries in the file")
+		}
 		if broken != 0 {
 			return fmt.Errorf("chain broken at entry %d (%d entries read)", broken, n)
 		}
