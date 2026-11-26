@@ -17,6 +17,10 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    ignore:
+      # v9 changes the table API the console data grid uses; migrate on purpose
+      - dependency-name: "@tanstack/react-table"
+        update-types: ["version-update:semver-major"]
     groups:
       npm:
         patterns: ["*"]
