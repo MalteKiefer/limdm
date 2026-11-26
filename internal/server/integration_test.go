@@ -834,6 +834,21 @@ func TestIntegration(t *testing.T) {
 	if code, body := ui("GET", "/software/packages", nil, adminSess); code != 200 || !strings.Contains(body, "Upload") {
 		t.Fatalf("packages page: %d", code)
 	}
+	// the handlers check the role themselves, not only the route wrappers
+	for _, who := range []session{{Email: "hd@firma.de", Role: "helpdesk"}, {Email: "au@firma.de", Role: "auditor"}, {Email: "ta@firma.de", Role: "admin", Tenant: 2}} {
+		for name, h := range map[string]handler{"store": s.packagesSettings, "settings": s.settingsSave, "backup": s.backupSave, "schedule": s.backupScheduleSave,
+			"upload": s.packageUpload, "delete": s.packageDelete, "run": s.backupRunNow, "target": s.backupTargetSave} {
+			if (name == "upload" || name == "delete") && who.Role == "admin" {
+				continue // tenant admins manage their own packages
+			}
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest("POST", "/x", strings.NewReader("store=s3&section=retention"))
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			if h(w, r, who); w.Code != http.StatusForbidden {
+				t.Errorf("%s by %s (tenant %d): %d", name, who.Role, who.Tenant, w.Code)
+			}
+		}
+	}
 	if _, body := ui("POST", "/settings", url.Values{"section": {"general"}, "stale_hours": {"48"}, "local_login": {"on"}}, adminSess); !strings.Contains(body, "Settings saved") {
 		t.Fatalf("general settings not saved: %s", body)
 	}

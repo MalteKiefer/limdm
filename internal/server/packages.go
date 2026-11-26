@@ -213,6 +213,10 @@ func (s *Server) renderPackages(w http.ResponseWriter, r *http.Request, sess ses
 // checks, then the store, the row and the audit entry. With four eyes on,
 // the upload is usable only after another admin approved it.
 func (s *Server) packageUpload(w http.ResponseWriter, r *http.Request, sess session) {
+	if sess.Role != "admin" { // also checked by page; uploads install as root
+		s.errorPage(w, r, sess, http.StatusForbidden, "your role cannot change this")
+		return
+	}
 	ctx := r.Context()
 	fail := func(msg string) { s.renderPackages(w, r, sess, "", msg) }
 	cfg, err := s.packageConfig(ctx)
@@ -314,6 +318,10 @@ func (s *Server) packageUpload(w http.ResponseWriter, r *http.Request, sess sess
 
 // packageDelete removes an upload no library item references.
 func (s *Server) packageDelete(w http.ResponseWriter, r *http.Request, sess session) {
+	if sess.Role != "admin" { // also checked by page; tenantCond below limits to own artifacts
+		s.errorPage(w, r, sess, http.StatusForbidden, "your role cannot change this")
+		return
+	}
 	ctx := r.Context()
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	tcond, targs := tenantCond(sess, "tenant_id", 1)
@@ -350,6 +358,10 @@ func (s *Server) packageDelete(w http.ResponseWriter, r *http.Request, sess sess
 
 // packagesSettings saves the limits and the store (global admins).
 func (s *Server) packagesSettings(w http.ResponseWriter, r *http.Request, sess session) {
+	if !backupAdmin(sess) { // the store and its credentials serve every tenant
+		s.errorPage(w, r, sess, http.StatusForbidden, "the package store is managed by global administrators")
+		return
+	}
 	ctx := r.Context()
 	cur, err := s.packageConfig(ctx)
 	if err != nil {

@@ -519,6 +519,10 @@ var settingsTabLabels = []struct{ Key, Label string }{
 }
 
 func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess session) {
+	if !backupAdmin(sess) { // server settings are global; tenants save their channels elsewhere
+		s.errorPage(w, r, sess, http.StatusForbidden, "settings are managed by global administrators")
+		return
+	}
 	ctx := r.Context()
 	// held from reading the current settings to storing them: two tabs saved
 	// at once must not overwrite each other, nor leave runtime and database apart
