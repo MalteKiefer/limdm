@@ -89,6 +89,8 @@ type apiMeInfo struct {
 	DateFormat  string       `json:"date_format"`
 	StaleHours  int          `json:"stale_hours"`
 	Version     string       `json:"version"`
+	CompanyName string       `json:"company_name"` // branding of the tenant or the installation
+	Accent      string       `json:"accent"`       // tenant color (#rrggbb) or empty; the app guards its contrast
 	CSRFToken   string       `json:"csrf_token,omitempty"`
 }
 
@@ -121,6 +123,11 @@ func (s *Server) apiMe(w http.ResponseWriter, r *http.Request, c apiCaller) {
 		DateFormat: requestDateFormat(r), StaleHours: s.settings().StaleHours, Version: Version}
 	if c.Sess != nil {
 		me.CSRFToken = s.csrfToken(*c.Sess)
+	}
+	b, color := s.tenantBrand(r.Context(), s.db, sess.Tenant)
+	me.CompanyName = b.Name
+	if colorRe.MatchString(color) {
+		me.Accent = color
 	}
 	if sess.Tenant != 0 {
 		t := apiMeTenant{ID: sess.Tenant}

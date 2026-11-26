@@ -3293,7 +3293,9 @@
           "locale",
           "date_format",
           "stale_hours",
-          "version"
+          "version",
+          "company_name",
+          "accent"
         ],
         "properties": {
           "login": {
@@ -3387,6 +3389,13 @@
           },
           "version": {
             "type": "string"
+          },
+          "company_name": {
+            "type": "string"
+          },
+          "accent": {
+            "type": "string",
+            "description": "tenant color #rrggbb or empty; the app adjusts it to keep 4.5:1 contrast"
           },
           "csrf_token": {
             "type": "string",
