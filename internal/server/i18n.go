@@ -787,4 +787,13 @@ var deCatalog = map[string]string{
 	"Report schedule deleted": "Berichtszeitplan gelöscht",
 	"Scheduled report run":    "Geplanter Bericht erzeugt",
 	"Report downloaded":       "Bericht heruntergeladen",
+	// R3-P
+	"Update ring saved":                              "Updatering gespeichert",
+	"Update ring deleted":                            "Updatering gelöscht",
+	"Update ring paused":                             "Updatering angehalten",
+	"Update ring resumed":                            "Updatering fortgesetzt",
+	"Update ring approved":                           "Updatering freigegeben",
+	"Update wave started":                            "Updatewelle gestartet",
+	"Update wave reached ring":                       "Updatewelle hat Ring erreicht",
+	"No security update pending longer than allowed": "Kein Sicherheitsupdate länger als erlaubt ausstehend",
 }

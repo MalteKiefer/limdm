@@ -931,3 +931,35 @@ CREATE TABLE IF NOT EXISTS blueprint_pilots (
     PRIMARY KEY (pilot_id, device_id)
 );
 CREATE INDEX IF NOT EXISTS blueprint_pilots_blueprint ON blueprint_pilots(blueprint_id);
+
+-- R3-P
+-- update rings (app_patch.go): ordered per tenant; a wave starts at the
+-- first ring and reaches ring N once it is deferral_days old, the ring
+-- before has it and nothing is paused (or approved, with require_approval)
+CREATE TABLE IF NOT EXISTS update_rings (
+    id               BIGSERIAL PRIMARY KEY,
+    tenant_id        BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id) ON DELETE CASCADE,
+    name             TEXT NOT NULL,
+    position         INT NOT NULL,
+    deferral_days    INT NOT NULL DEFAULT 0,
+    wave_days        INT NOT NULL DEFAULT 0,
+    paused           BOOLEAN NOT NULL DEFAULT false,
+    require_approval BOOLEAN NOT NULL DEFAULT false,
+    approved_wave    INT NOT NULL DEFAULT 0,
+    all_devices      BOOLEAN NOT NULL DEFAULT false,
+    tags             TEXT[] NOT NULL DEFAULT '{}',
+    groups           TEXT[] NOT NULL DEFAULT '{}',
+    blueprints       BIGINT[] NOT NULL DEFAULT '{}',
+    wave             INT NOT NULL DEFAULT 0,
+    wave_at          TIMESTAMPTZ,
+    UNIQUE (tenant_id, name)
+);
+CREATE TABLE IF NOT EXISTS update_waves (
+    tenant_id  BIGINT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    wave       INT NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_by TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, wave)
+);
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS update_ring_id BIGINT REFERENCES update_rings(id) ON DELETE SET NULL;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS updates JSONB;
