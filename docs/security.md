@@ -367,8 +367,16 @@ Failed local and OIDC sign ins and rejected enrollments are logged with the clie
 
 * **Diagnostics.** Log bundles (the **Collect logs** command) are redacted on the device
   before they leave it, capped at 512 KiB, kept for the newest 10 per device and only
-  downloadable by admins and the helpdesk; each download is audited. Redaction is pattern
-  based: review a bundle before passing it on outside IT.
+  downloadable by admins and the helpdesk; each download is audited. Redaction masks
+  private keys, `key=value` pairs with secret names (password, token, secret, API key,
+  preshared key, cookie and others), `Authorization` and `Proxy-Authorization` values,
+  bearer, basic and token credentials, user info and token query parameters in URLs
+  (`key`, `sig`, `code`, `access_token`, signed URL parameters), JWTs, GitHub, GitLab,
+  Slack, AWS and `sk-` keys, recovery keys, and the user fields of failed logins (pam_unix
+  `user=`, `ruser=`, `logname=`, sshd `invalid user`, `Failed password for`, `login`
+  `FOR '...'`, sudo `password for [...]`), because users often type their password into
+  the user name field. Redaction is pattern based: review a bundle before passing it on
+  outside IT.
 
 * By default the agent reports everything, including IP addresses, DNS, routes and logged
   in users. `com.limdm.privacy` switches items off per blueprint.
