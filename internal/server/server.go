@@ -894,9 +894,11 @@ func (s *Server) checkinSlot(w http.ResponseWriter, r *http.Request) (release fu
 			<-c
 		}
 	}
+	// a big check in takes its big slot first: waiting for it while holding
+	// a general slot would starve the small check ins (same order for all)
 	sems := []chan struct{}{s.checkins.get()}
 	if r.ContentLength < 0 || r.ContentLength > 1<<20 {
-		sems = append(sems, s.bigCheckins.get())
+		sems = []chan struct{}{s.bigCheckins.get(), s.checkins.get()}
 	}
 	t := time.NewTimer(checkinWait)
 	defer t.Stop()
