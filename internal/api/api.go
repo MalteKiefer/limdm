@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/netip"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -151,12 +150,73 @@ type File struct {
 	Mode    string `json:"mode"`            // octal, default 0644
 	Owner   string `json:"owner,omitempty"` // user name, default root
 	Group   string `json:"group,omitempty"` // group name, default root
+	// Template renders Content per device on the server (TemplateVars). A
+	// file still marked when it reaches the agent could not be rendered and
+	// is left as it is.
+	Template bool `json:"template,omitempty"`
 }
 
 type Firewall struct {
 	Enforce bool           `json:"enforce"`
 	Allow   []string       `json:"allow"`           // "22/tcp", "60000:61000/udp"
 	Rules   []FirewallRule `json:"rules,omitempty"` // allow rules limited to source networks
+	// Zones open ports for traffic from given interfaces or networks only:
+	// firewalld zones, ufw and nftables rules matching interface and source.
+	Zones []FirewallZone `json:"zones,omitempty"`
+	// Outbound filters traffic the device sends; nil leaves it alone.
+	Outbound *FirewallOutbound `json:"outbound,omitempty"`
+	// Template renders every rule text per device on the server
+	// (TemplateVars). A payload still marked when it reaches the agent could
+	// not be rendered; the agent then leaves the firewall as it is.
+	Template bool `json:"template,omitempty"`
+}
+
+// FirewallZone binds interfaces and source networks to a zone and opens
+// ports in it.
+type FirewallZone struct {
+	Name       string   `json:"name"`                 // firewalld zone, for example internal or trusted
+	Interfaces []string `json:"interfaces,omitempty"` // for example wg0
+	Sources    []string `json:"sources,omitempty"`    // CIDR or address
+	Allow      []string `json:"allow,omitempty"`      // ports as in Firewall.Allow
+}
+
+// FirewallOutbound is the policy for traffic the device sends. With policy
+// deny only the listed destinations, DNS, DHCP and the LiMDM server are
+// reachable.
+type FirewallOutbound struct {
+	Policy string           `json:"policy"` // allow | deny
+	Allow  []FirewallEgress `json:"allow,omitempty"`
+}
+
+// FirewallEgress allows traffic to a destination, a port or both.
+type FirewallEgress struct {
+	To   string `json:"to,omitempty"`   // CIDR or address, empty is any
+	Port string `json:"port,omitempty"` // as in Firewall.Allow, empty is any
+}
+
+// Walk calls fn for every rule text of f (what a template can fill).
+func (f *Firewall) Walk(fn func(*string)) {
+	for i := range f.Allow {
+		fn(&f.Allow[i])
+	}
+	for i := range f.Rules {
+		fn(&f.Rules[i].Port)
+		fn(&f.Rules[i].From)
+	}
+	for i := range f.Zones {
+		z := &f.Zones[i]
+		for _, l := range [][]string{z.Interfaces, z.Sources, z.Allow} {
+			for j := range l {
+				fn(&l[j])
+			}
+		}
+	}
+	if f.Outbound != nil {
+		for i := range f.Outbound.Allow {
+			fn(&f.Outbound.Allow[i].To)
+			fn(&f.Outbound.Allow[i].Port)
+		}
+	}
 }
 
 // FirewallRule allows a port only from a source network.
@@ -374,6 +434,11 @@ func (d Declaration) apply(p *Policy) error {
 			if _, err := f.FileMode(); err != nil {
 				bad("file %s: %v", f.Path, err)
 			}
+			if f.Template {
+				if _, err := ParseTemplate(f.Content); err != nil {
+					bad("file %s: template: %v", f.Path, err)
+				}
+			}
 			if userWritable(f.Path) {
 				bad("file %s: directories writable by users cannot be managed (symlink attacks)", f.Path)
 			}
@@ -388,21 +453,7 @@ func (d Declaration) apply(p *Policy) error {
 		if err := strict(d.Payload, &p.Firewall); err != nil {
 			return err
 		}
-		for _, a := range p.Firewall.Allow {
-			if !validPortRule(a) {
-				bad("invalid firewall rule %q (port 1..65535, ranges low:high)", a)
-			}
-		}
-		for _, r := range p.Firewall.Rules {
-			if !validPortRule(r.Port) {
-				bad("invalid firewall rule %q (port 1..65535, ranges low:high)", r.Port)
-			}
-			if _, err := netip.ParsePrefix(r.From); err != nil {
-				if _, err := netip.ParseAddr(r.From); err != nil || strings.Contains(r.From, "%") {
-					bad("firewall rule %s: from must be a network (CIDR) or an address, got %q", r.Port, r.From)
-				}
-			}
-		}
+		errs = append(errs, p.Firewall.validate()...)
 	case TypeOSVersion:
 		var v osPayload
 		if err := strict(d.Payload, &v); err != nil {

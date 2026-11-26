@@ -73,6 +73,10 @@ func (a *Agent) applyFiles(files []api.File) {
 			continue
 		}
 		written = append(written, f.Path)
+		if f.Template { // the server could not render it for this device: keep what is there
+			a.problem(api.TypeFiles, "file %s: template could not be rendered on the server (see the preview in the console)", f.Path)
+			continue
+		}
 		if changed, err := writeManagedFile(f); err != nil {
 			a.problem(api.TypeFiles, "file %s: %v", f.Path, err)
 		} else {
