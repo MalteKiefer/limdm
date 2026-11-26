@@ -113,9 +113,21 @@ way with `"type": "device.tamper"` and a `detail` field.
 
 ## Evidence
 
-* **Evidence CSV** (`/export/compliance.csv`): every check result per device.
-* **Inventory CSV** and **Audit CSV** for asset management and audits.
-* The audit log is append only and hash chained; the audit page verifies the chain
+* **Evidence CSV** (`/export/compliance.csv`): every current check result per device with
+  agent version, catalog version, CIS benchmark and the generation time.
+* **Compliance history** (Compliance page, **History**): devices report only changes, and
+  the server stores every change of a check result (`compliance_changes`, 365 days; the
+  last state before the cutoff is kept, so the state at any date stays known). The page
+  shows the state of all devices, or of one device with its changes, at the end of a chosen
+  day; **Report as CSV** (`/export/compliance-history.csv?at=YYYY-MM-DD&device=ID`) has the
+  same data with the time each state began. Devices that reported before the history
+  existed start with their last report as baseline.
+* **Inventory CSV**, **Audit CSV** and the audit **JSON Lines** export for asset management
+  and audits.
+* Every export writes two audit entries: `export` before (who, which file, which filter)
+  and `export.done` after, with the row count and the SHA-256 of exactly the file sent, so a
+  file handed to an auditor can be matched to its entry.
+* The audit log is append only and keyed hash chained; it can be verified outside LiMDM
   ([security.md](security.md#audit-log)).
 
 CSV exports neutralise formula injection.

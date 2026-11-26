@@ -54,6 +54,21 @@ A blueprint can inherit from a parent. The parent's map is evaluated first, then
 child's. An item selected twice counts at its last position, so a child can override
 inherited single value items.
 
+### Versions and preview
+
+Every save of a library item or blueprint is kept as a version: author, time, payload and,
+for items, the signature. The **Version history** link in the editor lists the versions
+and shows a line diff between any two. **Roll back** saves an older version again as the
+newest one; it is validated, signed and audited (`library.rollback`, `blueprint.rollback`)
+like any save. A deleted object keeps its last version: the library and blueprint pages
+list deleted objects, and **Restore** brings one back under its old ID (blueprints that
+inherited from a deleted blueprint and devices assigned to it are not reassigned). The
+version tables are append only.
+
+The editor saves in two steps: **Review changes** shows the diff against the stored
+version and the active devices that get the change (devices whose blueprint, or a
+blueprint inheriting from it, uses the item), then **Save** stores it.
+
 ### Which blueprint a device gets
 
 Every device has exactly one blueprint:
