@@ -95,7 +95,7 @@ func NeedsDeviceCert(profiles []NetworkProfile) bool {
 
 // SecretMask stands for a stored secret in the console. Saving it back keeps
 // the stored value.
-const SecretMask = "••••••"
+const SecretMask = "••••••" //nolint:gosec // a placeholder, not a credential
 
 var (
 	ifNameRe   = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,15}$`)
@@ -149,7 +149,7 @@ func (p NetworkProfile) Validate() error {
 			printable := len(psk) >= 8 && len(psk) <= 63 && strings.IndexFunc(psk, func(r rune) bool { return r < 0x20 || r > 0x7e }) < 0
 			if psk == SecretMask {
 				bad("the masked pre shared key has no stored value, enter it again")
-			} else if !printable && !(hex64 && p.Security == "wpa2-personal") {
+			} else if !printable && (!hex64 || p.Security != "wpa2-personal") {
 				bad("psk must be 8 to 63 printable ASCII characters (wpa2-personal also takes 64 hex digits)")
 			}
 			if p.EAP != nil {
