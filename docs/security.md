@@ -3,7 +3,12 @@
 ## Agent channel
 
 * **mTLS only, TLS 1.3.** The server runs its own device CA (ECDSA P-384). The agent
-  creates its key locally (P-256) and only sends a certificate signing request. It pins the
+  creates its key locally (P-256), inside the TPM 2.0 when there is one, and only sends a
+  certificate signing request. A TPM bound key is attested at enrollment (TPM2_Certify by an
+  attestation key, credential activation with the endorsement key) and can be required per
+  tenant ([agent.md](agent.md#tpm-bound-device-key)).
+* **Enrollment tokens** allow at most 500 uses and 30 days (lower limits in **Settings**,
+  **Enrollment**); every use is audited with the token it used. It pins the
   CA by SHA-256 fingerprint at enrollment and trusts nothing else afterwards, no system
   CAs. A TLS terminating proxy cannot sit in between.
 * **Revocation without CRLs:** the server accepts only the certificate serial currently

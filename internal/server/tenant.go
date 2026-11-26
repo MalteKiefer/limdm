@@ -159,11 +159,12 @@ type tenant struct {
 	Color       string
 	Devices     int
 	CreatedAt   time.Time
+	RequireTPM  bool // enrollment refused without a TPM bound key (tpmattest.go)
 }
 
 func (s *Server) tenantList(ctx context.Context) ([]tenant, error) {
 	rows, err := s.db.Query(ctx, `SELECT t.id, t.name, t.disabled, t.company_name, length(t.logo) > 0, t.color,
-		(SELECT count(*) FROM devices d WHERE d.tenant_id=t.id AND NOT d.retired)::int, t.created_at FROM tenants t ORDER BY t.id`)
+		(SELECT count(*) FROM devices d WHERE d.tenant_id=t.id AND NOT d.retired)::int, t.created_at, t.require_tpm FROM tenants t ORDER BY t.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -216,8 +217,8 @@ func (s *Server) loadTenantFor(ctx context.Context, sess session, id int64) (ten
 		return tenant{}, notFound
 	}
 	var t tenant
-	err := s.db.QueryRow(ctx, `SELECT id, name, disabled, company_name, length(logo) > 0, color, 0, created_at FROM tenants WHERE id=$1`, id).
-		Scan(&t.ID, &t.Name, &t.Disabled, &t.CompanyName, &t.HasLogo, &t.Color, &t.Devices, &t.CreatedAt)
+	err := s.db.QueryRow(ctx, `SELECT id, name, disabled, company_name, length(logo) > 0, color, 0, created_at, require_tpm FROM tenants WHERE id=$1`, id).
+		Scan(&t.ID, &t.Name, &t.Disabled, &t.CompanyName, &t.HasLogo, &t.Color, &t.Devices, &t.CreatedAt, &t.RequireTPM)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return tenant{}, notFound
 	}
@@ -239,6 +240,9 @@ func (s *Server) updateTenant(ctx context.Context, sess session, t, in tenant, l
 		t.Name = name
 		t.Disabled = in.Disabled && t.ID != defaultTenant
 	}
+	if sess.Super || in.RequireTPM { // a tenant's own admins may only make it stricter
+		t.RequireTPM = in.RequireTPM
+	}
 	t.CompanyName = strings.TrimSpace(in.CompanyName)
 	t.Color = strings.ToLower(strings.TrimSpace(in.Color))
 	if t.Color == "#0f6e6e" { // the color picker's default: keep the console colors
@@ -255,10 +259,10 @@ func (s *Server) updateTenant(ctx context.Context, sess session, t, in tenant, l
 			return &userError{http.StatusUnprocessableEntity, err.Error()}
 		}
 	}
-	detail := fmt.Sprintf("name=%q disabled=%v company=%q color=%q logo_bytes=%d keep_logo=%v", t.Name, t.Disabled, t.CompanyName, t.Color, len(logo), keepLogo)
+	detail := fmt.Sprintf("name=%q disabled=%v company=%q color=%q logo_bytes=%d keep_logo=%v require_tpm=%v", t.Name, t.Disabled, t.CompanyName, t.Color, len(logo), keepLogo, t.RequireTPM)
 	err := s.auditAction(ctx, sess.Email, "tenant.update", strconv.FormatInt(t.ID, 10), detail, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE tenants SET name=$2, disabled=$3, company_name=$4, color=$5, logo=CASE WHEN $7 THEN logo ELSE $6 END WHERE id=$1`,
-			t.ID, t.Name, t.Disabled, t.CompanyName, t.Color, logo, keepLogo)
+		_, err := tx.Exec(ctx, `UPDATE tenants SET name=$2, disabled=$3, company_name=$4, color=$5, logo=CASE WHEN $7 THEN logo ELSE $6 END, require_tpm=$8 WHERE id=$1`,
+			t.ID, t.Name, t.Disabled, t.CompanyName, t.Color, logo, keepLogo, t.RequireTPM)
 		return err
 	})
 	if isUnique(err) {

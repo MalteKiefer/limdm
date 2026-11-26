@@ -621,15 +621,48 @@ type EnrollRequest struct {
 	CSR       string `json:"csr"` // PEM, key generated on the device and never leaves it
 	Hostname  string `json:"hostname"`
 	MachineID string `json:"machine_id"`
+	// TPM is set when the key of the CSR lives in the device's TPM 2.0.
+	TPM *TPMEvidence `json:"tpm,omitempty"`
+}
+
+// TPMEvidence shows that a key is held by a TPM 2.0 and cannot leave it.
+// All fields are TPM wire structures (TPMT_PUBLIC, TPMS_ATTEST,
+// TPMT_SIGNATURE). The attestation key (AK) certifies the key with
+// TPM2_Certify; the endorsement key (EK) proves through credential
+// activation that the AK sits in the same TPM.
+type TPMEvidence struct {
+	EKPublic    []byte `json:"ek_public,omitempty"` // enrollment only
+	AKPublic    []byte `json:"ak_public"`
+	KeyPublic   []byte `json:"key_public"`
+	CertifyInfo []byte `json:"certify_info"`
+	CertifySig  []byte `json:"certify_signature"`
+	// Activated is the credential the TPM decrypted from TPMChallenge; set
+	// in the second enrollment request.
+	Activated []byte `json:"activated,omitempty"`
+}
+
+// TPMChallenge is TPM2_MakeCredential output for the EK and AK of the
+// evidence: only that TPM can decrypt it (TPM2_ActivateCredential).
+type TPMChallenge struct {
+	Credential []byte `json:"credential"`
+	Secret     []byte `json:"secret"`
 }
 
 type EnrollResponse struct {
 	DeviceID string `json:"device_id"`
 	Cert     string `json:"cert"` // PEM client certificate, CN = device ID
+	// TPMChallenge answers a first enrollment request with TPM evidence:
+	// no certificate yet, the agent sends the request again with the
+	// activated credential.
+	TPMChallenge *TPMChallenge `json:"tpm_challenge,omitempty"`
+	TPMBound     bool          `json:"tpm_bound,omitempty"` // the server accepted the key as TPM bound
 }
 
 type RenewRequest struct {
 	CSR string `json:"csr"`
+	// TPM is set when the new key lives in the TPM; it is certified by the
+	// attestation key the server pinned at enrollment (no EK, no challenge).
+	TPM *TPMEvidence `json:"tpm,omitempty"`
 }
 
 // ---- status channel ----

@@ -115,8 +115,9 @@ An index of all documents is in [docs/README.md](docs/README.md).
   (BSI Standard 300-1) need review by an information security officer.
 * Official CIS Benchmarks exist for Ubuntu and Debian; Fedora uses the RHEL
   recommendations as reference.
-* Server keys can live in a PKCS#11 HSM only with the separate `-tags pkcs11` build; agent
-  keys are files (the TPM binds LUKS volumes, not the device key).
+* Server keys can live in a PKCS#11 HSM only with the separate `-tags pkcs11` build. Agent
+  keys live in the TPM 2.0 when one exists, else in a file; the TPM attestation does not check
+  the EK certificate against vendor roots ([agent.md](docs/agent.md#tpm-bound-device-key)).
 * The client secret of the desktop login declaration is sealed on the server but stored in
   plain text on the device (0600, root only).
 * SUSE support, TPM binding and printers are not yet verified on real SUSE, TPM and CUPS

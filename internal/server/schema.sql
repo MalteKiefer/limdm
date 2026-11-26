@@ -937,3 +937,9 @@ CREATE INDEX IF NOT EXISTS blueprint_pilots_blueprint ON blueprint_pilots(bluepr
 -- tokens are cut down to these limits once
 UPDATE enroll_tokens SET uses_left = LEAST(uses_left, 500), expires_at = LEAST(expires_at, now() + interval '30 days')
     WHERE uses_left > 500 OR expires_at > now() + interval '30 days';
+-- TPM bound device keys (tpmattest.go): the attestation key pinned at
+-- enrollment and the SHA-256 of the endorsement key's public area
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS tpm_bound BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS tpm_ak BYTEA;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS tpm_ek_sha256 TEXT NOT NULL DEFAULT '';
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS require_tpm BOOLEAN NOT NULL DEFAULT false;

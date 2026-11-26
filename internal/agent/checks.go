@@ -36,7 +36,7 @@ type check struct {
 // CatalogVersion identifies the check catalog and its framework mapping. It
 // is reported with every result; raise it whenever a check, its level or a
 // reference changes, so evidence can be tied to the mapping it was made with.
-const CatalogVersion = "2026.11.1"
+const CatalogVersion = "2026.11.2"
 
 // cisBenchmark is the benchmark edition the CIS recommendation numbers refer
 // to. The titles are shared by the Debian and RHEL family benchmarks, whose
@@ -126,6 +126,9 @@ var catalog = []check{
 	{ID: "disk.tpm", Title: "LUKS volumes are bound to the TPM", Level: 1,
 		Refs: refs(l(bsiCrypto, bsiClient), l("A.8.24", "A.7.10")),
 		Run:  runTPMBinding},
+	{ID: "agent.tpm_key", Title: "Device key is held in the TPM", Level: 2,
+		Refs: refs(l(bsiCrypto, bsiCryptoAlgo), l("A.8.24", "A.5.17")),
+		Run:  runTPMKey},
 	{ID: "boot.password", Title: "Boot loader is password protected", Level: 1,
 		Refs: refs(l(bsiClient, bsiLinux), l("A.8.2", "A.8.9"), "1.4.1 Ensure bootloader password is set", "1.4.2 Ensure access to bootloader config is configured"),
 		Run:  runBootPassword},
