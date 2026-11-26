@@ -10,8 +10,8 @@
 <body>
 {{if .Sess.Email}}
 <div class="shell">
-  <aside class="side">
-    <div class="brand">{{if .Brand.Logo}}<img src="/branding/logo.png?v={{.Brand.V}}" alt="">{{else}}<img src="/static/logo.svg" alt="">{{end}} {{if .Brand.Name}}{{.Brand.Name}}{{else}}{{t "LiMDM"}}{{end}}</div>
+  <aside class="side" id="side">
+    <div class="brand"><button type="button" class="nav-toggle" aria-expanded="false" aria-controls="side" data-nav-toggle aria-label="{{t "Menu"}}"><span aria-hidden="true">☰</span></button>{{if .Brand.Logo}}<img src="/branding/logo.png?v={{.Brand.V}}" alt="">{{else}}<img src="/static/logo.svg" alt="">{{end}} {{if .Brand.Name}}{{.Brand.Name}}{{else}}{{t "LiMDM"}}{{end}}</div>
     <nav class="nav" aria-label="{{t "Main"}}">
       <a href="/" {{if eq .Page "overview"}}class="on" aria-current="page"{{end}}>{{t "Overview"}}</a>
       <a href="/devices" {{if or (eq .Page "devices") (eq .Page "device")}}class="on" aria-current="page"{{end}}>{{t "Devices"}}</a>

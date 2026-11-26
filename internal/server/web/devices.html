@@ -50,7 +50,7 @@
 </form>
 
 <div class="tablecard"><div class="scroll"><table>
-  <thead><tr><th class="sel"><input type="checkbox" data-select-all="bulk" aria-label="{{t "Select all"}}"></th><th>{{t "Device"}}</th><th>{{t "Status"}}</th><th class="num">{{t "Failing"}}</th><th>{{t "System"}}</th><th>{{t "Memory"}}</th><th>{{t "Blueprint"}}</th><th>{{t "Agent"}}</th><th>{{t "Last seen"}}</th></tr></thead>
+  <thead><tr><th class="sel"><input type="checkbox" data-select-all="bulk" aria-label="{{t "Select all"}}"></th><th>{{t "Device"}}</th><th>{{t "Status"}}</th><th class="num">{{t "Failing"}}</th><th class="wide-only">{{t "System"}}</th><th class="wide-only">{{t "Memory"}}</th><th class="wide-only">{{t "Blueprint"}}</th><th class="wide-only">{{t "Agent"}}</th><th>{{t "Last seen"}}</th></tr></thead>
   <tbody>
   {{range .Devices}}
   <tr>
@@ -58,10 +58,10 @@
     <td><a class="rowlink" href="/devices/{{.ID}}">{{.Hostname}}</a><span class="sub mono">{{.ID}}</span>{{if .Tags}}<span class="tagrow">{{range .Tags}}<a class="tag" href="/devices?tag={{.}}">#{{.}}</a>{{end}}</span>{{end}}</td>
     <td><span class="pill {{.Class}}" title="{{statusHelp .Status}}">{{t .Status}}</span></td>
     <td class="num">{{if .Failing}}<span class="pill fail">{{.Failing}}</span>{{else}}<span class="muted">0</span>{{end}}</td>
-    <td>{{.OS}}{{if .Desktop}}<span class="sub">{{.Desktop}}</span>{{end}}</td>
-    <td>{{gib .MemoryMB}}</td>
-    <td><a href="/devices?blueprint={{.Blueprints}}">{{.Blueprints}}</a></td>
-    <td class="mono"><a href="/devices?agent={{.AgentVersion}}">{{.AgentVersion}}</a></td>
+    <td class="wide-only">{{.OS}}{{if .Desktop}}<span class="sub">{{.Desktop}}</span>{{end}}</td>
+    <td class="wide-only">{{gib .MemoryMB}}</td>
+    <td class="wide-only"><a href="/devices?blueprint={{.Blueprints}}">{{.Blueprints}}</a></td>
+    <td class="mono wide-only"><a href="/devices?agent={{.AgentVersion}}">{{.AgentVersion}}</a></td>
     <td>{{ago .LastSeen}}</td>
   </tr>
   {{else}}<tr><td colspan="9" class="empty">{{if .Filter}}{{t "No devices match this filter."}}{{else if .Total}}{{t "No devices match."}}{{else}}{{t "No devices enrolled yet. Create an enrollment token and install the agent with it."}}{{if eq $.Sess.Role "admin"}}<div class="empty-action"><a class="button" href="/tokens">{{t "Enroll device"}}</a></div>{{end}}{{end}}</td></tr>{{end}}

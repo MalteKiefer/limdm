@@ -1073,4 +1073,5 @@ var deCatalog = map[string]string{
 	"One URL that receives signed JSON when a device becomes non-compliant, independent of the channels above.":                                                                                                      "Eine URL, die signiertes JSON erhält, wenn ein Gerät nicht konform wird, unabhängig von den Kanälen oben.",
 	"Two ways to hear about events: notification channels send the events you choose to Slack, Discord, email or a signed webhook; the compliance webhook posts every device that becomes non-compliant to one URL.": "Zwei Wege, von Ereignissen zu erfahren: Benachrichtigungskanäle senden die gewählten Ereignisse an Slack, Discord, E-Mail oder einen signierten Webhook; der Compliance Webhook meldet jedes Gerät, das nicht konform wird, an eine URL.",
 	"Notifications": "Benachrichtigungen",
+	"Menu":          "Menü",
 }

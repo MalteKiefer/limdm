@@ -50,6 +50,12 @@
       }
       return;
     }
+    const navToggle = t.closest('[data-nav-toggle]');
+    if (navToggle) {
+      const side = document.getElementById(navToggle.getAttribute('aria-controls'));
+      navToggle.setAttribute('aria-expanded', String(side.classList.toggle('open')));
+      return;
+    }
     const close = t.closest('[data-close]');
     if (close) { close.closest('dialog')?.close(); return; }
 
@@ -276,6 +282,30 @@
     }
     out.append(frag);
   };
+
+  // action menus: arrow keys move between the entries, Home and End jump,
+  // Escape closes the menu and returns to its button
+  const menuItems = (menu) => [...menu.querySelectorAll('[role=menuitem], .sub-head')].filter((i) => i.offsetParent !== null);
+  document.addEventListener('keydown', (e) => {
+    const menu = e.target.closest && e.target.closest('details.menu');
+    if (!menu || !['ArrowDown', 'ArrowUp', 'Home', 'End', 'Escape'].includes(e.key)) return;
+    if (e.target.matches('input, textarea, select')) return;
+    const summary = menu.querySelector('summary');
+    if (e.key === 'Escape') {
+      if (menu.open) { e.preventDefault(); menu.removeAttribute('open'); summary.focus(); }
+      return;
+    }
+    e.preventDefault();
+    if (!menu.open) menu.setAttribute('open', '');
+    const items = menuItems(menu);
+    if (!items.length) return;
+    const i = items.indexOf(document.activeElement);
+    let n = 0;
+    if (e.key === 'End') n = items.length - 1;
+    else if (e.key === 'ArrowDown') n = i < 0 ? 0 : (i + 1) % items.length;
+    else if (e.key === 'ArrowUp') n = i < 0 ? items.length - 1 : (i - 1 + items.length) % items.length;
+    items[n].focus();
+  });
 
   // Enter in a field with data-enter submits with that field's own button,
   // not with the form's first one ("Sync now" in the bulk bar)

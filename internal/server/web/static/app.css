@@ -621,3 +621,14 @@ a.lvl { color: inherit; text-decoration: underline dotted var(--line-strong); te
 .onboarding li.done a { color: var(--text-2); }
 .onboarding form { margin: 0; }
 .empty-action { margin-top: 10px; }
+/* ---- phones: the sidebar opens from a menu button (without JavaScript it stays open) ---- */
+.nav-toggle { display: none; }
+@media (max-width: 860px) {
+  .js .nav-toggle { display: inline-grid; place-items: center; width: 36px; height: 36px; padding: 0; margin-right: 4px; font-size: 18px;
+    background: transparent; border: 1px solid var(--nav-line); color: var(--nav-active); }
+  .js .side:not(.open) .nav, .js .side:not(.open) .who { display: none; }
+  .js .side.open .nav { flex-direction: column; }
+  .js .side.open .nav .group { display: block; }
+  .brand { padding: 12px 16px; }
+  .wide-only { display: none; }
+}
