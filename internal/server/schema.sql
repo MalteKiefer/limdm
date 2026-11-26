@@ -716,3 +716,43 @@ BEGIN
     END IF;
     RAISE EXCEPTION '% is append only', TG_TABLE_NAME;
 END $$;
+-- L
+-- Allowed states and references, checked for new and changed rows. NOT VALID:
+-- adding them does not scan the tables, and existing rows are not checked.
+DO $$
+BEGIN
+    ALTER TABLE commands ADD CONSTRAINT commands_status_check
+        CHECK (status IN ('pending', 'sent', 'ok', 'failed', 'expired')) NOT VALID;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$
+BEGIN
+    ALTER TABLE approvals ADD CONSTRAINT approvals_status_check
+        CHECK (status IN ('pending', 'approved', 'rejected', 'expired', 'used')) NOT VALID;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$
+BEGIN
+    ALTER TABLE catalog_requests ADD CONSTRAINT catalog_requests_status_check
+        CHECK (status IN ('pending', 'approved', 'denied')) NOT VALID;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$
+BEGIN
+    ALTER TABLE devices ADD CONSTRAINT devices_update_state_check
+        CHECK (update_state IN ('', 'offered', 'ok', 'failed', 'rolled_back')) NOT VALID;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+-- results and sessions outlive the retention of their command
+DO $$
+BEGIN
+    ALTER TABLE script_results ADD CONSTRAINT script_results_command_fk
+        FOREIGN KEY (command_id) REFERENCES commands(id) ON DELETE SET NULL NOT VALID;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$
+BEGIN
+    ALTER TABLE shell_sessions ADD CONSTRAINT shell_sessions_command_fk
+        FOREIGN KEY (command_id) REFERENCES commands(id) ON DELETE SET NULL NOT VALID;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;

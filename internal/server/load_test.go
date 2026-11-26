@@ -171,6 +171,37 @@ func TestMigrateUnchangedTakesNoLock(t *testing.T) {
 	}
 }
 
+func TestStatusConstraints(t *testing.T) {
+	db := loadTestDB(t, 2)
+	ctx := context.Background()
+	if _, err := db.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname) VALUES ('d1','s',now(),'a')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO commands(device_id, type, status, created_by) VALUES ('d1', 'lock', 'done', 'a')`,
+		`UPDATE devices SET update_state='installing'`,
+		`INSERT INTO script_results(device_id, command_id, exit_code, started_at, ended_at) VALUES ('d1', 424242, 0, now(), now())`,
+	} {
+		if _, err := db.Exec(ctx, q); err == nil {
+			t.Errorf("accepted: %s", q)
+		}
+	}
+	var cmd int64
+	if err := db.QueryRow(ctx, `INSERT INTO commands(device_id, type, status, created_by) VALUES ('d1', 'script', 'ok', 'a') RETURNING id`).Scan(&cmd); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO script_results(device_id, command_id, exit_code, started_at, ended_at) VALUES ('d1', $1, 0, now(), now())`, cmd); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, `DELETE FROM commands`); err != nil { // retention: the result stays
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM script_results WHERE command_id IS NULL`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("result after its command was pruned: %d %v", n, err)
+	}
+}
+
 func TestRolloutOffset(t *testing.T) {
 	spread := 24 * time.Hour
 	if rolloutOffset("d1", "1.0.0", spread) != rolloutOffset("d1", "1.0.0", spread) {
