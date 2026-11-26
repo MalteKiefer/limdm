@@ -13,8 +13,6 @@ import (
 	"log/slog"
 	"math/big"
 	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -261,15 +259,13 @@ func TestWithDatabase(t *testing.T) {
 func TestTargetSecretStaysWithHost(t *testing.T) {
 	s := &Server{}
 	prev := &StoreTarget{Name: "dav", Kind: "webdav", Endpoint: "https://dav.example.com", SecretEnc: "sealed"}
-	form := func(endpoint string) *http.Request {
-		r := httptest.NewRequest("POST", "/", strings.NewReader(url.Values{"endpoint": {endpoint}}.Encode()))
-		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		return r
+	form := func(endpoint string) targetInput {
+		return targetInput{StoreTarget: StoreTarget{Name: "dav", Kind: "webdav", Endpoint: endpoint, SecretEnc: "forged"}}
 	}
-	if tg, err := s.targetFromForm(form("https://dav.example.com"), "dav", "webdav", prev); err != nil || tg.SecretEnc != "sealed" {
+	if tg, err := s.target(form("https://dav.example.com"), prev); err != nil || tg.SecretEnc != "sealed" {
 		t.Fatalf("secret lost on an unchanged target: %v", err)
 	}
-	if tg, err := s.targetFromForm(form("https://evil.example.net"), "dav", "webdav", prev); err != nil || tg.SecretEnc != "" {
+	if tg, err := s.target(form("https://evil.example.net"), prev); err != nil || tg.SecretEnc != "" {
 		t.Fatalf("stored secret kept for another host: %v", err)
 	}
 }

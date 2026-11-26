@@ -268,19 +268,23 @@ func (s *Server) tenantShared(w http.ResponseWriter, r *http.Request, sess sessi
 		}
 		return out
 	}
-	bps, items := ids("blueprint"), ids("item")
-	err := s.auditAction(ctx, sess.Email, "tenant.shared", "", fmt.Sprintf("blueprints=%v items=%v", bps, items), func(tx pgx.Tx) error {
+	if err := s.setShared(ctx, sess, ids("blueprint"), ids("item")); err != nil {
+		s.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/tenants", http.StatusSeeOther)
+}
+
+// setShared sets which blueprints and library items of the default tenant
+// every tenant may read and use.
+func (s *Server) setShared(ctx context.Context, sess session, bps, items []int64) error {
+	return s.auditAction(ctx, sess.Email, "tenant.shared", "", fmt.Sprintf("blueprints=%v items=%v", bps, items), func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE blueprints SET shared = (id = ANY($1)) WHERE tenant_id=1`, bps); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `UPDATE library_items SET shared = (id = ANY($1)) WHERE tenant_id=1`, items)
 		return err
 	})
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/tenants", http.StatusSeeOther)
 }
 
 // tenantName checks a tenant name: 1 to 100 characters, no control characters.

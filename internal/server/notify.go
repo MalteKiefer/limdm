@@ -670,25 +670,42 @@ func (s *Server) channelViews(ctx context.Context) ([]channelView, error) {
 
 // channelSave adds a channel from the settings form.
 func (s *Server) channelSave(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
 	port, _ := strconv.Atoi(r.FormValue("smtp_port"))
-	c := channel{Name: strings.TrimSpace(r.FormValue("name")), Kind: r.FormValue("kind"), Events: r.Form["events"], Enabled: true,
-		Config: channelConfig{Host: strings.TrimSpace(r.FormValue("smtp_host")), Port: port, TLS: r.FormValue("smtp_tls"),
-			User: strings.TrimSpace(r.FormValue("smtp_user")), From: strings.TrimSpace(r.FormValue("smtp_from")), To: strings.Fields(strings.ReplaceAll(r.FormValue("smtp_to"), ",", " "))}}
+	c := channel{Name: r.FormValue("name"), Kind: r.FormValue("kind"), Events: r.Form["events"],
+		Config: channelConfig{Host: r.FormValue("smtp_host"), Port: port, TLS: r.FormValue("smtp_tls"),
+			User: r.FormValue("smtp_user"), From: r.FormValue("smtp_from"), To: strings.Fields(strings.ReplaceAll(r.FormValue("smtp_to"), ",", " "))}}
 	c.Secret = strings.TrimSpace(r.FormValue("url"))
 	if c.Kind == "email" {
 		c.Secret = r.FormValue("smtp_password")
+	}
+	if _, err := s.addChannel(r.Context(), sess, c); err != nil {
+		if ue := (*userError)(nil); errors.As(err, &ue) {
+			s.renderSettings(w, r, sess, s.settings(), "", ue.Msg)
+			return
+		}
+		s.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/settings?tab=notifications", http.StatusSeeOther)
+}
+
+// addChannel stores a new enabled channel of the tenant the request acts
+// for (global in the global view). The console form and the admin API both
+// call it.
+func (s *Server) addChannel(ctx context.Context, sess session, c channel) (int64, error) {
+	c.Name, c.Enabled = strings.TrimSpace(c.Name), true
+	if c.Kind == "email" {
+		c.Config.Host, c.Config.User, c.Config.From = strings.TrimSpace(c.Config.Host), strings.TrimSpace(c.Config.User), strings.TrimSpace(c.Config.From)
 	} else {
-		c.Config = channelConfig{}
+		c.Secret, c.Config = strings.TrimSpace(c.Secret), channelConfig{}
 	}
 	if err := validateChannel(c); err != nil {
-		s.renderSettings(w, r, sess, s.settings(), "", err.Error())
-		return
+		return 0, &userError{http.StatusUnprocessableEntity, err.Error()}
 	}
 	cfg, _ := json.Marshal(c.Config)
 	events := append([]string{}, c.Events...)
+	var id int64
 	err := s.auditAction(ctx, sess.Email, "notification.channel_add", c.Name, c.Kind, func(tx pgx.Tx) error {
-		var id int64
 		if err := tx.QueryRow(ctx, `INSERT INTO notification_channels(name, kind, config, events, tenant_id) VALUES ($1,$2,$3,$4,nullif($5::bigint, 0)) RETURNING id`,
 			c.Name, c.Kind, cfg, events, ctxTenant(ctx)).Scan(&id); err != nil {
 			return err
@@ -700,20 +717,14 @@ func (s *Server) channelSave(w http.ResponseWriter, r *http.Request, sess sessio
 		_, err = tx.Exec(ctx, `UPDATE notification_channels SET secret=$2 WHERE id=$1`, id, sealed)
 		return err
 	})
-	if err != nil {
-		if strings.Contains(err.Error(), "duplicate key") {
-			s.renderSettings(w, r, sess, s.settings(), "", "A channel with this name exists already.")
-			return
-		}
-		s.fail(w, err)
-		return
+	if isUnique(err) {
+		return 0, &userError{http.StatusConflict, "A channel with this name exists already."}
 	}
-	http.Redirect(w, r, "/settings?tab=notifications", http.StatusSeeOther)
+	return id, err
 }
 
 // channelOp tests, switches on or off, or deletes a channel.
 func (s *Server) channelOp(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	op := r.PathValue("op")
 	if err != nil || !slices.Contains([]string{"test", "enable", "disable", "delete"}, op) {
@@ -721,57 +732,77 @@ func (s *Server) channelOp(w http.ResponseWriter, r *http.Request, sess session)
 		return
 	}
 	if op == "test" {
-		chans, err := s.loadChannels(ctx, false)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		i := slices.IndexFunc(chans, func(c channel) bool { return c.ID == id && channelOwned(ctx, c) })
-		if i < 0 {
-			http.NotFound(w, r)
-			return
-		}
-		n := notice{Type: "test", Severity: "info", Title: "Test notification", At: time.Now().UTC(),
-			Text: "LiMDM can reach this channel. Sent by " + sess.Email + ".", URL: s.cfg.PublicURL + "/settings?tab=notifications"}
-		tctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		err = s.deliver(tctx, chans[i], n)
-		cancel()
-		msg := ""
-		if err != nil {
-			msg = truncate(err.Error(), 500)
-		}
-		_, _ = s.db.Exec(ctx, `INSERT INTO notification_log(channel_id, event, ok, error) VALUES ($1,'test',$2,$3)`, id, err == nil, msg)
-		if err != nil && ctxTenant(ctx) != 0 { // no network details for tenant accounts: the log has them
-			s.log.Warn("notification test failed", "channel", id, "err", msg)
-			s.renderSettings(w, r, sess, s.settings(), "", tenantDeliveryError)
-			return
-		}
-		if err != nil {
-			s.renderSettings(w, r, sess, s.settings(), "", "Test failed: "+msg)
-			return
-		}
-		http.Redirect(w, r, "/settings?tab=notifications", http.StatusSeeOther)
-		return
+		err = s.testChannel(r.Context(), sess, id)
+	} else {
+		err = s.setChannel(r.Context(), sess, id, op)
 	}
-	err = s.auditAction(ctx, sess.Email, "notification.channel_"+op, strconv.FormatInt(id, 10), "", func(tx pgx.Tx) error {
+	var ue *userError
+	switch {
+	case errors.As(err, &ue) && ue.Status == http.StatusNotFound:
+		http.NotFound(w, r)
+	case ue != nil:
+		s.renderSettings(w, r, sess, s.settings(), "", ue.Msg)
+	case err != nil:
+		s.fail(w, err)
+	default:
+		http.Redirect(w, r, "/settings?tab=notifications", http.StatusSeeOther)
+	}
+}
+
+var errNoChannel = &userError{http.StatusNotFound, "notification channel not found"}
+
+// testChannel sends a test notice to a channel the request's tenant owns
+// and logs the result. A failure is a userError; tenant accounts get no
+// network details (the server log has them).
+func (s *Server) testChannel(ctx context.Context, sess session, id int64) error {
+	chans, err := s.loadChannels(ctx, false)
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(chans, func(c channel) bool { return c.ID == id && channelOwned(ctx, c) })
+	if i < 0 {
+		return errNoChannel
+	}
+	n := notice{Type: "test", Severity: "info", Title: "Test notification", At: time.Now().UTC(),
+		Text: "LiMDM can reach this channel. Sent by " + sess.Email + ".", URL: s.cfg.PublicURL + "/settings?tab=notifications"}
+	tctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	err = s.deliver(tctx, chans[i], n)
+	cancel()
+	msg := ""
+	if err != nil {
+		msg = truncate(err.Error(), 500)
+	}
+	_, _ = s.db.Exec(ctx, `INSERT INTO notification_log(channel_id, event, ok, error) VALUES ($1,'test',$2,$3)`, id, err == nil, msg)
+	if err != nil && ctxTenant(ctx) != 0 { // no network details for tenant accounts: the log has them
+		s.log.Warn("notification test failed", "channel", id, "err", msg)
+		return &userError{http.StatusBadGateway, tenantDeliveryError}
+	}
+	if err != nil {
+		return &userError{http.StatusBadGateway, "Test failed: " + msg}
+	}
+	return nil
+}
+
+// setChannel switches a channel on or off (op enable, disable) or deletes it.
+func (s *Server) setChannel(ctx context.Context, sess session, id int64, op string) error {
+	err := s.auditAction(ctx, sess.Email, "notification.channel_"+op, strconv.FormatInt(id, 10), "", func(tx pgx.Tx) error {
 		if err := tenantGuard(ctx, tx, "notification_channels", id); err != nil {
 			return err
 		}
+		var tag interface{ RowsAffected() int64 }
 		var err error
 		if op == "delete" {
-			_, err = tx.Exec(ctx, `DELETE FROM notification_channels WHERE id=$1`, id)
+			tag, err = tx.Exec(ctx, `DELETE FROM notification_channels WHERE id=$1`, id)
 		} else {
-			_, err = tx.Exec(ctx, `UPDATE notification_channels SET enabled=$2, updated_at=now() WHERE id=$1`, id, op == "enable")
+			tag, err = tx.Exec(ctx, `UPDATE notification_channels SET enabled=$2, updated_at=now() WHERE id=$1`, id, op == "enable")
+		}
+		if err == nil && tag.RowsAffected() == 0 {
+			err = errNoChannel
 		}
 		return err
 	})
 	if ue := (*userError)(nil); errors.As(err, &ue) {
-		http.NotFound(w, r)
-		return
+		return errNoChannel
 	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/settings?tab=notifications", http.StatusSeeOther)
+	return err
 }

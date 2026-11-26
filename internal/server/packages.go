@@ -391,7 +391,9 @@ func (s *Server) packagesSettings(w http.ResponseWriter, r *http.Request, sess s
 	c.QuotaMB, _ = strconv.Atoi(r.FormValue("quota_mb"))
 	c.QuotaCount, _ = strconv.Atoi(r.FormValue("quota_count"))
 	if r.FormValue("store") == "s3" {
-		t, err := s.targetFromForm(r, "packages", "s3", cur.S3)
+		in := targetFromForm(r)
+		in.Name, in.Kind = "packages", "s3"
+		t, err := s.target(in, cur.S3)
 		if err != nil {
 			s.renderPackages(w, r, sess, "", err.Error())
 			return

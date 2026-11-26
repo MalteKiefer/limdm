@@ -150,7 +150,6 @@ func (s *Server) dirGroups(ctx context.Context) ([]dirGroup, error) {
 
 // groupAssign maps a directory group to a blueprint, or removes the mapping.
 func (s *Server) groupAssign(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
 	gid, err := strconv.ParseInt(r.FormValue("group_id"), 10, 64)
 	if err != nil {
 		s.errorPage(w, r, sess, http.StatusBadRequest, "invalid group")
@@ -158,10 +157,23 @@ func (s *Server) groupAssign(w http.ResponseWriter, r *http.Request, sess sessio
 	}
 	bp, _ := strconv.ParseInt(r.FormValue("blueprint_id"), 10, 64)
 	prio, err := strconv.Atoi(r.FormValue("priority"))
-	if err != nil || prio < 0 || prio > 10000 {
+	if err != nil {
 		prio = 100
 	}
-	err = s.auditAction(ctx, sess.Email, "directory.group_assign", strconv.FormatInt(gid, 10), fmt.Sprintf("blueprint=%d priority=%d", bp, prio), func(tx pgx.Tx) error {
+	if err := s.assignGroup(r.Context(), sess, gid, bp, prio); err != nil {
+		s.renderDirectory(w, r, sess, "", "", err.Error())
+		return
+	}
+	http.Redirect(w, r, "/directory?tab=groups", http.StatusSeeOther)
+}
+
+// assignGroup maps a directory group to a blueprint with a priority
+// (0 to 10000, else 100), or removes the mapping (bp 0).
+func (s *Server) assignGroup(ctx context.Context, sess session, gid, bp int64, prio int) error {
+	if prio < 0 || prio > 10000 {
+		prio = 100
+	}
+	return s.auditAction(ctx, sess.Email, "directory.group_assign", strconv.FormatInt(gid, 10), fmt.Sprintf("blueprint=%d priority=%d", bp, prio), func(tx pgx.Tx) error {
 		if bp == 0 {
 			_, err := tx.Exec(ctx, `DELETE FROM blueprint_group_assignments WHERE group_id=$1`, gid)
 			return err
@@ -170,26 +182,27 @@ func (s *Server) groupAssign(w http.ResponseWriter, r *http.Request, sess sessio
 			ON CONFLICT (group_id) DO UPDATE SET blueprint_id=EXCLUDED.blueprint_id, priority=EXCLUDED.priority`, gid, bp, prio)
 		return err
 	})
-	if err != nil {
-		s.renderDirectory(w, r, sess, "", "", err.Error())
-		return
-	}
-	http.Redirect(w, r, "/directory?tab=groups", http.StatusSeeOther)
 }
 
 // scimToken creates a new SCIM bearer token; only its hash is stored.
 func (s *Server) scimToken(w http.ResponseWriter, r *http.Request, sess session) {
-	tok := "lms_" + randToken(32)
-	doc, _ := json.Marshal(map[string]string{"token_sha256": fmt.Sprintf("%x", sha(tok))})
-	err := s.auditAction(r.Context(), sess.Email, "directory.scim_token", "scim", "token rotated", func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO settings(key, value) VALUES ('scim', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
-		return err
-	})
+	tok, err := s.rotateSCIMToken(r.Context(), sess)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	s.renderDirectory(w, r, sess, tok, "New SCIM token created; the previous one stopped working.", "")
+}
+
+// rotateSCIMToken replaces the SCIM bearer token and returns the new one.
+func (s *Server) rotateSCIMToken(ctx context.Context, sess session) (string, error) {
+	tok := "lms_" + randToken(32)
+	doc, _ := json.Marshal(map[string]string{"token_sha256": fmt.Sprintf("%x", sha(tok))})
+	err := s.auditAction(ctx, sess.Email, "directory.scim_token", "scim", "token rotated", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('scim', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
+		return err
+	})
+	return tok, err
 }
 
 // ---- Google Workspace sync ----
@@ -228,33 +241,39 @@ type serviceAccount struct {
 }
 
 func (s *Server) googleConfigure(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	g, err := s.googleSettings(ctx)
+	err := s.configureGoogle(r.Context(), sess, r.FormValue("admin_email"), r.FormValue("service_account"))
+	if ue := (*userError)(nil); errors.As(err, &ue) {
+		s.renderDirectory(w, r, sess, "", "", ue.Msg)
+		return
+	}
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	g.AdminEmail = strings.ToLower(strings.TrimSpace(r.FormValue("admin_email")))
-	if key := strings.TrimSpace(r.FormValue("service_account")); key != "" {
+	s.googleSyncNow(w, r, sess)
+}
+
+// configureGoogle stores the delegated admin and, when given, a new
+// service account key (sealed) of the Google Workspace sync.
+func (s *Server) configureGoogle(ctx context.Context, sess session, adminEmail, key string) error {
+	g, err := s.googleSettings(ctx)
+	if err != nil {
+		return err
+	}
+	g.AdminEmail = strings.ToLower(strings.TrimSpace(adminEmail))
+	if key := strings.TrimSpace(key); key != "" {
 		var sa serviceAccount
 		if err := json.Unmarshal([]byte(key), &sa); err != nil || sa.ClientEmail == "" || sa.PrivateKey == "" {
-			s.renderDirectory(w, r, sess, "", "", "paste the service account JSON key file")
-			return
+			return &userError{http.StatusUnprocessableEntity, "paste the service account JSON key file"}
 		}
 		if g.KeyEnc, err = s.sealField("settings.google_service_account_key", key); err != nil {
-			s.fail(w, err)
-			return
+			return err
 		}
 	}
 	if !strings.Contains(g.AdminEmail, "@") || g.KeyEnc == "" {
-		s.renderDirectory(w, r, sess, "", "", "service account key and an admin email for delegation are required")
-		return
+		return &userError{http.StatusUnprocessableEntity, "service account key and an admin email for delegation are required"}
 	}
-	if err := s.auditAction(ctx, sess.Email, "directory.google_configure", g.AdminEmail, "service account updated", func(tx pgx.Tx) error { return saveGoogle(ctx, tx, g) }); err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.googleSyncNow(w, r, sess)
+	return s.auditAction(ctx, sess.Email, "directory.google_configure", g.AdminEmail, "service account updated", func(tx pgx.Tx) error { return saveGoogle(ctx, tx, g) })
 }
 
 func (s *Server) googleSyncNow(w http.ResponseWriter, r *http.Request, sess session) {
