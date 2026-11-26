@@ -70,6 +70,7 @@ func (a *Agent) applyExtra() {
 	run(api.TypePolkit, applyPolkit(x.Polkit))
 	run(api.TypeSudo, applySudo(x.Sudo))
 	run(api.TypeBootloader, a.applyBootloader(x.Bootloader))
+	run(api.TypePrinters, a.applyPrinters(x.Printers))
 	a.ensureDependencies()
 	a.notifyEscrow()
 }
