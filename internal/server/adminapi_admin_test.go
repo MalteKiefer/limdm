@@ -37,7 +37,8 @@ func TestAdminAPIManagement(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer tx.Rollback(ctx)
-		tok, _, _, err := insertToken(ctx, tx, tokenApproval{Name: name, Role: role, Days: 30, Scopes: scopes}, root.Email)
+		// each token belongs to its own person; alice2 is a second token of alice
+		tok, _, _, err := insertToken(ctx, tx, tokenApproval{Name: name, Role: role, Days: 30, Scopes: scopes}, strings.TrimSuffix(name, "2")+"@firma.de")
 		if err != nil || tx.Commit(ctx) != nil {
 			t.Fatal(err)
 		}
@@ -85,6 +86,9 @@ func TestAdminAPIManagement(t *testing.T) {
 	}
 	if resp, _ = call(alice, "POST", loc+"/approve", ""); resp.StatusCode != http.StatusConflict {
 		t.Fatalf("own request approved: %d", resp.StatusCode)
+	}
+	if resp, _ = call(mkToken("alice2", "admin"), "POST", loc+"/approve", ""); resp.StatusCode != http.StatusConflict {
+		t.Fatalf("own request approved with a second token: %d", resp.StatusCode)
 	}
 	if resp, body = call(bob, "POST", loc+"/approve", ""); resp.StatusCode != 200 || !strings.Contains(body, `"status":"approved"`) {
 		t.Fatalf("approve: %d %s", resp.StatusCode, body)

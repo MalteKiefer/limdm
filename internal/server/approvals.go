@@ -178,26 +178,37 @@ func (s *Server) expireApprovals(ctx context.Context) error {
 	return tx.Commit(ctx)
 }
 
-// sameActor reports whether a request was made by the deciding admin: the
-// same login, or an API token that admin created.
+// sameActor reports whether a request was made by the deciding admin:
+// both sides are traced to the person behind them (an API token to its
+// creator, a token made by a token to that one's creator, and so on).
 func (s *Server) sameActor(ctx context.Context, tx pgx.Tx, requestedBy, email string) bool {
 	if requestedBy == email {
 		return true
 	}
-	rest, ok := strings.CutPrefix(requestedBy, "api:")
-	if !ok {
-		return false
+	a, ok1 := rootActor(ctx, tx, requestedBy)
+	b, ok2 := rootActor(ctx, tx, email)
+	// an actor we cannot resolve never passes as someone else
+	return !ok1 || !ok2 || strings.EqualFold(a, b)
+}
+
+// rootActor returns the person behind an actor: "api:name#id" is replaced
+// by the creator of token id until a person is reached.
+func rootActor(ctx context.Context, q querier, actor string) (string, bool) {
+	for range 10 {
+		rest, ok := strings.CutPrefix(actor, "api:")
+		if !ok {
+			return actor, true
+		}
+		i := strings.LastIndexByte(rest, '#')
+		if i < 0 {
+			return "", false
+		}
+		id, err := strconv.ParseInt(rest[i+1:], 10, 64)
+		if err != nil || q.QueryRow(ctx, `SELECT created_by FROM api_tokens WHERE id=$1`, id).Scan(&actor) != nil {
+			return "", false
+		}
 	}
-	i := strings.LastIndexByte(rest, '#')
-	id, err := strconv.ParseInt(rest[i+1:], 10, 64)
-	if i < 0 || err != nil {
-		return true // an API requester we cannot resolve never passes as someone else
-	}
-	var creator string
-	if err := tx.QueryRow(ctx, `SELECT created_by FROM api_tokens WHERE id=$1`, id).Scan(&creator); err != nil {
-		return true
-	}
-	return creator == email
+	return "", false
 }
 
 // decideApproval approves or rejects a pending request for the console and
