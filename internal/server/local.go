@@ -197,7 +197,7 @@ func rateKey(r *http.Request) string {
 }
 
 // over reports whether key reached max hits within window, without counting.
-func (l *limiter) over(key string, max int, window time.Duration) bool { //nolint:unparam // every caller uses 20 per 5 minutes today
+func (l *limiter) over(key string, max int, window time.Duration) bool { //nolint:unparam // every caller uses a 5 minute window today
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	n := 0

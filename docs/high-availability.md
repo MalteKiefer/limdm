@@ -79,9 +79,15 @@ PostgreSQL itself is made highly available with the usual tools (see
   console port's readiness (HAProxy `check port`, a shared health check in cloud load
   balancers).
 * **Client addresses on 8444:** with plain TCP passthrough the instance sees the load
-  balancer's address. Only the enrollment rate limit uses it (20 failed attempts per five
-  minutes per instance). Prefer a load balancer that keeps the client address
-  (HAProxy `usesrc clientip`, LVS direct routing, cloud network load balancers).
+  balancer's address: the device's public address and location and the enrollment failure
+  limit then see the balancer. Enable PROXY protocol version 2 on the balancer (HAProxy
+  `send-proxy-v2`, AWS NLB proxy protocol v2, nginx stream `proxy_protocol on`) and list its
+  addresses in `LIMDM_AGENT_PROXY_PROTOCOL`: connections from those addresses must start
+  with the header, connections from anywhere else must not and keep their own address.
+  Alternatively use a balancer that keeps the client address (HAProxy `usesrc clientip`,
+  LVS direct routing). Enrollment failures are limited per address and token (20 tries of
+  one wrong token in five minutes) and per address (200 failures), per instance, so a few
+  wrong tokens behind one balancer do not block other enrollments.
 
 ### Health endpoints
 

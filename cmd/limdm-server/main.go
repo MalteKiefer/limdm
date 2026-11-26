@@ -80,6 +80,10 @@ func serve(log *slog.Logger) error {
 	}
 	admin := newServer(cfg.Listen, srv.AdminHandler(), &tls.Config{MinVersion: tls.VersionTLS12})
 	agent := newServer(cfg.AgentListen, srv.AgentHandler(), agentTLS)
+	agentLn, err := srv.AgentListener(cfg.AgentListen)
+	if err != nil {
+		return err
+	}
 
 	errc := make(chan error, 2)
 	go func() {
@@ -91,8 +95,8 @@ func serve(log *slog.Logger) error {
 		}
 	}()
 	go func() {
-		log.Info("agent API listening (mTLS, TLS 1.3)", "addr", cfg.AgentListen)
-		errc <- agent.ListenAndServeTLS("", "")
+		log.Info("agent API listening (mTLS, TLS 1.3)", "addr", cfg.AgentListen, "proxy_protocol", len(cfg.AgentProxyFrom) > 0)
+		errc <- agent.ServeTLS(agentLn, "", "")
 	}()
 	select {
 	case <-ctx.Done():

@@ -76,6 +76,8 @@ type Config struct {
 	// parallel agent package downloads per instance; more wait, then get 503 (LIMDM_UPDATE_DOWNLOADS)
 	UpdateDownloads int
 	MaxCheckins     int // check ins decoded and processed at once per instance (LIMDM_MAX_CHECKINS)
+	// load balancers that send a PROXY v2 header to the agent listener (LIMDM_AGENT_PROXY_PROTOCOL)
+	AgentProxyFrom []netip.Prefix
 }
 
 // envInt reads a number setting within [lo, hi]; def when unset.
@@ -139,6 +141,9 @@ func ConfigFromEnv() (Config, error) {
 	c.StaleAfter = time.Duration(hours) * time.Hour
 	if c.TrustedProxies, err = parseProxies(os.Getenv("LIMDM_TRUSTED_PROXIES")); err != nil {
 		return c, err
+	}
+	if c.AgentProxyFrom, err = parseProxies(os.Getenv("LIMDM_AGENT_PROXY_PROTOCOL")); err != nil {
+		return c, fmt.Errorf("LIMDM_AGENT_PROXY_PROTOCOL: %w", err)
 	}
 	drain, err := strconv.Atoi(envOr("LIMDM_DRAIN_SECONDS", "5"))
 	if err != nil || drain < 0 || drain > 300 {
@@ -686,15 +691,21 @@ func (s *Server) deviceAuth(next http.HandlerFunc, allowExpired bool) http.Handl
 }
 
 func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
-	// unauthenticated: limit attempts per address before touching the database
-	// only failures count: a mass rollout behind one office NAT must not hit it
-	if s.limit.over("enroll:"+rateKey(r), 20, 5*time.Minute) {
-		problem(w, http.StatusTooManyRequests, "too many enrollment attempts, try again later")
-		return
-	}
 	var req api.EnrollRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
 		problem(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	// unauthenticated: failures are limited before touching the database, per
+	// address and token (20 tries of one wrong token) and per address (200
+	// failures): only failures count, so a mass rollout behind one office NAT
+	// or a load balancer without PROXY protocol is not blocked by a few typos
+	th := sha(req.Token)
+	src := "enroll:" + rateKey(r)
+	tokKey := src + ":" + hex.EncodeToString(th[:8])
+	if s.limit.over(tokKey, 20, 5*time.Minute) || s.limit.over(src, 200, 5*time.Minute) {
+		w.Header().Set("Retry-After", "300")
+		problem(w, http.StatusTooManyRequests, "too many enrollment attempts, try again later")
 		return
 	}
 	ctx := r.Context()
@@ -708,9 +719,10 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	var tenantID int64 // the device joins the tenant of its token
 	err = tx.QueryRow(ctx, `UPDATE enroll_tokens SET uses_left = uses_left - 1
 		WHERE token_hash=$1 AND uses_left > 0 AND expires_at > now()
-		AND tenant_id IN (SELECT id FROM tenants WHERE NOT disabled) RETURNING blueprint_id, tenant_id`, sha(req.Token)).Scan(&blueprintID, &tenantID)
+		AND tenant_id IN (SELECT id FROM tenants WHERE NOT disabled) RETURNING blueprint_id, tenant_id`, th).Scan(&blueprintID, &tenantID)
 	if err != nil {
-		s.limit.allow("enroll:"+rateKey(r), 20, 5*time.Minute) // counts the failure
+		s.limit.allow(tokKey, 20, 5*time.Minute) // counts the failure
+		s.limit.allow(src, 200, 5*time.Minute)
 		s.log.Warn("enroll rejected", "remote", clientIP(r))
 		problem(w, http.StatusForbidden, "invalid or expired token")
 		return
