@@ -168,14 +168,14 @@ func migratePriorityBlueprints(ctx context.Context, tx pgx.Tx) error {
 // seedDefaultBlueprint gives a new installation the CIS Level 1 baseline.
 func seedDefaultBlueprint(ctx context.Context, tx pgx.Tx) error {
 	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blueprints WHERE name='default')`).Scan(&exists); err != nil || exists {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blueprints WHERE name='default' AND tenant_id=1)`).Scan(&exists); err != nil || exists {
 		return err
 	}
 	var ids []int64
 	for _, li := range api.DefaultLibrary() {
 		var id int64
 		if err := tx.QueryRow(ctx, `INSERT INTO library_items(name, type, payload) VALUES ($1,$2,$3)
-			ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id`, li.Name, li.Type, string(li.Payload)).Scan(&id); err != nil {
+			ON CONFLICT (tenant_id, name) DO UPDATE SET name=EXCLUDED.name RETURNING id`, li.Name, li.Type, string(li.Payload)).Scan(&id); err != nil {
 			return err
 		}
 		ids = append(ids, id)
@@ -271,7 +271,7 @@ func resolveDevice(ctx context.Context, q pgx.Tx, deviceID string) (resolved, er
 	}
 	if bp == nil {
 		var def int64
-		if err := q.QueryRow(ctx, `SELECT id FROM blueprints WHERE name='default'`).Scan(&def); err != nil {
+		if err := q.QueryRow(ctx, `SELECT id FROM blueprints WHERE name='default' AND tenant_id=1`).Scan(&def); err != nil {
 			return res, err
 		}
 		bp = &def
@@ -721,14 +721,14 @@ func (s *Server) deleteLibraryItem(ctx context.Context, actor string, id int64) 
 const effectiveBlueprintSQL = `coalesce(d.blueprint_id,
 	(SELECT a.blueprint_id FROM dir_users u JOIN dir_members m ON m.user_id=u.id JOIN blueprint_group_assignments a ON a.group_id=m.group_id
 	 WHERE u.id=d.primary_user_id AND u.active ORDER BY a.priority, a.group_id LIMIT 1),
-	(SELECT id FROM blueprints WHERE name='default'))`
+	(SELECT id FROM blueprints WHERE name='default' AND tenant_id=1))`
 
 func (s *Server) allBlueprints(ctx context.Context, deviceID string) ([]blueprintRec, error) {
 	cond, args := visibleCond(ctx, "b", 1)
 	dcond, dargs := tenantDevices(ctx, 1+len(args))
 	rows, err := s.db.Query(ctx, `SELECT b.id, b.name, b.parent_id, b.tree, b.description, b.updated_at,
 		(SELECT count(*) FROM devices d WHERE NOT d.retired AND `+dcond+` AND `+effectiveBlueprintSQL+` = b.id),
-		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND (d.blueprint_id=b.id OR (d.blueprint_id IS NULL AND b.name='default'))),
+		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND (d.blueprint_id=b.id OR (d.blueprint_id IS NULL AND b.name='default' AND b.tenant_id=1))),
 		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND `+effectiveBlueprintSQL+` = b.id)
 		FROM blueprints b WHERE `+cond+` ORDER BY b.name='default' DESC, b.name`, append(append([]any{deviceID}, args...), dargs...)...)
 	if err != nil {
@@ -783,7 +783,7 @@ func (s *Server) blueprintEdit(w http.ResponseWriter, r *http.Request, sess sess
 		}
 	} else {
 		var def int64
-		if err := s.db.QueryRow(r.Context(), `SELECT id FROM blueprints WHERE name='default'`).Scan(&def); err == nil {
+		if err := s.db.QueryRow(r.Context(), `SELECT id FROM blueprints WHERE name='default' AND tenant_id=1`).Scan(&def); err == nil {
 			bp.Parent = &def
 		}
 	}
@@ -862,6 +862,9 @@ func (s *Server) saveBlueprint(ctx context.Context, actor string, bp *blueprintR
 func (s *Server) validateBlueprint(ctx context.Context, bp blueprintRec) error {
 	if !identOK(bp.Name) {
 		return invalid(errors.New("name must be 1..64 characters: letters, digits, dot, dash, underscore"))
+	}
+	if bp.Name == "default" && ownerTenant(ctx) != defaultTenant { // names are unique per tenant; default applies by name
+		return &userError{http.StatusConflict, "the name is already in use"}
 	}
 	items, err := s.allItems(ctx)
 	if err != nil {
