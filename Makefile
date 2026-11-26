@@ -10,7 +10,7 @@ export CGO_ENABLED=0
 build:
 	for arch in amd64 arm64; do \
 		GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o dist/limdm-agent-linux-$$arch ./cmd/limdm-agent; \
-		GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "-s -w -X github.com/maltekiefer/limdm/internal/server.Version=$(VERSION)" -o dist/limdm-server-linux-$$arch ./cmd/limdm-server; \
+		GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "-s -w -X github.com/maltekiefer/limdm/internal/server.Version=$(VERSION) -X github.com/maltekiefer/limdm/internal/server.ReleasePubKey=$(UPDATE_PUBKEY)" -o dist/limdm-server-linux-$$arch ./cmd/limdm-server; \
 	done
 
 test:

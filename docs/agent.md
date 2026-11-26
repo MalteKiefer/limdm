@@ -92,8 +92,12 @@ fingerprint, no secret. It
 2. writes `/etc/limdm/enroll.conf` (0600) from `LIMDM_TOKEN`; without `LIMDM_TOKEN` it uses
    an existing `/etc/limdm/enroll.conf`,
 3. finds the newest release of `LIMDM_RELEASE_REPO` through the GitHub API, downloads
-   `limdm-agent_<version>_linux_<arch>.<deb|rpm|pkg.tar.zst|apk>` and verifies it against
-   `limdm_<version>_SHA256SUMS`,
+   `limdm-agent_<version>_linux_<arch>.<deb|rpm|pkg.tar.zst|apk>`,
+   `limdm_<version>_SHA256SUMS` and its signature `limdm_<version>_SHA256SUMS.sig`, checks
+   the Ed25519 signature with the release public key embedded in the script (the key the
+   server has, `LIMDM_RELEASE_PUBLIC_KEY`; OpenSSL 3 does the check) and then the package
+   against the signed sums; anything that does not verify stops the installation, so a
+   tampered GitHub release cannot install anything,
 4. on apt, dnf and zypper systems adds the osquery repository, trusting only the embedded
    signing key `1484 120A C4E9 F8A1 A577 AEEE 97A8 0C63 C9D8 B80B`,
 5. installs osquery and the agent; the package enrolls the device from `enroll.conf` in its
@@ -160,12 +164,17 @@ Example with Ansible:
 ## Manual installation and other systems
 
 ```sh
-sudo sh install-agent.sh ./limdm-agent_0.16.0_linux_amd64.deb   # adds osquery, installs both
+# SHA256SUMS and SHA256SUMS.sig of the release next to the package; the key is the
+# RELEASE_KEY line of https://mdm.example.com/install.sh
+sudo LIMDM_RELEASE_PUBLIC_KEY=<hex> sh install-agent.sh ./limdm-agent_0.16.0_linux_amd64.deb   # adds osquery, installs both
 sudo limdm-agent enroll --config /etc/limdm/enroll.conf
 sudo systemctl enable --now limdm-agent
 ```
 
 or with flags: `limdm-agent enroll --server URL --fingerprint FP --token TOKEN [--allow-scripts] [--allow-remote-shell]`.
+`install-agent.sh` verifies the signature of `limdm_<version>_SHA256SUMS` and the package
+checksum before it installs anything; `LIMDM_SKIP_SIGNATURE=true` skips this for packages
+you built yourself.
 Distributions without apt, dnf, zypper, pacman or apk use the tar.gz release; the agent
 falls back to native inventory when osquery is missing.
 

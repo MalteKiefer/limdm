@@ -17,7 +17,10 @@
 * **Agent updates** need an Ed25519 signature from the release key whose public half is
   compiled into the agent; an agent built without it refuses self updates (fail closed).
   The private key is a CI secret of the protected `release` environment, not an offline
-  key, and the release fails without it. Downgrades are refused.
+  key, and the release fails without it. Downgrades are refused. First installations check
+  the same signature: `/install.sh` embeds the release public key of the server and refuses
+  sums without a valid signature, and `install-agent.sh` needs the key in
+  `LIMDM_RELEASE_PUBLIC_KEY`.
 * **Signed commands.** Every command (lock, wipe, script, message …) is signed when it
   is created, with an Ed25519 key in `command.key` next to the CA key, never in the
   database. The signature covers device, command ID, type, creation time and payload. The
@@ -427,7 +430,8 @@ Failed local and OIDC sign ins and rejected enrollments are logged with the clie
   (`LIMDM_SYSLOG`), GitHub for agent releases, Flathub for the app catalog and the location
   service (only when geolocation is on). Devices talk to the
   LiMDM server, the identity provider during desktop login, their package repositories and
-  the osquery repository. `/install.sh` downloads from GitHub.
+  the osquery repository. `/install.sh` downloads from GitHub and verifies the release
+  signature before it installs.
 
 ## Reporting vulnerabilities
 

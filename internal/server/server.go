@@ -52,6 +52,7 @@ type Config struct {
 	AgentURL       string   // URL agents use, its host goes into the server certificate
 	AgentHosts     []string // additional names/IPs for the agent certificate, e.g. the IP older agents enrolled with
 	ReleaseRepo    string   // GitHub owner/name the install script downloads agent packages from
+	ReleaseKey     string   // hex Ed25519 public release key /install.sh verifies SHA256SUMS with
 	GeoIPURL       string   // location lookup for device addresses, the IP is appended; "" disables
 	CADir          string
 	LocalLogin     bool // local admin accounts with password and TOTP
@@ -101,6 +102,7 @@ func ConfigFromEnv() (Config, error) {
 		LocalLogin:    os.Getenv("LIMDM_LOCAL_LOGIN") == "true",
 		AgentHosts:    split(os.Getenv("LIMDM_AGENT_HOSTS")),
 		ReleaseRepo:   os.Getenv("LIMDM_RELEASE_REPO"),
+		ReleaseKey:    envOr("LIMDM_RELEASE_PUBLIC_KEY", ReleasePubKey),
 		GeoIPURL:      envOr("LIMDM_GEOIP_URL", "https://ipwho.is/"),
 		Syslog:        os.Getenv("LIMDM_SYSLOG"),
 		MultiTenant:   os.Getenv("LIMDM_MULTI_TENANT") == "true",
