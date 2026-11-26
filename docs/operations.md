@@ -36,7 +36,7 @@ Agents must run 0.16 or newer. Runbooks: [keys.md](keys.md).
 
 1. Install the same or a newer server version; keep the agent port closed.
 2. Set `LIMDM_SESSION_KEY` of the backup and a new, empty `LIMDM_DATABASE_URL`.
-3. `limdm-server backup verify`, then `limdm-server backup restore -identity KEY -replay
+3. `limdm-server backup verify`, then `limdm-server backup restore -identity KEY -command-key HEX -replay
    AUDIT_AFTER_BACKUP FILE`.
 4. Start one instance, check `/readyz` and the audit chain, then open the agent port.
 

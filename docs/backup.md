@@ -188,8 +188,8 @@ console (**Settings, Backup**, **Settings, Data retention**, **Software, Package
 limdm-server backup [-env FILE] create [-reason TEXT] [-if-configured]
 limdm-server backup [-env FILE] list [-from TARGET]
 limdm-server backup [-env FILE] verify  -identity KEY [-from TARGET] [-command-key HEX] FILE
-limdm-server backup [-env FILE] restore -identity KEY [-from TARGET] [-db URL] [-ca DIR] [-window 168h] [-replay FILE] [-force] FILE
-limdm-server backup [-env FILE] restore-test -identity KEY [-from TARGET] [-db SCRATCH_URL] FILE
+limdm-server backup [-env FILE] restore -identity KEY [-from TARGET] [-command-key HEX] [-db URL] [-ca DIR] [-window 168h] [-replay FILE] [-force] FILE
+limdm-server backup [-env FILE] restore-test -identity KEY [-from TARGET] [-command-key HEX] [-db SCRATCH_URL] FILE
 ```
 
 `FILE` is a local archive, or with `-from` the archive name on a configured target.
@@ -197,7 +197,8 @@ limdm-server backup [-env FILE] restore-test -identity KEY [-from TARGET] [-db S
 `verify` decrypts the archive, checks every entry against the manifest and the manifest
 signature, and prints the signing command key. Pass the expected key with `-command-key`
 (or run it on the server, which compares with its active key): age alone does not prove who
-wrote an archive, the signature does.
+wrote an archive, the signature does. `restore` and `restore-test` refuse an archive whose
+signer is neither `-command-key` nor the active command key of the server they run on.
 
 ## Restore
 
@@ -211,7 +212,7 @@ forced, a `LIMDM_SESSION_KEY` other than the one the archive was made with.
 3. `limdm-server backup verify -identity limdm-backup.agekey -command-key HEX FILE`
 4. Export the audit entries written after the backup, if any copy survived: the syslog
    collector (`LIMDM_SYSLOG`) or a JSON Lines export.
-5. `limdm-server backup restore -identity limdm-backup.agekey -replay audit-after.log FILE`
+5. `limdm-server backup restore -identity limdm-backup.agekey -command-key HEX -replay audit-after.log FILE`
    loads the database in one transaction, writes the CA directory, opens the restored keys,
    records `backup.restore` and applies the revocations from the replay file (below).
    Uploaded packages land in `artifacts.restore` next to the CA directory; move them into

@@ -587,6 +587,10 @@ func BackupCommand(ctx context.Context, log *slog.Logger, args []string, out io.
 		fmt.Fprintln(out, "signer matches -command-key")
 	case s != nil && m.CommandKey == pubHex(s.cmdKey):
 		fmt.Fprintln(out, "signer is the active command key of this server")
+	case args[0] != "verify":
+		// age recipients are public: anyone who can write to a target can
+		// build an archive for them, only the signer proves who made it
+		return errors.New("the signer is not pinned: pass -command-key with the command key from your records")
 	default:
 		fmt.Fprintln(out, "WARNING: signer not pinned; compare the key above with your records or pass -command-key")
 	}
