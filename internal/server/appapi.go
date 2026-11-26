@@ -14,6 +14,7 @@ import (
 
 // appAPIRoutes adds the console app endpoints to the admin API mux.
 func (s *Server) appAPIRoutes(m *http.ServeMux) {
+	s.appDevicesRoutes(m)
 	m.HandleFunc("GET /api/v1/me", s.need("read", s.apiMe))
 	m.HandleFunc("GET /api/v1/events/stream", s.need("read", s.apiEventStream))
 	m.HandleFunc("GET /api/v1/devices/facets", s.need("read", s.apiDeviceFacets))

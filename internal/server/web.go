@@ -796,26 +796,8 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		}
 	}
 	evPages := max(1, (evTotal+evSize-1)/evSize)
-	// the latest protective action per kind (lock, lost mode, wipe, uninstall
-	// release) stays visible on the device page until the next one replaces it
-	type protective struct {
-		Type, Status, By string
-		At               time.Time
-	}
-	var protect []protective
-	if rows, err := s.db.Query(ctx, `SELECT DISTINCT ON (k) type, status, created_by, created_at FROM (
-		SELECT *, CASE type WHEN 'unlock' THEN 'lock' WHEN 'found' THEN 'lost' ELSE type END AS k FROM commands
-		WHERE device_id=$1 AND type IN ('lock','unlock','lost','found','wipe','allow_uninstall')) c
-		ORDER BY k, id DESC`, id); err == nil {
-		protect, err = pgx.CollectRows(rows, pgx.RowToStructByPos[protective])
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		protect = slices.DeleteFunc(protect, func(p protective) bool { // the release ends after an hour
-			return p.Type == "allow_uninstall" && time.Since(p.At) > 2*time.Hour
-		})
-	} else {
+	protect, err := s.protectiveActions(ctx, id)
+	if err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -864,10 +846,6 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 	// connections: holding one while waiting for another starves the pool
 	// under many parallel page loads
 	_ = tx.Rollback(ctx)
-	type declRow struct {
-		Identifier, Type, State, Class string
-		Reasons                        []string
-	}
 	sub := r.URL.Query().Get("sub")
 	switch {
 	case tab == "software" && sub != "sources" && sub != "flatpak" && sub != "catalog":
@@ -897,26 +875,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 			failingChecks++
 		}
 	}
-	reported := map[string]api.DeclarationStatus{}
-	for _, st := range data.Decl {
-		reported[st.Identifier] = st
-	}
-	var declRows []declRow
-	for _, dcl := range want {
-		row := declRow{Identifier: dcl.Identifier, Type: dcl.Type}
-		st, ok := reported[dcl.Identifier]
-		switch {
-		case !ok || st.ServerToken != dcl.ServerToken:
-			row.State, row.Class = "pending", "warn"
-		case !st.Valid:
-			row.State, row.Class, row.Reasons = "invalid", "bad", st.Reasons
-		case !st.Active:
-			row.State, row.Class, row.Reasons = "not achieved", "bad", st.Reasons
-		default:
-			row.State, row.Class = "active", "ok"
-		}
-		declRows = append(declRows, row)
-	}
+	declRows := declarationRows(want, data.Decl)
 	var agentVersions []string
 	if rows, err := s.db.Query(ctx, `SELECT version FROM agent_releases WHERE NOT blocked`); err == nil {
 		agentVersions, _ = pgx.CollectRows(rows, pgx.RowTo[string])
@@ -976,6 +935,66 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"},
 		"Sub": sub, "ShowSystem": r.URL.Query().Get("system") == "1", "NetworkInfo": len(data.Inv.DNS)+len(data.Inv.Routes) > 0 || hasIPs(data.Inv.Interfaces),
 	})
+}
+
+// protective is the latest protective action of one kind on a device.
+type protective struct {
+	Type   string    `json:"type"`
+	Status string    `json:"status"`
+	By     string    `json:"by"`
+	At     time.Time `json:"at"`
+}
+
+// protectiveActions lists the latest protective action per kind (lock, lost
+// mode, wipe, uninstall release); it stays visible on the device page until
+// the next one of its kind replaces it, the release for two hours.
+func (s *Server) protectiveActions(ctx context.Context, id string) ([]protective, error) {
+	rows, err := s.db.Query(ctx, `SELECT DISTINCT ON (k) type, status, created_by, created_at FROM (
+		SELECT *, CASE type WHEN 'unlock' THEN 'lock' WHEN 'found' THEN 'lost' ELSE type END AS k FROM commands
+		WHERE device_id=$1 AND type IN ('lock','unlock','lost','found','wipe','allow_uninstall')) c
+		ORDER BY k, id DESC`, id)
+	if err != nil {
+		return nil, err
+	}
+	protect, err := pgx.CollectRows(rows, pgx.RowToStructByPos[protective])
+	return slices.DeleteFunc(protect, func(p protective) bool {
+		return p.Type == "allow_uninstall" && time.Since(p.At) > 2*time.Hour
+	}), err
+}
+
+// declRow is the state of one expected declaration on a device.
+type declRow struct {
+	Identifier string   `json:"identifier"`
+	Type       string   `json:"type"`
+	State      string   `json:"state"` // pending | invalid | not achieved | active
+	Class      string   `json:"-"`
+	Reasons    []string `json:"reasons"`
+}
+
+// declarationRows compares the declarations a device should have with what
+// it reported.
+func declarationRows(want []api.Declaration, got []api.DeclarationStatus) []declRow {
+	reported := map[string]api.DeclarationStatus{}
+	for _, st := range got {
+		reported[st.Identifier] = st
+	}
+	out := []declRow{}
+	for _, dcl := range want {
+		row := declRow{Identifier: dcl.Identifier, Type: dcl.Type, Reasons: []string{}}
+		st, ok := reported[dcl.Identifier]
+		switch {
+		case !ok || st.ServerToken != dcl.ServerToken:
+			row.State, row.Class = "pending", "warn"
+		case !st.Valid:
+			row.State, row.Class, row.Reasons = "invalid", "bad", st.Reasons
+		case !st.Active:
+			row.State, row.Class, row.Reasons = "not achieved", "bad", st.Reasons
+		default:
+			row.State, row.Class = "active", "ok"
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 // pwError is the password policy message a redirect named, if any.
@@ -1271,12 +1290,7 @@ func (s *Server) tokenRevoke(w http.ResponseWriter, r *http.Request, sess sessio
 		s.notFound(w, r, sess)
 		return
 	}
-	err = s.auditActionFn(r.Context(), func(tx pgx.Tx) (string, string, string, string, error) {
-		var note string
-		tcond, targs := tenantCond(sess, "tenant_id", 1)
-		err := tx.QueryRow(r.Context(), `DELETE FROM enroll_tokens WHERE token_hash=$1 AND `+tcond+` RETURNING note`, append([]any{id}, targs...)...).Scan(&note)
-		return sess.Email, "token.revoke", r.PathValue("id")[:12], note, err
-	})
+	err = s.revokeEnrollToken(r.Context(), sess, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		s.notFound(w, r, sess)
 		return
@@ -1322,30 +1336,55 @@ func (s *Server) tokenPage(w http.ResponseWriter, r *http.Request, sess session,
 func (s *Server) tokenCreate(w http.ResponseWriter, r *http.Request, sess session) {
 	uses, err1 := strconv.Atoi(r.FormValue("uses"))
 	days, err2 := strconv.Atoi(r.FormValue("days"))
-	if err1 != nil || err2 != nil || uses < 1 || uses > 10000 || days < 1 || days > 90 {
-		s.errorPage(w, r, sess, http.StatusBadRequest, "uses 1..10000, days 1..90")
+	if err1 != nil || err2 != nil {
+		uses = 0
+	}
+	bpID, _ := strconv.ParseInt(r.FormValue("blueprint_id"), 10, 64)
+	token, err := s.createEnrollToken(r.Context(), sess, r.FormValue("note"), bpID, uses, days)
+	var ue *userError
+	if errors.As(err, &ue) {
+		s.errorPage(w, r, sess, ue.Status, ue.Msg)
 		return
-	}
-	var bpID *int64
-	if v, err := strconv.ParseInt(r.FormValue("blueprint_id"), 10, 64); err == nil && v > 0 {
-		if !s.tenantOwns(r.Context(), sess, "blueprints", v, true) {
-			s.errorPage(w, r, sess, http.StatusBadRequest, "unknown blueprint")
-			return
-		}
-		bpID = &v
-	}
-	token := "lmt_" + randToken(24)
-	note := truncate(r.FormValue("note"), 200)
-	err := s.auditAction(r.Context(), sess.Email, "token.create", note, fmt.Sprintf("uses=%d days=%d blueprint=%v", uses, days, r.FormValue("blueprint_id")), func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO enroll_tokens(token_hash, note, blueprint_id, uses_left, expires_at, created_by, tenant_id)
-			VALUES ($1,$2,$3,$4, now() + make_interval(days => $5), $6, $7)`, sha(token), note, bpID, uses, days, sess.Email, ownerTenant(r.Context()))
-		return err
-	})
-	if err != nil {
+	} else if err != nil {
 		s.fail(w, err)
 		return
 	}
 	s.tokenPage(w, r, sess, token)
+}
+
+// createEnrollToken creates an enrollment token for 1..10000 uses and
+// 1..90 days, optionally binding new devices to a blueprint (0: default),
+// and returns it; it is shown only once.
+func (s *Server) createEnrollToken(ctx context.Context, sess session, note string, blueprintID int64, uses, days int) (string, error) {
+	if uses < 1 || uses > 10000 || days < 1 || days > 90 {
+		return "", &userError{http.StatusBadRequest, "uses 1..10000, days 1..90"}
+	}
+	var bpID *int64
+	if blueprintID > 0 {
+		if !s.tenantOwns(ctx, sess, "blueprints", blueprintID, true) {
+			return "", &userError{http.StatusBadRequest, "unknown blueprint"}
+		}
+		bpID = &blueprintID
+	}
+	token := "lmt_" + randToken(24)
+	note = truncate(note, 200)
+	err := s.auditAction(ctx, sess.Email, "token.create", note, fmt.Sprintf("uses=%d days=%d blueprint=%d", uses, days, blueprintID), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO enroll_tokens(token_hash, note, blueprint_id, uses_left, expires_at, created_by, tenant_id)
+			VALUES ($1,$2,$3,$4, now() + make_interval(days => $5), $6, $7)`, sha(token), note, bpID, uses, days, sess.Email, ownerTenant(ctx))
+		return err
+	})
+	return token, err
+}
+
+// revokeEnrollToken deletes an enrollment token of the caller's tenant;
+// pgx.ErrNoRows when there is none.
+func (s *Server) revokeEnrollToken(ctx context.Context, sess session, hash []byte) error {
+	return s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
+		var note string
+		tcond, targs := tenantCond(sess, "tenant_id", 1)
+		err := tx.QueryRow(ctx, `DELETE FROM enroll_tokens WHERE token_hash=$1 AND `+tcond+` RETURNING note`, append([]any{hash}, targs...)...).Scan(&note)
+		return sess.Email, "token.revoke", hex.EncodeToString(hash)[:12], note, err
+	})
 }
 
 // ---- compliance reporting ----
