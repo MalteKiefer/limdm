@@ -5,7 +5,19 @@ PKG           := github.com/maltekiefer/limdm
 LDFLAGS       := -s -w -X $(PKG)/internal/agent.Version=$(VERSION) -X $(PKG)/internal/agent.UpdatePubKey=$(UPDATE_PUBKEY)
 export CGO_ENABLED=0
 
-.PHONY: build test lint integration snapshot clean
+.PHONY: build test lint integration snapshot clean web web-check web-e2e
+
+# console app (web/): builds into internal/server/webapp/dist, which is committed
+web:
+	cd web && npm ci --ignore-scripts && npm run build
+
+# what CI runs for the app, without the end to end tests
+web-check:
+	cd web && npm ci --ignore-scripts && npm run lint && npm test && npm run build
+
+# end to end tests against a local server; E2E_DB is a disposable database
+web-e2e:
+	cd web && LIMDM_E2E_DATABASE_URL=$(E2E_DB) npm run e2e
 
 build:
 	for arch in amd64 arm64; do \
