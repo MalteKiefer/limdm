@@ -58,16 +58,21 @@ func (s *slots) resize(n int) {
 	if s == nil {
 		return
 	}
+	size := maxSlots // bounded: the size comes from a setting
 	if n < 1 {
-		n = 1
+		size = 1
+	} else if n <= maxSlots {
+		size = n
 	}
-	if n > maxSlots { // bounded: the size comes from a setting
-		n = maxSlots
-	}
-	if c := s.c.Load(); c != nil && cap(*c) == n {
+	if c := s.c.Load(); c != nil && cap(*c) == size {
 		return
 	}
-	c := make(chan struct{}, n)
+	var c chan struct{}
+	if size <= maxSlots {
+		c = make(chan struct{}, size)
+	} else {
+		c = make(chan struct{}, maxSlots)
+	}
 	s.c.Store(&c)
 }
 
