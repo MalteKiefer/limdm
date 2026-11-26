@@ -537,13 +537,15 @@ function ShellDialog({ target, onClose }: { target: Target; onClose: () => void 
   const start = useShellStart(target.id)
   const [user, setUser] = useState('')
   const s = target.detail?.shell
+  const off = s ? !s.policy : false
   return (
-    <Modal open onClose={onClose} title={t('devices.cmd.shell')} description={t('devices.shell.limits', { max: s?.max_minutes ?? 60, idle: s?.idle_minutes ?? 15 })} footer={<Foot form="dlg-shell" onClose={onClose} label={t('devices.shell.start')} busy={start.isPending} />}>
+    <Modal open onClose={onClose} title={t('devices.cmd.shell')} description={t('devices.shell.limits', { max: s?.max_minutes ?? 60, idle: s?.idle_minutes ?? 15 })} footer={<Foot form="dlg-shell" onClose={onClose} label={t('devices.shell.start')} busy={start.isPending} disabled={off} />}>
       <form
         id="dlg-shell"
         className="flex flex-col gap-4"
         onSubmit={(e) => {
           e.preventDefault()
+          if (off) return
           start.mutate(user, {
             onSuccess: (r) => {
               if (r.id) void nav({ to: '/devices/$id/shell/$sid', params: { id: target.id, sid: r.id } })
@@ -556,6 +558,11 @@ function ShellDialog({ target, onClose }: { target: Target; onClose: () => void 
           })
         }}
       >
+        {off && (
+          <p role="alert" className="text-[13px] font-medium text-bad">
+            {t('devices.shell.policyOff')}
+          </p>
+        )}
         <Text label={t('devices.shell.user')} help={t(s?.allow_root ? 'devices.shell.userHelpRoot' : 'devices.shell.userHelp')} value={user} onChange={setUser} mono autoFocus />
         {s?.four_eyes && <p className="text-[12.5px] text-muted">{t('devices.shell.fourEyes')}</p>}
       </form>

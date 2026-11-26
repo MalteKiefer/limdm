@@ -181,6 +181,7 @@ type apiShellSettings struct {
 	Max       int  `json:"max_minutes"`
 	Idle      int  `json:"idle_minutes"`
 	FourEyes  bool `json:"four_eyes"`
+	Policy    bool `json:"policy"` // the device's policy allows remote shells (com.limdm.agent remote_shell)
 }
 
 type apiDiagnostics struct {
@@ -238,11 +239,14 @@ func (s *Server) apiDeviceDetail(w http.ResponseWriter, r *http.Request, c apiCa
 	}
 	res, err := resolveDevice(ctx, tx, id)
 	var exempt func(string) bool
+	shellPolicy := false
 	if err == nil {
 		if decls, derr := effectiveDeclarations(ctx, tx, id); derr == nil {
-			if pol, _ := api.Compose(decls); pol.Extra.DiskEncryption != nil {
+			pol, _ := api.Compose(decls)
+			if pol.Extra.DiskEncryption != nil {
 				exempt = pol.Extra.DiskEncryption.Excluded
 			}
+			shellPolicy = pol.RemoteShell
 		}
 	}
 	_ = tx.Rollback(ctx) // free the connection before the next queries (see device)
@@ -357,7 +361,7 @@ func (s *Server) apiDeviceDetail(w http.ResponseWriter, r *http.Request, c apiCa
 	set := s.settings()
 	maxM, idleM := set.RemoteShell.Limits()
 	d.Shell = apiShellSettings{Enabled: set.RemoteShell.Enabled, Allowed: set.RemoteShell.allows(c.Role) && c.can("helpdesk"),
-		AllowRoot: set.RemoteShell.AllowRoot, Max: maxM, Idle: idleM, FourEyes: set.FourEyesShell}
+		AllowRoot: set.RemoteShell.AllowRoot, Max: maxM, Idle: idleM, FourEyes: set.FourEyesShell, Policy: shellPolicy}
 	d.FourEyesCommands = []string{}
 	for _, t := range []string{"wipe", "lost", "script"} {
 		if s.needsApproval(t) {

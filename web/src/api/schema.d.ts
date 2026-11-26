@@ -3661,6 +3661,8 @@ export interface components {
                 max_minutes: number;
                 idle_minutes: number;
                 four_eyes: boolean;
+                /** @description The device's policy allows remote shells (com.limdm.agent remote_shell). */
+                policy: boolean;
             };
             four_eyes_commands: string[];
             four_eyes_recovery: boolean;

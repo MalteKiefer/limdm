@@ -18,8 +18,9 @@ import (
 
 // Remote support shell: the signed "shell" command makes the agent open an
 // outbound mTLS request to the server and run a login shell on a PTY behind
-// it. No port is opened on the device. Only on devices enrolled with
-// allow_remote_shell, one session at a time.
+// it. No port is opened on the device. Only when the device's policy allows
+// it (com.limdm.agent remote_shell) or, from older enrollments, the local
+// allow_remote_shell; one session at a time.
 
 const supportUser = "limdm-support"
 
@@ -30,8 +31,8 @@ type runningShell struct {
 
 // startShell checks the command and starts the session in the background.
 func (a *Agent) startShell(c api.Command) (string, error) {
-	if !a.cfg.AllowRemoteShell {
-		return "", errors.New("remote shells are disabled on this device (allow_remote_shell)")
+	if !a.pol.RemoteShell && !a.cfg.AllowRemoteShell {
+		return "", errors.New("remote shells are not allowed by the device's policy (Agent: remote shell)")
 	}
 	if a.state.CommandKey == "" { // unsigned commands run before a key is pinned; a shell never does
 		return "", errors.New("remote shells need a pinned command signing key")

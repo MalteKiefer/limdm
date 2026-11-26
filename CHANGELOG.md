@@ -4,6 +4,15 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.18.1 (2026-11-26)
+
+### Changed
+- Remote shells are allowed per policy: **Remote shell** in the **Agent** declaration (`com.limdm.agent`, `remote_shell`) instead of a local opt in on each device. The server refuses a start without it and the console says why in the start dialog; the local `allow_remote_shell` keeps working on the agent.
+
+### Fixed
+- Form fields in a row line up when their help texts differ in height.
+- CrowdSec: `deploy/crowdsec/parsers/s02-enrich/limdm-console-whitelist.yaml` keeps `http-crawl-non_statics` from banning admins while the console loads icons and API responses.
+
 ## 0.18.0 (2026-11-26)
 
 ### Upgrade notes

@@ -418,8 +418,9 @@ removes them; the deletion is one of them (`device.delete`).
 The remote shell ([remote-shell.md](remote-shell.md)) is remote code execution by design;
 these controls keep it narrow:
 
-* **Two opt ins.** The device must be enrolled with `allow_remote_shell` (local file, not
-  changeable from the server) and **Settings**, **Security**, **Remote shell** must be on.
+* **Two opt ins.** The device's policy must allow it (**Agent**, **Remote shell** in its
+  blueprint, signed like every library item) and **Settings**, **Security**, **Remote shell**
+  must be on.
   Helpdesk and root need their own switches. Without the root switch the agent also
   refuses accounts with admin rights (uid 0, `sudo`, `wheel` or `admin` group, sudoers
   rules including `NOPASSWD`; on the agent also the root equivalent groups `docker`, `lxd`,
