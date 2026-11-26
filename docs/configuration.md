@@ -28,6 +28,7 @@ the environment.
 | `LIMDM_TRUSTED_PROXIES` | | Load balancers whose `X-Forwarded-For` names the client, comma separated addresses or networks (`10.0.0.5,10.0.1.0/24`). A proxy on loopback is always trusted ([high-availability.md](high-availability.md#load-balancer)). |
 | `LIMDM_DRAIN_SECONDS` | `5` | On SIGTERM, how long `/readyz` fails before connections close, so load balancers stop sending requests (0 to 300). |
 | `LIMDM_SYSLOG` | | Forward audit entries and device events as RFC 5424 syslog, `udp://host:514` or `tcp://host:514` ([security.md](security.md#audit-log)). |
+| `LIMDM_MULTI_TENANT` | `false` | `true` shows the tenant pages and the tenant switcher to global administrators ([tenants.md](tenants.md)). Tenant isolation applies regardless. |
 
 The server refuses to start when OIDC and local login are both off, when OIDC is set without
 an administrator, or when the console would listen publicly without a certificate.
@@ -112,6 +113,10 @@ history), the compliance history page and the audit log with its CSV and JSON Li
 with fleet wide data that are not filtered (Directory, Agents, Software, Network
 certificates, version history) are refused to scoped accounts. API tokens can carry scope
 tags too ([admin-api.md](admin-api.md#tokens)); scoped tokens get no metrics.
+
+**Tenants.** With multi tenancy, accounts belong to one tenant or are global (super
+admins); accounts added while switched to a tenant belong to it. Users lists the accounts
+of the current tenant, in the global view all of them with their tenant ([tenants.md](tenants.md)).
 
 ## Profile
 

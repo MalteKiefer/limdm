@@ -3,7 +3,7 @@
   "info": {
     "title": "LiMDM admin API",
     "version": "1",
-    "description": "REST API of the LiMDM console. Every action runs through the same functions as the console, with the same role rules, validation and audit entries. Authenticate with an API token from the console (Administration, API tokens) as a bearer token. Errors are RFC 9457 problem details. Lists are paged with limit and an opaque cursor. Each token may send 600 requests per minute; failed authentications are limited to 20 per client address in five minutes."
+    "description": "REST API of the LiMDM console. Every action runs through the same functions as the console, with the same role rules, validation and audit entries. Authenticate with an API token from the console (Administration, API tokens) as a bearer token. Errors are RFC 9457 problem details. Lists are paged with limit and an opaque cursor. Each token may send 600 requests per minute; failed authentications are limited to 20 per client address in five minutes. Tenants: a token created in a tenant (multi tenancy, see docs/tenants.md) sees and changes only that tenant's devices, commands, library items, blueprints, tags and audit entries; shared library items and blueprints of the Default tenant are readable but not writable, and objects of other tenants answer 404. Global tokens see every tenant. Metrics need a global token."
   },
   "servers": [
     {
@@ -295,7 +295,7 @@
       "post": {
         "operationId": "enqueueCommand",
         "summary": "Queue a command",
-        "description": "Same commands and rules as the console: scripts, lost mode, wipe, allow_uninstall, user, software and app commands need the admin role; lost and wipe need confirm set to the host name. Audited as command.<type>. Roles admin and helpdesk, not read only.",
+        "description": "Same commands and rules as the console: scripts, lost mode, wipe, allow_uninstall, user, software and app commands need the admin role; lost and wipe need confirm set to the host name. Audited as command.<type>. Roles admin and helpdesk, not read only. With four eyes approval on (wipe, lost mode, scripts) nothing is queued: the answer is 202 with the approval_id of a pending request that another admin decides in the console (Approvals).",
         "requestBody": {
           "required": true,
           "content": {
@@ -308,11 +308,18 @@
         },
         "responses": {
           "202": {
-            "description": "Queued",
+            "description": "Queued (a Command), or, when the command needs four eyes approval, an approval request (ApprovalPending) with Location /approvals",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Command"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Command"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApprovalPending"
+                    }
+                  ]
                 }
               }
             },
@@ -1461,6 +1468,10 @@
           "hash": {
             "type": "string",
             "description": "SHA-256 chain hash, hex"
+          },
+          "tenant_id": {
+            "type": "integer",
+            "description": "Tenant of the entry; absent for global entries. When set it is hashed as a fifth field after detail (decimal)."
           }
         }
       },
@@ -1479,6 +1490,64 @@
           "next_cursor": {
             "type": "string",
             "description": "Pass as cursor to get the next page; absent on the last page."
+          }
+        }
+      },
+      "ApprovalPending": {
+        "type": "object",
+        "required": [
+          "approval_id",
+          "status"
+        ],
+        "properties": {
+          "approval_id": {
+            "type": "integer",
+            "description": "ID of the pending approval request"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
+          }
+        }
+      },
+      "ApiToken": {
+        "type": "object",
+        "description": "An API token as the console creates it (Administration, API tokens); shown for reference, tokens are not managed through this API.",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "helpdesk",
+              "auditor",
+              "metrics"
+            ]
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "scope_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Device scope of a helpdesk or auditor token: only devices with one of these tags are visible and reachable; empty means every device (of the token's tenant). Scoped tokens get no metrics."
+          },
+          "tenant_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Tenant of the token; null for a global token. Set from the console's tenant context when the token is created."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       }

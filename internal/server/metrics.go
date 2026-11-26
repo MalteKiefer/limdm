@@ -130,7 +130,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if c.Role == "helpdesk" || c.sess().scoped() { // fleet wide numbers: unscoped tokens only
+	if c.Role == "helpdesk" || c.sess().scoped() || c.Tenant != 0 { // fleet wide numbers: global, unscoped tokens only
 		s.deny(w, r, c, "metrics need a metrics, admin or auditor token without a device scope")
 		return
 	}

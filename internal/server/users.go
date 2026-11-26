@@ -109,12 +109,18 @@ type consoleUser struct {
 	Local       bool
 	Tags        []string // device scope (helpdesk, auditor)
 	Groups      []string
-	FromGroup   bool // role from a directory group mapping
+	FromGroup   bool   // role from a directory group mapping
+	Tenant      string // tenant name, "" for global accounts
 }
 
-func (s *Server) consoleUsers(ctx context.Context) ([]consoleUser, error) {
-	rows, err := s.db.Query(ctx, `SELECT email, role, disabled, last_login, false, scope_tags, scope_groups, from_group FROM console_users
-		UNION ALL SELECT name, role, disabled, last_login, true, scope_tags, scope_groups, false FROM local_admins ORDER BY 5, 1`)
+// consoleUsers lists the accounts of the tenant of sess (all in the global view).
+func (s *Server) consoleUsers(ctx context.Context, sess session) ([]consoleUser, error) {
+	cu, args := tenantCond(sess, "u.tenant_id", 0)
+	la, _ := tenantCond(sess, "l.tenant_id", 0)
+	rows, err := s.db.Query(ctx, `SELECT u.email, u.role, u.disabled, u.last_login, false, u.scope_tags, u.scope_groups, u.from_group, coalesce(t.name, '')
+		FROM console_users u LEFT JOIN tenants t ON t.id=u.tenant_id WHERE `+cu+`
+		UNION ALL SELECT l.name, l.role, l.disabled, l.last_login, true, l.scope_tags, l.scope_groups, false, coalesce(t.name, '')
+		FROM local_admins l LEFT JOIN tenants t ON t.id=l.tenant_id WHERE `+la+` ORDER BY 5, 1`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +132,7 @@ func (s *Server) usersPage(w http.ResponseWriter, r *http.Request, sess session)
 }
 
 func (s *Server) renderUsers(w http.ResponseWriter, r *http.Request, sess session, creds, errMsg string) {
-	users, err := s.consoleUsers(r.Context())
+	users, err := s.consoleUsers(r.Context(), sess)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -150,6 +156,10 @@ func (s *Server) userAdd(w http.ResponseWriter, r *http.Request, sess session) {
 		s.renderUsers(w, r, sess, "", "unknown role")
 		return
 	}
+	var tenantID *int64 // accounts added in a tenant belong to it; NULL is global
+	if sess.Tenant != 0 {
+		tenantID = &sess.Tenant
+	}
 	if kind == "oidc" {
 		addr, err := mail.ParseAddress(strings.TrimSpace(r.FormValue("login")))
 		if err != nil || addr.Name != "" {
@@ -158,7 +168,7 @@ func (s *Server) userAdd(w http.ResponseWriter, r *http.Request, sess session) {
 		}
 		email := strings.ToLower(addr.Address)
 		err = s.auditAction(ctx, sess.Email, "user.add", email, "oidc "+role, func(tx pgx.Tx) error {
-			tag, err := tx.Exec(ctx, `INSERT INTO console_users(email, role) VALUES ($1,$2) ON CONFLICT DO NOTHING`, email, role)
+			tag, err := tx.Exec(ctx, `INSERT INTO console_users(email, role, tenant_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, email, role, tenantID)
 			if err == nil && tag.RowsAffected() == 0 {
 				err = errors.New("user exists already")
 			}
@@ -179,7 +189,10 @@ func (s *Server) userAdd(w http.ResponseWriter, r *http.Request, sess session) {
 	var creds string
 	err := s.auditAction(ctx, sess.Email, "user.add", localPrefix+name, "local "+role, func(tx pgx.Tx) error {
 		var err error
-		creds, err = localAdd(ctx, tx, name, role)
+		if creds, err = localAdd(ctx, tx, name, role); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE local_admins SET tenant_id=$2 WHERE name=$1`, name, tenantID)
 		return err
 	})
 	if err != nil {
@@ -196,6 +209,10 @@ func (s *Server) userUpdate(w http.ResponseWriter, r *http.Request, sess session
 	c := userChange{Role: r.FormValue("role"), Disabled: r.FormValue("disabled") == "on"}
 	if !slices.Contains(roles, c.Role) {
 		s.renderUsers(w, r, sess, "", "unknown role")
+		return
+	}
+	if !s.userInTenant(ctx, sess, login) {
+		s.renderUsers(w, r, sess, "", "user not found")
 		return
 	}
 	if login == sess.Email && (c.Disabled || c.Role != sess.Role) {
@@ -251,6 +268,21 @@ type userChange struct {
 
 func (c userChange) String() string {
 	return fmt.Sprintf("role=%s disabled=%v scope_tags=%v scope_groups=%q", c.Role, c.Disabled, c.Tags, c.Groups)
+}
+
+// userInTenant reports whether the account belongs to the tenant of sess;
+// in the global view every account does.
+func (s *Server) userInTenant(ctx context.Context, sess session, login string) bool {
+	if sess.Tenant == 0 {
+		return true
+	}
+	q, key := `SELECT EXISTS(SELECT 1 FROM console_users WHERE email=$1 AND tenant_id=$2)`, login
+	if name, ok := strings.CutPrefix(login, localPrefix); ok {
+		q, key = `SELECT EXISTS(SELECT 1 FROM local_admins WHERE name=$1 AND tenant_id=$2)`, name
+	}
+	var ok bool
+	err := s.db.QueryRow(ctx, q, key, sess.Tenant).Scan(&ok)
+	return err == nil && ok
 }
 
 // currentRole is the stored role of an account, enabled or not ("" unknown).
@@ -314,6 +346,10 @@ func (s *Server) userReset(w http.ResponseWriter, r *http.Request, sess session)
 	}
 	if localPrefix+name == sess.Email {
 		s.renderUsers(w, r, sess, "", "change your own credentials in your profile")
+		return
+	}
+	if !s.userInTenant(ctx, sess, localPrefix+name) {
+		s.renderUsers(w, r, sess, "", "user not found")
 		return
 	}
 	var creds string

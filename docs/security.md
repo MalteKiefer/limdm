@@ -70,6 +70,27 @@
   credentials, the desktop login client secret) are sealed with AES-256-GCM; recovery keys
   too, bound to device and volume. Keys derive from `LIMDM_SESSION_KEY` with HKDF.
 
+## Tenant isolation
+
+With several tenants ([tenants.md](tenants.md)) isolation is deny by default on two levels.
+A session or API token bound to a tenant reaches only the console routes on an explicit
+list (`tenantRoutes` in `tenant.go`); every other route, including routes added later,
+answers 403. The listed handlers filter by tenant: devices through the same central filter
+as the device scopes (`scopeCond`), so device lists, pages, commands, exports, compliance
+history, the remote shell, recovery keys and the admin API share one condition, and every
+route with a device ID checks that device before its handler runs. Other tables are
+filtered by their tenant column, and the shared save and delete functions of the console
+and the API refuse objects of other tenants. Objects of other tenants answer 404.
+Blueprints cannot reference another tenant's library items, and declaration resolution
+loads only items of the device's tenant and of Default. A test walks every console route as
+an admin of one tenant against the data of another.
+
+The tenant of an account is read from the database on every request; the tenant a super
+admin switched to is kept in the signed session cookie and checked against the tenants
+table. A disabled tenant ends the sessions and API tokens of its accounts and stops its
+enrollment tokens. Metrics, server settings, keys, the directory and the network CRL are
+global only.
+
 ## Four eyes approval
 
 **Settings**, **Security**, **Four eyes approval** makes a second administrator approve:
@@ -112,7 +133,10 @@ hash = HMAC-SHA256(key, prev || be64(at_us) || be64(len(actor)) || actor || be64
 ```
 
 `at_us` is the time in Unix microseconds, `be64` an unsigned 64 bit big endian integer; the
-first entry has 32 zero bytes as `prev`. The key is derived from `command.key` with HKDF
+first entry has 32 zero bytes as `prev`. An entry that belongs to a tenant
+([tenants.md](tenants.md)) appends `be64(len(tenant)) || tenant` with the tenant ID in
+decimal; entries without a tenant (all from before tenants existed) hash as above. CSV and
+JSON Lines exports carry `tenant_id`. The key is derived from `command.key` with HKDF
 (SHA-256, info `limdm audit chain v1`), so it never lives in the database: whoever can only
 write to the database cannot recompute the chain after changing a row. Entries written
 before the keyed chain was introduced use plain SHA-256 over the same bytes; the first keyed entry is recorded in

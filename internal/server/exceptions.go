@@ -47,8 +47,9 @@ func (e riskException) State() string {
 }
 
 func (s *Server) riskExceptions(ctx context.Context) ([]riskException, error) {
+	cond, args := tenantCond(session{Tenant: ctxTenant(ctx)}, "x.tenant_id", 0)
 	rows, err := s.db.Query(ctx, `SELECT id, check_id, mode, tag, reason, owner, approver, expires_at, created_by, created_at, revoked_at
-		FROM risk_exceptions x ORDER BY (`+activeExceptionSQL+`) DESC, expires_at`)
+		FROM risk_exceptions x WHERE `+cond+` ORDER BY (`+activeExceptionSQL+`) DESC, expires_at`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -63,6 +64,7 @@ func applyExceptions(ctx context.Context, q pgx.Tx, deviceID string, decls []api
 		return nil
 	}
 	rows, err := q.Query(ctx, `SELECT check_id, mode FROM risk_exceptions x WHERE `+activeExceptionSQL+`
+		AND x.tenant_id = (SELECT tenant_id FROM devices WHERE id=$1)
 		AND (x.tag = '' OR x.tag = ANY(SELECT unnest(tags) FROM devices WHERE id=$1)) ORDER BY id`, deviceID)
 	if err != nil {
 		return err
@@ -123,8 +125,8 @@ func (s *Server) exceptionAdd(w http.ResponseWriter, r *http.Request, sess sessi
 	default:
 		err := s.auditAction(r.Context(), sess.Email, "exception.add", e.CheckID, fmt.Sprintf("mode=%s tag=%q owner=%q approver=%q expires=%s reason=%q",
 			e.Mode, e.Tag, e.Owner, e.Approver, e.Expires.Format(time.DateOnly), e.Reason), func(tx pgx.Tx) error {
-			_, err := tx.Exec(r.Context(), `INSERT INTO risk_exceptions(check_id, mode, tag, reason, owner, approver, expires_at, created_by)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, e.CheckID, e.Mode, e.Tag, e.Reason, e.Owner, e.Approver, e.Expires, e.CreatedBy)
+			_, err := tx.Exec(r.Context(), `INSERT INTO risk_exceptions(check_id, mode, tag, reason, owner, approver, expires_at, created_by, tenant_id)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, e.CheckID, e.Mode, e.Tag, e.Reason, e.Owner, e.Approver, e.Expires, e.CreatedBy, ownerTenant(r.Context()))
 			return err
 		})
 		if err != nil {
@@ -143,9 +145,14 @@ func (s *Server) exceptionRevoke(w http.ResponseWriter, r *http.Request, sess se
 	}
 	err = s.auditActionFn(r.Context(), func(tx pgx.Tx) (string, string, string, string, error) {
 		var check string
-		err := tx.QueryRow(r.Context(), `UPDATE risk_exceptions SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL RETURNING check_id`, id).Scan(&check)
+		tcond, targs := tenantCond(sess, "tenant_id", 1)
+		err := tx.QueryRow(r.Context(), `UPDATE risk_exceptions SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL AND `+tcond+` RETURNING check_id`, append([]any{id}, targs...)...).Scan(&check)
 		return sess.Email, "exception.revoke", check, "#" + strconv.FormatInt(id, 10), err
 	})
+	if errors.Is(err, pgx.ErrNoRows) && !s.tenantOwns(r.Context(), sess, "risk_exceptions", id, false) {
+		s.notFound(w, r, sess)
+		return
+	}
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		s.fail(w, err)
 		return

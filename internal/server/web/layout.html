@@ -6,22 +6,23 @@
 <title>{{block "title" .}}LiMDM{{end}}</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css">
+{{if .Brand.Color}}<link rel="stylesheet" href="/branding/tenant.css?v={{.Brand.V}}">{{end}}
 </head>
 <body>
 {{if .Sess.Email}}
 <div class="shell">
   <aside class="side" id="side">
-    <div class="brand"><button type="button" class="nav-toggle" aria-expanded="false" aria-controls="side" data-nav-toggle aria-label="{{t "Menu"}}"><span aria-hidden="true">☰</span></button>{{if .Brand.Logo}}<img src="/branding/logo.png?v={{.Brand.V}}" alt="">{{else}}<img src="/static/logo.svg" alt="">{{end}} {{if .Brand.Name}}{{.Brand.Name}}{{else}}{{t "LiMDM"}}{{end}}</div>
+    <div class="brand"><button type="button" class="nav-toggle" aria-expanded="false" aria-controls="side" data-nav-toggle aria-label="{{t "Menu"}}"><span aria-hidden="true">☰</span></button>{{if .Brand.Logo}}<img src="{{.Brand.LogoURL}}" alt="">{{else}}<img src="/static/logo.svg" alt="">{{end}} {{if .Brand.Name}}{{.Brand.Name}}{{else}}{{t "LiMDM"}}{{end}}</div>
     <nav class="nav" aria-label="{{t "Main"}}">
       <a href="/" {{if eq .Page "overview"}}class="on" aria-current="page"{{end}}>{{t "Overview"}}</a>
       <a href="/devices" {{if or (eq .Page "devices") (eq .Page "device")}}class="on" aria-current="page"{{end}}>{{t "Devices"}}</a>
       <a href="/compliance" {{if eq .Page "compliance"}}class="on" aria-current="page"{{end}}>{{t "Compliance"}}</a>
       <span class="group">{{t "Configuration"}}</span>
       <a href="/library" {{if or (eq .Page "library") (eq .Page "item")}}class="on" aria-current="page"{{end}}>{{t "Library"}}</a>
-      {{if ne .Sess.Role "helpdesk"}}<a href="/directory" {{if eq .Page "directory"}}class="on" aria-current="page"{{end}}>{{t "Directory"}}</a>{{end}}
+      {{if and (ne .Sess.Role "helpdesk") (not .Sess.TenantOnly)}}<a href="/directory" {{if eq .Page "directory"}}class="on" aria-current="page"{{end}}>{{t "Directory"}}</a>{{end}}
       <a href="/blueprints" {{if or (eq .Page "blueprints") (eq .Page "blueprint")}}class="on" aria-current="page"{{end}}>{{t "Blueprints"}}</a>
       <a href="/tokens" {{if eq .Page "tokens"}}class="on" aria-current="page"{{end}}>{{t "Enrollment"}}</a>
-      {{if ne .Sess.Role "helpdesk"}}<a href="/agents" {{if eq .Page "agents"}}class="on" aria-current="page"{{end}}>{{t "Agents"}}</a>
+      {{if and (ne .Sess.Role "helpdesk") (not .Sess.TenantOnly)}}<a href="/agents" {{if eq .Page "agents"}}class="on" aria-current="page"{{end}}>{{t "Agents"}}</a>
       <a href="/software" {{if or (eq .Page "software") (eq .Page "app")}}class="on" aria-current="page"{{end}}>{{t "Software"}}</a>{{end}}
       {{if ne .Sess.Role "helpdesk"}}<span class="group">{{t "Evidence"}}</span>
       <a href="/audit" {{if eq .Page "audit"}}class="on" aria-current="page"{{end}}>{{t "Audit log"}}</a>{{end}}
@@ -31,6 +32,8 @@
       <a href="/users" {{if eq .Page "users"}}class="on" aria-current="page"{{end}}>{{t "Users"}}</a>
       <a href="/settings" {{if eq .Page "settings"}}class="on" aria-current="page"{{end}}>{{t "Settings"}}</a>
       <a href="/settings/api" {{if eq .Page "apitokens"}}class="on" aria-current="page"{{end}}>{{t "API tokens"}}</a>
+      {{if .Sess.TenantOnly}}<a href="/tenants/{{.Sess.Tenant}}" {{if eq .Page "tenant"}}class="on" aria-current="page"{{end}}>{{t "Company"}}</a>{{end}}
+      {{if and .MultiTenant .Sess.Super}}<a href="/tenants" {{if or (eq .Page "tenants") (eq .Page "tenant")}}class="on" aria-current="page"{{end}}>{{t "Tenants"}}</a>{{end}}
       {{if eq .Sess.Role "admin"}}<a href="/network" {{if eq .Page "network"}}class="on" aria-current="page"{{end}}>{{t "Network certificates"}}</a>{{end}}
       {{end}}
       <a class="nav-help{{if eq .Page "help"}} on{{end}}" href="/help" {{if eq .Page "help"}}aria-current="page"{{end}}>{{t "Help"}}</a>
@@ -44,6 +47,10 @@
         <div class="langs" aria-label="{{t "Language"}}"><a href="/lang/de" {{if eq lang "de"}}aria-current="true"{{end}}>DE</a><a href="/lang/en" {{if eq lang "en"}}aria-current="true"{{end}}>EN</a></div>
         <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="link">{{t "Sign out"}}</button></form>
       </div>
+      {{if .TenantList}}<form class="tenant-switch" method="post" action="/tenants/switch"><input type="hidden" name="csrf" value="{{.CSRF}}">
+        <label>{{t "Tenant"}}<select name="tenant"><option value="0">{{t "All tenants (global)"}}</option>{{range .TenantList}}{{if not .Disabled}}<option value="{{.ID}}" {{if eq .ID $.Sess.Tenant}}selected{{end}}>{{.Name}}</option>{{end}}{{end}}</select></label>
+        <button class="secondary small">{{t "Switch"}}</button></form>
+      {{else if .TenantName}}<div class="tenant-name">{{.TenantName}}</div>{{end}}
       <div class="version">LiMDM {{version}}</div>
     </div>
   </aside>

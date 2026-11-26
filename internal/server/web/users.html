@@ -10,7 +10,7 @@
     <div class="scroll"><table>
       <thead><tr><th>{{t "Login"}}</th><th>{{t "Type"}}</th><th>{{t "Role"}}</th><th>{{t "Last sign in"}}</th>{{if eq .Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
       <tbody>{{$s := .}}{{range .Users}}{{$login := .Login}}{{if .Local}}{{$login = printf "local:%s" .Login}}{{end}}<tr>
-        <td class="mono">{{.Login}}{{if .Disabled}} <span class="pill">{{t "disabled"}}</span>{{end}}{{if .FromGroup}} <span class="pill">{{t "from directory group"}}</span>{{end}}
+        <td class="mono">{{.Login}}{{if .Disabled}} <span class="pill">{{t "disabled"}}</span>{{end}}{{if .FromGroup}} <span class="pill">{{t "from directory group"}}</span>{{end}}{{if $s.MultiTenant}} <span class="pill">{{with .Tenant}}{{.}}{{else}}{{t "global"}}{{end}}</span>{{end}}
           {{if or .Tags .Groups}}<span class="sub">{{t "Scope"}}: {{join .Tags ", "}}{{if and .Tags .Groups}} · {{end}}{{join .Groups ", "}}</span>{{end}}</td>
         <td>{{if .Local}}{{t "local (password + TOTP)"}}{{else}}{{t "OIDC"}}{{end}}</td>
         <td>{{if eq $login $s.Sess.Email}}{{t .Role}} <a class="muted" href="/profile">({{t "you"}})</a>{{else if eq $s.Sess.Role "admin"}}

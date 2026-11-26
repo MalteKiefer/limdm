@@ -20,7 +20,15 @@ Admins create tokens under Administration, **API tokens** (`/settings/api`):
   token, as for scoped console users ([security.md](security.md)). A scoped token lists,
   reads and commands only devices with one of the tags (other devices answer `404`), sees
   only their audit entries and tags, and gets no `/metrics`. Directory group scopes exist
-  for console users only. Admin and metrics tokens cannot be scoped.
+  for console users only. Admin and metrics tokens cannot be scoped. The tags are stored as
+  `scope_tags` with the token.
+* **Tenant**: a token created while switched to a tenant (or by a tenant admin) belongs to
+  that tenant ([tenants.md](tenants.md)). It lists, reads and changes only that tenant's
+  devices, commands, library items, blueprints, tags and audit entries; shared library
+  items and blueprints of Default are readable, never writable; objects of other tenants
+  answer `404`. Tokens created in the global view are global. Metrics tokens are always
+  global, and tenant tokens get `403` on `/metrics`. Tokens of a disabled tenant are
+  refused.
 
 The token (`lma_...`) is shown once. The server stores only its SHA-256 hash, the first
 characters for recognition, the creator, the expiry and the last use (updated at most once a
@@ -43,6 +51,9 @@ Entries made through the API name the token as actor: `api:<name>#<id>`. In addi
 | `api_token.create`, `api_token.revoke` | A token was created or revoked in the console |
 | `api.auth_failed` | An unknown, expired or revoked token was sent (detail: reason and client address) |
 | `api.denied` | A valid token tried something its role does not allow |
+
+Audit entries in `GET /api/v1/audit` carry `tenant_id` when they belong to a tenant; it is
+hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-notifications-approvals)).
 
 ## Limits
 
@@ -117,7 +128,8 @@ answer is `202` with the command and its `Location`. Poll `GET /api/v1/commands/
 password.
 
 With four eyes approval on (Settings, Security), wipe, lost mode and scripts do not run:
-the answer is `202` with `{"approval_id": 12, "status": "pending"}` and an admin decides
+the answer is `202` with `{"approval_id": 12, "status": "pending"}` (`ApprovalPending` in the
+OpenAPI document, `Location: /approvals`) instead of a command, and an admin decides
 under **Approvals** in the console (`params.reason` is shown there). The token can never
 approve its own request; once approved, the command is queued with the token as creator.
 Library item answers mask network secrets; a `PUT` that sends the mask back keeps them, and

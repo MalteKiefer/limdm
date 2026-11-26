@@ -263,7 +263,8 @@ func (s *Server) affectedDevices(ctx context.Context, roots []int64) ([]deviceRo
 			}
 		}
 	}
-	return s.listDevicesWhere(ctx, `NOT d.retired AND `+effectiveBlueprintSQL+` = ANY($1)`, ids)
+	cond, args := tenantDevices(ctx, 1)
+	return s.listDevicesWhere(ctx, `NOT d.retired AND `+cond+` AND `+effectiveBlueprintSQL+` = ANY($1)`, append([]any{ids}, args...)...)
 }
 
 // treeUses reports whether an assignment map references the item anywhere.
@@ -404,6 +405,10 @@ func (s *Server) libraryHistory(w http.ResponseWriter, r *http.Request, sess ses
 		http.NotFound(w, r)
 		return
 	}
+	if !s.tenantOwns(r.Context(), sess, "library_items", id, true) {
+		s.notFound(w, r, sess)
+		return
+	}
 	vs, err := s.itemVersions(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
@@ -418,6 +423,10 @@ func (s *Server) blueprintHistory(w http.ResponseWriter, r *http.Request, sess s
 	id, ok := versionID(r)
 	if !ok {
 		http.NotFound(w, r)
+		return
+	}
+	if !s.tenantOwns(r.Context(), sess, "blueprints", id, true) {
+		s.notFound(w, r, sess)
 		return
 	}
 	vs, err := s.blueprintVersions(r.Context(), id)
@@ -448,6 +457,10 @@ func (s *Server) libraryRollback(w http.ResponseWriter, r *http.Request, sess se
 		http.NotFound(w, r)
 		return
 	}
+	if !s.tenantOwns(ctx, sess, "library_items", id, false) {
+		s.notFound(w, r, sess)
+		return
+	}
 	vs, err := s.itemVersions(ctx, id)
 	if err != nil {
 		s.fail(w, err)
@@ -470,6 +483,10 @@ func (s *Server) blueprintRollback(w http.ResponseWriter, r *http.Request, sess 
 	n, err := strconv.Atoi(r.FormValue("version"))
 	if !ok || err != nil {
 		http.NotFound(w, r)
+		return
+	}
+	if !s.tenantOwns(ctx, sess, "blueprints", id, false) {
+		s.notFound(w, r, sess)
 		return
 	}
 	vs, err := s.blueprintVersions(ctx, id)
@@ -500,6 +517,9 @@ type deletedObject struct {
 
 // deletedObjects lists objects whose latest version is a deletion.
 func (s *Server) deletedObjects(ctx context.Context, table, idCol string) ([]deletedObject, error) {
+	if ctxTenant(ctx) != 0 { // versions carry no tenant: restoring deleted objects is global
+		return nil, nil
+	}
 	rows, err := s.db.Query(ctx, `SELECT DISTINCT ON (`+idCol+`) `+idCol+`, name, created_at, created_by, deleted FROM `+table+`
 		ORDER BY `+idCol+`, version DESC`)
 	if err != nil {

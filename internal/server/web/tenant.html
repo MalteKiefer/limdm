@@ -1,0 +1,20 @@
+{{define "title"}}{{.T.Name}} · LiMDM{{end}}
+{{define "content"}}
+<div class="page-head"><div><h1>{{.T.Name}} {{template "doclink" "tenants.md"}}</h1><div class="meta"><span>{{t "Tenant"}} #{{.T.ID}}</span></div></div>
+  {{if .Sess.Super}}<div class="actions"><a class="button secondary" href="/tenants">{{t "All tenants"}}</a></div>{{end}}</div>
+{{template "err" .Error}}
+<form class="card" method="post" action="/tenants/{{.T.ID}}" enctype="multipart/form-data">
+  {{template "csrf" .CSRF}}
+  {{if .Sess.Super}}
+  <label>{{t "Name"}}<input name="name" maxlength="100" required value="{{.T.Name}}"></label>
+  {{if ne .T.ID 1}}<label class="check"><input type="checkbox" name="disabled" {{if .T.Disabled}}checked{{end}}> {{t "Disabled: its users and API tokens cannot sign in and its enrollment tokens stop working; devices keep checking in"}}</label>{{end}}
+  {{end}}
+  <h2>{{t "Branding"}}</h2>
+  <p class="muted">{{t "Shown in the console of this tenant and by the desktop helper on its devices. Empty fields use the global branding."}}</p>
+  <label>{{t "Company name"}}<input name="company_name" maxlength="100" value="{{.T.CompanyName}}"></label>
+  <label>{{t "Accent color"}}<input name="color" type="color" value="{{if .T.Color}}{{.T.Color}}{{else}}#0f6e6e{{end}}"></label>
+  <label>{{t "Logo (PNG)"}}<input name="logo" type="file" accept="image/png"></label>
+  {{if .T.HasLogo}}<label class="check"><input type="checkbox" name="remove_logo"> {{t "Remove logo"}}</label>{{end}}
+  {{if eq .Sess.Role "admin"}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
+</form>
+{{end}}

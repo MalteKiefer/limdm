@@ -202,12 +202,15 @@ func (sess session) scoped() bool {
 	return sess.Role != "admin" && (len(sess.Tags) > 0 || len(sess.Groups) > 0)
 }
 
-// scopeCond is a condition on devices d limiting sess to its scope, with
-// its arguments numbered after n existing ones.
+// scopeCond is a condition on devices d limiting sess to its tenant and
+// its scope, with its arguments numbered after n existing ones. It is the
+// one place that builds the device filter of a console session or token.
 func scopeCond(sess session, n int) (string, []any) {
+	tcond, targs := tenantCond(sess, "d.tenant_id", n)
 	if !sess.scoped() {
-		return "TRUE", nil
+		return tcond, targs
 	}
+	n += len(targs)
 	tags, groups := sess.Tags, sess.Groups
 	if tags == nil {
 		tags = []string{}
@@ -215,17 +218,19 @@ func scopeCond(sess session, n int) (string, []any) {
 	if groups == nil {
 		groups = []string{}
 	}
-	return fmt.Sprintf(`(d.tags && $%d::text[] OR d.primary_user_id IN (SELECT m.user_id FROM dir_members m
-		JOIN dir_groups g ON g.id=m.group_id WHERE g.name = ANY($%d::text[])))`, n+1, n+2), []any{tags, groups}
+	return tcond + fmt.Sprintf(` AND (d.tags && $%d::text[] OR d.primary_user_id IN (SELECT m.user_id FROM dir_members m
+		JOIN dir_groups g ON g.id=m.group_id WHERE g.name = ANY($%d::text[])))`, n+1, n+2), append(targs, tags, groups)
 }
 
-// auditScope limits audit entries to those about devices in the scope.
+// auditScope limits audit entries to the tenant of sess and, for scoped
+// accounts, to those about devices in the scope.
 func auditScope(sess session, n int) (string, []any) {
+	tcond, targs := tenantCond(sess, "tenant_id", n)
 	if !sess.scoped() {
-		return "TRUE", nil
+		return tcond, targs
 	}
-	cond, args := scopeCond(sess, n)
-	return `target IN (SELECT d.id FROM devices d WHERE ` + cond + `)`, args
+	cond, args := scopeCond(sess, n+len(targs))
+	return tcond + ` AND target IN (SELECT d.id FROM devices d WHERE ` + cond + `)`, append(targs, args...)
 }
 
 // inScope reports whether the device exists within the scope of sess.
