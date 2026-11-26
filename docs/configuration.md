@@ -42,7 +42,8 @@ Read by `limdm-server serve` (`ConfigFromEnv`). The package reads them from
 | `LIMDM_UPDATE_DOWNLOADS` | `20` | Agent packages served at once per instance (1 to 10000); more downloads wait up to 20 s, then get 503 with `Retry-After` ([agent.md](agent.md)). |
 | `LIMDM_AGENT_PROXY_PROTOCOL` | | Load balancers in TCP passthrough mode that send a PROXY protocol v2 header on the agent port, comma separated addresses or networks. Connections from them must start with the header, which names the device's address; other connections are taken as they are ([high-availability.md](high-availability.md#load-balancer)). |
 | `LIMDM_DRAIN_SECONDS` | `5` | On SIGTERM, how long `/readyz` fails before connections close, so load balancers stop sending requests (0 to 300). |
-| `LIMDM_SYSLOG` | | Forward audit entries and device events as RFC 5424 syslog, `udp://host:514` or `tcp://host:514` ([operations.md](operations.md#syslog)). |
+| `LIMDM_SYSLOG` | | Forward audit entries and device events as RFC 5424 syslog, `udp://host:514`, `tcp://host:514` or over TLS `tcp+tls://host:6514` ([operations.md](operations.md#syslog)). |
+| `LIMDM_SYSLOG_CA` | | CA certificate file (PEM) that verifies a `tcp+tls` syslog collector; without it the system roots apply. |
 | `LIMDM_MULTI_TENANT` | `false` | `true` shows the tenant pages and the tenant switcher to global administrators ([tenants.md](tenants.md)). Tenant isolation applies regardless. |
 
 The server refuses to start when OIDC and local login are both off, when OIDC is set without

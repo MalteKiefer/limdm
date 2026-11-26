@@ -192,7 +192,13 @@ framing, RFC 6587). Audit entries have the message ID `audit` and the structured
 message ID `event` with `id` and `device`. A copy outside the database anchors the audit
 chain externally. Forwarding runs on one instance, retries unsent entries and continues
 from its stored position after a restart or leader change
-([high-availability.md](high-availability.md#background-jobs)).
+([high-availability.md](high-availability.md#background-jobs)). Both streams are written one
+transaction at a time up to the commit, so ids become visible in order and the position
+(last sent id) cannot skip an entry that committed late.
+
+`LIMDM_SYSLOG=tcp+tls://host:6514` sends over TLS (RFC 5425, octet counting, TLS 1.2 or
+newer); the collector's certificate is verified against the system roots, or against the CA
+file in `LIMDM_SYSLOG_CA` for a private CA.
 
 ## Retention
 

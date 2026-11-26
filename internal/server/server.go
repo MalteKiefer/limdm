@@ -67,7 +67,7 @@ type Config struct {
 	Keys           KeyProvider
 	ReleaseDir     string
 	StaleAfter     time.Duration
-	Syslog         string // udp://host:port or tcp://host:port: audit entries and device events as RFC 5424
+	Syslog         string // udp://host:port, tcp://host:port or tcp+tls://host:port: audit entries and device events as RFC 5424
 	// proxies (load balancers) whose X-Forwarded-For is trusted for the client address, besides loopback
 	TrustedProxies []netip.Prefix
 	DrainDelay     time.Duration // between failing /readyz and closing connections at shutdown
@@ -75,7 +75,8 @@ type Config struct {
 	DBMaxConns     int           // connections in the pool of this instance (LIMDM_DB_MAX_CONNS)
 	// parallel agent package downloads per instance; more wait, then get 503 (LIMDM_UPDATE_DOWNLOADS)
 	UpdateDownloads int
-	MaxCheckins     int // check ins decoded and processed at once per instance (LIMDM_MAX_CHECKINS)
+	MaxCheckins     int    // check ins decoded and processed at once per instance (LIMDM_MAX_CHECKINS)
+	SyslogCA        string // CA file for tcp+tls syslog targets; empty: system roots
 	// load balancers that send a PROXY v2 header to the agent listener (LIMDM_AGENT_PROXY_PROTOCOL)
 	AgentProxyFrom []netip.Prefix
 }
@@ -119,6 +120,7 @@ func ConfigFromEnv() (Config, error) {
 		ReleaseRepo:   os.Getenv("LIMDM_RELEASE_REPO"),
 		GeoIPURL:      envOr("LIMDM_GEOIP_URL", "https://ipwho.is/"),
 		Syslog:        os.Getenv("LIMDM_SYSLOG"),
+		SyslogCA:      os.Getenv("LIMDM_SYSLOG_CA"),
 		MultiTenant:   os.Getenv("LIMDM_MULTI_TENANT") == "true",
 	}
 	if c.GeoIPURL == "off" {
@@ -1183,7 +1185,8 @@ func audit(ctx context.Context, tx pgx.Tx, actor, action, target, detail string)
 // a savepoint (tx.Begin) are written at once.
 type auditTx struct {
 	pgx.Tx
-	pending []auditEntry
+	pending  []auditEntry
+	atCommit []func(context.Context, pgx.Tx) error // run before the audit entries
 }
 
 type auditEntry struct {
@@ -1192,6 +1195,11 @@ type auditEntry struct {
 }
 
 func (t *auditTx) Commit(ctx context.Context) error {
+	for _, f := range t.atCommit {
+		if err := f(ctx, t.Tx); err != nil {
+			return err
+		}
+	}
 	for _, e := range t.pending {
 		if err := audit(withTenant(ctx, e.tenant), t.Tx, e.actor, e.action, e.target, e.detail); err != nil {
 			return err
@@ -1385,8 +1393,20 @@ func (s *Server) storeEvents(ctx context.Context, tx pgx.Tx, id string, events [
 		evAt, evText = append(evAt, at), append(evText, truncate(msg, 2000))
 	}
 	if len(evText) > 0 {
-		if _, err := tx.Exec(ctx, `INSERT INTO device_events(device_id, at, detail) SELECT $1, a, d FROM unnest($2::timestamptz[], $3::text[]) AS e(a, d)`,
-			id, evAt, evText); err != nil {
+		// one writer at a time from the insert to the commit, as for the audit
+		// log: ids then become visible in commit order, and the syslog cursor
+		// (id > last sent) cannot skip an event committed late with a smaller id
+		insert := func(ctx context.Context, tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, lockEvents); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `INSERT INTO device_events(device_id, at, detail) SELECT $1, a, d FROM unnest($2::timestamptz[], $3::text[]) AS e(a, d)`,
+				id, evAt, evText)
+			return err
+		}
+		if d, ok := tx.(*auditTx); ok {
+			d.atCommit = append(d.atCommit, insert) // the lock is then held for the commit only
+		} else if err := insert(ctx, tx); err != nil {
 			return nil, err
 		}
 	}
