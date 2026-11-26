@@ -931,3 +931,7 @@ CREATE TABLE IF NOT EXISTS blueprint_pilots (
     PRIMARY KEY (pilot_id, device_id)
 );
 CREATE INDEX IF NOT EXISTS blueprint_pilots_blueprint ON blueprint_pilots(blueprint_id);
+
+-- R3-D
+-- the device timeline reads the audit entries of one device
+CREATE INDEX IF NOT EXISTS audit_log_target ON audit_log(target, id);

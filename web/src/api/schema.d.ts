@@ -1115,7 +1115,7 @@ export interface paths {
         };
         /**
          * Activity of a device, newest first
-         * @description Merges device events, commands, script results, remote shell sessions (the helpdesk sees its own) and diagnostics bundles (admin and helpdesk).
+         * @description Merges device events, commands, script results, remote shell sessions (the helpdesk sees its own), diagnostics bundles (admin and helpdesk), compliance check changes (title is the check id, status the new result) and audit entries with the device as target (audit permission; title is the action, by the actor, extra the translated action label).
          */
         get: operations["deviceTimeline"];
         put?: never;
@@ -3457,7 +3457,7 @@ export interface components {
         };
         TimelineEntry: {
             /** @enum {string} */
-            kind: "event" | "command" | "script" | "shell" | "diagnostics";
+            kind: "event" | "command" | "script" | "shell" | "diagnostics" | "compliance" | "audit";
             id: string;
             /** Format: date-time */
             at: string;
@@ -6584,7 +6584,7 @@ export interface operations {
                 limit?: components["parameters"]["limit"];
                 /** @description next_cursor of the previous page */
                 cursor?: components["parameters"]["cursor"];
-                kind?: "event" | "command" | "script" | "shell" | "diagnostics";
+                kind?: "event" | "command" | "script" | "shell" | "diagnostics" | "compliance" | "audit";
             };
             header?: never;
             path: {
