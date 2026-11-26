@@ -19,7 +19,8 @@ const (
 	proxyUnit    = "/etc/systemd/system/limdm-agent.service.d/60-limdm-proxy.conf"
 	proxyApt     = "/etc/apt/apt.conf.d/60limdm-proxy"
 	proxyDnf5    = "/etc/dnf/libdnf5.conf.d/60-limdm-proxy.conf"
-	dnfConf      = "/etc/dnf/dnf.conf" // dnf4 (RHEL 9 family) has no drop in directory for [main]
+	dnfConf      = "/etc/dnf/dnf.conf"    // dnf4 (RHEL 9 family) has no drop in directory for [main]
+	suseProxy    = "/etc/sysconfig/proxy" // SUSE: zypper, YaST and the login environment read it
 )
 
 // declaredProxy is the proxy the agent's own HTTP clients use. Nil until a
@@ -133,6 +134,10 @@ func (a *Agent) applyProxy(p *api.Proxy) error {
 	switch a.host.family {
 	case "debian":
 		_, e3 = writeOrRemove(proxyApt, apt, 0o644)
+	case "suse":
+		if exists(suseProxy) {
+			e3 = a.syncSUSEProxy(p)
+		}
 	case "fedora":
 		_, e3 = writeOrRemove(proxyDnf5, dnf, 0o644)
 		if exists(dnfConf) {
@@ -169,6 +174,92 @@ func (a *Agent) applyProxy(p *api.Proxy) error {
 		declaredProxy.Store(&q)
 	}
 	return errors.Join(e1, e2, e3, e4)
+}
+
+// sysconfigOwned remembers what LiMDM changed in a sysconfig file: the
+// values found before (Orig) and the values it wrote (Wrote).
+type sysconfigOwned struct {
+	Orig  map[string]string `json:"orig"`
+	Wrote map[string]string `json:"wrote"`
+}
+
+// syncSUSEProxy sets PROXY_ENABLED, HTTP_PROXY, HTTPS_PROXY and NO_PROXY in
+// /etc/sysconfig/proxy (the file belongs to the distribution, so only these
+// keys change). Without a declaration the values found before come back,
+// for keys nobody changed since.
+func (a *Agent) syncSUSEProxy(p *api.Proxy) error {
+	b, err := os.ReadFile(suseProxy)
+	if err != nil {
+		return err
+	}
+	s, owned := syncSysconfig(string(b), suseProxyValues(p), a.state.SUSEProxy)
+	if _, err := writeIfChanged(suseProxy, s, 0o644); err != nil {
+		return err
+	}
+	a.state.SUSEProxy = owned
+	return nil
+}
+
+// suseProxyValues are the /etc/sysconfig/proxy values of a declaration; nil
+// without one.
+func suseProxyValues(p *api.Proxy) map[string]string {
+	if p == nil {
+		return nil
+	}
+	enabled := "no"
+	if p.HTTP != "" || p.HTTPS != "" {
+		enabled = "yes"
+	}
+	return map[string]string{"PROXY_ENABLED": enabled, "HTTP_PROXY": p.HTTP, "HTTPS_PROXY": p.HTTPS, "NO_PROXY": p.NoProxy}
+}
+
+// syncSysconfig writes want as KEY="value" lines into a sysconfig file, or,
+// with want nil, restores owned.Orig for keys that still hold owned.Wrote.
+// Values are allowlisted by the declaration (no quotes, spaces or $).
+func syncSysconfig(s string, want map[string]string, owned *sysconfigOwned) (string, *sysconfigOwned) {
+	if want == nil {
+		if owned == nil {
+			return s, nil
+		}
+		for k, v := range owned.Orig {
+			if cur, ok := sysconfigValue(s, k); !ok || cur == owned.Wrote[k] {
+				s = setSysconfigValue(s, k, v)
+			}
+		}
+		return s, nil
+	}
+	if owned == nil {
+		owned = &sysconfigOwned{Orig: map[string]string{}}
+		for k := range want {
+			owned.Orig[k], _ = sysconfigValue(s, k)
+		}
+	}
+	for _, k := range sortedKeys(want) {
+		s = setSysconfigValue(s, k, want[k])
+	}
+	owned.Wrote = want
+	return s, owned
+}
+
+func sysconfigValue(s, key string) (string, bool) {
+	for _, l := range strings.Split(s, "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(l), key+"="); ok {
+			return strings.Trim(v, `"'`), true
+		}
+	}
+	return "", false
+}
+
+func setSysconfigValue(s, key, value string) string {
+	line := key + `="` + value + `"`
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), key+"=") {
+			lines[i] = line
+			return strings.Join(lines, "\n") + "\n"
+		}
+	}
+	return strings.Join(append(lines, line), "\n") + "\n"
 }
 
 // syncINIKey sets key in section of an INI style file (dnf.conf, pacman.conf), or

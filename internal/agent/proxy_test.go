@@ -63,3 +63,24 @@ func TestSyncINIKey(t *testing.T) {
 		t.Fatalf("hand made proxy removed:\n%s", b)
 	}
 }
+
+func TestSyncSysconfigProxy(t *testing.T) {
+	orig := "## Path: Network/Proxy\nPROXY_ENABLED=\"no\"\nHTTP_PROXY=\"\"\nHTTPS_PROXY=\"\"\nNO_PROXY=\"localhost, 127.0.0.1\"\n"
+	s, owned := syncSysconfig(orig, suseProxyValues(&api.Proxy{HTTP: "http://p:3128", HTTPS: "http://p:3128", NoProxy: ".corp"}), nil)
+	for _, want := range []string{`PROXY_ENABLED="yes"`, `HTTP_PROXY="http://p:3128"`, `HTTPS_PROXY="http://p:3128"`, `NO_PROXY=".corp"`, "## Path"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %s in\n%s", want, s)
+		}
+	}
+	// a second apply keeps the values found before the first one
+	s, owned = syncSysconfig(s, suseProxyValues(&api.Proxy{HTTPS: "http://q:8080"}), owned)
+	if owned.Orig["NO_PROXY"] != "localhost, 127.0.0.1" || !strings.Contains(s, `HTTP_PROXY=""`) {
+		t.Fatalf("second apply: %+v\n%s", owned, s)
+	}
+	// removal restores the original, except a key changed by hand since
+	s = setSysconfigValue(s, "NO_PROXY", "hand.example")
+	s, owned = syncSysconfig(s, nil, owned)
+	if owned != nil || !strings.Contains(s, `PROXY_ENABLED="no"`) || !strings.Contains(s, `HTTPS_PROXY=""`) || !strings.Contains(s, `NO_PROXY="hand.example"`) {
+		t.Fatalf("cleanup: %+v\n%s", owned, s)
+	}
+}

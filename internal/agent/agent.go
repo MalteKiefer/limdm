@@ -95,6 +95,7 @@ type State struct {
 	OfflineLocked  bool                      `json:"offline_locked,omitempty"`
 	FallbackDNS    bool                      `json:"fallback_dns,omitempty"` // server allows the DNS over HTTPS fallback
 	DNFProxy       string                    `json:"dnf_proxy,omitempty"`    // proxy= value LiMDM wrote to dnf.conf (dnf4)
+	SUSEProxy      *sysconfigOwned           `json:"suse_proxy,omitempty"`   // keys LiMDM manages in /etc/sysconfig/proxy
 	Held           []string                  `json:"held,omitempty"`         // packages LiMDM put on apt hold
 	DNFExclude     string                    `json:"dnf_exclude,omitempty"`  // excludepkgs= value LiMDM wrote to dnf.conf
 	PacmanIgnore   string                    `json:"pacman_ignore,omitempty"`
