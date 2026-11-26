@@ -213,6 +213,7 @@ var migrations = []struct {
 			WHERE NOT EXISTS (SELECT 1 FROM blueprint_versions v WHERE v.blueprint_id = b.id)`)
 		return err
 	}},
+	{11, partitionMetrics}, // device_metrics by day (partitions.go)
 }
 
 func columnExists(ctx context.Context, tx pgx.Tx, table, column string) (bool, error) {
