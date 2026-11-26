@@ -132,7 +132,6 @@ var concurrentIndexes = []string{
 	`devices_flatpaks ON devices USING gin ((inventory->'flatpaks') jsonb_path_ops)`,
 	`devices_flatpak_remotes ON devices USING gin ((inventory->'flatpak_remotes') jsonb_path_ops)`,
 	`devices_checks ON devices USING gin (checks jsonb_path_ops)`,
-	`devices_packages ON devices USING gin (packages jsonb_path_ops)`,
 	// retention of finished commands
 	`commands_finished ON commands (updated_at) WHERE status IN ('ok', 'failed', 'expired')`,
 }
@@ -214,6 +213,16 @@ var migrations = []struct {
 		return err
 	}},
 	{11, partitionMetrics}, // device_metrics by day (partitions.go)
+	{12, func(ctx context.Context, tx pgx.Tx) error { // packages from devices.packages to device_packages
+		_, err := tx.Exec(ctx, `INSERT INTO device_packages(device_id, name, version, arch)
+			SELECT d.id, left(p->>'n', 200), left(coalesce(p->>'v', ''), 200), left(coalesce(p->>'a', ''), 50)
+			FROM devices d, jsonb_array_elements(CASE WHEN jsonb_typeof(d.packages) = 'array' THEN d.packages ELSE '[]'::jsonb END) p
+			WHERE coalesce(p->>'n', '') <> ''
+			ON CONFLICT DO NOTHING;
+			DROP INDEX IF EXISTS devices_packages;
+			UPDATE devices SET packages = '[]' WHERE packages <> '[]'`)
+		return err
+	}},
 }
 
 func columnExists(ctx context.Context, tx pgx.Tx, table, column string) (bool, error) {

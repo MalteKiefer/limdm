@@ -673,13 +673,13 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		return
 	}
 	var d deviceRow
-	var inv, checks, decl, users, pkgs []byte
+	var inv, checks, decl, users []byte
 	var enrolled, certExp time.Time
 	var since *time.Time
 	err := s.db.QueryRow(ctx, `SELECT id, hostname, agent_version, failing, jsonb_array_length(checks), last_seen, retired,
-		inventory, checks, decl_status, users, packages, enrolled_at, cert_not_after, grace_until, auto_locked, noncompliant_since,
+		inventory, checks, decl_status, users, enrolled_at, cert_not_after, grace_until, auto_locked, noncompliant_since,
 		update_state, update_version, update_requested, external_ip, geo FROM devices WHERE id=$1`, id).
-		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &pkgs, &enrolled, &certExp, &d.GraceUntil, &d.AutoLocked, &since,
+		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &enrolled, &certExp, &d.GraceUntil, &d.AutoLocked, &since,
 			&d.UpdateState, &d.UpdateVersion, &d.UpdateRequested, &d.ExternalIP, &d.Geo)
 	if err != nil {
 		s.notFound(w, r, sess)
@@ -694,7 +694,12 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		Packages []api.Package
 	}
 	if err := errors.Join(json.Unmarshal(inv, &data.Inv), json.Unmarshal(checks, &data.Checks), json.Unmarshal(decl, &data.Decl),
-		json.Unmarshal(users, &data.Users), json.Unmarshal(pkgs, &data.Packages)); err != nil {
+		json.Unmarshal(users, &data.Users)); err != nil {
+		s.fail(w, err)
+		return
+	}
+	data.Packages, err = devicePackages(ctx, s.db, id)
+	if err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -1701,9 +1706,9 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 			FROM devices d WHERE ` + cond + ` ORDER BY hostname`
 	case "packages.csv":
 		header = []string{"device_id", "hostname", "package", "version", "arch"}
-		q = `SELECT d.id, d.hostname, coalesce(p->>'n',''), coalesce(p->>'v',''), coalesce(p->>'a','')
-			FROM devices d, jsonb_array_elements(CASE WHEN jsonb_typeof(d.packages) = 'array' THEN d.packages ELSE '[]'::jsonb END) p
-			WHERE NOT d.retired AND ` + cond + ` ORDER BY d.hostname, d.id, p->>'n'`
+		q = `SELECT d.id, d.hostname, p.name, p.version, p.arch
+			FROM devices d JOIN device_packages p ON p.device_id = d.id
+			WHERE NOT d.retired AND ` + cond + ` ORDER BY d.hostname, d.id, p.name, p.arch, p.version`
 	case "audit.csv":
 		var where string
 		_, where, args = auditFilter(r.URL.Query(), sess)

@@ -984,7 +984,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Packages != nil {
-		if _, err := tx.Exec(ctx, `UPDATE devices SET packages=$2, packages_hash=$3 WHERE id=$1`, id, jsonb(req.Packages), truncate(req.PackagesHash, 128)); err != nil {
+		if err := savePackages(ctx, tx, id, req.Packages, truncate(req.PackagesHash, 128)); err != nil {
 			s.failAPI(w, err)
 			return
 		}

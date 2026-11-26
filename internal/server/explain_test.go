@@ -23,17 +23,18 @@ func TestExplainFleet(t *testing.T) {
 		INSERT INTO dir_users(source, user_name, email, active, previous_emails)
 			SELECT 'scim', 'u'||i, 'u'||i||'@x.test', i % 20 <> 0, CASE WHEN i % 10 = 0 THEN ARRAY['old'||i||'@x.test'] ELSE '{}' END
 			FROM generate_series(1, 50000) i;
-		INSERT INTO devices(id, cert_serial, cert_not_after, hostname, machine_id, last_seen, tags, users, inventory, checks, packages, retired)
+		INSERT INTO devices(id, cert_serial, cert_not_after, hostname, machine_id, last_seen, tags, users, inventory, checks, retired)
 			SELECT 'd'||i, 's', now(), 'pc'||lpad(i::text, 6, '0'), md5(i::text), now(), ARRAY['t'||(i % 50)],
 				jsonb_build_array(jsonb_build_object('username', 'u'||i, 'email', 'u'||i||'@x.test')),
 				jsonb_build_object('apps', jsonb_build_array(jsonb_build_object('id', 'app'||(i % 30), 'installed', true)),
 					'flatpaks', jsonb_build_array(jsonb_build_object('id', 'org.fp'||(i % 40))),
 					'flatpak_remotes', jsonb_build_array(jsonb_build_object('name', 'flathub'))),
 				(SELECT jsonb_agg(jsonb_build_object('id', 'check'||c, 'status', CASE WHEN (i + c) % 97 = 0 THEN 'fail' ELSE 'pass' END)) FROM generate_series(1, 20) c),
-				(SELECT jsonb_agg(jsonb_build_object('n', 'pkg'||p, 'v', '1.'||(i % 7)||'.'||p)) FROM generate_series(1, 200) p)
-					|| CASE WHEN i % 500 = 0 THEN '[{"n":"rare","v":"2.0"}]'::jsonb ELSE '[]'::jsonb END,
 				i % 100 = 0
 			FROM generate_series(1, 50000) i;
+		INSERT INTO device_packages(device_id, name, version)
+			SELECT 'd'||i, 'pkg'||p, '1.'||(i % 7)||'.'||p FROM generate_series(1, 50000) i, generate_series(1, 200) p;
+		INSERT INTO device_packages(device_id, name, version) SELECT 'd'||i, 'rare', '2.0' FROM generate_series(500, 50000, 500) i;
 		ANALYZE`); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +78,7 @@ func TestExplainFleet(t *testing.T) {
 		{"filter flatpak", list + ` WHERE ` + where("flatpak"), "devices_flatpaks", []any{"org.fp3"}},
 		{"filter remote", list + ` WHERE ` + where("remote") + ` LIMIT 200`, "", []any{"flathub"}},
 		{"filter failing", list + ` WHERE ` + where("failing"), "devices_checks", []any{"check5"}},
-		{"filter pkg with version", list + ` WHERE ` + pkgVer, "devices_packages", pkgArgs},
+		{"filter pkg with version", list + ` WHERE ` + pkgVer, "device_packages_name", pkgArgs},
 		{"retention: finished commands", `DELETE FROM commands WHERE status IN ('ok', 'failed', 'expired') AND updated_at < now() - interval '180 days'
 			AND type NOT IN ('lock', 'unlock', 'lost', 'found', 'wipe')`, "", nil},
 	} {

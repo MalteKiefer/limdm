@@ -258,16 +258,21 @@ point; measure with `limdm_http_request_duration_seconds` and the PostgreSQL sta
 | `LIMDM_DB_MAX_CONNS` per instance | 32 | 32 | 24 to 32 |
 | PostgreSQL | 2 CPU, 4 GB RAM | 4 CPU, 16 GB RAM | 8 to 16 CPU, 32 to 64 GB RAM, `max_connections` 300 |
 | `device_metrics` (30 days) | 3 million rows, 0.5 GB | 29 million rows, 4 GB | 144 million rows, 20 GB |
-| `devices` with inventory and packages | 0.5 GB | 5 GB | 25 GB |
+| `devices` with inventory | 0.2 GB | 2 GB | 10 GB |
+| `device_packages` (about 2,000 rows per device, with indexes) | 0.3 GB | 3 GB | 15 GB |
 | Device events, compliance changes (365 days) | 1 GB | 10 GB | 50 GB |
-| WAL per day (package list changes dominate) | 0.5 GB | 3 to 5 GB | 15 to 25 GB |
+| WAL per day (package changes are written as a diff) | 0.2 GB | 1 to 2 GB | 5 to 10 GB |
 | Agent release rollout (6 MB package) | 6 GB | 60 GB | 300 GB |
 
 Notes:
 
 * The rollout window (default 24 hours) spreads the agent download over the day: 300 GB at
   50,000 devices are about 30 Mbit/s on average instead of a peak of tens of Gbit/s.
-  `LIMDM_UPDATE_DOWNLOADS` bounds parallel downloads per instance.
+  **Settings, Operations** bounds parallel downloads per instance.
+* Installed packages live in `device_packages`, one row per package. A check in with a
+  changed list deletes and inserts only the changed rows. The upgrade to 0.17 moves the
+  lists out of `devices.packages` in one migration; at 50,000 devices plan a few minutes
+  for the first start.
 * Audit entries are appended at the commit of a check in; the advisory lock is held for the
   append only, so check ins with command results scale with the database, not one after
   another.

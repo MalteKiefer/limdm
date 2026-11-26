@@ -841,3 +841,16 @@ CREATE TABLE IF NOT EXISTS artifacts (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, sha256)
 );
+
+-- integration v0.17.0
+-- installed packages per device, written by diff at check in (server.go
+-- savePackages) instead of the whole list as JSONB; devices.packages is no
+-- longer read or written (migration 12 moves its content here)
+CREATE TABLE IF NOT EXISTS device_packages (
+    device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    name      TEXT NOT NULL,
+    version   TEXT NOT NULL,
+    arch      TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (device_id, name, arch, version)
+);
+CREATE INDEX IF NOT EXISTS device_packages_name ON device_packages(name, device_id);

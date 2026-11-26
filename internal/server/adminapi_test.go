@@ -60,6 +60,10 @@ func TestAdminAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(ctx, `INSERT INTO device_packages(device_id, name, version) VALUES
+		('d1', 'openssl', '3.0.2-0ubuntu1.15'), ('d2', 'openssl', '1:3.0.13-1~deb12u1')`); err != nil {
+		t.Fatal(err)
+	}
 	// the SQL status matches the status computed in Go
 	for _, st := range deviceStatuses {
 		dq, _ := parseDeviceQuery(url.Values{"status": {st}}, s.staleAfter())
