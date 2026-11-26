@@ -29,17 +29,59 @@ import (
 
 // ---- schema and migrations ----
 
+// migrate applies schema.sql and the migrations when they changed since the
+// last start. An unchanged schema takes no lock at all: a rolling restart
+// must not queue ACCESS EXCLUSIVE requests in front of the running instances.
 func migrate(ctx context.Context, db *pgxpool.Pool) error {
-	// one migrator at a time, and the schema inside the same transaction:
-	// SET LOCAL keeps the disabled timeouts out of the pooled connection
-	tx, err := db.Begin(ctx)
+	if ok, err := schemaCurrent(ctx, db); err != nil || ok {
+		return err
+	}
+	conn, err := db.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+	// one migrator at a time, for the schema transaction and the index builds
+	// after it. A try lock in a loop: a statement waiting for the lock would
+	// hold a snapshot, and the concurrent index build of the instance that
+	// migrates waits for every older snapshot to end
+	for start := time.Now(); ; {
+		var got bool
+		if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(7364)`).Scan(&got); err != nil {
+			return err
+		}
+		if got {
+			break
+		}
+		if time.Since(start) > 15*time.Minute {
+			return errors.New("another instance has been migrating the schema for 15 minutes")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+	defer func() {
+		// the session keeps the lock and settings otherwise; at worst the
+		// connection is closed with them
+		if _, err := conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(7364); RESET statement_timeout`); err != nil {
+			conn.Conn().Close(context.WithoutCancel(ctx)) //nolint:errcheck // already failing
+		}
+	}()
+	if ok, err := schemaCurrent(ctx, conn); err != nil || ok { // another instance was faster
+		return err
+	}
+	// the schema inside one transaction: SET LOCAL keeps the disabled
+	// timeouts to it
+	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 	// no statement limit, but a bounded lock wait: the schema takes table
 	// locks until the commit, and a running instance must not stall behind them
-	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = '30s'; SELECT pg_advisory_xact_lock(7364)`); err != nil {
+	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = '30s'`); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, schema); err != nil {
@@ -60,10 +102,77 @@ func migrate(ctx context.Context, db *pgxpool.Pool) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO schema_applied(hash, version) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING`, schemaHash(), Version); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := buildIndexes(ctx, conn); err != nil {
+		return fmt.Errorf("build indexes: %w", err)
+	}
+	// recorded last: a start that failed to build an index tries again
+	_, err = conn.Exec(ctx, `INSERT INTO schema_applied(hash, version) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING`, schemaHash(), Version)
+	return err
+}
+
+// concurrentIndexes are indexes on tables that grow with the fleet. They are
+// built with CREATE INDEX CONCURRENTLY outside the schema transaction, so a
+// first build on a big installation does not block writes to the table.
+// Each entry is "name ON table ...".
+var concurrentIndexes = []string{
+	// poll and check in: device users disabled, renamed or deleted in the directory
+	`dir_users_lower_email ON dir_users (lower(email))`,
+	`dir_users_previous_emails ON dir_users USING gin (previous_emails) WHERE NOT active`,
+	// enrollment: earlier records of the same machine
+	`devices_machine_id ON devices (machine_id) WHERE NOT retired`,
+	// device list and API pages: sorted by host name
+	`devices_hostname ON devices (hostname, id)`,
+	`devices_retired_hostname ON devices (retired, hostname, id)`,
+	// device filters (deviceFilters, pkgCond)
+	`devices_tags ON devices USING gin (tags)`,
+	`devices_apps ON devices USING gin ((inventory->'apps') jsonb_path_ops)`,
+	`devices_flatpaks ON devices USING gin ((inventory->'flatpaks') jsonb_path_ops)`,
+	`devices_flatpak_remotes ON devices USING gin ((inventory->'flatpak_remotes') jsonb_path_ops)`,
+	`devices_checks ON devices USING gin (checks jsonb_path_ops)`,
+	`devices_packages ON devices USING gin (packages jsonb_path_ops)`,
+	// retention of finished commands
+	`commands_finished ON commands (updated_at) WHERE status IN ('ok', 'failed', 'expired')`,
+}
+
+// buildIndexes creates the concurrentIndexes that are missing, on conn
+// which holds the migration lock. An invalid index left by an interrupted
+// build is built again.
+func buildIndexes(ctx context.Context, conn *pgxpool.Conn) error {
+	if _, err := conn.Exec(ctx, `SET statement_timeout = 0`); err != nil { // reset by migrate
+		return err
+	}
+	for _, ix := range concurrentIndexes {
+		name, _, _ := strings.Cut(ix, " ")
+		var invalid bool
+		if err := conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+			WHERE c.relname = $1 AND c.relnamespace = current_schema()::regnamespace AND NOT i.indisvalid)`, name).Scan(&invalid); err != nil {
+			return err
+		}
+		if invalid {
+			if _, err := conn.Exec(ctx, `DROP INDEX CONCURRENTLY IF EXISTS `+name); err != nil {
+				return err
+			}
+		}
+		if _, err := conn.Exec(ctx, `CREATE INDEX CONCURRENTLY IF NOT EXISTS `+ix); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// schemaCurrent tells whether this exact schema and set of migrations was
+// applied already (schema_applied, keyed by schemaHash).
+func schemaCurrent(ctx context.Context, q rowQuerier) (bool, error) {
+	var ok bool
+	err := q.QueryRow(ctx, `SELECT to_regclass('schema_applied') IS NOT NULL`).Scan(&ok)
+	if err != nil || !ok {
+		return false, err
+	}
+	err = q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_applied WHERE hash=$1)`, schemaHash()).Scan(&ok)
+	return ok, err
 }
 
 var migrations = []struct {
@@ -85,6 +194,26 @@ var migrations = []struct {
 	}},
 	{7, func(ctx context.Context, tx pgx.Tx) error { return seedApps(ctx, tx, moreCatalog) }},
 	{8, seedVendorIcons},
+	// one off data repairs and baselines, formerly run with schema.sql at every start
+	{9, func(ctx context.Context, tx pgx.Tx) error {
+		// agents without a compliance item reported "checks": null, which the
+		// jsonb_array_* functions of the device page and the export reject;
+		// then the history baseline for devices that reported before it existed
+		_, err := tx.Exec(ctx, `UPDATE devices SET checks = '[]' WHERE jsonb_typeof(checks) <> 'array';
+			UPDATE devices SET decl_status = '[]' WHERE jsonb_typeof(decl_status) <> 'array';
+			INSERT INTO compliance_changes(device_id, at, check_id, status, detail, catalog_version)
+			SELECT d.id, coalesce(d.last_seen, now()), c->>'id', coalesce(c->>'status', ''), coalesce(c->>'detail', ''), d.catalog_version
+			FROM devices d, jsonb_array_elements(d.checks) c
+			WHERE c->>'id' IS NOT NULL AND NOT EXISTS (SELECT 1 FROM compliance_changes x WHERE x.device_id = d.id)`)
+		return err
+	}},
+	{10, func(ctx context.Context, tx pgx.Tx) error { // baseline version of blueprints saved before versioning existed
+		_, err := tx.Exec(ctx, `INSERT INTO blueprint_versions(blueprint_id, version, name, description, parent_id, tree, note, created_by, created_at)
+			SELECT b.id, 1, b.name, b.description, b.parent_id, b.tree, 'baseline', 'system', b.updated_at FROM blueprints b
+			WHERE NOT EXISTS (SELECT 1 FROM blueprint_versions v WHERE v.blueprint_id = b.id)`)
+		return err
+	}},
+	{11, partitionMetrics}, // device_metrics by day (partitions.go)
 }
 
 func columnExists(ctx context.Context, tx pgx.Tx, table, column string) (bool, error) {
@@ -720,6 +849,7 @@ func (s *Server) deleteLibraryItem(ctx context.Context, actor string, id int64) 
 // it: the explicit one, else the primary user's group, else default.
 const effectiveBlueprintSQL = `coalesce(d.blueprint_id,
 	(SELECT a.blueprint_id FROM dir_users u JOIN dir_members m ON m.user_id=u.id JOIN blueprint_group_assignments a ON a.group_id=m.group_id
+	 JOIN blueprints gb ON gb.id=a.blueprint_id AND (gb.tenant_id=d.tenant_id OR gb.tenant_id=1 AND gb.shared)
 	 WHERE u.id=d.primary_user_id AND u.active ORDER BY a.priority, a.group_id LIMIT 1),
 	(SELECT id FROM blueprints WHERE name='default'))`
 

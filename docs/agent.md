@@ -215,6 +215,11 @@ in [concepts.md](concepts.md#agent-cycle). In addition it
 * keeps enforcing the stored declarations while the server is unreachable, and locks the
   device after `offline_lock_hours` without contact when that is set.
 
+The agent runs with lower CPU and I/O priority (systemd `Nice=10`, `CPUWeight=20`,
+`IOSchedulingClass=best-effort` with priority 7; on OpenRC nice 10 and ionice 2:7), so its
+background work yields to users on laptops and to workloads on servers. Package installs it
+starts inherit that priority.
+
 ### Privacy options
 
 Two features send data to third parties. Both are off by default and switched on in
@@ -375,7 +380,12 @@ Agents are updated from the console, page **Agents**:
 2. An admin **approves** a version. Nothing is installed before that.
 3. Rollout: with **Update agents automatically**, devices tagged with the **Pilot tag** get
    an approved version at their next check in, all others after the delay (default 7
-   days). **Update agent…** on a device page installs the newest approved version, or any
+   days) spread over the **Rollout window** (default 24 hours): each device gets the version
+   at its own fixed offset within the window (derived from device and version), so a release
+   reaches the fleet evenly instead of within one poll minute. 0 hands it to all at once.
+   The server serves at most `LIMDM_UPDATE_DOWNLOADS` packages at once per instance
+   (default 20); further downloads wait up to 20 seconds, then get 503 with `Retry-After`
+   and the agent tries again later without counting a failed update. **Update agent…** on a device page installs the newest approved version, or any
    fetched version that is not blocked and newer than the running one, on that device
    only, regardless of policy and delay. Picking a version counts as its approval for this
    device. Agents never downgrade: an older pick is dropped. **Outdated agents** on the
@@ -484,6 +494,12 @@ agent update that is due (a version picked for the device, an admin request, or 
 version the rollout policy releases for it). Agent updates can carry security fixes, so they
 do not wait for the next regular check in. A version being installed or one that already
 failed on the device does not trigger check ins. After failed polls the agent waits longer,
-up to 5 minutes, and returns to one minute with the first answer. Restart and shutdown
+up to 5 minutes plus up to half of that as random delay, and returns to one minute with the
+first answer. Failed check ins back off the same way: the interval doubles per failure up to
+15 minutes, with up to 50 % random delay, so a fleet does not return in the same seconds
+after a server outage. When the server answers 503 or 429 (overloaded, too many parallel
+package downloads) the agent honors `Retry-After` (at most 30 minutes, plus jitter) for check
+ins, polls and update downloads; a deferred update download is not reported as a failed
+update and is offered again later. Restart and shutdown
 delays count from when the command was sent in the console; a command that arrives late
 still gives users at least one minute of warning.

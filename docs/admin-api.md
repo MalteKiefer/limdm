@@ -5,7 +5,8 @@ and other integrations. It runs on the console listener and uses the same functi
 console: the same role rules, device scopes, tenant limits, four eyes approval, validation
 and audit entries. The OpenAPI 3.1 description is served at `/api/v1/openapi.json` (no token
 needed) and lives in the repository as
-[`internal/server/openapi.json`](../internal/server/openapi.json).
+[`internal/server/openapi.json`](../internal/server/openapi.json). `/api/v1/docs` renders it as
+a reference page on the console itself (no token, no scripts, no external resources).
 
 ## Tokens
 
@@ -44,6 +45,16 @@ for cross site requests to abuse.
 curl -H "Authorization: Bearer $LIMDM_TOKEN" https://mdm.example.com/api/v1/devices?tag=finance
 ```
 
+### Scopes
+
+A token can further be limited to scopes (console form or `scopes` when created through the
+API); without scopes it can do everything its role allows. `read`: the `GET` endpoints of
+devices, commands, library items, blueprints and tags; `commands`: send device commands;
+`library`: change library items, blueprints and devices; `audit`: the audit log; `admin`:
+approvals, exceptions, tokens and tenants. A request outside the scopes answers `403` and is
+audited as `api.denied`. Tokens are rotated by creating the successor and deleting the old
+one (`POST` and `DELETE /api/v1/tokens`); they are valid for at most 365 days.
+
 ### Roles
 
 | Level | Roles | Endpoints |
@@ -51,7 +62,7 @@ curl -H "Authorization: Bearer $LIMDM_TOKEN" https://mdm.example.com/api/v1/devi
 | read | `admin`, `helpdesk`, `auditor` (read only tokens included) | every `GET` except the audit log |
 | audit | `admin`, `auditor` | `GET /api/v1/audit` |
 | helpdesk | `admin`, `helpdesk`, not read only | `POST /api/v1/devices/{id}/commands`; the command type decides further |
-| admin | `admin`, not read only | `PATCH`, `POST`, `PUT`, `DELETE` on devices, library items and blueprints |
+| admin | `admin`, not read only | `PATCH`, `POST`, `PUT`, `DELETE` on devices, library items, blueprints, exceptions, tokens and tenants; deciding approvals |
 | metrics | `metrics`, `admin`, `auditor`; global and unscoped only | `GET /metrics` |
 
 ## Audit
@@ -64,6 +75,7 @@ through the API carry the same name as creator. In addition:
 | `api_token.create`, `api_token.revoke` | A token was created (detail: role, read only, days, prefix, scope tags) or revoked in the console |
 | `api.auth_failed` | An unknown, expired, revoked or disabled tenant token was sent (detail: reason and client address) |
 | `api.denied` | A valid token tried something its role, read only flag or scope does not allow (target: method and path) |
+| `api.read` | A read through the API (target: method and path, detail: query). By default only the sensitive reads, `GET /api/v1/audit` and `GET /api/v1/devices/{id}`; `LIMDM_AUDIT_API_READS=all` records every read, `off` none ([configuration.md](configuration.md)) |
 
 Audit entries in `GET /api/v1/audit` carry `tenant_id` when they belong to a tenant; it is
 hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-notifications-approvals)).
@@ -71,9 +83,11 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 ## Limits
 
 * 600 requests per minute and token; then `429` with `Retry-After: 60`.
-* Failed authentications: 20 per client address in five minutes, as for SCIM; then `429`
-  with `Retry-After: 300` before the token is even checked. A request without any token
-  counts but is not audited.
+* Failed authentications: 20 per client address and token in five minutes, as for SCIM, and
+  200 per client address; then `429` with `Retry-After: 300` before the token is even
+  checked. A script retrying a wrong token so locks out only that token, not valid tokens
+  behind the same NAT. A request without any token counts but is not audited, and at most 30
+  failures a minute go to the audit log (the server log gets every one).
 * Request bodies up to 1 MiB; a larger body answers `400`.
 * The console's network allow and block lists apply.
 
@@ -82,14 +96,19 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 * JSON (RFC 8259), UTF-8, times RFC 3339. Requests with a body send
   `Content-Type: application/json`; unknown fields are refused, and the body holds exactly
   one JSON value.
-* Errors are RFC 9457 problem details (`application/problem+json`) with `status` and `detail`,
+* Errors are RFC 9457 problem details (`application/problem+json`) with `status`, `detail`
+  and a machine readable `code` (`type` is `urn:limdm:problem:<code>`: `bad_request`,
+  `unauthorized`, `forbidden`, `not_found`, `conflict`, `invalid`, `rate_limited`, `busy`, ...),
   also for unknown paths (`404`) and wrong methods (`405` with `Allow`). A `401` carries
   `WWW-Authenticate: Bearer realm="limdm", error="invalid_token"`.
 * Status codes: `200` read or replaced, `201` created (with `Location`), `202` command
   queued or approval requested, `204` deleted, `400` malformed request, `401` token missing
   or invalid, `403` role does not allow it, `404` not found or outside the token's tenant or
   scope, `409` name taken, object still in use or device retired, `415` not JSON, `422`
-  rejected by validation, `429` rate limited.
+  rejected by validation, `429` rate limited, `503` server busy (database lock or statement
+  timeout; retry after `Retry-After`).
+* Every answer carries `X-Request-ID`; a well formed one sent with the request is kept.
+  Server log lines of failed requests name it.
 * Lists take `limit` (1 to 500, default 100) and return `{"items": [...], "next_cursor": "..."}`.
   Pass `next_cursor` as `cursor` for the next page; it is absent on the last page.
   `GET /api/v1/tags` is not paged.
@@ -116,7 +135,19 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `DELETE /api/v1/blueprints/{id}` | admin | | `204`; its devices fall back to default; audited as `blueprint.delete` |
 | `GET /api/v1/tags` | read | | `200` `{"items": [{"name", "devices"}]}`, tags of active devices |
 | `GET /api/v1/audit` | audit | `q`, `actor`, `action`, `target`, `from`, `to`, `limit`, `cursor` | `200` page of entries (`id`, `at`, `actor`, `action`, `target`, `detail`, `prev`, `hash`, `tenant_id`), newest first |
+| `GET /api/v1/approvals` | read | `status`, `limit`, `cursor` | `200` page of approval requests (`id`, `action`, `target`, `payload`, `reason`, `requested_by`, `status`, `decided_by`, `decided_at`, `created_at`, `expires_at`), newest first; helpdesk tokens see their own |
+| `GET /api/v1/approvals/{id}` | read | | `200` approval request |
+| `POST /api/v1/approvals/{id}/approve`, `.../reject` | admin | | `200` approval request (with `credentials` of an approved local account); `409` for an own, decided or expired request; audited as `approval.approve` or `approval.reject` |
+| `GET /api/v1/exceptions` | read | | `200` `{"items": [...]}` risk exceptions with `state` |
+| `POST /api/v1/exceptions` | admin | `{"check_id", "mode", "tag", "reason", "owner", "approver", "expires": "YYYY-MM-DD"}` | `201` `{"id"}`; audited as `exception.add` |
+| `DELETE /api/v1/exceptions/{id}` | admin | | `204`; audited as `exception.revoke` |
+| `GET /api/v1/tokens` | audit | | `200` `{"items": [...]}` tokens without secrets |
+| `POST /api/v1/tokens` | admin | `{"name", "role", "days", "read_only", "scope_tags", "scopes"}` | `201` token with `token` (the secret, shown once); audited as `api_token.create` |
+| `DELETE /api/v1/tokens/{id}` | admin | | `204`; audited as `api_token.revoke` |
+| `GET /api/v1/tenants` | admin, global token | | `200` `{"items": [...]}` tenants with device counts; `404` without multi tenancy |
+| `POST /api/v1/tenants` | admin, global token | `{"name"}` | `201` `{"id"}`; `409` name taken; audited as `tenant.add` |
 | `GET /api/v1/openapi.json` | none | | the OpenAPI document |
+| `GET /api/v1/docs` | none | | the reference page |
 | `GET /metrics` | metrics | | Prometheus text format, see [Metrics](#metrics) |
 
 ### Device filters
@@ -124,7 +155,8 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 `q` (text in host name, OS, id, blueprint, tags), `status` (`compliant`, `in grace`,
 `non-compliant`, `stale`, `pending`, `retired`), `tag`, `app`, `flatpak`, `remote`,
 `blueprint`, `agent`, `failing` (check id) and `pkg`. All given filters apply together;
-values above 200 characters are ignored. `pkg` is a package name with an optional version
+a value above 200 characters or an unknown `status` is answered with 400, never with the
+unfiltered fleet. `pkg` is a package name with an optional version
 comparison:
 
 ```sh
@@ -166,16 +198,21 @@ approval request, up to 500 characters). A type the token's role may not send an
 and is audited as `api.denied`; other rule violations answer `422`. A retired device answers
 `409`.
 
-The answer is `202` with the command and `Location: /api/v1/commands/{id}`. Poll
+The answer is `202` with the command and `Location: /api/v1/commands/{id}`. Send an
+`Idempotency-Key` header (up to 255 printable characters) to make a retry after a timeout
+safe: within 24 hours the same token and key get the first answer again
+(`Idempotent-Replayed: true`) instead of a second command; the key with another request
+answers `422`, while the first is still running `409`. Poll
 `GET /api/v1/commands/{id}` until `status` is `ok`, `failed` or `expired` (`pending` and
 `sent` are still open; commands expire after 7 days). The payload is never returned, since
 it can hold a password.
 
 With four eyes approval on (Settings, Security), wipe, lost mode and scripts do not run:
 the answer is `202` with `{"approval_id": 12, "status": "pending"}` (`ApprovalPending` in the
-OpenAPI document, `Location: /approvals`) instead of a command, and another admin decides
-under **Approvals** in the console (`params.reason` is shown there). Tokens cannot approve;
-once approved, the command is queued with the token as creator.
+OpenAPI document, `Location: /api/v1/approvals/{id}`) instead of a command, and another
+admin decides under **Approvals** in the console (`params.reason` is shown there) or through
+`POST /api/v1/approvals/{id}/approve`. Neither the requesting token nor the person who created
+it can approve; once approved, the command is queued with the token as creator.
 
 ### Library items and blueprints
 
@@ -186,6 +223,11 @@ item takes its certificates in the payload (the PEM upload is a console feature)
 Blueprints take `name`, `description`, `parent_id` and `tree` (the JSON of the blueprint
 editor). Deleting a library item a blueprint uses answers `409`. The default blueprint
 cannot be renamed (`404`) or deleted (`409`), and never inherits.
+
+`GET` and every save of a single item or blueprint answer with an `ETag`. Send it back as
+`If-Match` with a `PUT`: when the object changed since (another automation or the console),
+the answer is `412` with the current `ETag` and nothing is saved. A `PUT` without `If-Match`
+replaces as before.
 
 ## Metrics
 

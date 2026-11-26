@@ -141,21 +141,47 @@ type limiter struct {
 // dropped, so rotating source addresses cannot grow the map without end.
 const limiterTTL = time.Hour
 
-// sweep drops idle keys; called with mu held.
+// limiterMaxKeys bounds the keys of throughput limits (devices, API tokens);
+// beyond it the least recently used of them are dropped. Failure counters
+// (sign in, enrollment, token, SCIM and CRL failures) are never dropped
+// before their window ends: dropping them would reset a lockout.
+var limiterMaxKeys = 200000
+
+// failureKey reports a key that counts failures (see limiterMaxKeys).
+func failureKey(k string) bool {
+	for _, p := range []string{"login:", "enroll:", "apifail:", "scim:", "crl:"} {
+		if strings.HasPrefix(k, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// sweep drops idle keys once a minute, then the least recently used
+// throughput keys over limiterMaxKeys; called with mu held.
 func (l *limiter) sweep(now time.Time) {
-	if now.Sub(l.swept) < time.Minute && len(l.hits) < 50000 {
+	if now.Sub(l.swept) < time.Minute {
 		return
 	}
 	l.swept = now
+	type use struct {
+		key  string
+		last time.Time
+	}
+	var others []use
 	for k, ts := range l.hits {
-		if len(ts) == 0 || now.Sub(ts[len(ts)-1]) > limiterTTL {
+		switch {
+		case len(ts) == 0 || now.Sub(ts[len(ts)-1]) > limiterTTL:
 			delete(l.hits, k)
+		case !failureKey(k):
+			others = append(others, use{k, ts[len(ts)-1]})
 		}
 	}
-	// still that many live keys: a flood from many networks. Start over
-	// rather than scan the whole map at every request.
-	if len(l.hits) >= 50000 {
-		clear(l.hits)
+	if over := len(others) - limiterMaxKeys; over > 0 {
+		slices.SortFunc(others, func(a, b use) int { return a.last.Compare(b.last) })
+		for _, u := range others[:over] {
+			delete(l.hits, u.key)
+		}
 	}
 }
 
@@ -171,7 +197,7 @@ func rateKey(r *http.Request) string {
 }
 
 // over reports whether key reached max hits within window, without counting.
-func (l *limiter) over(key string, max int, window time.Duration) bool { //nolint:unparam // every caller uses 20 per 5 minutes today
+func (l *limiter) over(key string, max int, window time.Duration) bool { //nolint:unparam // every caller uses a 5 minute window today
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	n := 0
@@ -451,7 +477,7 @@ func (r rowsOne) RowsAffected() int64 {
 // LocalAdmin manages local admin accounts: add, reset, disable, enable, list.
 // add and reset return a generated password and TOTP URI.
 func LocalAdmin(ctx context.Context, databaseURL, op, name, role string) (string, error) {
-	pc, err := pgxPoolConfig(databaseURL)
+	pc, err := pgxPoolConfig(databaseURL, 4)
 	if err != nil {
 		return "", err
 	}

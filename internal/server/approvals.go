@@ -119,8 +119,90 @@ func (s *Server) approvalDecide(w http.ResponseWriter, r *http.Request, sess ses
 		http.NotFound(w, r)
 		return
 	}
-	var notices []func()
-	var creds string // new local credentials, shown once to the approver
+	creds, notices, err := s.decideApproval(ctx, sess, id, op)
+	var ae errApproval
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		http.NotFound(w, r)
+		return
+	case errors.As(err, &ae):
+		s.renderApprovals(w, r, sess, string(ae))
+		return
+	case err != nil:
+		s.fail(w, err)
+		return
+	}
+	for _, n := range notices {
+		n()
+	}
+	if creds != "" {
+		s.renderApprovalsCreds(w, r, sess, creds)
+		return
+	}
+	http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+}
+
+// errApproval is a refusal shown to the deciding admin.
+type errApproval string
+
+func (e errApproval) Error() string { return string(e) }
+
+// expireApprovals ends pending requests and unused recovery views past
+// their time, with an audit entry each.
+func (s *Server) expireApprovals(ctx context.Context) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `UPDATE approvals SET status='expired'
+		WHERE (status = 'pending' OR status = 'approved' AND action IN ('recovery.view', 'remote_shell')) AND expires_at < now()
+		RETURNING id, action, target, requested_by`)
+	if err != nil {
+		return err
+	}
+	type row struct {
+		ID                  int64
+		Action, Target, Req string
+	}
+	list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[row])
+	if err != nil {
+		return err
+	}
+	for _, a := range list {
+		if err := audit(ctx, tx, "system", "approval.expire", a.Target, fmt.Sprintf("#%d %s requested by %s", a.ID, a.Action, a.Req)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// sameActor reports whether a request was made by the deciding admin: the
+// same login, or an API token that admin created.
+func (s *Server) sameActor(ctx context.Context, tx pgx.Tx, requestedBy, email string) bool {
+	if requestedBy == email {
+		return true
+	}
+	rest, ok := strings.CutPrefix(requestedBy, "api:")
+	if !ok {
+		return false
+	}
+	i := strings.LastIndexByte(rest, '#')
+	id, err := strconv.ParseInt(rest[i+1:], 10, 64)
+	if i < 0 || err != nil {
+		return true // an API requester we cannot resolve never passes as someone else
+	}
+	var creator string
+	if err := tx.QueryRow(ctx, `SELECT created_by FROM api_tokens WHERE id=$1`, id).Scan(&creator); err != nil {
+		return true
+	}
+	return creator == email
+}
+
+// decideApproval approves or rejects a pending request for the console and
+// the admin API. It returns new local credentials (shown once to the
+// approver) and notifications to send after the commit.
+func (s *Server) decideApproval(ctx context.Context, sess session, id int64, op string) (creds string, notices []func(), err error) {
 	err = func() error {
 		tx, err := s.db.Begin(ctx)
 		if err != nil {
@@ -214,81 +296,5 @@ func (s *Server) approvalDecide(w http.ResponseWriter, r *http.Request, sess ses
 		}
 		return tx.Commit(ctx)
 	}()
-	var ae errApproval
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		http.NotFound(w, r)
-		return
-	case errors.As(err, &ae):
-		s.renderApprovals(w, r, sess, string(ae))
-		return
-	case err != nil:
-		s.fail(w, err)
-		return
-	}
-	for _, n := range notices {
-		n()
-	}
-	if creds != "" {
-		s.renderApprovalsCreds(w, r, sess, creds)
-		return
-	}
-	http.Redirect(w, r, "/approvals", http.StatusSeeOther)
-}
-
-// errApproval is a refusal shown to the deciding admin.
-type errApproval string
-
-func (e errApproval) Error() string { return string(e) }
-
-// expireApprovals ends pending requests and unused recovery views past
-// their time, with an audit entry each.
-func (s *Server) expireApprovals(ctx context.Context) error {
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	rows, err := tx.Query(ctx, `UPDATE approvals SET status='expired'
-		WHERE (status = 'pending' OR status = 'approved' AND action IN ('recovery.view', 'remote_shell')) AND expires_at < now()
-		RETURNING id, action, target, requested_by`)
-	if err != nil {
-		return err
-	}
-	type row struct {
-		ID                  int64
-		Action, Target, Req string
-	}
-	list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[row])
-	if err != nil {
-		return err
-	}
-	for _, a := range list {
-		if err := audit(ctx, tx, "system", "approval.expire", a.Target, fmt.Sprintf("#%d %s requested by %s", a.ID, a.Action, a.Req)); err != nil {
-			return err
-		}
-	}
-	return tx.Commit(ctx)
-}
-
-// sameActor reports whether a request was made by the deciding admin: the
-// same login, or an API token that admin created.
-func (s *Server) sameActor(ctx context.Context, tx pgx.Tx, requestedBy, email string) bool {
-	if requestedBy == email {
-		return true
-	}
-	rest, ok := strings.CutPrefix(requestedBy, "api:")
-	if !ok {
-		return false
-	}
-	i := strings.LastIndexByte(rest, '#')
-	id, err := strconv.ParseInt(rest[i+1:], 10, 64)
-	if i < 0 || err != nil {
-		return true // an API requester we cannot resolve never passes as someone else
-	}
-	var creator string
-	if err := tx.QueryRow(ctx, `SELECT created_by FROM api_tokens WHERE id=$1`, id).Scan(&creator); err != nil {
-		return true
-	}
-	return creator == email
+	return creds, notices, err
 }

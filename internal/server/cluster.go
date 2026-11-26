@@ -32,6 +32,7 @@ const (
 	lockStartup  = 7366 // key material and data initialization at startup
 	lockSettings = 7367 // console settings saves
 	lockSCIM     = 7368 // SCIM read, modify and write
+	lockEvents   = 7369 // device event inserts up to their commit (storeEvents)
 )
 
 const (
@@ -199,6 +200,9 @@ func schemaHash() string {
 	h.Write([]byte(schema))
 	for _, m := range migrations {
 		fmt.Fprintf(h, "|%d", m.version)
+	}
+	for _, ix := range concurrentIndexes {
+		h.Write([]byte("|" + ix))
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

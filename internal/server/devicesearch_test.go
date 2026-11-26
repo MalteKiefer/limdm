@@ -53,8 +53,12 @@ func TestParseDeviceQueryCombines(t *testing.T) {
 			t.Errorf("clear %s: %s", c.Key, c.Clear)
 		}
 	}
-	if dq, _ := parseDeviceQuery(url.Values{"status": {"bogus"}}, time.Hour); dq.Status != "" {
+	if _, err := parseDeviceQuery(url.Values{"status": {"bogus"}}, time.Hour); err == nil {
 		t.Fatal("unknown status accepted")
+	}
+	// a filter that cannot apply must fail, never widen to the whole fleet
+	if _, err := parseDeviceQuery(url.Values{"tag": {strings.Repeat("x", 201)}}, time.Hour); err == nil {
+		t.Fatal("over long filter ignored")
 	}
 	if _, err := parseDeviceQuery(url.Values{"pkg": {"a;b"}}, time.Hour); err == nil {
 		t.Fatal("bad package filter accepted")

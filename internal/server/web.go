@@ -374,15 +374,16 @@ func (s *Server) listDevicesQuery(ctx context.Context, where, tail string, args 
 }
 
 // deviceFilters are the device list filters other pages link to; each is
-// a condition on d with the value as $1.
+// a condition on d with the value as $1. Containment (@>) instead of
+// expanding the arrays: the GIN indexes in schema.sql answer it.
 var deviceFilters = []struct{ Key, Label, Where string }{
-	{"tag", "Tag", `$1 = ANY(d.tags)`},
-	{"app", "Catalog app installed", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.inventory->'apps', '[]'::jsonb)) a WHERE a->>'id' = $1 AND (a->>'installed')::boolean)`},
-	{"flatpak", "Flatpak installed", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.inventory->'flatpaks', '[]'::jsonb)) f WHERE f->>'id' = $1)`},
-	{"remote", "Flatpak remote", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.inventory->'flatpak_remotes', '[]'::jsonb)) r WHERE r->>'name' = $1)`},
+	{"tag", "Tag", `d.tags @> ARRAY[$1::text]`},
+	{"app", "Catalog app installed", `d.inventory->'apps' @> jsonb_build_array(jsonb_build_object('id', $1::text, 'installed', true))`},
+	{"flatpak", "Flatpak installed", `d.inventory->'flatpaks' @> jsonb_build_array(jsonb_build_object('id', $1::text))`},
+	{"remote", "Flatpak remote", `d.inventory->'flatpak_remotes' @> jsonb_build_array(jsonb_build_object('name', $1::text))`},
 	{"blueprint", "Blueprint", `(SELECT name FROM blueprints WHERE id = ` + effectiveBlueprintSQL + `) = $1`},
 	{"agent", "Agent version", `d.agent_version = $1`},
-	{"failing", "Failing check", `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(d.checks, '[]'::jsonb)) c WHERE c->>'id' = $1 AND c->>'status' = 'fail')`},
+	{"failing", "Failing check", `d.checks @> jsonb_build_array(jsonb_build_object('id', $1::text, 'status', 'fail'))`},
 }
 
 // devicesPageSize is the number of devices per page of the device list.
@@ -1769,6 +1770,7 @@ func (s *Server) streamExport(w http.ResponseWriter, r *http.Request, sess sessi
 		_, _ = io.WriteString(w, "\nERROR: export incomplete, run it again\n")
 		detail += " incomplete"
 	}
+	_ = tx.Rollback(ctx) // the audit entry takes a connection of its own
 	if err := s.auditAction(context.WithoutCancel(ctx), sess.Email, "export.done", kind, detail, nil); err != nil {
 		s.log.Error("audit export.done", "err", err)
 	}

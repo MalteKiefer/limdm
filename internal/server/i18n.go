@@ -1391,4 +1391,10 @@ var deCatalog = map[string]string{
 	// review
 	"New administrator":               "Neuer Administrator",
 	"Administrator credentials reset": "Zugangsdaten eines Administrators zurückgesetzt",
+	// L
+	"Rollout window (hours)": "Verteilungsfenster (Stunden)",
+	"After the delay each device gets the version at its own fixed time within this window": "Nach der Verzögerung erhält jedes Gerät die Version zu seinem eigenen festen Zeitpunkt in diesem Fenster",
+	"The rollout window must be 0 to 720 hours.":                                            "Das Verteilungsfenster muss 0 bis 720 Stunden betragen.",
+	"Scopes": "Berechtigungsbereiche",
+	"None checked: everything the role allows. read: devices, commands, library, tags; commands: send commands; library: change library items, blueprints and devices; audit: the audit log; admin: approvals, exceptions, tokens, tenants.": "Keiner gewählt: alles, was die Rolle erlaubt. read: Geräte, Befehle, Bibliothek, Tags; commands: Befehle senden; library: Bibliothekselemente, Blueprints und Geräte ändern; audit: das Auditprotokoll; admin: Freigaben, Ausnahmen, Tokens, Mandanten.",
 }

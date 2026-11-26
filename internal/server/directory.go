@@ -62,13 +62,17 @@ func directoryFacts(ctx context.Context, q pgx.Tx, deviceID string) (groups []st
 }
 
 // groupBlueprint returns the blueprint assigned to one of the primary user's
-// groups (lowest priority number wins), or nil.
+// groups (lowest priority number wins), or nil. Only blueprints of the
+// device's tenant or shared ones of Default count: directory groups are
+// global, and a group assigned to another tenant's blueprint must not hand
+// that tenant's structure to this device.
 func groupBlueprint(ctx context.Context, q pgx.Tx, deviceID string) (*int64, error) {
 	var id int64
 	err := q.QueryRow(ctx, `SELECT a.blueprint_id FROM devices d
 		JOIN dir_users u ON u.id=d.primary_user_id AND u.active
 		JOIN dir_members m ON m.user_id=u.id
 		JOIN blueprint_group_assignments a ON a.group_id=m.group_id
+		JOIN blueprints b ON b.id=a.blueprint_id AND (b.tenant_id=d.tenant_id OR b.tenant_id=1 AND b.shared)
 		WHERE d.id=$1 ORDER BY a.priority, a.group_id LIMIT 1`, deviceID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -518,7 +522,8 @@ func activeUsers(ctx context.Context, tx pgx.Tx, users []api.User) ([]api.User, 
 	// or deleted user had it before (renamed, then the address reused)
 	rows, err := tx.Query(ctx, `SELECT e FROM unnest($1::text[]) e WHERE
 		NOT EXISTS (SELECT 1 FROM dir_users WHERE active AND lower(email) = e)
-		AND (EXISTS (SELECT 1 FROM dir_users WHERE NOT active AND (lower(email) = e OR e = ANY(previous_emails)))
+		AND (EXISTS (SELECT 1 FROM dir_users WHERE NOT active AND lower(email) = e)
+		OR EXISTS (SELECT 1 FROM dir_users WHERE NOT active AND previous_emails @> ARRAY[e])
 		OR EXISTS (SELECT 1 FROM dir_tombstones WHERE email = e))`, emails)
 	if err != nil {
 		return nil, err

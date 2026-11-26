@@ -939,8 +939,8 @@ func TestPollWait(t *testing.T) {
 	if w := pollWait(0); w < time.Minute || w > time.Minute+10*time.Second {
 		t.Fatalf("normal: %v", w)
 	}
-	if w := pollWait(10); w < 5*time.Minute || w > 5*time.Minute+10*time.Second {
-		t.Fatalf("backoff capped at five minutes: %v", w)
+	if w := pollWait(10); w < 5*time.Minute || w > 7*time.Minute+40*time.Second {
+		t.Fatalf("backoff capped at five minutes plus half as jitter: %v", w)
 	}
 }
 

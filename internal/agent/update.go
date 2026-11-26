@@ -190,6 +190,9 @@ func (a *Agent) downloadPackage(ctx context.Context, version, file, dst, wantHex
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if err := busyOf("download "+file, resp); err != nil {
+			return err
+		}
 		return fmt.Errorf("download %s: %s", file, resp.Status)
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(dst), ".dl-*")

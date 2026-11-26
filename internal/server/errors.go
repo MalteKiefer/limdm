@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -32,6 +33,20 @@ func errStatus(err error) (int, string) {
 		return http.StatusConflict, "a referenced object does not exist or is still in use"
 	}
 	return 0, ""
+}
+
+// overloaded reports an error of a busy database rather than of the request:
+// a lock or statement timeout, a serialization failure or deadlock, too many
+// connections, or no free pool connection in time. Clients retry these.
+func overloaded(err error) bool {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) {
+		switch pe.Code {
+		case "55P03", "57014", "40001", "40P01", "53300":
+			return true
+		}
+	}
+	return errors.Is(err, context.DeadlineExceeded)
 }
 
 // failUser answers a console request with the error page for the error's

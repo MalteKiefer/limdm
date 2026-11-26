@@ -220,7 +220,8 @@ See [agent.md](agent.md#enrollment-tokens).
   blocked), signature, devices and failures; **Approve**, **Block**,
   **Check for new versions**, **Show older versions**.
 * **Rollout**: **Update agents automatically**, **Pilot tag**, **Delay for all other
-  devices (days)**.
+  devices (days)**, **Rollout window (hours)** (each device at its own fixed time within the
+  window after the delay; 0 to 720, default 24).
 * **Fleet**: devices per agent version; **Outdated agents** updates single devices to the
   newest approved version (**Update to**).
 

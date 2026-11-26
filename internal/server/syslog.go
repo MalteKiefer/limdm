@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -12,7 +15,9 @@ import (
 )
 
 // Audit entries and device events go to a SIEM as RFC 5424 syslog messages
-// when LIMDM_SYSLOG names a target (udp://host:514 or tcp://host:514). A
+// when LIMDM_SYSLOG names a target (udp://host:514, tcp://host:514 or, with
+// TLS as in RFC 5425, tcp+tls://host:6514; LIMDM_SYSLOG_CA trusts a private
+// CA instead of the system roots). A
 // copy outside the database anchors the audit chain externally. Forwarding
 // starts with the entries written after the server started and retries
 // unsent ones; the loop runs on one instance only.
@@ -64,8 +69,14 @@ func (s *Server) syslogLoop(ctx context.Context) {
 		return
 	}
 	u, err := url.Parse(target)
-	if err != nil || (u.Scheme != "udp" && u.Scheme != "tcp") || u.Host == "" {
-		s.log.Error("LIMDM_SYSLOG must be udp://host:port or tcp://host:port")
+	if err != nil || (u.Scheme != "udp" && u.Scheme != "tcp" && u.Scheme != "tcp+tls") || u.Host == "" {
+		s.log.Error("LIMDM_SYSLOG must be udp://host:port, tcp://host:port or tcp+tls://host:port")
+		<-ctx.Done()
+		return
+	}
+	dial, err := syslogDialer(u, s.cfg.SyslogCA)
+	if err != nil {
+		s.log.Error("syslog", "err", err)
 		<-ctx.Done()
 		return
 	}
@@ -81,13 +92,13 @@ func (s *Server) syslogLoop(ctx context.Context) {
 	var conn net.Conn
 	send := func(m string) error {
 		if conn == nil {
-			c, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, u.Scheme, u.Host)
+			c, err := dial(ctx)
 			if err != nil {
 				return err
 			}
 			conn = c
 		}
-		if u.Scheme == "tcp" { // octet counting framing (RFC 6587)
+		if u.Scheme != "udp" { // octet counting framing (RFC 6587, RFC 5425)
 			m = strconv.Itoa(len(m)) + " " + m
 		}
 		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
@@ -124,6 +135,28 @@ func (s *Server) syslogLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// syslogDialer connects to the target of u; tcp+tls verifies the server
+// against the system roots or the CA file ca.
+func syslogDialer(u *url.URL, ca string) (func(context.Context) (net.Conn, error), error) {
+	d := &net.Dialer{Timeout: 5 * time.Second}
+	if u.Scheme != "tcp+tls" {
+		return func(ctx context.Context) (net.Conn, error) { return d.DialContext(ctx, u.Scheme, u.Host) }, nil
+	}
+	cfg := &tls.Config{ServerName: u.Hostname(), MinVersion: tls.VersionTLS12}
+	if ca != "" {
+		pem, err := os.ReadFile(ca)
+		if err != nil {
+			return nil, fmt.Errorf("LIMDM_SYSLOG_CA: %w", err)
+		}
+		cfg.RootCAs = x509.NewCertPool()
+		if !cfg.RootCAs.AppendCertsFromPEM(pem) {
+			return nil, errors.New("LIMDM_SYSLOG_CA: no certificate found")
+		}
+	}
+	td := &tls.Dialer{NetDialer: d, Config: cfg}
+	return func(ctx context.Context) (net.Conn, error) { return td.DialContext(ctx, "tcp", u.Host) }, nil
 }
 
 // forwardAudit sends audit entries after *last; *last only moves past sent ones.

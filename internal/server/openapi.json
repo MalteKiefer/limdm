@@ -149,6 +149,9 @@
           },
           "429": {
             "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
         }
       }
@@ -190,6 +193,9 @@
             "$ref": "#/components/responses/Problem"
           },
           "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -238,6 +244,9 @@
             "$ref": "#/components/responses/Problem"
           },
           "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -292,13 +301,16 @@
           },
           "404": {
             "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
         }
       },
       "post": {
         "operationId": "enqueueCommand",
         "summary": "Queue a command",
-        "description": "Same commands and rules as the console: scripts, lost mode, wipe, allow_uninstall, user, software and app commands need the admin role; lost and wipe need confirm set to the host name. Audited as command.<type>. Roles admin and helpdesk, not read only. With four eyes approval on (wipe, lost mode, scripts) nothing is queued: the answer is 202 with the approval_id of a pending request that another admin decides in the console (Approvals).",
+        "description": "Same commands and rules as the console: scripts, lost mode, wipe, allow_uninstall, user, software and app commands need the admin role; lost and wipe need confirm set to the host name. Audited as command.<type>. Roles admin and helpdesk, not read only. With four eyes approval on (wipe, lost mode, scripts) nothing is queued: the answer is 202 with the approval_id of a pending request that another admin decides in the console or through /api/v1/approvals/{id}.",
         "requestBody": {
           "required": true,
           "content": {
@@ -311,7 +323,7 @@
         },
         "responses": {
           "202": {
-            "description": "Queued (a Command), or, when the command needs four eyes approval, an approval request (ApprovalPending) with Location /approvals",
+            "description": "Queued (a Command), or, when the command needs four eyes approval, an approval request (ApprovalPending) with Location /api/v1/approvals/{id}",
             "content": {
               "application/json": {
                 "schema": {
@@ -358,8 +370,22 @@
           },
           "429": {
             "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            },
+            "description": "Repeating the request with the same key within 24 hours returns the first answer (header Idempotent-Replayed: true) instead of queuing again; the same key with another request is 422, one still running 409."
+          }
+        ]
       }
     },
     "/api/v1/commands/{id}": {
@@ -401,6 +427,9 @@
           },
           "429": {
             "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
         }
       }
@@ -439,6 +468,9 @@
             "$ref": "#/components/responses/Problem"
           },
           "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -496,6 +528,9 @@
           },
           "429": {
             "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
         }
       }
@@ -526,6 +561,14 @@
                   "$ref": "#/components/schemas/LibraryItem"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "send it as If-Match with a PUT"
+              }
             }
           },
           "401": {
@@ -538,6 +581,9 @@
             "$ref": "#/components/responses/Problem"
           },
           "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -565,6 +611,13 @@
                   "$ref": "#/components/schemas/LibraryItem"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           },
           "400": {
@@ -590,8 +643,24 @@
           },
           "429": {
             "$ref": "#/components/responses/Problem"
+          },
+          "412": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "ETag of the version the change is based on; another version answers 412"
+          }
+        ]
       },
       "delete": {
         "operationId": "deleteLibraryItem",
@@ -614,6 +683,9 @@
             "$ref": "#/components/responses/Problem"
           },
           "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -653,6 +725,9 @@
             "$ref": "#/components/responses/Problem"
           },
           "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -710,6 +785,9 @@
           },
           "429": {
             "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
         }
       }
@@ -740,6 +818,14 @@
                   "$ref": "#/components/schemas/Blueprint"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "send it as If-Match with a PUT"
+              }
             }
           },
           "401": {
@@ -752,6 +838,9 @@
             "$ref": "#/components/responses/Problem"
           },
           "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -779,6 +868,13 @@
                   "$ref": "#/components/schemas/Blueprint"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           },
           "400": {
@@ -804,8 +900,24 @@
           },
           "429": {
             "$ref": "#/components/responses/Problem"
+          },
+          "412": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "ETag of the version the change is based on; another version answers 412"
+          }
+        ]
       },
       "delete": {
         "operationId": "deleteBlueprint",
@@ -828,6 +940,9 @@
             "$ref": "#/components/responses/Problem"
           },
           "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -856,6 +971,9 @@
             "$ref": "#/components/responses/Problem"
           },
           "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -950,6 +1068,9 @@
           },
           "429": {
             "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
         }
       }
@@ -993,6 +1114,596 @@
           },
           "429": {
             "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/approvals": {
+      "get": {
+        "operationId": "listApprovals",
+        "summary": "List approval requests",
+        "description": "Newest first, of the token's tenant; helpdesk tokens see their own requests. Scope read for the role, admin for the scope check.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                "expired",
+                "used"
+              ]
+            }
+          },
+          {
+            "$ref": "#/components/parameters/limit"
+          },
+          {
+            "$ref": "#/components/parameters/cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/approvals/{id}": {
+      "get": {
+        "operationId": "getApproval",
+        "summary": "Get an approval request",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Approval"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/approvals/{id}/approve": {
+      "post": {
+        "operationId": "approveApproval",
+        "summary": "Approve an approval request",
+        "description": "Admin tokens, not read only. Never a request of the same token or of the person who created it (409); an approved command is queued at once. Audited as approval.approve.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Approval"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/approvals/{id}/reject": {
+      "post": {
+        "operationId": "rejectApproval",
+        "summary": "Reject an approval request",
+        "description": "Admin tokens, not read only. Never a request of the same token or of the person who created it (409); an approved command is queued at once. Audited as approval.reject.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Approval"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/exceptions": {
+      "get": {
+        "operationId": "listExceptions",
+        "summary": "List risk exceptions",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Exception"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "addException",
+        "summary": "Add a risk exception",
+        "description": "Admin tokens, not read only. With four eyes approval on, the approver must be another person. Audited as exception.add.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExceptionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Created"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "API path of the new or pending resource"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "415": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/exceptions/{id}": {
+      "delete": {
+        "operationId": "revokeException",
+        "summary": "Revoke a risk exception",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/tokens": {
+      "get": {
+        "operationId": "listTokens",
+        "summary": "List API tokens",
+        "description": "Admin and auditor tokens; the secrets are never shown again.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Token"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createToken",
+        "summary": "Create an API token",
+        "description": "Admin tokens, not read only. The answer holds the secret once. Rotate by creating the successor and deleting the old token. Audited as api_token.create.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Token"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "API path of the new or pending resource"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "415": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/tokens/{id}": {
+      "delete": {
+        "operationId": "revokeToken",
+        "summary": "Revoke an API token",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/tenants": {
+      "get": {
+        "operationId": "listTenants",
+        "summary": "List tenants",
+        "description": "Global admin tokens with multi tenancy on (else 404).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Tenant"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createTenant",
+        "summary": "Create a tenant",
+        "description": "Global admin tokens, not read only. Audited as tenant.add.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 100
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Created"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "API path of the new or pending resource"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "415": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/docs": {
+      "get": {
+        "operationId": "apiReference",
+        "summary": "This reference as a page",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "HTML",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }
@@ -1043,7 +1754,8 @@
         "type": "object",
         "properties": {
           "type": {
-            "type": "string"
+            "type": "string",
+            "description": "urn:limdm:problem:<code>"
           },
           "title": {
             "type": "string"
@@ -1053,6 +1765,26 @@
           },
           "detail": {
             "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "description": "machine readable error code, also the last part of type (urn:limdm:problem:<code>)",
+            "enum": [
+              "bad_request",
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "method_not_allowed",
+              "conflict",
+              "precondition_failed",
+              "too_large",
+              "unsupported_media_type",
+              "invalid",
+              "precondition_required",
+              "rate_limited",
+              "internal",
+              "busy"
+            ]
           }
         }
       },
@@ -1551,6 +2283,324 @@
           "expires_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "Approval": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "action": {
+            "type": "string",
+            "description": "command, user.update, user.add, user.reset, recovery.view or remote_shell"
+          },
+          "target": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "expired",
+              "used"
+            ]
+          },
+          "decided_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "decided_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "credentials": {
+            "type": "string",
+            "description": "new local credentials of an approved user.add or user.reset, only in the decision's answer"
+          }
+        }
+      },
+      "ApprovalPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Approval"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "Exception": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "check_id": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "exclude",
+              "advisory"
+            ]
+          },
+          "tag": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "approver": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "expired",
+              "revoked"
+            ]
+          }
+        }
+      },
+      "ExceptionInput": {
+        "type": "object",
+        "required": [
+          "check_id",
+          "mode",
+          "reason",
+          "owner",
+          "approver",
+          "expires"
+        ],
+        "properties": {
+          "check_id": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "exclude",
+              "advisory"
+            ]
+          },
+          "tag": {
+            "type": "string",
+            "description": "one device tag, empty for every device"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "owner": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "approver": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "expires": {
+            "type": "string",
+            "format": "date",
+            "description": "last day it applies, within three years"
+          }
+        }
+      },
+      "Token": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "scope_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "token": {
+            "type": "string",
+            "description": "the secret, only in the answer that created it"
+          }
+        }
+      },
+      "TokenInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "role",
+          "days"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "helpdesk",
+              "auditor",
+              "metrics"
+            ]
+          },
+          "days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "scope_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "device tags, helpdesk and auditor tokens only"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "read",
+                "commands",
+                "library",
+                "audit",
+                "admin"
+              ]
+            },
+            "description": "limits the token; empty: everything its role allows"
+          }
+        }
+      },
+      "Tenant": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "company_name": {
+            "type": "string"
+          },
+          "devices": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Created": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
           }
         }
       }

@@ -59,6 +59,10 @@ func TestIntegration(t *testing.T) {
 	if err := migrate(ctx, db); err != nil {
 		t.Fatal(err)
 	}
+	// an unchanged schema is skipped; forget it to apply it once more
+	if _, err := db.Exec(ctx, `DELETE FROM schema_applied`); err != nil {
+		t.Fatal(err)
+	}
 	if err := migrate(ctx, db); err != nil {
 		t.Fatal("schema must be idempotent: ", err)
 	}
@@ -1317,6 +1321,7 @@ func TestAgentUpdates(t *testing.T) {
 	// poll: nothing pending, then a queued command
 	pollOf := func(id string) bool {
 		t.Helper()
+		s.forgetRollout() // the test changes releases in the database directly
 		rec := httptest.NewRecorder()
 		s.poll(rec, httptest.NewRequest("POST", "/api/v1/poll", nil).WithContext(context.WithValue(ctx, deviceKey, id)))
 		var pr api.PollResponse

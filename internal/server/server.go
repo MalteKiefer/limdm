@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"log/slog"
+	mrand "math/rand/v2"
 	"net"
 	"net/http"
 	"net/netip"
@@ -66,11 +67,29 @@ type Config struct {
 	Keys           KeyProvider
 	ReleaseDir     string
 	StaleAfter     time.Duration
-	Syslog         string // udp://host:port or tcp://host:port: audit entries and device events as RFC 5424
+	Syslog         string // udp://host:port, tcp://host:port or tcp+tls://host:port: audit entries and device events as RFC 5424
 	// proxies (load balancers) whose X-Forwarded-For is trusted for the client address, besides loopback
 	TrustedProxies []netip.Prefix
 	DrainDelay     time.Duration // between failing /readyz and closing connections at shutdown
 	MultiTenant    bool          // tenant pages and switcher (tenant.go); isolation applies always
+	DBMaxConns     int           // connections in the pool of this instance (LIMDM_DB_MAX_CONNS)
+	// parallel agent package downloads per instance; more wait, then get 503 (LIMDM_UPDATE_DOWNLOADS)
+	UpdateDownloads int
+	MaxCheckins     int    // check ins decoded and processed at once per instance (LIMDM_MAX_CHECKINS)
+	SyslogCA        string // CA file for tcp+tls syslog targets; empty: system roots
+	AccessLog       bool   // a log line per request (LIMDM_ACCESS_LOG)
+	AuditAPIReads   string // off, sensitive or all: API reads written to the audit log (LIMDM_AUDIT_API_READS)
+	// load balancers that send a PROXY v2 header to the agent listener (LIMDM_AGENT_PROXY_PROTOCOL)
+	AgentProxyFrom []netip.Prefix
+}
+
+// envInt reads a number setting within [lo, hi]; def when unset.
+func envInt(k string, def, lo, hi int) (int, error) {
+	n, err := strconv.Atoi(envOr(k, strconv.Itoa(def)))
+	if err != nil || n < lo || n > hi {
+		return 0, fmt.Errorf("%s must be %d to %d", k, lo, hi)
+	}
+	return n, nil
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -103,6 +122,9 @@ func ConfigFromEnv() (Config, error) {
 		ReleaseRepo:   os.Getenv("LIMDM_RELEASE_REPO"),
 		GeoIPURL:      envOr("LIMDM_GEOIP_URL", "https://ipwho.is/"),
 		Syslog:        os.Getenv("LIMDM_SYSLOG"),
+		SyslogCA:      os.Getenv("LIMDM_SYSLOG_CA"),
+		AccessLog:     os.Getenv("LIMDM_ACCESS_LOG") == "true",
+		AuditAPIReads: envOr("LIMDM_AUDIT_API_READS", "sensitive"),
 		MultiTenant:   os.Getenv("LIMDM_MULTI_TENANT") == "true",
 	}
 	if c.GeoIPURL == "off" {
@@ -126,11 +148,26 @@ func ConfigFromEnv() (Config, error) {
 	if c.TrustedProxies, err = parseProxies(os.Getenv("LIMDM_TRUSTED_PROXIES")); err != nil {
 		return c, err
 	}
+	if c.AgentProxyFrom, err = parseProxies(os.Getenv("LIMDM_AGENT_PROXY_PROTOCOL")); err != nil {
+		return c, fmt.Errorf("LIMDM_AGENT_PROXY_PROTOCOL: %w", err)
+	}
 	drain, err := strconv.Atoi(envOr("LIMDM_DRAIN_SECONDS", "5"))
 	if err != nil || drain < 0 || drain > 300 {
 		return c, errors.New("LIMDM_DRAIN_SECONDS must be 0 to 300")
 	}
 	c.DrainDelay = time.Duration(drain) * time.Second
+	if c.DBMaxConns, err = envInt("LIMDM_DB_MAX_CONNS", 32, 4, 1000); err != nil {
+		return c, err
+	}
+	if c.UpdateDownloads, err = envInt("LIMDM_UPDATE_DOWNLOADS", 20, 1, 10000); err != nil {
+		return c, err
+	}
+	if c.MaxCheckins, err = envInt("LIMDM_MAX_CHECKINS", 64, 1, 10000); err != nil {
+		return c, err
+	}
+	if !slices.Contains([]string{"off", "sensitive", "all"}, c.AuditAPIReads) {
+		return c, errors.New("LIMDM_AUDIT_API_READS must be off, sensitive or all")
+	}
 	var missing []string
 	required := map[string]string{
 		"LIMDM_DATABASE_URL": c.DatabaseURL, "LIMDM_PUBLIC_URL": c.PublicURL, "LIMDM_AGENT_URL": c.AgentURL,
@@ -227,9 +264,16 @@ type Server struct {
 	shells     shellHub // remote shell sessions this instance holds
 	ha         cluster  // instance identity, notifications, relay (cluster.go)
 	brands     sync.Map // tenant id -> brandEntry (tenant.go)
+
+	// load limits of the agent API; nil: no limit
+	downloads chan struct{} // agent package downloads running (agentPackage)
+	// check ins running, and those with a body over 1 MiB (inventory, package
+	// list) among them (checkinSlot)
+	checkins, bigCheckins chan struct{}
+	rolloutC              atomic.Pointer[rolloutCache] // agentupdates.go
 }
 
-func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
+func pgxPoolConfig(databaseURL string, maxConns int) (*pgxpool.Config, error) {
 	pc, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, err
@@ -237,7 +281,7 @@ func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
 	// explicit limits instead of the pgx default of max(4, CPUs); a pool_max_conns
 	// parameter in the URL still wins
 	if !strings.Contains(databaseURL, "pool_max_conns") {
-		pc.MaxConns = 32
+		pc.MaxConns = int32(max(maxConns, 4)) //nolint:gosec // bounded by ConfigFromEnv
 	}
 	pc.MinConns = 2
 	pc.MaxConnIdleTime = 5 * time.Minute
@@ -256,7 +300,7 @@ func newPool(ctx context.Context, pc *pgxpool.Config) (*pgxpool.Pool, error) {
 }
 
 func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
-	pc, err := pgxPoolConfig(cfg.DatabaseURL)
+	pc, err := pgxPoolConfig(cfg.DatabaseURL, cfg.DBMaxConns)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +355,8 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 // openCore loads the keys and the audit chain state: what the server and
 // limdm-server keys need.
 func openCore(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Pool) (*Server, error) {
-	s := &Server{cfg: cfg, db: db, log: log, geoSem: make(chan struct{}, 1)}
+	s := &Server{cfg: cfg, db: db, log: log, geoSem: make(chan struct{}, 1), downloads: make(chan struct{}, max(cfg.UpdateDownloads, 1)),
+		checkins: make(chan struct{}, max(cfg.MaxCheckins, 1)), bigCheckins: make(chan struct{}, max(cfg.MaxCheckins/8, 1))}
 	if err := s.loadKeys(); err != nil {
 		return nil, err
 	}
@@ -340,7 +385,7 @@ func openCore(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Poo
 
 // OpenKeys opens the database and the keys for limdm-server keys.
 func OpenKeys(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
-	pc, err := pgxPoolConfig(cfg.DatabaseURL)
+	pc, err := pgxPoolConfig(cfg.DatabaseURL, cfg.DBMaxConns)
 	if err != nil {
 		return nil, err
 	}
@@ -480,7 +525,7 @@ func (s *Server) AdminHandler() http.Handler {
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	s.webRoutes(mux)
 	s.apiRoutes(mux)
-	return countRequests("console", securityHeaders(s.consoleFilter(mux)))
+	return s.countRequests("console", securityHeaders(s.consoleFilter(mux)))
 }
 
 // AgentHandler serves the agent API. Everything except fetching the CA and
@@ -501,7 +546,7 @@ func (s *Server) AgentHandler() http.Handler {
 	mux.HandleFunc("GET /api/v1/catalog/search", s.deviceAuth(s.deviceLimit(30, s.flathubSearchJSON), false))
 	mux.HandleFunc("GET /api/v1/catalog/flathub-icon", s.deviceAuth(s.deviceLimit(300, s.flathubIcon), false))
 	s.shellAgentRoutes(mux)
-	return countRequests("agent", securityHeaders(mux))
+	return s.countRequests("agent", securityHeaders(mux))
 }
 
 // AgentTLSConfig: TLS 1.3 only, server certificate from the device CA. The
@@ -656,15 +701,21 @@ func (s *Server) deviceAuth(next http.HandlerFunc, allowExpired bool) http.Handl
 }
 
 func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
-	// unauthenticated: limit attempts per address before touching the database
-	// only failures count: a mass rollout behind one office NAT must not hit it
-	if s.limit.over("enroll:"+rateKey(r), 20, 5*time.Minute) {
-		problem(w, http.StatusTooManyRequests, "too many enrollment attempts, try again later")
-		return
-	}
 	var req api.EnrollRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
 		problem(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	// unauthenticated: failures are limited before touching the database, per
+	// address and token (20 tries of one wrong token) and per address (200
+	// failures): only failures count, so a mass rollout behind one office NAT
+	// or a load balancer without PROXY protocol is not blocked by a few typos
+	th := sha(req.Token)
+	src := "enroll:" + rateKey(r)
+	tokKey := src + ":" + hex.EncodeToString(th[:8])
+	if s.limit.over(tokKey, 20, 5*time.Minute) || s.limit.over(src, 200, 5*time.Minute) {
+		w.Header().Set("Retry-After", "300")
+		problem(w, http.StatusTooManyRequests, "too many enrollment attempts, try again later")
 		return
 	}
 	ctx := r.Context()
@@ -678,9 +729,10 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	var tenantID int64 // the device joins the tenant of its token
 	err = tx.QueryRow(ctx, `UPDATE enroll_tokens SET uses_left = uses_left - 1
 		WHERE token_hash=$1 AND uses_left > 0 AND expires_at > now()
-		AND tenant_id IN (SELECT id FROM tenants WHERE NOT disabled) RETURNING blueprint_id, tenant_id`, sha(req.Token)).Scan(&blueprintID, &tenantID)
+		AND tenant_id IN (SELECT id FROM tenants WHERE NOT disabled) RETURNING blueprint_id, tenant_id`, th).Scan(&blueprintID, &tenantID)
 	if err != nil {
-		s.limit.allow("enroll:"+rateKey(r), 20, 5*time.Minute) // counts the failure
+		s.limit.allow(tokKey, 20, 5*time.Minute) // counts the failure
+		s.limit.allow(src, 200, 5*time.Minute)
 		s.log.Warn("enroll rejected", "remote", clientIP(r))
 		problem(w, http.StatusForbidden, "invalid or expired token")
 		return
@@ -785,8 +837,8 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 			SELECT 1 FROM devices d, jsonb_array_elements(d.users) u
 			WHERE d.id=$1 AND d.last_seen IS NOT NULL
 			AND NOT EXISTS (SELECT 1 FROM dir_users a WHERE a.active AND lower(a.email)=lower(u->>'email')) AND (
-				EXISTS (SELECT 1 FROM dir_users du WHERE (lower(du.email)=lower(u->>'email') OR lower(u->>'email') = ANY(du.previous_emails))
-					AND NOT du.active AND du.updated_at > d.last_seen)
+				EXISTS (SELECT 1 FROM dir_users du WHERE lower(du.email)=lower(u->>'email') AND NOT du.active AND du.updated_at > d.last_seen)
+				OR EXISTS (SELECT 1 FROM dir_users du WHERE du.previous_emails @> ARRAY[lower(u->>'email')] AND NOT du.active AND du.updated_at > d.last_seen)
 				OR EXISTS (SELECT 1 FROM dir_tombstones t WHERE t.email=lower(u->>'email') AND t.removed_at > d.last_seen)))`, id).Scan(&pending); err != nil {
 			s.failAPI(w, err)
 			return
@@ -807,20 +859,67 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(api.PollResponse{Pending: pending})
 }
 
+// checkinSlot bounds the check ins decoded and processed at once, and among
+// them those with a big body: memory and database connections stay bounded
+// when the fleet comes back at once or a device floods the server. A check in
+// that gets no slot within a few seconds is asked to come back later.
+func (s *Server) checkinSlot(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
+	var held []chan struct{}
+	release = func() {
+		for _, c := range held {
+			<-c
+		}
+	}
+	sems := []chan struct{}{s.checkins}
+	if r.ContentLength < 0 || r.ContentLength > 1<<20 {
+		sems = append(sems, s.bigCheckins)
+	}
+	t := time.NewTimer(checkinWait)
+	defer t.Stop()
+	for _, c := range sems {
+		if c == nil {
+			continue
+		}
+		select {
+		case c <- struct{}{}:
+			held = append(held, c)
+		case <-t.C:
+			release()
+			retryLater(w, 30+mrand.IntN(90), "too many check ins at once, retry later") //nolint:gosec // jitter, not a secret
+			return nil, false
+		case <-r.Context().Done():
+			release()
+			return nil, false
+		}
+	}
+	return release, true
+}
+
+// checkinWait is how long a check in waits for a slot (checkinSlot).
+var checkinWait = 5 * time.Second
+
 func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	id := r.Context().Value(deviceKey).(string)
+	release, ok := s.checkinSlot(w, r)
+	if !ok {
+		return
+	}
+	defer release()
 	var req api.CheckinRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<20)).Decode(&req); err != nil {
 		problem(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	ctx := r.Context()
-	tx, err := s.db.Begin(ctx)
+	dbTx, err := s.db.Begin(ctx)
 	if err != nil {
 		s.failAPI(w, err)
 		return
 	}
-	defer tx.Rollback(ctx)
+	defer dbTx.Rollback(ctx)
+	// audit entries (command results, tamper events, escrow, compliance) are
+	// appended at the commit, so the global audit lock is held only there
+	tx := &auditTx{Tx: dbTx}
 	// one check in per device at a time: a retry or a poll triggered check in
 	// running in parallel would otherwise overwrite this one's results
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM devices WHERE id=$1 FOR UPDATE`, id); err != nil {
@@ -868,6 +967,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		pkgHash = req.PackagesHash
 	}
 	var notices []notice // sent after the commit
+	var refused []api.CommandResult
 	for _, res := range req.Results {
 		status := "failed"
 		if res.OK {
@@ -882,7 +982,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if typ == "shell" && !res.OK {
-			s.shellRefused(ctx, res.ID, res.Output)
+			refused = append(refused, res) // after the commit: it needs its own connection
 		}
 		if !res.OK && slices.Contains([]string{"lock", "unlock", "lost", "found", "wipe", "script"}, typ) {
 			notices = append(notices, notice{Type: "command.failed", Severity: "critical", Title: "Command failed: " + typ,
@@ -1011,7 +1111,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		notices = append(notices, notice{Type: "agent.update_failed", Severity: "warning", Title: "Agent update failed: " + u.To,
 			Text: fmt.Sprintf("%s to %s failed (rolled back: %v). %s", u.From, u.To, u.RolledBack, truncate(u.Detail, 300))})
 	}
-	if b := s.deviceBranding(ctx, id); b.Hash != req.BrandingHash {
+	if b := s.deviceBranding(ctx, tx, id); b.Hash != req.BrandingHash {
 		resp.Branding = &b
 	}
 	if err := s.recordUpdateResult(ctx, tx, id, req.UpdateResult); err != nil {
@@ -1034,6 +1134,9 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		s.failAPI(w, err)
 		return
 	}
+	for _, res := range refused {
+		s.shellRefused(ctx, res.ID, res.Output)
+	}
 	if relocate {
 		go s.locate(id, ip) //nolint:gosec // G118: the lookup outlives the request on purpose
 	}
@@ -1054,6 +1157,10 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 // any later modification of a row breaks verification of every following row;
 // the hash is keyed (audit.go), so it cannot be recomputed from the database.
 func audit(ctx context.Context, tx pgx.Tx, actor, action, target, detail string) error {
+	if d, ok := tx.(*auditTx); ok {
+		d.pending = append(d.pending, auditEntry{ctxTenant(ctx), actor, action, target, detail})
+		return nil
+	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7363)`); err != nil {
 		return err
 	}
@@ -1078,6 +1185,35 @@ func audit(ctx context.Context, tx pgx.Tx, actor, action, target, detail string)
 	_, err = tx.Exec(ctx, `INSERT INTO audit_log(at, actor, action, target, detail, prev, hash, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
 		at, actor, action, target, detail, prev, auditHash(auditKey, prev, at, auditFields(actor, action, target, detail, tenant)...), tenant)
 	return err
+}
+
+// auditTx is a transaction whose audit entries are appended at its commit:
+// the global audit lock is then held for the append and the commit only, not
+// for the rest of a long transaction such as a check in. Entries made inside
+// a savepoint (tx.Begin) are written at once.
+type auditTx struct {
+	pgx.Tx
+	pending  []auditEntry
+	atCommit []func(context.Context, pgx.Tx) error // run before the audit entries
+}
+
+type auditEntry struct {
+	tenant                        int64 // of the request (ctxTenant)
+	actor, action, target, detail string
+}
+
+func (t *auditTx) Commit(ctx context.Context) error {
+	for _, f := range t.atCommit {
+		if err := f(ctx, t.Tx); err != nil {
+			return err
+		}
+	}
+	for _, e := range t.pending {
+		if err := audit(withTenant(ctx, e.tenant), t.Tx, e.actor, e.action, e.target, e.detail); err != nil {
+			return err
+		}
+	}
+	return t.Tx.Commit(ctx)
 }
 
 // auditTenant is the tenant of an entry: the tenant the request acts for,
@@ -1118,23 +1254,58 @@ func (s *Server) auditAction(ctx context.Context, actor, action, target, detail 
 	return tx.Commit(ctx)
 }
 
+// problemCodes are the machine readable error codes of the problem types.
+var problemCodes = map[int]string{
+	http.StatusBadRequest: "bad_request", http.StatusUnauthorized: "unauthorized", http.StatusForbidden: "forbidden",
+	http.StatusNotFound: "not_found", http.StatusMethodNotAllowed: "method_not_allowed", http.StatusConflict: "conflict",
+	http.StatusPreconditionFailed: "precondition_failed", http.StatusRequestEntityTooLarge: "too_large",
+	http.StatusUnsupportedMediaType: "unsupported_media_type", http.StatusUnprocessableEntity: "invalid",
+	http.StatusPreconditionRequired: "precondition_required", http.StatusTooManyRequests: "rate_limited",
+	http.StatusInternalServerError: "internal", http.StatusServiceUnavailable: "busy",
+}
+
 // problem answers the agent API with RFC 9457 problem details, so clients
-// can tell errors apart by status and type instead of parsing text.
+// can tell errors apart by status and type instead of parsing text. The type
+// is urn:limdm:problem:<code>, the code is also a member of its own.
 func problem(w http.ResponseWriter, status int, detail string) {
+	code := problemCodes[status]
+	if code == "" {
+		code = strconv.Itoa(status)
+	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"type": "about:blank", "title": http.StatusText(status), "status": status, "detail": detail})
+	_ = json.NewEncoder(w).Encode(map[string]any{"type": "urn:limdm:problem:" + code, "code": code, "title": http.StatusText(status), "status": status, "detail": detail})
 }
 
-// failAPI logs an internal error and answers with a generic problem.
+// retryLater answers 503 with Retry-After: the server is overloaded, not the
+// request wrong; agents wait that long before they try again.
+func retryLater(w http.ResponseWriter, seconds int, detail string) {
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	problem(w, http.StatusServiceUnavailable, detail)
+}
+
+// failAPI logs an internal error and answers with a generic problem; a busy
+// database (lock or statement timeout, no free connection) is a 503 the
+// agent retries after Retry-After.
 func (s *Server) failAPI(w http.ResponseWriter, err error) {
-	s.log.Error("agent request failed", "err", err)
+	if overloaded(err) {
+		s.log.Warn("agent request: database busy", "err", err, "request_id", requestID(w))
+		retryLater(w, 30+mrand.IntN(90), "server busy, retry later") //nolint:gosec // jitter, not a secret
+		return
+	}
+	s.log.Error("agent request failed", "err", err, "request_id", requestID(w))
 	problem(w, http.StatusInternalServerError, "internal error")
 }
 
 func (s *Server) fail(w http.ResponseWriter, err error) {
-	s.log.Error("request failed", "err", err)
+	if overloaded(err) {
+		s.log.Warn("request: database busy", "err", err, "request_id", requestID(w))
+		w.Header().Set("Retry-After", "30")
+		http.Error(w, "server busy, try again in a moment", http.StatusServiceUnavailable)
+		return
+	}
+	s.log.Error("request failed", "err", err, "request_id", requestID(w))
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
 
@@ -1245,8 +1416,20 @@ func (s *Server) storeEvents(ctx context.Context, tx pgx.Tx, id string, events [
 		evAt, evText = append(evAt, at), append(evText, truncate(msg, 2000))
 	}
 	if len(evText) > 0 {
-		if _, err := tx.Exec(ctx, `INSERT INTO device_events(device_id, at, detail) SELECT $1, a, d FROM unnest($2::timestamptz[], $3::text[]) AS e(a, d)`,
-			id, evAt, evText); err != nil {
+		// one writer at a time from the insert to the commit, as for the audit
+		// log: ids then become visible in commit order, and the syslog cursor
+		// (id > last sent) cannot skip an event committed late with a smaller id
+		insert := func(ctx context.Context, tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, lockEvents); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `INSERT INTO device_events(device_id, at, detail) SELECT $1, a, d FROM unnest($2::timestamptz[], $3::text[]) AS e(a, d)`,
+				id, evAt, evText)
+			return err
+		}
+		if d, ok := tx.(*auditTx); ok {
+			d.atCommit = append(d.atCommit, insert) // the lock is then held for the commit only
+		} else if err := insert(ctx, tx); err != nil {
 			return nil, err
 		}
 	}

@@ -178,6 +178,7 @@ scrape_configs:
 | `limdm_audit_chain_intact` | | 1 while the audit hash chain verifies, 0 after an entry was changed |
 | `limdm_audit_verified_timestamp_seconds` | | Last audit chain verification |
 | `limdm_http_requests_total` | `listener`, `method`, `code` | Requests since the process started, console and agent listener; per instance, scrape every instance |
+| `limdm_http_request_duration_seconds` | `listener`, `le` | Histogram of request durations (5 ms to 30 s buckets), console and agent listener; per instance |
 
 Useful alerts: `limdm_audit_chain_intact == 0`, `increase(limdm_notifications_24h{result="failed"}[1h]) > 0`,
 `limdm_devices{status="stale"} > 0`. Each scrape verifies the audit entries written since the
@@ -192,7 +193,13 @@ framing, RFC 6587). Audit entries have the message ID `audit` and the structured
 message ID `event` with `id` and `device`. A copy outside the database anchors the audit
 chain externally. Forwarding runs on one instance, retries unsent entries and continues
 from its stored position after a restart or leader change
-([high-availability.md](high-availability.md#background-jobs)).
+([high-availability.md](high-availability.md#background-jobs)). Both streams are written one
+transaction at a time up to the commit, so ids become visible in order and the position
+(last sent id) cannot skip an entry that committed late.
+
+`LIMDM_SYSLOG=tcp+tls://host:6514` sends over TLS (RFC 5425, octet counting, TLS 1.2 or
+newer); the collector's certificate is verified against the system roots, or against the CA
+file in `LIMDM_SYSLOG_CA` for a private CA.
 
 ## Retention
 
@@ -203,7 +210,7 @@ An hourly job (one instance) deletes:
 | Finished commands (`ok`, `failed`, `expired`) | 180 days; lock, unlock, lost mode, end of lost mode and wipe stay |
 | Device events | 365 days (`device_events` refuses deletes outside this job) |
 | Compliance changes | 365 days; the latest change per device and check stays |
-| Device metrics (memory, disk, load) | 30 days |
+| Device metrics (memory, disk, load) | 30 days; the table is partitioned by day and whole days are dropped (no bloat from deletes) |
 | Fleet history (overview chart) | 400 days |
 | Notification delivery log | 30 days |
 | Approval requests | expire after 24 hours |
@@ -212,6 +219,43 @@ An hourly job (one instance) deletes:
 Audit retention runs once a day and only behind a fully verified chain. The last deleted
 entry's id and hash become a checkpoint signed with the audit key, from which verification
 starts afterwards; the deletion itself is an audit entry ([security.md](security.md#audit-log)).
+
+`device_metrics` is partitioned by day (`device_metrics_YYYYMMDD`, created a week ahead by
+the hourly job, a default partition catches anything else). The upgrade to 0.17 keeps the
+existing rows in `device_metrics_legacy`, which is dropped once its 30 days are over.
+
+## Sizing
+
+Estimates for the default intervals (check in every 5 minutes, poll every minute, a metric
+sample every 15 minutes) with package lists of 150 to 300 KB per device. They are a starting
+point; measure with `limdm_http_request_duration_seconds` and the PostgreSQL statistics.
+
+| | 1,000 devices | 10,000 devices | 50,000 devices |
+|---|---|---|---|
+| Check ins per second | 3 | 32 | 160 |
+| Polls per second | 15 | 150 | 770 |
+| Server instances (2 CPU, 2 GB each) | 1 (2 for HA) | 2 | 4 to 6 |
+| `LIMDM_DB_MAX_CONNS` per instance | 32 | 32 | 24 to 32 |
+| PostgreSQL | 2 CPU, 4 GB RAM | 4 CPU, 16 GB RAM | 8 to 16 CPU, 32 to 64 GB RAM, `max_connections` 300 |
+| `device_metrics` (30 days) | 3 million rows, 0.5 GB | 29 million rows, 4 GB | 144 million rows, 20 GB |
+| `devices` with inventory and packages | 0.5 GB | 5 GB | 25 GB |
+| Device events, compliance changes (365 days) | 1 GB | 10 GB | 50 GB |
+| WAL per day (package list changes dominate) | 0.5 GB | 3 to 5 GB | 15 to 25 GB |
+| Agent release rollout (6 MB package) | 6 GB | 60 GB | 300 GB |
+
+Notes:
+
+* The rollout window (default 24 hours) spreads the agent download over the day: 300 GB at
+  50,000 devices are about 30 Mbit/s on average instead of a peak of tens of Gbit/s.
+  `LIMDM_UPDATE_DOWNLOADS` bounds parallel downloads per instance.
+* Audit entries are appended at the commit of a check in; the advisory lock is held for the
+  append only, so check ins with command results scale with the database, not one after
+  another.
+* Shell transcripts (365 days) and script results (200 per device, up to 32 KB each) can
+  add up to several GB at 50,000 devices; the audit log grows without limit unless audit
+  retention is set.
+* Rolling restarts of the same version do not lock tables. The first start of a new version
+  applies the schema and builds new indexes concurrently.
 
 ## Command line
 

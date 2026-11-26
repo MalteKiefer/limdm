@@ -112,4 +112,6 @@ then disable it.
 * Version history: restoring a deleted library item or blueprint is available in the global
   view only, and the restored object belongs to Default.
 * Directory, SSO and the software catalog are per installation. Directory group role
-  mappings create global accounts.
+  mappings create global accounts. A directory group assigned to a blueprint applies only to
+  devices of that blueprint's tenant (or to all, for a shared blueprint of Default); devices
+  of other tenants fall through to their default blueprint.

@@ -55,13 +55,13 @@ PostgreSQL itself is made highly available with the usual tools (see
 | Console sessions, OIDC state, nonce and PKCE verifier | sealed cookies (`LIMDM_SESSION_KEY`), valid on every instance |
 | Desktop login (device code flow) | runs between the device and the identity provider; the server only hands out the configuration |
 | Console settings | stored in PostgreSQL; a trigger sends `NOTIFY limdm_settings`, every instance reloads within milliseconds. Saves are serialized across instances (advisory lock) and load a newer change first, so two admins saving on different instances do not undo each other |
-| Audit chain | appends take the advisory lock 7363, so ids and hashes stay in order with any number of instances |
+| Audit chain | appends take the advisory lock 7363, so ids and hashes stay in order with any number of instances. A check in appends its entries (command results, tamper events, escrow, compliance actions) at its commit, so the lock is held for the append only and check ins of different devices run in parallel; no transaction takes a second pool connection while it holds the lock |
 | Result of the last full audit verification | PostgreSQL (`settings` key `audit_verification`), shown on the audit page and in `/metrics` of every instance |
 | SCIM read, modify and write | advisory lock across instances |
 | Remote shell | relayed between instances, see [below](#remote-shell) |
 | Background jobs | leader election per job, see [below](#background-jobs) |
-| Rate limits (sign in, enrollment, API tokens, SCIM, CRL, device endpoints), the cap on audited OIDC failures | **per instance**, in memory. With n instances an address gets up to n times the budget. Accepted: the lockout of local accounts (5 failures, 15 minutes) is stored in the database and counts across instances, API and SCIM tokens are 256 bit random values |
-| Fleet overview cache, Flathub search cache | per instance, one minute and one hour |
+| Rate limits (sign in, enrollment, API tokens, SCIM, CRL, device endpoints), the cap on audited OIDC failures | **per instance**, in memory. With n instances an address gets up to n times the budget. Accepted: the lockout of local accounts (5 failures, 15 minutes) is stored in the database and counts across instances, API and SCIM tokens are 256 bit random values. Counters expire an hour after their last hit; beyond 200,000 throughput keys (devices, tokens) the least recently used are dropped, failure counters (sign in, enrollment, token, SCIM, CRL) never before their window ends |
+| Fleet overview cache, Flathub search cache, agent rollout (policy and approved releases for polls) | per instance, one minute, one hour and 30 seconds |
 | `/metrics` request counters | per instance; scrape every instance (`limdm_http_requests_total`), the fleet gauges are the same on all |
 
 ## Load balancer
@@ -79,9 +79,15 @@ PostgreSQL itself is made highly available with the usual tools (see
   console port's readiness (HAProxy `check port`, a shared health check in cloud load
   balancers).
 * **Client addresses on 8444:** with plain TCP passthrough the instance sees the load
-  balancer's address. Only the enrollment rate limit uses it (20 failed attempts per five
-  minutes per instance). Prefer a load balancer that keeps the client address
-  (HAProxy `usesrc clientip`, LVS direct routing, cloud network load balancers).
+  balancer's address: the device's public address and location and the enrollment failure
+  limit then see the balancer. Enable PROXY protocol version 2 on the balancer (HAProxy
+  `send-proxy-v2`, AWS NLB proxy protocol v2, nginx stream `proxy_protocol on`) and list its
+  addresses in `LIMDM_AGENT_PROXY_PROTOCOL`: connections from those addresses must start
+  with the header, connections from anywhere else must not and keep their own address.
+  Alternatively use a balancer that keeps the client address (HAProxy `usesrc clientip`,
+  LVS direct routing). Enrollment failures are limited per address and token (20 tries of
+  one wrong token in five minutes) and per address (200 failures), per instance, so a few
+  wrong tokens behind one balancer do not block other enrollments.
 
 ### Health endpoints
 
@@ -269,7 +275,11 @@ fall count, and systemd `TimeoutStopSec` (default 90 s) above `LIMDM_DRAIN_SECON
 
 Schema changes apply at start inside one transaction under an advisory lock: instances that
 start at the same time wait for each other, the first applies the schema, the others find
-it current. Startup work on key material (signing existing items, sealing secrets) is
+it current. The schema is applied only when it changed: each applied version is recorded by
+its hash (`schema_applied`), and an instance whose schema is recorded already starts without
+taking the advisory lock or any table lock. A rolling restart of the same version therefore
+never queues ACCESS EXCLUSIVE lock requests in front of the running instances; only the first
+instance of a new version takes them (bounded by a 30 s lock wait). Startup work on key material (signing existing items, sealing secrets) is
 serialized the same way.
 
 **Rolling upgrade** (default for releases whose notes do not say otherwise):
@@ -298,7 +308,16 @@ ones run. `server_instances.version` shows which version each instance runs:
 All instances connect to the primary. Requirements of LiMDM:
 
 * `LISTEN/NOTIFY` and session advisory locks: connect directly or through a pooler in
-  **session** mode. PgBouncer transaction or statement pooling breaks both.
+  **session** mode. PgBouncer transaction or statement pooling breaks both (the
+  notification listener, leader election of background jobs, session settings of the
+  index build), so it is not supported.
+* Connections: each instance opens up to `LIMDM_DB_MAX_CONNS` (default 32) plus one for
+  notifications and, at a schema change, one for the migration. Keep the sum over all
+  instances below `max_connections` (default 100) minus what backups and monitoring use,
+  for example 3 instances with 24 each for 100. Transactions never wait for a second
+  connection of the same pool, so a small pool slows requests down but cannot lock up.
+  For many instances put PgBouncer in **session** mode in front and size
+  `default_pool_size` like the sum above.
 * Writes only: standbys cannot serve LiMDM (no read routing).
 * After a failover, connections break: instances reconnect (pool, notification listener),
   background jobs restart under new locks, running remote shells end.

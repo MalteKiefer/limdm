@@ -743,7 +743,9 @@ func runRebootPending(a *Agent) (string, string) {
 		a.state.RebootSince = time.Now().Round(0)
 	}
 	since := time.Since(a.state.RebootSince)
-	detail := fmt.Sprintf("reboot required for %s", since.Round(time.Hour))
+	// a date, not a running duration: the detail would change the status
+	// (and resend the whole inventory) every hour
+	detail := "reboot required since " + a.state.RebootSince.UTC().Format("2006-01-02")
 	if since > 7*24*time.Hour {
 		return fail, detail
 	}
