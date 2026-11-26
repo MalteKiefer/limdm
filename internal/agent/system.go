@@ -619,6 +619,7 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 		}
 	}
 	inv.Disks, inv.Volumes = nativeDisks(), nativeVolumes()
+	inv.TPM = tpmInventory()
 	inv.Accounts, inv.Groups = nssAccounts()
 	annotateSSO(inv.Accounts)
 	inv.Repos = h.repos()

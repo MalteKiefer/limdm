@@ -719,4 +719,6 @@ var deCatalog = map[string]string{
 	"The repository signs its metadata, not each package": "Das Repository signiert seine Metadaten, nicht jedes Paket",
 	"The user is warned on the device":                    "Der Nutzer wird am Gerät gewarnt",
 	"Update agents automatically":                         "Agenten automatisch aktualisieren",
+	// E2
+	"Printers": "Drucker", "TPM": "TPM", "bound to the TPM": "an das TPM gebunden",
 }

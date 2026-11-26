@@ -398,6 +398,7 @@ func (a *Agent) escrowConfirmed(sent []pendingKey) {
 		a.state.Escrowed[k.UUID] = time.Now().UTC()
 		a.event("recovery key for %s escrowed", k.Device)
 	}
+	a.bindEscrowed(sent)
 	a.state.PendingKeys = a.state.PendingKeys[len(sent):]
 }
 
@@ -497,6 +498,9 @@ func CreateRecoveryKeys(readPass func(prompt string) (string, error), all bool) 
 		}
 		done++
 		fmt.Printf("%s: recovery key added\n", v.Path)
+		if err := bindWithPIN(st.Declarations, v.Path, k, readPass); err != nil {
+			fmt.Printf("%s: TPM binding failed: %v\n", v.Path, err)
+		}
 	}
 	if done > 0 {
 		fmt.Println("The agent sends the new keys to your IT department with its next check in. Your passphrase stays unchanged.")

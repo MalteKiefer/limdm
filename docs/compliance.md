@@ -23,6 +23,7 @@ training stay with the ISMS.
 | `updates.auto`, `updates.security`, `updates.reboot` | 1 | maintenance window |
 | `disk.encryption` system disk on LUKS | 1 | (needs reinstallation) |
 | `disk.recovery` LUKS recovery keys escrowed | 1 | desktop helper asks the user |
+| `disk.tpm` LUKS volumes bound to the TPM 2.0 (only with `tpm2` in `com.limdm.diskencryption`; fails only with `require`) | 1 | bound with the next escrowed recovery key |
 | `boot.password` GRUB password set | 1 | via `com.limdm.bootloader` |
 | `firewall.active` host firewall active | 1 | yes |
 | `mac.enabled` / `mac.enforcing` AppArmor or SELinux | 1 / 2 | |
