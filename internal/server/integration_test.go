@@ -59,6 +59,10 @@ func TestIntegration(t *testing.T) {
 	if err := migrate(ctx, db); err != nil {
 		t.Fatal(err)
 	}
+	// an unchanged schema is skipped; forget it to apply it once more
+	if _, err := db.Exec(ctx, `DELETE FROM schema_applied`); err != nil {
+		t.Fatal(err)
+	}
 	if err := migrate(ctx, db); err != nil {
 		t.Fatal("schema must be idempotent: ", err)
 	}

@@ -269,7 +269,11 @@ fall count, and systemd `TimeoutStopSec` (default 90 s) above `LIMDM_DRAIN_SECON
 
 Schema changes apply at start inside one transaction under an advisory lock: instances that
 start at the same time wait for each other, the first applies the schema, the others find
-it current. Startup work on key material (signing existing items, sealing secrets) is
+it current. The schema is applied only when it changed: each applied version is recorded by
+its hash (`schema_applied`), and an instance whose schema is recorded already starts without
+taking the advisory lock or any table lock. A rolling restart of the same version therefore
+never queues ACCESS EXCLUSIVE lock requests in front of the running instances; only the first
+instance of a new version takes them (bounded by a 30 s lock wait). Startup work on key material (signing existing items, sealing secrets) is
 serialized the same way.
 
 **Rolling upgrade** (default for releases whose notes do not say otherwise):

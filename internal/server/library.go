@@ -29,7 +29,13 @@ import (
 
 // ---- schema and migrations ----
 
+// migrate applies schema.sql and the migrations when they changed since the
+// last start. An unchanged schema takes no lock at all: a rolling restart
+// must not queue ACCESS EXCLUSIVE requests in front of the running instances.
 func migrate(ctx context.Context, db *pgxpool.Pool) error {
+	if ok, err := schemaCurrent(ctx, db); err != nil || ok {
+		return err
+	}
 	// one migrator at a time, and the schema inside the same transaction:
 	// SET LOCAL keeps the disabled timeouts out of the pooled connection
 	tx, err := db.Begin(ctx)
@@ -40,6 +46,9 @@ func migrate(ctx context.Context, db *pgxpool.Pool) error {
 	// no statement limit, but a bounded lock wait: the schema takes table
 	// locks until the commit, and a running instance must not stall behind them
 	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = '30s'; SELECT pg_advisory_xact_lock(7364)`); err != nil {
+		return err
+	}
+	if ok, err := schemaCurrent(ctx, tx); err != nil || ok { // another instance was faster
 		return err
 	}
 	if _, err := tx.Exec(ctx, schema); err != nil {
@@ -66,6 +75,18 @@ func migrate(ctx context.Context, db *pgxpool.Pool) error {
 	return tx.Commit(ctx)
 }
 
+// schemaCurrent tells whether this exact schema and set of migrations was
+// applied already (schema_applied, keyed by schemaHash).
+func schemaCurrent(ctx context.Context, q rowQuerier) (bool, error) {
+	var ok bool
+	err := q.QueryRow(ctx, `SELECT to_regclass('schema_applied') IS NOT NULL`).Scan(&ok)
+	if err != nil || !ok {
+		return false, err
+	}
+	err = q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_applied WHERE hash=$1)`, schemaHash()).Scan(&ok)
+	return ok, err
+}
+
 var migrations = []struct {
 	version int
 	run     func(context.Context, pgx.Tx) error
@@ -85,6 +106,25 @@ var migrations = []struct {
 	}},
 	{7, func(ctx context.Context, tx pgx.Tx) error { return seedApps(ctx, tx, moreCatalog) }},
 	{8, seedVendorIcons},
+	// one off data repairs and baselines, formerly run with schema.sql at every start
+	{9, func(ctx context.Context, tx pgx.Tx) error {
+		// agents without a compliance item reported "checks": null, which the
+		// jsonb_array_* functions of the device page and the export reject;
+		// then the history baseline for devices that reported before it existed
+		_, err := tx.Exec(ctx, `UPDATE devices SET checks = '[]' WHERE jsonb_typeof(checks) <> 'array';
+			UPDATE devices SET decl_status = '[]' WHERE jsonb_typeof(decl_status) <> 'array';
+			INSERT INTO compliance_changes(device_id, at, check_id, status, detail, catalog_version)
+			SELECT d.id, coalesce(d.last_seen, now()), c->>'id', coalesce(c->>'status', ''), coalesce(c->>'detail', ''), d.catalog_version
+			FROM devices d, jsonb_array_elements(d.checks) c
+			WHERE c->>'id' IS NOT NULL AND NOT EXISTS (SELECT 1 FROM compliance_changes x WHERE x.device_id = d.id)`)
+		return err
+	}},
+	{10, func(ctx context.Context, tx pgx.Tx) error { // baseline version of blueprints saved before versioning existed
+		_, err := tx.Exec(ctx, `INSERT INTO blueprint_versions(blueprint_id, version, name, description, parent_id, tree, note, created_by, created_at)
+			SELECT b.id, 1, b.name, b.description, b.parent_id, b.tree, 'baseline', 'system', b.updated_at FROM blueprints b
+			WHERE NOT EXISTS (SELECT 1 FROM blueprint_versions v WHERE v.blueprint_id = b.id)`)
+		return err
+	}},
 }
 
 func columnExists(ctx context.Context, tx pgx.Tx, table, column string) (bool, error) {

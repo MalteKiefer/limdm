@@ -376,10 +376,7 @@ CREATE TABLE IF NOT EXISTS notification_log (
     at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS notification_log_channel ON notification_log(channel_id, id DESC);
--- agents without a compliance item reported "checks": null, which the
--- jsonb_array_* functions of the device page and the export reject
-UPDATE devices SET checks = '[]' WHERE jsonb_typeof(checks) <> 'array';
-UPDATE devices SET decl_status = '[]' WHERE jsonb_typeof(decl_status) <> 'array';
+-- the one off repair of checks and decl_status is migration 9 (library.go)
 -- users of a device already reported as disabled (notified once)
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS users_disabled TEXT[] NOT NULL DEFAULT '{}';
 -- addresses a directory user had before (renames, domain moves): device user
@@ -432,11 +429,8 @@ CREATE INDEX IF NOT EXISTS compliance_changes_at ON compliance_changes USING bri
 DROP TRIGGER IF EXISTS compliance_changes_append_only ON compliance_changes;
 CREATE TRIGGER compliance_changes_append_only BEFORE UPDATE ON compliance_changes
     FOR EACH ROW EXECUTE FUNCTION rows_append_only();
--- baseline for devices that reported before the history existed
-INSERT INTO compliance_changes(device_id, at, check_id, status, detail, catalog_version)
-    SELECT d.id, coalesce(d.last_seen, now()), c->>'id', coalesce(c->>'status', ''), coalesce(c->>'detail', ''), d.catalog_version
-    FROM devices d, jsonb_array_elements(d.checks) c
-    WHERE c->>'id' IS NOT NULL AND NOT EXISTS (SELECT 1 FROM compliance_changes x WHERE x.device_id = d.id);
+-- the baseline for devices that reported before the history existed is
+-- migration 9 (library.go)
 
 -- Versions of library items and blueprints: every save, rollback and delete
 -- (the deleted payload stays). No foreign key, versions outlive the object.
@@ -475,11 +469,8 @@ CREATE TRIGGER library_item_versions_append_only BEFORE UPDATE OR DELETE ON libr
 DROP TRIGGER IF EXISTS blueprint_versions_append_only ON blueprint_versions;
 CREATE TRIGGER blueprint_versions_append_only BEFORE UPDATE OR DELETE ON blueprint_versions
     FOR EACH ROW EXECUTE FUNCTION rows_append_only();
--- baseline version of objects saved before versioning existed (library
--- items: at startup in server.go, after secrets are sealed and items signed)
-INSERT INTO blueprint_versions(blueprint_id, version, name, description, parent_id, tree, note, created_by, created_at)
-    SELECT b.id, 1, b.name, b.description, b.parent_id, b.tree, 'baseline', 'system', b.updated_at FROM blueprints b
-    WHERE NOT EXISTS (SELECT 1 FROM blueprint_versions v WHERE v.blueprint_id = b.id);
+-- the baseline version of blueprints saved before versioning existed is
+-- migration 10 (library.go); library items get theirs at startup in server.go
 -- W2
 -- Four eyes approvals: a second admin approves wipe, lost mode, scripts, role
 -- changes and (optionally) recovery key views before they run.

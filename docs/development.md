@@ -84,7 +84,10 @@ configuration in `.golangci.yml` (`nolintlint` is on: an exception is a
   constraints). The integration test applies the schema twice and fails when the second run
   fails. Data conversions that must run once go into the versioned `migrations` list in
   `internal/server/library.go` (recorded in `schema_migrations`). Migrations run in one
-  transaction under an advisory lock, so several instances can start together.
+  transaction under an advisory lock, so several instances can start together. The schema and
+  the migrations are applied only when their hash (`schemaHash`) is not in `schema_applied`
+  yet, so statements in `schema.sql` must not depend on running at every start: data repairs
+  and backfills over big tables belong in a migration.
 * `internal/server/openapi.json` is written by hand and embedded in the server; the tests
   only check that it is valid, so update it with every admin API change.
 * Commits are signed; `main` only accepts pull requests with passing checks.

@@ -143,3 +143,27 @@ func TestCheckinsConcurrent(t *testing.T) {
 		t.Fatalf("audit entries: %d %v", got, err)
 	}
 }
+
+// A restart with an unchanged schema takes no lock: it neither waits for the
+// migration lock nor for running transactions on the tables.
+func TestMigrateUnchangedTakesNoLock(t *testing.T) {
+	db := loadTestDB(t, 4)
+	ctx := context.Background()
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `LOCK TABLE devices IN ROW EXCLUSIVE MODE; SELECT pg_advisory_xact_lock(7364)`); err != nil {
+		t.Fatal(err)
+	}
+	mctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := migrate(mctx, db); err != nil {
+		t.Fatalf("restart with an unchanged schema waited: %v", err)
+	}
+	var n int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (9, 10)`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("one off migrations: %d %v", n, err)
+	}
+}
