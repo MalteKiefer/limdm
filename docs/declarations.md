@@ -27,6 +27,16 @@ take the item evaluated last ([concepts.md](concepts.md#merging)).
 Level 1 or 2, automatic remediation, documented exceptions, advisory checks, grace period
 and actions. Details: [compliance.md](compliance.md).
 
+### `com.limdm.customchecks` (list)
+
+```json
+{"checks": [{"id": "custom.no_telnet", "title": "Telnet client is not installed", "severity": "medium", "level": 1,
+  "refs": {"bsi": ["SYS.2.3.A1"]}, "package": {"name": "telnet", "state": "absent"}}]}
+```
+
+Compliance checks defined by IT: a read only osquery query or a file, sysctl, package or
+service condition, no shell. Merged by `id`. Details: [compliance.md](compliance.md#custom-checks-comlimdmcustomchecks).
+
 ### `com.limdm.privacy`
 
 ```json
