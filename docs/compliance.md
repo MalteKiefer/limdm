@@ -323,3 +323,9 @@ account.
   ([security.md](security.md#audit-log)).
 
 CSV exports neutralise formula injection.
+
+The console app (`/app/compliance`) downloads the same files through
+`GET /api/v1/exports/{kind}` and shows the SHA-256 of the downloaded file next to the
+matching `export.done` audit entry. Its overview drills from a framework card to the
+controls and checks, and from a check to the devices with their result, the remediation and
+the active exceptions.
