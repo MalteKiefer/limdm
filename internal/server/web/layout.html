@@ -65,3 +65,5 @@
 {{define "pwfields"}}<label>{{t .Label}}<input name="password" type="password" minlength="{{.Min}}" required autocomplete="new-password"><small class="field-hint">{{t "At least"}} {{.Min}} {{with .Hint}}{{t .}}{{else}}{{t "characters, per the password policy"}}{{end}}</small></label>
 <label>{{t "Repeat password"}}<input name="password2" type="password" minlength="{{.Min}}" required autocomplete="new-password" data-match="password" data-mismatch="{{t "The passwords do not match."}}"></label>
 <div class="pwgen js-only"><button type="button" class="secondary small" data-pwgen="{{.Min}}">{{t "Generate password"}}</button><code data-pwgen-out hidden></code><button type="button" class="secondary small" data-copy="" data-copied="{{t "Copied"}}" hidden>{{t "Copy"}}</button></div>{{end}}
+{{/* an error notice: translated text, the technical message folded away */}}
+{{define "err"}}{{with .}}{{$m := errmsg .}}<div class="notice error" role="alert">{{$m.Text}}{{with $m.Detail}}<details class="err-detail"><summary>{{t "Technical detail"}}</summary><code>{{.}}</code></details>{{end}}</div>{{end}}{{end}}

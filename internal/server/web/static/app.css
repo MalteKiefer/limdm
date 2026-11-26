@@ -587,3 +587,6 @@ legend .hint, summary .hint { display: block; margin-top: 2px; font-size: 12px; 
 .js .js-only { display: flex; }
 .pwgen { align-items: center; gap: 8px; flex-wrap: wrap; margin: -4px 0 12px; }
 .pwgen code { font-size: 13px; padding: 3px 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; user-select: all; overflow-wrap: anywhere; }
+.err-detail { margin-top: 6px; color: var(--text-3); font-size: 12px; }
+.err-detail summary { cursor: pointer; }
+.err-detail code { display: block; margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); }

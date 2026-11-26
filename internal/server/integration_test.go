@@ -642,8 +642,9 @@ func TestIntegration(t *testing.T) {
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"reboot"}}, help); code != http.StatusSeeOther {
 		t.Fatalf("helpdesk command: %d", code)
 	}
-	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"shutdown"}, "minutes": {"5000"}}, help); code != http.StatusBadRequest {
-		t.Fatalf("delay out of range accepted: %d", code)
+	if code, body := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"shutdown"}, "minutes": {"5000"}}, help); code != http.StatusBadRequest ||
+		!strings.Contains(body, `class="notice error"`) || !strings.Contains(body, "delay must be 0..1440 minutes") {
+		t.Fatalf("delay out of range accepted or not shown in the console layout: %d", code)
 	}
 	// lost mode and wipe: admins only, confirmed with the host name
 	var host string

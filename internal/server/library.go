@@ -451,19 +451,19 @@ func (s *Server) libraryEdit(w http.ResponseWriter, r *http.Request, sess sessio
 			}
 		}
 		if err != nil {
-			http.NotFound(w, r)
+			s.notFound(w, r, sess)
 			return
 		}
 	} else if q := r.URL.Query(); q.Get("from") != "" && q.Get("remote") != "" {
 		var err error
 		if it, err = s.flatpakTemplate(r.Context(), q.Get("from"), q.Get("remote"), q.Get("inst"), q.Get("mode")); err != nil {
-			http.NotFound(w, r)
+			s.notFound(w, r, sess)
 			return
 		}
 	} else if q.Get("from") != "" {
 		var err error
 		if it, err = s.sourceTemplate(r.Context(), q.Get("from"), q.Get("file"), q.Get("mode")); err != nil {
-			http.NotFound(w, r)
+			s.notFound(w, r, sess)
 			return
 		}
 	} else if ex, ok := api.Types[it.Type]; ok {
@@ -541,7 +541,7 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 func (s *Server) libraryDelete(w http.ResponseWriter, r *http.Request, sess session) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
 	use, err := s.itemUsage(r.Context())
@@ -550,7 +550,7 @@ func (s *Server) libraryDelete(w http.ResponseWriter, r *http.Request, sess sess
 		return
 	}
 	if len(use[id]) > 0 {
-		http.Error(w, "item is used by blueprints: "+strings.Join(use[id], ", "), http.StatusConflict)
+		s.errorPage(w, r, sess, http.StatusConflict, "item is used by blueprints: "+strings.Join(use[id], ", "))
 		return
 	}
 	err = s.auditAction(r.Context(), sess.Email, "library.delete", strconv.FormatInt(id, 10), "", func(tx pgx.Tx) error {
@@ -613,7 +613,7 @@ func (s *Server) blueprintEdit(w http.ResponseWriter, r *http.Request, sess sess
 			bp, err = scanBlueprint(s.db.QueryRow(r.Context(), `SELECT `+blueprintCols+` FROM blueprints WHERE id=$1`, id))
 		}
 		if err != nil {
-			http.NotFound(w, r)
+			s.notFound(w, r, sess)
 			return
 		}
 	} else {
@@ -727,7 +727,7 @@ func (s *Server) checkNoCycle(ctx context.Context, id, parent int64) error {
 func (s *Server) blueprintDelete(w http.ResponseWriter, r *http.Request, sess session) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
 	err = s.auditAction(r.Context(), sess.Email, "blueprint.delete", strconv.FormatInt(id, 10), "devices fall back to default", func(tx pgx.Tx) error {
@@ -738,7 +738,7 @@ func (s *Server) blueprintDelete(w http.ResponseWriter, r *http.Request, sess se
 		return err
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		s.errorPage(w, r, sess, http.StatusConflict, err.Error())
 		return
 	}
 	http.Redirect(w, r, "/blueprints", http.StatusSeeOther)

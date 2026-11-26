@@ -383,7 +383,7 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		set.Rules = PasswordPolicy{MinLength: n, Upper: r.FormValue("upper") == "on", Lower: r.FormValue("lower") == "on",
 			Digit: r.FormValue("digit") == "on", Symbol: r.FormValue("symbol") == "on", NoName: r.FormValue("no_name") == "on"}
 	default:
-		http.Error(w, "unknown settings section", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "unknown settings section")
 		return
 	}
 	if f, _, err := r.FormFile("logo"); err == nil {

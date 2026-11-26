@@ -7,7 +7,7 @@
     {{if eq .Sess.Role "admin"}}<form method="post" action="/agents/fetch">{{template "csrf" .CSRF}}<button class="secondary">{{t "Check for new versions"}}</button></form>{{end}}
   </div>
 </div>
-{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+{{template "err" .Error}}
 {{if .Msg}}<div class="notice ok" role="status">{{t .Msg}}</div>{{end}}
 <section class="tablecard">
     <div class="card-head"><h2>{{t "Versions"}}</h2><span class="muted">{{t "packages checked against the release checksums"}}</span></div>

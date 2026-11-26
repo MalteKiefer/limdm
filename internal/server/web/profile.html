@@ -4,7 +4,7 @@
 <nav class="tabs" aria-label="{{t "Profile"}}">
   {{range .Tabs}}<a href="/profile?tab={{.}}" {{if eq $.Tab .}}class="on" aria-current="page"{{end}}>{{t .}}</a>{{end}}
 </nav>
-{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+{{template "err" .Error}}
 {{if .Msg}}<div class="notice ok" role="status">{{t .Msg}}</div>{{end}}
 <div class="narrow">
 {{if eq .Tab "language"}}

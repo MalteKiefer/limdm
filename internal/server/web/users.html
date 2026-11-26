@@ -1,7 +1,7 @@
 {{define "title"}}{{t "Users · LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head"><div><h1>{{t "Users"}}</h1><div class="meta"><span>{{t "Console access: OIDC identities and local accounts"}}</span></div></div></div>
-{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+{{template "err" .Error}}
 {{if .Creds}}<div class="notice ok" role="status"><strong>{{t "Credentials created."}}</strong> Shown only once; hand them over securely and add the TOTP secret to an authenticator app.<pre>{{.Creds}}</pre></div>{{end}}
 <div class="grid side-right">
   <section class="tablecard">

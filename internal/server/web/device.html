@@ -58,7 +58,7 @@
       <dt>{{t "Inventory"}}</dt><dd>{{if .Inv.Source}}{{.Inv.Source}}{{else}}–{{end}}</dd></div>
   </dl>
 </header>
-{{with .PwError}}<div class="notice error" role="alert">{{t .}}</div>{{end}}
+{{template "err" .PwError}}
 {{range .Protective}}{{if or (eq .Type "lock") (eq .Type "lost") (eq .Type "wipe")}}<div class="notice error state-notice" role="status">{{else}}<div class="notice ok state-notice" role="status">{{end}}
   <strong>{{if eq .Type "lock"}}{{t "Device locked"}}{{else if eq .Type "unlock"}}{{t "Device unlocked"}}{{else if eq .Type "lost"}}{{t "Lost mode on"}}{{else if eq .Type "found"}}{{t "Lost mode ended"}}{{else if eq .Type "wipe"}}{{t "Wipe sent"}}{{else}}{{t "Uninstall allowed for 1 hour"}}{{end}}</strong>
   <span>{{t "by"}} {{.By}}, {{fmtTime .At}}</span>

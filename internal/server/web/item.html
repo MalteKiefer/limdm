@@ -4,7 +4,7 @@
   <div><div class="eyebrow"><a href="/library">{{t "Library"}}</a></div><h1>{{if .It.Name}}{{.It.Name}}{{else}}{{t "New"}} {{typeLabel .It.Type}}{{end}}</h1>
   <div class="meta"><span class="mono">{{.It.Type}}</span>{{if .UsedBy}}<span>{{t "used by"}} {{join .UsedBy ", "}}</span>{{end}}</div></div>
 </div>
-{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+{{template "err" .Error}}
 <div class="grid side-right">
   <script type="application/json" id="item-examples">{{.Examples}}</script>
   <form class="card" method="post" action="/library" enctype="multipart/form-data">

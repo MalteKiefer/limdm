@@ -248,11 +248,11 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	c, err := r.Cookie(loginCookie)
 	if err != nil || !hmac.Equal([]byte(c.Value), []byte(r.FormValue("csrf"))) {
-		http.Error(w, "login form expired, reload the page", http.StatusForbidden)
+		s.errorPage(w, r, session{}, http.StatusForbidden, "login form expired, reload the page")
 		return
 	}
 	if !s.limit.allow("login:"+rateKey(r), 10, 5*time.Minute) {
-		http.Error(w, "too many attempts, try again later", http.StatusTooManyRequests)
+		s.errorPage(w, r, session{}, http.StatusTooManyRequests, "too many attempts, try again later")
 		return
 	}
 	name := strings.ToLower(strings.TrimSpace(r.FormValue("username")))

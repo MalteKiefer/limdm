@@ -3,7 +3,7 @@
 <div class="page-head">
   <div><div class="eyebrow"><a href="/blueprints">{{t "Blueprints"}}</a></div><h1>{{if .BP.Name}}{{.BP.Name}}{{else}}{{t "New blueprint"}}{{end}}</h1></div>
 </div>
-{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+{{template "err" .Error}}
 <form method="post" action="/blueprints" id="bp-form">
   {{template "csrf" .CSRF}}<input type="hidden" name="id" value="{{.BP.ID}}">
   <section class="card">

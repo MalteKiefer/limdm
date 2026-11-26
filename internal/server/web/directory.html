@@ -6,7 +6,7 @@
   <a href="/directory?tab=groups" {{if eq .Tab "groups"}}class="on" aria-current="page"{{end}}>{{t "Groups"}}</a>
   {{if eq .Sess.Role "admin"}}<a href="/directory?tab=settings" {{if eq .Tab "settings"}}class="on" aria-current="page"{{end}}>{{t "Settings"}}</a>{{end}}
 </nav>
-{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+{{template "err" .Error}}
 {{if .Msg}}<div class="notice ok" role="status">{{t .Msg}}</div>{{end}}
 {{if .Token}}<div class="notice ok" role="status"><strong>{{t "SCIM token"}}</strong> (shown only once):<pre>{{.Token}}</pre></div>{{end}}
 {{if eq .Tab "people"}}

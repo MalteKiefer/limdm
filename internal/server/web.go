@@ -60,6 +60,7 @@ func parsePages(lang, layout string) map[string]*template.Template {
 			return m
 		},
 		"t":       T,
+		"errmsg":  func(msg string) userError { return friendlyError(lang, msg) },
 		"lang":    func() string { return lang },
 		"version": func() string { return Version },
 		"ago": func(t *time.Time) string {
@@ -146,7 +147,7 @@ func (s *Server) helpdeskPage(h handler) http.HandlerFunc { return s.pageFor(h, 
 func (s *Server) adminOrAuditor(h handler) handler {
 	return func(w http.ResponseWriter, r *http.Request, sess session) {
 		if sess.Role == "helpdesk" {
-			http.Error(w, "not available for the helpdesk role", http.StatusForbidden)
+			s.errorPage(w, r, sess, http.StatusForbidden, "not available for the helpdesk role")
 			return
 		}
 		h(w, r, sess)
@@ -163,11 +164,11 @@ func (s *Server) pageFor(h handler, postRole string) http.HandlerFunc {
 		if r.Method == http.MethodPost {
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 			if sess.Role != "admin" && postRole != "self" && (postRole != "helpdesk" || sess.Role != "helpdesk") {
-				http.Error(w, "your role cannot change this", http.StatusForbidden)
+				s.errorPage(w, r, sess, http.StatusForbidden, "your role cannot change this")
 				return
 			}
 			if !s.csrfOK(r, sess) {
-				http.Error(w, "csrf check failed", http.StatusForbidden)
+				s.errorPage(w, r, sess, http.StatusForbidden, "csrf check failed")
 				return
 			}
 		}
@@ -394,29 +395,29 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "bad form")
 		return
 	}
 	ids := slices.Compact(slices.Sorted(slices.Values(r.Form["id"])))
 	if len(ids) == 0 || len(ids) > 1000 {
-		http.Error(w, "select 1 to 1000 devices", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "select 1 to 1000 devices")
 		return
 	}
 	var known int
 	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM devices WHERE id = ANY($1) AND NOT retired`, ids).Scan(&known); err != nil || known != len(ids) {
-		http.Error(w, "unknown or retired device selected", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "unknown or retired device selected")
 		return
 	}
 	op, typ, _ := strings.Cut(r.FormValue("action"), ":")
 	switch op {
 	case "tag-add", "tag-remove":
 		if sess.Role != "admin" {
-			http.Error(w, "this action requires the admin role", http.StatusForbidden)
+			s.errorPage(w, r, sess, http.StatusForbidden, "this action requires the admin role")
 			return
 		}
 		tags, err := parseTags(r.FormValue("tag"))
 		if err != nil || len(tags) != 1 {
-			http.Error(w, "one tag: up to 32 letters, digits, dot, dash, underscore", http.StatusBadRequest)
+			s.errorPage(w, r, sess, http.StatusBadRequest, "one tag: up to 32 letters, digits, dot, dash, underscore")
 			return
 		}
 		sql := `UPDATE devices SET tags = array_append(tags, $2) WHERE id = $1 AND NOT $2 = ANY(tags)`
@@ -434,7 +435,7 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 		}
 	case "agent-update":
 		if sess.Role != "admin" {
-			http.Error(w, "this action requires the admin role", http.StatusForbidden)
+			s.errorPage(w, r, sess, http.StatusForbidden, "this action requires the admin role")
 			return
 		}
 		for _, id := range ids {
@@ -448,12 +449,12 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 		}
 	case "command":
 		if typ == "lost" || typ == "wipe" || typ == "script" {
-			http.Error(w, "lost mode, wipe and scripts are sent to one device at a time", http.StatusBadRequest)
+			s.errorPage(w, r, sess, http.StatusBadRequest, "lost mode, wipe and scripts are sent to one device at a time")
 			return
 		}
 		payload, code, msg := s.commandPayload(r, sess, ids[0], typ)
 		if code != 0 {
-			http.Error(w, msg, code)
+			s.errorPage(w, r, sess, code, msg)
 			return
 		}
 		for _, id := range ids {
@@ -463,7 +464,7 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 			}
 		}
 	default:
-		http.Error(w, "unknown action", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "unknown action")
 		return
 	}
 	// back to the list with its filters; only the query is taken over
@@ -594,7 +595,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &pkgs, &enrolled, &certExp, &d.GraceUntil, &d.AutoLocked, &since,
 			&d.UpdateState, &d.UpdateVersion, &d.UpdateRequested, &d.ExternalIP, &d.Geo)
 	if err != nil {
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
 	s.status(&d)
@@ -860,7 +861,7 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 		return
 	}
 	if code != 0 {
-		http.Error(w, msg, code)
+		s.errorPage(w, r, sess, code, msg)
 		return
 	}
 	if err := s.queueCommand(r.Context(), sess.Email, id, typ, payload); err != nil {
@@ -1028,7 +1029,7 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 	id := r.PathValue("id")
 	users, err := parseUsers(r.FormValue("users"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, err.Error())
 		return
 	}
 	var bpID *int64
@@ -1037,14 +1038,14 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 	}
 	tags, err := parseTags(r.FormValue("tags"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, err.Error())
 		return
 	}
 	var primary *int64
 	if email := strings.ToLower(strings.TrimSpace(r.FormValue("primary_user"))); email != "" {
 		var uid int64
 		if err := s.db.QueryRow(r.Context(), `SELECT id FROM dir_users WHERE email=$1`, email).Scan(&uid); err != nil {
-			http.Error(w, "primary user not found in the directory", http.StatusBadRequest)
+			s.errorPage(w, r, sess, http.StatusBadRequest, "primary user not found in the directory")
 			return
 		}
 		primary = &uid
@@ -1080,7 +1081,7 @@ func (s *Server) deviceRetire(w http.ResponseWriter, r *http.Request, sess sessi
 func (s *Server) tokenRevoke(w http.ResponseWriter, r *http.Request, sess session) {
 	id, err := hex.DecodeString(r.PathValue("id"))
 	if err != nil || len(id) != sha256.Size {
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
 	err = s.auditActionFn(r.Context(), func(tx pgx.Tx) (string, string, string, string, error) {
@@ -1089,7 +1090,7 @@ func (s *Server) tokenRevoke(w http.ResponseWriter, r *http.Request, sess sessio
 		return sess.Email, "token.revoke", r.PathValue("id")[:12], note, err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
 	if err != nil {
@@ -1133,7 +1134,7 @@ func (s *Server) tokenCreate(w http.ResponseWriter, r *http.Request, sess sessio
 	uses, err1 := strconv.Atoi(r.FormValue("uses"))
 	days, err2 := strconv.Atoi(r.FormValue("days"))
 	if err1 != nil || err2 != nil || uses < 1 || uses > 10000 || days < 1 || days > 90 {
-		http.Error(w, "uses 1..10000, days 1..90", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "uses 1..10000, days 1..90")
 		return
 	}
 	var bpID *int64
@@ -1484,7 +1485,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 		header = []string{"id", "at", "actor", "action", "target", "detail", "hash"}
 		q = `SELECT id::text, at::text, actor, action, target, detail, encode(hash,'hex') FROM audit_log ORDER BY id`
 	default:
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
 	if err := s.auditAction(ctx, sess.Email, "export", kind, "", nil); err != nil {

@@ -560,7 +560,7 @@ func (s *Server) deviceAgentUpdate(w http.ResponseWriter, r *http.Request, sess 
 	if target != "" {
 		var ok bool
 		if err := s.db.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM agent_releases WHERE version=$1 AND NOT blocked)`, target).Scan(&ok); err != nil || !ok {
-			http.Error(w, "unknown or blocked version", http.StatusBadRequest)
+			s.errorPage(w, r, sess, http.StatusBadRequest, "unknown or blocked version")
 			return
 		}
 	}

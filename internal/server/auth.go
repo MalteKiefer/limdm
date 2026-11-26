@@ -124,21 +124,21 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	if err != nil || s.unseal(c.Value, &f) != nil || time.Now().After(f.Exp) ||
 		!hmac.Equal([]byte(r.URL.Query().Get("state")), []byte(f.State)) {
 		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "state")
-		http.Error(w, "login expired, start again", http.StatusBadRequest)
+		s.errorPage(w, r, session{}, http.StatusBadRequest, "login expired, start again")
 		return
 	}
 	s.setCookie(w, flowCookie, "", -1)
 	tok, err := auth.oauth.Exchange(ctx, r.URL.Query().Get("code"), oauth2.VerifierOption(f.Verifier))
 	if err != nil {
 		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "code exchange")
-		http.Error(w, "login failed", http.StatusUnauthorized)
+		s.errorPage(w, r, session{}, http.StatusUnauthorized, "login failed")
 		return
 	}
 	raw, _ := tok.Extra("id_token").(string)
 	idt, err := auth.verifier.Verify(ctx, raw)
 	if err != nil || idt.Nonce != f.Nonce {
 		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "id token")
-		http.Error(w, "login failed", http.StatusUnauthorized)
+		s.errorPage(w, r, session{}, http.StatusUnauthorized, "login failed")
 		return
 	}
 	var claims struct {
@@ -148,7 +148,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := idt.Claims(&claims); err != nil {
 		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "claims")
-		http.Error(w, "login failed", http.StatusUnauthorized)
+		s.errorPage(w, r, session{}, http.StatusUnauthorized, "login failed")
 		return
 	}
 	email := strings.ToLower(claims.Email)
@@ -158,7 +158,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 			s.log.Error("audit login.denied", "err", err)
 		}
 		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "not a console user")
-		http.Error(w, "access denied", http.StatusForbidden)
+		s.errorPage(w, r, session{}, http.StatusForbidden, "access denied")
 		return
 	}
 	now := time.Now()
