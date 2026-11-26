@@ -128,6 +128,7 @@ func (s *Server) sendWebhook(ev *webhookEvent) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		ctx = withPrivate(ctx, s.notifyPrivate()) // global setting of a global admin
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 		if err != nil {
 			s.log.Error("webhook", "err", err)

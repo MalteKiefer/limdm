@@ -287,6 +287,8 @@ key files stay readable only by it.
 | Enrollment fails with fingerprint mismatch | fingerprint copied from another server, or a proxy on 8444 |
 | Devices stay `pending` | no status yet; first check in takes up to one interval |
 | `/install.sh` reports "no release found" | no release in `LIMDM_RELEASE_REPO` yet, or GitHub not reachable |
+| `/install.sh` answers 404 "release signing key not configured" | the server was built without the release key: set `LIMDM_RELEASE_PUBLIC_KEY` |
+| `/install.sh` stops with "release signature ... invalid" | the release lacks `SHA256SUMS.sig` or was changed, or the host has no OpenSSL 3 |
 | Agent update fails with "built without a release signing key" | the agent was built without `UPDATE_PUBKEY`; update with the package manager ([release key](#release-key)) |
 | Desktop helper does not ask | `limdm-desktop --now` in the session; zenity or kdialog installed; `/run/limdm/agent.sock` exists. Compositors without XDG autostart (sway, Hyprland) get the dialog from the agent together with the daily notification |
 | Device locked unexpectedly | `/etc/nologin` text: manual lock, compliance lock or offline lock; check in from the device unlocks the offline lock |

@@ -534,14 +534,29 @@ func (s *Server) auditVerify(w http.ResponseWriter, r *http.Request, sess sessio
 	http.Redirect(w, r, "/audit", http.StatusSeeOther)
 }
 
-// oidcFailures limits failed OIDC sign in entries: anyone can call the
-// callback, and each entry takes the audit lock.
+// auditBudget limits audit entries of failed sign ins: anyone can cause
+// them, and each entry takes the audit lock. 30 per minute; the process
+// log gets every one.
 // ponytail: one global window, per address limits if this gets noisy.
-var oidcFailures struct {
+type auditBudget struct {
 	sync.Mutex
 	window time.Time
 	n      int
 }
+
+// take reports whether one more entry fits into the current minute.
+func (b *auditBudget) take() bool {
+	b.Lock()
+	defer b.Unlock()
+	if time.Since(b.window) > time.Minute {
+		b.window, b.n = time.Now(), 0
+	}
+	b.n++
+	return b.n <= 30
+}
+
+// oidcFailures and localFailures budget failed OIDC and local sign ins.
+var oidcFailures, localFailures auditBudget
 
 // auditLoginFailure records a failed OIDC sign in (reason only, never codes
 // or tokens), at most 30 per minute; the process log gets every one.
@@ -551,14 +566,7 @@ func (s *Server) auditLoginFailure(ctx context.Context, r *http.Request, reason 
 		ip = a.String() // parsed, never the raw header text
 	}
 	s.log.Warn("oidc login failed", "remote", ip, "reason", reason)
-	oidcFailures.Lock()
-	if time.Since(oidcFailures.window) > time.Minute {
-		oidcFailures.window, oidcFailures.n = time.Now(), 0
-	}
-	oidcFailures.n++
-	over := oidcFailures.n > 30
-	oidcFailures.Unlock()
-	if over {
+	if !oidcFailures.take() {
 		return
 	}
 	if err := s.auditAction(context.WithoutCancel(ctx), "oidc", "login.failed", "", truncate("reason="+reason+" remote="+ip, 300), nil); err != nil {

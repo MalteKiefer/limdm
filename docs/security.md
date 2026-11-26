@@ -17,17 +17,40 @@
 * **Agent updates** need an Ed25519 signature from the release key whose public half is
   compiled into the agent; an agent built without it refuses self updates (fail closed).
   The private key is a CI secret of the protected `release` environment, not an offline
-  key, and the release fails without it. Downgrades are refused.
+  key, and the release fails without it. Downgrades are refused. First installations check
+  the same signature: `/install.sh` embeds the release public key of the server and refuses
+  sums without a valid signature, and `install-agent.sh` needs the key in
+  `LIMDM_RELEASE_PUBLIC_KEY`.
 * **Signed commands.** Every command (lock, wipe, script, message …) is signed when it
   is created, with an Ed25519 key in `command.key` next to the CA key, never in the
   database. The signature covers device, command ID, type, creation time and payload. The
   agent pins the public key at its first check in with a signing server and from then on
-  runs only commands with a valid signature; refused ones are reported and logged. Whoever
-  can only write to the database cannot make a device run anything. Recovery keys for lost
+  runs only commands with a valid signature; refused ones are reported and logged. Recovery keys for lost
   mode travel beside the signed payload, inside the mTLS channel. Back up `command.key`
   with the CA. A new key reaches devices only through a rotation: the server announces it
   with a rollover record signed by the pinned key, and the agent refuses any other key
   change ([keys.md](keys.md#command-key)).
+* **Signed declarations.** Everything else a device acts on as root is signed with the same
+  key when an admin saves it, never when it is delivered: library items (name, type,
+  payload), catalog apps (ID, name, mode, sources with their package repositories, detect
+  names), managed Flatpak remotes and the user list of each device (bound to the device,
+  with the admin flags). The server checks the signature before it delivers anything and
+  leaves out what fails, with an error in its log. The agent checks catalog apps, remotes and
+  the user list again with its pinned key once the server announces that it signs them
+  (`signed_data` in the check in answer): entries without a valid signature are dropped, an
+  unsigned user list is refused and the last one stays, and the refusal is reported as an
+  event. Older agents ignore the signatures; they get no user list while the stored one does
+  not verify. A change that keeps signed fields (allowing or blocking a remote, opening up an
+  app on request) is refused when the stored entry no longer verifies, so a database change
+  is never signed later by accident.
+
+  Whoever can only write to the database cannot make a device run, install or trust anything
+  an admin did not sign. They can still change which signed items and apps reach which
+  device (blueprint assignment, approved app requests), stop delivery (a broken signature
+  withholds the entry), and change what grants nothing on a device: summary, category and
+  icon of apps, branding, the store switches (which only restrict), risk exceptions (which
+  only exclude compliance checks), the public DNS fallback switch (TLS to the pinned CA still
+  applies) and requests to rotate escrowed recovery keys (the device makes the new key itself).
 * **Keys and HSM.** Device CA, network CA and command key can live in a PKCS#11 HSM
   (`LIMDM_KEY_PROVIDER=pkcs11` with `LIMDM_PKCS11_MODULE`, `LIMDM_PKCS11_TOKEN`,
   `LIMDM_PKCS11_PIN`; separate build with `-tags pkcs11`). The private keys then never
@@ -59,7 +82,12 @@
   allowed. The lists also cover the admin API and `/metrics`, which share the console
   listener. Loopback is always allowed, saving a list that would lock out your own address
   is refused, and the agent API, `/healthz`, `/readyz`, SCIM and `/install.sh` are not
-  affected. Refused requests are logged with the parsed address.
+  affected. Refused requests are logged with the parsed address. SCIM has its own list,
+  **SCIM allowed networks** (empty: every network), for the identity provider's
+  provisioning addresses; outside it `/scim/` answers 403 before the token is checked. The
+  SCIM token can manage directory people and groups but never create a console
+  administrator: a role mapping to `admin` ignores groups known only from SCIM
+  ([configuration.md](configuration.md#role-groups)).
 * **Client address.** `X-Forwarded-For` is used only when the peer is loopback or in
   `LIMDM_TRUSTED_PROXIES`; then the last entry counts. Network lists, rate limits and audit
   entries use this address.
@@ -71,8 +99,12 @@
   `acr` claim must be one of them instead. A refused sign in is audited as `login.denied`
   ([configuration.md](configuration.md#console-settings)).
 * Local accounts: argon2id password and TOTP (RFC 6238, codes usable once), one time
-  recovery codes stored as SHA-256 hashes, lockout after 5 failures for 15 minutes (stored
-  in the database, so it counts across instances).
+  recovery codes stored as SHA-256 hashes. Sign in attempts are rate limited per client
+  address first (see below); after 5 failures an account is locked for 15 minutes for that
+  client network only (address, IPv6 per /64), stored in the database so it counts across
+  instances. Somebody who knows the name of a break glass account can therefore lock it
+  only for their own network, never for the administrators who need it. A reset of the
+  credentials clears every lockout of the account.
 * Sessions: sealed cookies, 30 minutes idle and 8 hours absolute timeout, CSRF tokens on
   every form, `SameSite=Lax`, `Secure`, `HttpOnly`; the sign in form uses a separate
   `SameSite=Strict` token. Signing out ends the sessions of the account everywhere.
@@ -168,7 +200,27 @@ global only.
 **Settings**, **Security**, **Four eyes approval** makes a second administrator approve:
 wipe, lost mode, scripts, role changes of console users, every change to an administrator
 account (adding one, disabling or enabling one, resetting a local administrator's
-credentials), and optionally recovery key views and remote shell sessions. New local
+credentials), admin API tokens, and optionally recovery key views and remote shell sessions.
+It also covers the declarations that act like a script, so one administrator cannot reach
+root on devices without a second one:
+
+* saving or rolling back a library item (console and admin API) of the types
+  `com.limdm.scripts`, `com.limdm.sudo`, `com.limdm.localusers`, `com.limdm.repositories`,
+  `com.limdm.login` (desktop login and its PAM setup), `com.limdm.ssh`, `com.limdm.polkit`,
+  `com.limdm.certificates` (system trust anchors), and `com.limdm.files` when a path needs
+  `allow_scripts` on the device (outside `/etc/motd`, `/etc/issue`, `/etc/issue.net`,
+  `/etc/motd.d/`, `/srv/`, `/etc/opt/`, `/var/opt/`). Other types (packages from the
+  configured repositories, firewall, updates, compliance and so on) are saved directly;
+* catalog apps that are required or bring a vendor package repository (an icon uploaded
+  with the request is not kept; Flathub icons are fetched again);
+* console administrators from group mappings: while the setting is on, a mapping of a
+  directory group or OIDC `groups` claim to `admin` is ignored, the person gets the strongest
+  other mapped role or none, and accounts from groups do not count as administrators. Add
+  administrators explicitly, which needs an approval.
+
+The item, app or token is validated when requested and signed or created when approved, in
+the name of the requester. A new admin API token is shown once to the approving admin, who
+hands it over. Assigning an approved item to a blueprint needs no further approval. New local
 administrator credentials after an approved add or reset are shown once to the approving
 admin, who hands them over, so the requester never holds a second administrator account. A
 remote shell approval names the local user: an approval for one account never opens a shell
@@ -186,7 +238,7 @@ The setting can only be switched on with at least two active administrators (wit
 nobody could approve), and while it is on the second to last admin cannot be demoted or
 disabled. The recovery key and remote shell options require the main switch. With the
 setting off everything runs directly as before. Roles derived from directory groups follow
-the directory, not this approval. While it is on, the approver of a
+the directory, except that they never grant the admin role while the setting is on. While it is on, the approver of a
 [risk exception](compliance.md#risk-exceptions) must be someone other than the admin who
 records it. With several tenants a request belongs to the requester's tenant (for a global
 administrator: the tenant of the device or user concerned) and is decided there.
@@ -200,9 +252,10 @@ start otherwise. Schema changes run as versioned migrations under an advisory lo
 
 Append only (a trigger blocks `UPDATE` and `TRUNCATE` always, `DELETE` outside the retention
 job) and hash chained. Recorded:
-console actions, settings changes, sign ins (also failed ones: local, and OIDC as
-`login.failed` with the reason `state`, `code exchange`, `id token` or `claims` and the
-client address, never codes or tokens; at most 30 per minute, the process log has all),
+console actions, settings changes, sign ins (also failed ones: local as
+`login.local.failed`, and OIDC as `login.failed` with the reason `state`, `code exchange`,
+`id token` or `claims` and the client address, never codes or tokens; failed ones at most
+30 per minute each, lockouts always, the process log has all),
 refused MFA sign ins (`login.denied`), enrollments, certificate rotations, commands, tamper
 events, recovery key escrow and every recovery key view, policy actions, exports
 (`export`, `export.done` with SHA-256), four eyes requests and decisions (`approval.*`),
@@ -369,13 +422,18 @@ Failed local and OIDC sign ins and rejected enrollments are logged with the clie
   lookup regardless of the setting; the address is still shown. Devices
   with `network_info: false` get neither: the server stores no public address or location
   for them and deletes what was stored.
+* Notification channels and the compliance webhook never reach loopback, link local or
+  metadata addresses; private networks only from global channels with the setting for it,
+  never from tenant channels ([notifications.md](notifications.md#delivery)). Tenant
+  channels sign with their own secret.
 * Outbound connections: the server talks to the configured OIDC provider, the Google
   Directory API (if configured), the compliance webhook and notification channels (if
   configured: Slack, Discord, webhook URLs, SMTP servers), the syslog target
   (`LIMDM_SYSLOG`), GitHub for agent releases, Flathub for the app catalog and the location
   service (only when geolocation is on). Devices talk to the
   LiMDM server, the identity provider during desktop login, their package repositories and
-  the osquery repository. `/install.sh` downloads from GitHub.
+  the osquery repository. `/install.sh` downloads from GitHub and verifies the release
+  signature before it installs.
 
 ## Reporting vulnerabilities
 

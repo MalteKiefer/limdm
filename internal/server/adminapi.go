@@ -380,6 +380,11 @@ func (s *Server) apiTokenCreate(w http.ResponseWriter, r *http.Request, sess ses
 	}
 	token, _, err := s.createAPIToken(r.Context(), sess, tokenSpec{Name: r.FormValue("name"), Role: r.FormValue("role"), Days: days,
 		ReadOnly: r.FormValue("read_only") == "on", ScopeTags: scope, Scopes: r.Form["scopes"]})
+	var pending approvalPending
+	if errors.As(err, &pending) {
+		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+		return
+	}
 	if err != nil {
 		s.failUser(w, r, sess, err)
 		return
@@ -436,14 +441,22 @@ func (s *Server) createAPIToken(ctx context.Context, sess session, t tokenSpec) 
 	if sess.Tenant != 0 {
 		tenantID = &sess.Tenant
 	}
-	token := "lma_" + randToken(32)
-	prefix := token[:12]
+	ta := tokenApproval{Name: t.Name, Role: t.Role, ReadOnly: readOnly, Days: t.Days, Scope: t.ScopeTags, Scopes: t.Scopes, Tenant: tenantID}
+	if t.Role == "admin" && s.settings().FourEyes { // four eyes: the approver gets the token once (foureyes.go)
+		aid, err := s.requestApproval(ctx, sess, "token.add", t.Name, ta, "")
+		if err != nil {
+			return bad(err.Error())
+		}
+		return "", 0, approvalPending(aid)
+	}
+	var token string
 	var id int64
-	err := s.auditAction(ctx, sess.Email, "api_token.create", t.Name, fmt.Sprintf("role=%s read_only=%t days=%d prefix=%s scope_tags=%s scopes=%s",
-		t.Role, readOnly, t.Days, prefix, strings.Join(t.ScopeTags, ","), strings.Join(t.Scopes, ",")), func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `INSERT INTO api_tokens(name, prefix, token_hash, role, read_only, created_by, expires_at, scope_tags, tenant_id, scopes)
-			VALUES ($1,$2,$3,$4,$5,$6, now() + make_interval(days => $7), $8, $9, $10) RETURNING id`,
-			t.Name, prefix, sha(token), t.Role, readOnly, sess.Email, t.Days, t.ScopeTags, tenantID, t.Scopes).Scan(&id)
+	err := s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
+		var prefix string
+		var err error
+		token, prefix, id, err = insertToken(ctx, tx, ta, sess.Email)
+		return sess.Email, "api_token.create", t.Name, fmt.Sprintf("role=%s read_only=%t days=%d prefix=%s scope_tags=%s scopes=%s",
+			t.Role, readOnly, t.Days, prefix, strings.Join(t.ScopeTags, ","), strings.Join(t.Scopes, ",")), err
 	})
 	return token, id, err
 }
@@ -963,6 +976,11 @@ func (s *Server) apiItemSave(w http.ResponseWriter, r *http.Request, c apiCaller
 	it.ID = id
 	it.Name, it.Description = strings.TrimSpace(it.Name), strings.TrimSpace(it.Description)
 	if err := s.saveLibraryItem(r.Context(), c.actor(), &it); err != nil {
+		if aid, ok := pendingApproval(err); ok { // four eyes: an admin decides in the console
+			w.Header().Set("Location", "/approvals")
+			writeJSONStatus(w, http.StatusAccepted, map[string]any{"approval_id": aid, "status": "pending"})
+			return
+		}
 		s.apiFail(w, err)
 		return
 	}

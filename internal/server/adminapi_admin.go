@@ -279,6 +279,11 @@ func (s *Server) apiTokenAdd(w http.ResponseWriter, r *http.Request, c apiCaller
 	}
 	t.ScopeTags = tags
 	tok, id, err := s.createAPIToken(r.Context(), c.sess(), t)
+	var pending approvalPending
+	if errors.As(err, &pending) {
+		writeJSONStatus(w, http.StatusAccepted, map[string]any{"approval_id": int64(pending), "status": "pending"})
+		return
+	}
 	if err != nil {
 		s.apiFail(w, err)
 		return

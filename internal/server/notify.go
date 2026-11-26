@@ -160,23 +160,46 @@ func validateChannel(c channel) error {
 
 // ---- formats ----
 
+// Titles and texts carry what devices and users report (host names, user
+// names, command output, tamper details). They must not become links,
+// mentions or formatting in chat channels.
+
 // slackEscape keeps host and user names from forming Slack links or mentions.
 var slackEscape = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
+// defang breaks URLs so chat clients do not turn them into links.
+func defang(s string) string { return strings.ReplaceAll(s, "://", ":\u200b//") }
+
+// slackBody shows title and text as plain_text blocks, which Slack never
+// renders as formatting or links; only the console link is mrkdwn. The
+// escaped fallback text is what notifications show.
 func slackBody(n notice) ([]byte, error) {
-	text := "*" + slackEscape.Replace(n.Title) + "*\n" + slackEscape.Replace(n.Text)
-	if n.URL != "" {
-		text += "\n<" + n.URL + "|Open in LiMDM>"
+	plain := func(s string, max int) map[string]any {
+		return map[string]any{"type": "plain_text", "text": truncate(defang(cleanText(s)), max), "emoji": false}
 	}
-	return json.Marshal(map[string]any{"text": text})
+	blocks := []any{map[string]any{"type": "header", "text": plain(firstNonEmpty(n.Title, "LiMDM"), 150)}}
+	if n.Text != "" {
+		blocks = append(blocks, map[string]any{"type": "section", "text": plain(n.Text, 3000)})
+	}
+	if n.URL != "" {
+		blocks = append(blocks, map[string]any{"type": "context", "elements": []any{map[string]any{"type": "mrkdwn", "text": "<" + n.URL + "|Open in LiMDM>"}}})
+	}
+	return json.Marshal(map[string]any{"text": slackEscape.Replace(defang(n.Title)), "blocks": blocks, "unfurl_links": false, "unfurl_media": false})
 }
+
+// discordEscape matches the characters Discord markdown gives a meaning
+// (formatting, masked links, headings, lists, quotes, mentions).
+var discordEscape = regexp.MustCompile("[\\\\*_~`|>#\\-\\[\\]()<@:]")
+
+// discordText escapes markdown with backslashes and defangs URLs.
+func discordText(s string) string { return defang(discordEscape.ReplaceAllString(s, `\$0`)) }
 
 func discordBody(n notice) ([]byte, error) {
 	color := map[string]int{"critical": 0xE01B24, "warning": 0xF5C211}[n.Severity]
 	if color == 0 {
 		color = 0x0F6E6E
 	}
-	embed := map[string]any{"title": n.Title, "description": n.Text, "color": color, "timestamp": n.At.Format(time.RFC3339)}
+	embed := map[string]any{"title": discordText(n.Title), "description": discordText(n.Text), "color": color, "timestamp": n.At.Format(time.RFC3339)}
 	if n.URL != "" {
 		embed["url"] = n.URL
 	}
@@ -216,21 +239,50 @@ func cleanText(s string) string {
 
 // safeDialer refuses loopback, link-local (cloud metadata at 169.254.169.254)
 // and unspecified addresses after name resolution, so a channel cannot be
-// pointed at the server itself. Private networks stay allowed (an internal
-// SIEM or mail relay).
-var safeDialer = &net.Dialer{Timeout: 15 * time.Second, Control: func(_, address string, _ syscall.RawConn) error {
+// pointed at the server itself, and private networks unless the request
+// may reach them (withPrivate).
+var safeDialer = &net.Dialer{Timeout: 15 * time.Second, ControlContext: func(ctx context.Context, _, address string, _ syscall.RawConn) error {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
 		return err
 	}
-	if !targetAllowed(net.ParseIP(host)) {
+	if !targetAllowed(ctx, net.ParseIP(host)) {
 		return fmt.Errorf("notification target %s is not allowed", host)
 	}
 	return nil
 }}
 
-func targetAllowed(ip net.IP) bool {
-	return ip != nil && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsUnspecified() && !ip.IsMulticast()
+type privateKey struct{}
+
+// withPrivate lets a delivery reach private networks: global channels and
+// the compliance webhook with Settings NotifyPrivate on, never tenant channels.
+func withPrivate(ctx context.Context, ok bool) context.Context {
+	return context.WithValue(ctx, privateKey{}, ok)
+}
+
+func privateAllowed(ctx context.Context) bool {
+	ok, _ := ctx.Value(privateKey{}).(bool)
+	return ok
+}
+
+// sharedSpace is RFC 6598 shared address space (carrier NAT, also some
+// cloud metadata services such as 100.100.100.200).
+var sharedSpace = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
+func targetAllowed(ctx context.Context, ip net.IP) bool {
+	if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+		return false
+	}
+	if ip.IsPrivate() || sharedSpace.Contains(ip) {
+		return privateAllowed(ctx)
+	}
+	return true
+}
+
+// notifyPrivate is the setting for global channels (false before settings load).
+func (s *Server) notifyPrivate() bool {
+	rt := s.rt.Load()
+	return rt != nil && rt.set.NotifyPrivate
 }
 
 // proxyChecked uses the proxy from the environment, but checks the target
@@ -243,20 +295,23 @@ func proxyChecked(req *http.Request) (*url.URL, error) {
 	}
 	host := req.URL.Hostname()
 	if ip := net.ParseIP(host); ip != nil {
-		if !targetAllowed(ip) {
+		if !targetAllowed(req.Context(), ip) {
 			return nil, fmt.Errorf("notification target %s is not allowed", host)
 		}
 		return u, nil
 	}
 	ips, err := net.DefaultResolver.LookupIP(req.Context(), "ip", host)
 	if err != nil {
+		if !privateAllowed(req.Context()) {
+			return nil, fmt.Errorf("notification target %s cannot be resolved to check it", host)
+		}
 		// egress only through the proxy, without outside DNS on this host: the
-		// proxy resolves and enforces its own rules (channel URLs are set by
-		// admins only)
+		// proxy resolves and enforces its own rules (global channels with
+		// private networks allowed only)
 		return u, nil //nolint:nilerr // see above
 	}
 	for _, ip := range ips {
-		if !targetAllowed(ip) {
+		if !targetAllowed(req.Context(), ip) {
 			return nil, fmt.Errorf("notification target %s is not allowed", req.URL.Hostname())
 		}
 	}
@@ -287,16 +342,27 @@ var notifyClient = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, // no redirects to internal addresses
 }
 
-func (s *Server) postJSON(ctx context.Context, target string, body []byte, signed bool) error {
+// postJSON posts body. signed adds X-LiMDM-Signature: for a global channel
+// (tenant nil) the scheme of the compliance webhook, HMAC over timestamp
+// "." body with the webhook secret; for a tenant channel HMAC over
+// timestamp "." tenant ID "." body with the tenant's own secret, so a
+// tenant's signed events cannot be replayed to another tenant's receiver.
+func (s *Server) postJSON(ctx context.Context, target string, body []byte, signed bool, tenant *int64) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if signed { // same scheme as the legacy webhook: timestamp and body under HMAC
+	if signed {
 		ts := strconv.FormatInt(time.Now().Unix(), 10)
-		mac := hmac.New(sha256.New, s.webhookKey())
-		mac.Write([]byte(ts + "."))
+		key, prefix := s.webhookKey(), ts+"."
+		if tenant != nil {
+			id := strconv.FormatInt(*tenant, 10)
+			key, prefix = s.tenantWebhookKey(*tenant), ts+"."+id+"."
+			req.Header.Set("X-LiMDM-Tenant", id)
+		}
+		mac := hmac.New(sha256.New, key)
+		mac.Write([]byte(prefix))
 		mac.Write(body)
 		req.Header.Set("X-LiMDM-Timestamp", ts)
 		req.Header.Set("X-LiMDM-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
@@ -376,25 +442,26 @@ func sendEmail(ctx context.Context, cfg channelConfig, password string, n notice
 }
 
 func (s *Server) deliver(ctx context.Context, c channel, n notice) error {
+	ctx = withPrivate(ctx, c.Tenant == nil && s.notifyPrivate())
 	switch c.Kind {
 	case "slack":
 		b, err := slackBody(n)
 		if err != nil {
 			return err
 		}
-		return s.postJSON(ctx, c.Secret, b, false)
+		return s.postJSON(ctx, c.Secret, b, false, nil)
 	case "discord":
 		b, err := discordBody(n)
 		if err != nil {
 			return err
 		}
-		return s.postJSON(ctx, c.Secret, b, false)
+		return s.postJSON(ctx, c.Secret, b, false, nil)
 	case "webhook":
 		b, err := json.Marshal(n)
 		if err != nil {
 			return err
 		}
-		return s.postJSON(ctx, c.Secret, b, true)
+		return s.postJSON(ctx, c.Secret, b, true, c.Tenant)
 	case "email":
 		return sendEmail(ctx, c.Config, c.Secret, n)
 	}
@@ -473,6 +540,10 @@ func (s *Server) loadChannels(ctx context.Context, enabledOnly bool) ([]channel,
 	})
 }
 
+// tenantDeliveryError replaces delivery errors for tenant accounts, so a
+// channel cannot be used to probe networks (open, closed, TLS, banners).
+const tenantDeliveryError = "Test failed: the target did not accept the message. Check the URL or the mail settings."
+
 // channelField binds a sealed secret to its channel.
 func channelField(id int64) string { return "notification_channel:" + strconv.FormatInt(id, 10) }
 
@@ -528,6 +599,9 @@ func (s *Server) channelViews(ctx context.Context) ([]channelView, error) {
 		var e, ev string
 		var at time.Time
 		if err := s.db.QueryRow(ctx, `SELECT ok, error, event, at FROM notification_log WHERE channel_id=$1 ORDER BY id DESC LIMIT 1`, c.ID).Scan(&ok, &e, &ev, &at); err == nil {
+			if e != "" && ctxTenant(ctx) != 0 {
+				e = tenantDeliveryError
+			}
 			v.LastOK, v.LastError, v.LastEv, v.LastAt = &ok, e, ev, &at
 		}
 		out = append(out, v)
@@ -608,6 +682,11 @@ func (s *Server) channelOp(w http.ResponseWriter, r *http.Request, sess session)
 			msg = truncate(err.Error(), 500)
 		}
 		_, _ = s.db.Exec(ctx, `INSERT INTO notification_log(channel_id, event, ok, error) VALUES ($1,'test',$2,$3)`, id, err == nil, msg)
+		if err != nil && ctxTenant(ctx) != 0 { // no network details for tenant accounts: the log has them
+			s.log.Warn("notification test failed", "channel", id, "err", msg)
+			s.renderSettings(w, r, sess, s.settings(), "", tenantDeliveryError)
+			return
+		}
 		if err != nil {
 			s.renderSettings(w, r, sess, s.settings(), "", "Test failed: "+msg)
 			return

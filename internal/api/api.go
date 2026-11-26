@@ -1015,6 +1015,11 @@ type CheckinResponse struct {
 	RenewCert bool `json:"renew_cert,omitempty"`
 	// RenewNetworkCert does the same for the EAP-TLS certificate.
 	RenewNetworkCert bool `json:"renew_network_cert,omitempty"`
+	// SignedData: this server signs catalog apps, managed remotes and the
+	// device user list (SignedUsers). An agent with a pinned command key
+	// then refuses entries without a valid signature.
+	SignedData  bool         `json:"signed_data,omitempty"`
+	SignedUsers *SignedUsers `json:"signed_users,omitempty"`
 }
 
 // ---- signed agent releases ----

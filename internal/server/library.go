@@ -297,14 +297,14 @@ func migratePriorityBlueprints(ctx context.Context, tx pgx.Tx) error {
 // seedDefaultBlueprint gives a new installation the CIS Level 1 baseline.
 func seedDefaultBlueprint(ctx context.Context, tx pgx.Tx) error {
 	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blueprints WHERE name='default')`).Scan(&exists); err != nil || exists {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blueprints WHERE name='default' AND tenant_id=1)`).Scan(&exists); err != nil || exists {
 		return err
 	}
 	var ids []int64
 	for _, li := range api.DefaultLibrary() {
 		var id int64
 		if err := tx.QueryRow(ctx, `INSERT INTO library_items(name, type, payload) VALUES ($1,$2,$3)
-			ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id`, li.Name, li.Type, string(li.Payload)).Scan(&id); err != nil {
+			ON CONFLICT (tenant_id, name) DO UPDATE SET name=EXCLUDED.name RETURNING id`, li.Name, li.Type, string(li.Payload)).Scan(&id); err != nil {
 			return err
 		}
 		ids = append(ids, id)
@@ -400,7 +400,7 @@ func resolveDevice(ctx context.Context, q pgx.Tx, deviceID string) (resolved, er
 	}
 	if bp == nil {
 		var def int64
-		if err := q.QueryRow(ctx, `SELECT id FROM blueprints WHERE name='default'`).Scan(&def); err != nil {
+		if err := q.QueryRow(ctx, `SELECT id FROM blueprints WHERE name='default' AND tenant_id=1`).Scan(&def); err != nil {
 			return res, err
 		}
 		bp = &def
@@ -693,6 +693,10 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		return
 	}
 	if err := s.saveLibraryItem(r.Context(), sess.Email, &it); err != nil {
+		if _, ok := pendingApproval(err); ok {
+			http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+			return
+		}
 		fail(err)
 		return
 	}
@@ -761,44 +765,58 @@ func (s *Server) storeItem(ctx context.Context, actor, action, note string, it *
 		return invalid(err)
 	}
 	it.Payload = compact.Bytes()
-	sig := signItem(it.Name, it.Type, compact.Bytes())
-	detail := it.Type + " " + compact.String()
+	if s.itemNeedsApproval(*it) { // four eyes: stored as a request, signed when approved
+		return s.requestItemApproval(ctx, actor, action, note, *it, restore)
+	}
+	return s.auditAction(ctx, actor, action, it.Name, itemDetail(*it, note), func(tx pgx.Tx) error {
+		return writeItem(ctx, tx, actor, note, it, restore)
+	})
+}
+
+// itemDetail is the audit text of an item save.
+func itemDetail(it api.LibraryItem, note string) string {
+	detail := it.Type + " " + string(it.Payload)
 	if it.Type == api.TypeNetwork {
-		detail = it.Type + " " + string(api.MaskNetworkSecrets(compact.Bytes())) // no secrets in the audit log
+		detail = it.Type + " " + string(api.MaskNetworkSecrets(it.Payload)) // no secrets in the audit log
 	}
 	if note != "save" {
 		detail = note + ": " + detail
 	}
-	return s.auditAction(ctx, actor, action, it.Name, detail, func(tx pgx.Tx) error {
-		id := it.ID
-		if id > 0 {
-			if err := tenantGuard(ctx, tx, "library_items", id); err != nil {
-				return err
-			}
-			if err := ensureItemBaseline(ctx, tx, id); err != nil {
-				return err
-			}
-			tag, err := tx.Exec(ctx, `UPDATE library_items SET name=$2, type=$3, description=$4, payload=$5, signature=$6, updated_at=now() WHERE id=$1`,
-				id, it.Name, it.Type, it.Description, compact.String(), sig)
-			if err != nil {
-				return err
-			}
-			if tag.RowsAffected() == 0 {
-				if !restore {
-					return &userError{http.StatusNotFound, "library item not found"}
-				}
-				if _, err := tx.Exec(ctx, `INSERT INTO library_items(id, name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-					id, it.Name, it.Type, it.Description, compact.String(), sig, ownerTenant(ctx)); err != nil {
-					return err
-				}
-			}
-		} else if err := tx.QueryRow(ctx, `INSERT INTO library_items(name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-			it.Name, it.Type, it.Description, compact.String(), sig, ownerTenant(ctx)).Scan(&id); err != nil {
+	return detail
+}
+
+// writeItem signs and writes a validated, compact item with its version in
+// tx and sets it.ID.
+func writeItem(ctx context.Context, tx pgx.Tx, actor, note string, it *api.LibraryItem, restore bool) error {
+	sig := signItem(it.Name, it.Type, it.Payload)
+	id := it.ID
+	if id > 0 {
+		if err := tenantGuard(ctx, tx, "library_items", id); err != nil {
 			return err
 		}
-		it.ID = id
-		return recordItemVersion(ctx, tx, id, actor, note, false)
-	})
+		if err := ensureItemBaseline(ctx, tx, id); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE library_items SET name=$2, type=$3, description=$4, payload=$5, signature=$6, updated_at=now() WHERE id=$1`,
+			id, it.Name, it.Type, it.Description, string(it.Payload), sig)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			if !restore {
+				return &userError{http.StatusNotFound, "library item not found"}
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO library_items(id, name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+				id, it.Name, it.Type, it.Description, string(it.Payload), sig, ownerTenant(ctx)); err != nil {
+				return err
+			}
+		}
+	} else if err := tx.QueryRow(ctx, `INSERT INTO library_items(name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+		it.Name, it.Type, it.Description, string(it.Payload), sig, ownerTenant(ctx)).Scan(&id); err != nil {
+		return err
+	}
+	it.ID = id
+	return recordItemVersion(ctx, tx, id, actor, note, false)
 }
 
 func (s *Server) libraryDelete(w http.ResponseWriter, r *http.Request, sess session) {
@@ -851,14 +869,14 @@ const effectiveBlueprintSQL = `coalesce(d.blueprint_id,
 	(SELECT a.blueprint_id FROM dir_users u JOIN dir_members m ON m.user_id=u.id JOIN blueprint_group_assignments a ON a.group_id=m.group_id
 	 JOIN blueprints gb ON gb.id=a.blueprint_id AND (gb.tenant_id=d.tenant_id OR gb.tenant_id=1 AND gb.shared)
 	 WHERE u.id=d.primary_user_id AND u.active ORDER BY a.priority, a.group_id LIMIT 1),
-	(SELECT id FROM blueprints WHERE name='default'))`
+	(SELECT id FROM blueprints WHERE name='default' AND tenant_id=1))`
 
 func (s *Server) allBlueprints(ctx context.Context, deviceID string) ([]blueprintRec, error) {
 	cond, args := visibleCond(ctx, "b", 1)
 	dcond, dargs := tenantDevices(ctx, 1+len(args))
 	rows, err := s.db.Query(ctx, `SELECT b.id, b.name, b.parent_id, b.tree, b.description, b.updated_at,
 		(SELECT count(*) FROM devices d WHERE NOT d.retired AND `+dcond+` AND `+effectiveBlueprintSQL+` = b.id),
-		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND (d.blueprint_id=b.id OR (d.blueprint_id IS NULL AND b.name='default'))),
+		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND (d.blueprint_id=b.id OR (d.blueprint_id IS NULL AND b.name='default' AND b.tenant_id=1))),
 		EXISTS(SELECT 1 FROM devices d WHERE d.id=$1 AND `+effectiveBlueprintSQL+` = b.id)
 		FROM blueprints b WHERE `+cond+` ORDER BY b.name='default' DESC, b.name`, append(append([]any{deviceID}, args...), dargs...)...)
 	if err != nil {
@@ -913,7 +931,7 @@ func (s *Server) blueprintEdit(w http.ResponseWriter, r *http.Request, sess sess
 		}
 	} else {
 		var def int64
-		if err := s.db.QueryRow(r.Context(), `SELECT id FROM blueprints WHERE name='default'`).Scan(&def); err == nil {
+		if err := s.db.QueryRow(r.Context(), `SELECT id FROM blueprints WHERE name='default' AND tenant_id=1`).Scan(&def); err == nil {
 			bp.Parent = &def
 		}
 	}
@@ -992,6 +1010,9 @@ func (s *Server) saveBlueprint(ctx context.Context, actor string, bp *blueprintR
 func (s *Server) validateBlueprint(ctx context.Context, bp blueprintRec) error {
 	if !identOK(bp.Name) {
 		return invalid(errors.New("name must be 1..64 characters: letters, digits, dot, dash, underscore"))
+	}
+	if bp.Name == "default" && ownerTenant(ctx) != defaultTenant { // names are unique per tenant; default applies by name
+		return &userError{http.StatusConflict, "the name is already in use"}
 	}
 	items, err := s.allItems(ctx)
 	if err != nil {

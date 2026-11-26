@@ -35,6 +35,7 @@ Read by `limdm-server serve` (`ConfigFromEnv`). The package reads them from
 | `LIMDM_STALE_HOURS` | `24` | Hours without check in until a device counts as stale (positive integer). Starting value of the console setting. |
 | `LIMDM_RELEASE_DIR` | `/var/lib/limdm-server/agent-releases` | Cache of verified agent packages for updates ([agent.md](agent.md#updates)). The packaged `server.env` sets `/var/lib/limdm-server/releases`. |
 | `LIMDM_RELEASE_REPO` | `MalteKiefer/limdm` | GitHub repository for agent updates and `/install.sh`. |
+| `LIMDM_RELEASE_PUBLIC_KEY` | compiled in (release builds) | Ed25519 public release key (64 hex characters) that `/install.sh` embeds to verify `SHA256SUMS` before installing. Without a key `/install.sh` answers 404. Set it for servers built without `UPDATE_PUBKEY` or agents from your own fork ([operations.md](operations.md#release-key)). |
 | `LIMDM_GEOIP_URL` | `https://ipwho.is/` | Location lookup for device public addresses, the IP is appended. Used only when **Settings, Security, Privacy** turns geolocation on (default off); `off` disables it for good ([security.md](security.md#privacy)). |
 | `LIMDM_TRUSTED_PROXIES` | | Load balancers or reverse proxies whose `X-Forwarded-For` names the client, comma separated addresses or networks (`10.0.0.5,10.0.1.0/24`). A proxy on loopback is always trusted. Without it, a proxy on another host makes every request seem to come from the proxy (rate limits, console network lists, audit) ([high-availability.md](high-availability.md#load-balancer)). |
 | `LIMDM_DB_MAX_CONNS` | `32` | Database connections of this instance (4 to 1000); a `pool_max_conns` parameter in `LIMDM_DATABASE_URL` wins. All instances together plus about 3 per instance (schema, notifications) must stay below `max_connections` of PostgreSQL ([high-availability.md](high-availability.md#postgresql)). |
@@ -107,6 +108,9 @@ Accounts of a tenant see only the Notifications tab with their own channels
   blocked networks are refused even when allowed. Loopback is always allowed, the agent API
   is not affected. Saving is refused when your own address would be locked out. Behind a
   proxy on another host set `LIMDM_TRUSTED_PROXIES`, otherwise the proxy's address is checked.
+  **SCIM allowed networks** limits `/scim/` to the provisioning addresses of the identity
+  provider (empty: every network). SCIM ignores the console lists, because the identity
+  provider calls it from its own networks; a refused request answers 403 and is logged.
 
 ### Security
 
@@ -225,6 +229,13 @@ again on every request, so leaving the group ends access after the next director
 strongest mapped role wins. Accounts created or edited in **Users** are explicit and
 ignore the mapping.
 
+A mapping to `admin` grants the role only through the OIDC `groups` claim or Google
+Workspace groups, never through a group the person is in only by SCIM: the static SCIM
+token alone must not create global administrators. While
+[four eyes approval](security.md#four-eyes-approval) is on, no group grants `admin` at
+all; the person gets the strongest other mapped role. Administrators are then added
+explicitly in **Users**, with an approval.
+
 ### Local admins
 
 `limdm-server local-admin` manages local accounts from the server host, for the first
@@ -269,7 +280,9 @@ Password checks in the profile count towards the same lockout as the sign in (5 
 
 * **SCIM 2.0** at `<LIMDM_PUBLIC_URL>/scim/v2` (filters: `attribute eq "value"` only, others
   are answered with 400 `invalidFilter`; no ETags) with a bearer token created on the page
-  (Okta, Microsoft Entra ID, authentik, JumpCloud).
+  (Okta, Microsoft Entra ID, authentik, JumpCloud). Limit it to the provider's addresses
+  with **Settings**, **General**, **SCIM allowed networks**. SCIM groups never make anyone a
+  console administrator ([role groups](#role-groups)).
 * **Google Workspace:** a service account with domain wide delegation for the scopes
   `admin.directory.user.readonly`, `admin.directory.group.readonly` and
   `admin.directory.group.member.readonly`, plus an admin email to impersonate. The service

@@ -13,9 +13,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Four eyes approval: with the setting on, wipe, lost mode, scripts and
-// console role changes (and optionally recovery key views) are stored as a
-// request; another admin approves or rejects it. The requester can never
+// Four eyes approval: with the setting on, wipe, lost mode, scripts,
+// console role changes, root effective library items, required catalog apps
+// or ones with a repository and admin API tokens (foureyes.go), and
+// optionally recovery key views and remote shells, are stored as a request; another admin approves or rejects it. The requester can never
 // approve their own request, requests expire after a day, every step is
 // audited. With the setting off nothing changes.
 
@@ -279,6 +280,18 @@ func (s *Server) decideApproval(ctx context.Context, sess session, id int64, op 
 					return errApproval(err.Error())
 				}
 				if err := audit(ctx, tx, a.RequestedBy, "user.reset", a.Target, fmt.Sprintf("new credentials and TOTP (approval #%d by %s)", a.ID, sess.Email)); err != nil {
+					return err
+				}
+			case "library.save":
+				if err := applyItemApproval(ctx, tx, a, sess.Email); err != nil {
+					return err
+				}
+			case "catalog.save":
+				if err := s.applyCatalogApproval(ctx, tx, a, sess.Email); err != nil {
+					return err
+				}
+			case "token.add":
+				if creds, err = applyTokenApproval(ctx, tx, a, sess.Email); err != nil {
 					return err
 				}
 			case "recovery.view", "remote_shell":

@@ -32,6 +32,8 @@ type CatalogApp struct {
 	Detect   []string    `json:"detect,omitempty"` // further package names that mean "installed" (firefox-esr, code)
 	IconHash string      `json:"icon_hash,omitempty"`
 	Request  string      `json:"request,omitempty"` // this device's request: pending | approved | denied
+	// Signature is the command key's signature over CatalogAppSigned.
+	Signature string `json:"signature,omitempty"`
 }
 
 // AppSource is a way to install an app.
@@ -64,8 +66,9 @@ type CatalogRemote struct {
 	Name        string `json:"name"`
 	URL         string `json:"url"` // .flatpakrepo file, repository or oci+https URL
 	Title       string `json:"title,omitempty"`
-	State       string `json:"state"`        // allowed | blocked
-	CatalogOnly bool   `json:"catalog_only"` // with RestrictFlathub only catalog apps
+	State       string `json:"state"`               // allowed | blocked
+	CatalogOnly bool   `json:"catalog_only"`        // with RestrictFlathub only catalog apps
+	Signature   string `json:"signature,omitempty"` // command key signature over CatalogRemoteSigned
 }
 
 var remoteNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)

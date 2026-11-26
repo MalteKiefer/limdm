@@ -40,6 +40,12 @@ type Settings struct {
 	// Loopback is always allowed, so the host itself can repair a mistake.
 	ConsoleAllow []string `json:"console_allow,omitempty"`
 	ConsoleBlock []string `json:"console_block,omitempty"`
+	// SCIMAllow limits /scim/ to these networks (the identity provider's
+	// provisioning addresses); empty allows every network.
+	SCIMAllow []string `json:"scim_allow,omitempty"`
+	// NotifyPrivate lets global notification channels reach private
+	// networks (an internal SIEM or mail relay); tenant channels never can.
+	NotifyPrivate bool `json:"notify_private_networks,omitempty"`
 	// Password rules for passwords chosen in the console: local accounts on
 	// devices (create, reset) and local console accounts.
 	Rules PasswordPolicy `json:"password_policy"` // password rules
@@ -138,6 +144,7 @@ type runtimeState struct {
 	set      Settings
 	allow    []netip.Prefix // parsed ConsoleAllow
 	block    []netip.Prefix // parsed ConsoleBlock
+	scim     []netip.Prefix // parsed SCIMAllow
 	auth     *oidcAuth      // nil when OIDC is not configured
 	branding api.Branding   // derived from set once, sent to agents and shown in the console
 }
@@ -279,6 +286,10 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 	if err != nil {
 		return nil, fmt.Errorf("blocked networks: %w", err)
 	}
+	scim, err := parseNets(set.SCIMAllow)
+	if err != nil {
+		return nil, fmt.Errorf("SCIM networks: %w", err)
+	}
 	var auth *oidcAuth
 	if cur := s.rt.Load(); cur != nil && set.OIDCIssuer != "" && cur.set.OIDCIssuer == set.OIDCIssuer &&
 		cur.set.OIDCClientID == set.OIDCClientID && cur.set.OIDCClientSecret == set.OIDCClientSecret &&
@@ -300,7 +311,7 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 	if auth == nil && !set.LocalLogin && (!s.rediscover.Load() || set.OIDCIssuer == "") {
 		return nil, errors.New("enable at least one login method: OIDC or local accounts")
 	}
-	return &runtimeState{set: set, auth: auth, branding: computeBranding(set), allow: allow, block: block}, nil
+	return &runtimeState{set: set, auth: auth, branding: computeBranding(set), allow: allow, block: block, scim: scim}, nil
 }
 
 // parseNets reads CIDRs or single addresses (one per entry).
@@ -329,6 +340,12 @@ func parseNets(list []string) ([]netip.Prefix, error) {
 		return nil, errors.New("at most 200 entries")
 	}
 	return res, nil
+}
+
+// netsContain reports whether the address ip is in one of nets.
+func netsContain(nets []netip.Prefix, ip string) bool {
+	a, err := netip.ParseAddr(ip)
+	return err == nil && slices.ContainsFunc(nets, func(p netip.Prefix) bool { return p.Contains(a.Unmap()) })
 }
 
 // consoleAllowed decides by the client address (clientIP).
@@ -387,6 +404,10 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 			return
 		}
 		data["Channels"], data["NotifyEvents"] = views, notifyEvents
+		if t := ctxTenant(r.Context()); t != 0 && sess.Role == "admin" { // signed webhook channels of this tenant
+			data["TenantWebhookSecret"] = hex.EncodeToString(s.tenantWebhookKey(t))
+			data["TenantID"] = t
+		}
 	}
 	if tab == "security" && keysAllowed(sess) {
 		if keys, err := s.KeysStatus(r.Context()); err != nil {
@@ -398,7 +419,7 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 	s.render(w, r, sess, "settings", map[string]any{"Set": set, "ClientIP": clientIP(r), "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
 		"Tab": tab, "Tabs": tabs, "Channels": data["Channels"], "NotifyEvents": data["NotifyEvents"], "Keys": data["Keys"], "TenantOnly": sess.TenantOnly(),
 		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": map[bool]string{false: hex.EncodeToString(s.whKey)}[sess.TenantOnly()],
-		"RoleGroupsText": roleGroupsText(set.RoleGroups)})
+		"RoleGroupsText": roleGroupsText(set.RoleGroups), "TenantWebhookSecret": data["TenantWebhookSecret"], "TenantID": data["TenantID"]})
 }
 
 // settingsTabs are the sections of the settings page; each tab saves only
@@ -450,8 +471,10 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		set.RoleGroups = groups
 	case "monitoring":
 		set.WebhookURL = strings.TrimSpace(r.FormValue("webhook_url"))
+		set.NotifyPrivate = r.FormValue("notify_private") == "on"
 	case "network":
 		set.ConsoleAllow, set.ConsoleBlock = strings.Fields(r.FormValue("console_allow")), strings.Fields(r.FormValue("console_block"))
+		set.SCIMAllow = strings.Fields(r.FormValue("scim_allow"))
 	case "branding":
 		set.CompanyName = strings.TrimSpace(r.FormValue("company_name"))
 	case "security":

@@ -51,6 +51,7 @@ builds:
     ldflags:
       - -s -w
       - -X github.com/maltekiefer/limdm/internal/server.Version={{ .Version }}
+      - -X github.com/maltekiefer/limdm/internal/server.ReleasePubKey={{ envOrDefault "UPDATE_PUBKEY" "" }}
 
 archives:
   - id: agent
