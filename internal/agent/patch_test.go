@@ -9,7 +9,7 @@ import (
 
 func TestUpdateDay(t *testing.T) {
 	sat := time.Date(2026, 11, 28, 23, 0, 0, 0, time.Local) // a Saturday
-	sunEarly := sat.Add(2 * time.Hour)                     // Sunday 01:00, still Saturday's window
+	sunEarly := sat.Add(2 * time.Hour)                      // Sunday 01:00, still Saturday's window
 	for _, c := range []struct {
 		now    time.Time
 		window string
