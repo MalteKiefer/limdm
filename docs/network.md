@@ -121,7 +121,7 @@ path length zero, and keeping the two apart means the agents' mTLS certificates 
 used for network access.
 
 Configure the RADIUS server to accept client certificates from the network CA only. Download
-it under **Network certificates** (`/network`, admins and auditors, linked from a device's
+it under **Network certificates** (`/app/settings?s=network`, admins and auditors, linked from a device's
 **Network** tab) or `/network/ca.pem` (any signed in console user). FreeRADIUS example (`mods-available/eap`, `tls-config tls-common`):
 
 ```

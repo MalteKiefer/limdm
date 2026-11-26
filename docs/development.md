@@ -100,8 +100,7 @@ configuration in `.golangci.yml` (`nolintlint` is on: an exception is a
 
 ## Console app
 
-The console under `/app/` (the default after sign in; the classic console stays under its
-own paths, see [console.md](console.md#console-app-and-classic-console)) is a React app in `web/` (TypeScript strict, Vite, Tailwind 4,
+The console under `/app/` (the only console, see [console.md](console.md)) is a React app in `web/` (TypeScript strict, Vite, Tailwind 4,
 TanStack Router, Query, Table and Virtual, Base UI, cmdk, ECharts modules). Exact versions
 are pinned in `web/package.json` with `package-lock.json`. Node 24 or later is needed only
 to change the app: its build output `internal/server/webapp/dist` is committed and embedded

@@ -86,7 +86,7 @@ An index of all documents is in [docs/README.md](docs/README.md).
 |---|---|
 | [Installation](docs/installation.md) | Supported systems, Docker Compose, deb/rpm with Caddy, PostgreSQL, ports, files, first sign in |
 | [Configuration](docs/configuration.md) | Environment variables, Settings tabs, OIDC, roles, install script variables |
-| [Console](docs/console.md) | The console app under `/app/`, the classic console, every page, roles and permissions |
+| [Console](docs/console.md) | The console app under `/app/`, its areas, former addresses, roles and permissions |
 | [Concepts](docs/concepts.md) | Declarations, library, blueprints, conditions, inheritance, versions, device states |
 | [Tenants](docs/tenants.md) | Multi tenancy for MSPs and groups of companies, super admins, shared objects |
 | [Declarations](docs/declarations.md) | Reference of every library item type and field |
