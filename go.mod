@@ -4,7 +4,7 @@ go 1.27.4
 
 require (
 	filippo.io/age v1.3.2
-	fyne.io/systray v1.11.0
+	fyne.io/systray v1.12.2
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/miekg/pkcs11 v1.1.2
