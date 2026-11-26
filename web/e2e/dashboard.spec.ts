@@ -118,6 +118,39 @@ test('reports: compliance history and presets', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'Bericht erzeugen' })).toHaveAttribute('href', /audit\.jsonl\?from=/)
 })
 
+test('reports: schedule a saved report and run it now', async ({ page }) => {
+  const me = await request.newContext({ baseURL, ignoreHTTPSErrors: true, storageState: statePath })
+  const csrf = await csrfOf(me)
+  // a webhook channel to a private address: the server refuses to deliver there, no traffic leaves
+  await me.post('/settings/notifications', { form: { csrf, name: `e2e-reports-${Date.now()}`, kind: 'webhook', url: 'https://127.0.0.1:9/hook' }, headers: { Origin: baseURL }, maxRedirects: 0 })
+  const view = await me.post('/api/v1/views', { data: { list: 'reports', name: `Inventar e2e ${Date.now()}`, query: 'kind=inventory.csv' }, headers: { 'X-CSRF-Token': csrf, Origin: baseURL } })
+  expect(view.status()).toBe(201)
+  const { name } = (await view.json()) as { name: string }
+  await me.dispose()
+
+  await page.goto('/app/reports')
+  const card = page.getByRole('region', { name: 'Zeitpläne' })
+  await card.getByLabel(/Gespeicherter Bericht/).selectOption({ label: name })
+  await card.getByLabel('Rhythmus').selectOption('monthly')
+  await card.getByRole('checkbox').first().check()
+  await card.getByRole('button', { name: 'Zeitplan speichern' }).click()
+  await expect(page.getByText('Zeitplan gespeichert')).toBeVisible()
+  const row = card.getByRole('listitem').filter({ hasText: name })
+  await expect(row.getByText('monatlich')).toBeVisible()
+  await row.getByRole('button', { name: 'Jetzt ausführen' }).click()
+  await expect(page.getByText(/Bericht erzeugt und gesendet/)).toBeVisible()
+  await row.getByText('Letzte Läufe').click()
+  await expect(row.getByRole('link', { name: 'Herunterladen' }).first()).toHaveAttribute('href', /\/api\/v1\/report-runs\/\d+/)
+})
+
+test('home KPIs for security updates and current agents come from the API', async ({ page }) => {
+  // the e2e database has no devices, so the tiles stay hidden behind the empty state
+  const res = await page.request.get('/api/v1/stats/updates')
+  expect(res.status()).toBe(200)
+  expect(await res.json()).toMatchObject({ security_devices: 0, agent_total: 0, history: expect.any(Array) })
+  expect((await page.request.get('/api/v1/stats/annotations?days=7')).status()).toBe(200)
+})
+
 test('global search finds the audit log', async ({ page }) => {
   await page.goto('/app/')
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()

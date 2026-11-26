@@ -51,3 +51,6 @@ export function presetHref(p: Preset, now = new Date()): string {
   const qs = q.toString()
   return `/api/v1/exports/${p.kind}${qs ? `?${qs}` : ''}`
 }
+
+/** E-mail addresses from free text: split on commas, semicolons and spaces, empty parts dropped. */
+export const parseEmails = (s: string) => s.split(/[\s,;]+/).filter(Boolean)

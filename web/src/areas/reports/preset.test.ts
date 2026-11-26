@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodePreset, encodePreset, presetHref } from './preset'
+import { decodePreset, encodePreset, parseEmails, presetHref } from './preset'
 
 describe('report presets', () => {
   it('round trips and keeps only the parameters of the kind', () => {
@@ -14,5 +14,10 @@ describe('report presets', () => {
     expect(presetHref({ kind: 'audit.jsonl', days: 7, q: 'ssh' }, new Date(2026, 0, 10))).toBe('/api/v1/exports/audit.jsonl?from=2026-01-03&q=ssh')
     expect(presetHref({ kind: 'compliance-history.csv', at: '2026-01-02', device: 'd1' })).toBe('/api/v1/exports/compliance-history.csv?at=2026-01-02&device=d1')
     expect(presetHref({ kind: 'inventory.csv' })).toBe('/api/v1/exports/inventory.csv')
+  })
+
+  it('splits e-mail lists', () => {
+    expect(parseEmails(' a@b.de, c@d.de;e@f.de  ')).toEqual(['a@b.de', 'c@d.de', 'e@f.de'])
+    expect(parseEmails('')).toEqual([])
   })
 })

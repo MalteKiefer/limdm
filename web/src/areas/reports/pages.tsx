@@ -14,6 +14,7 @@ import { ErrorState, LoadingState } from '../../components/states'
 import { Badge, Card, PageHeader } from '../../components/ui'
 import { useT, type MessageKey } from '../../i18n'
 import { dateTime, fmt } from '../../i18n/format'
+import { Schedules } from './schedules'
 import { decodePreset, encodePreset, kinds, paramsOf, presetHref, type Kind, type Preset } from './preset'
 
 type Search = { at?: string; device?: string }
@@ -34,6 +35,7 @@ export function ReportsPage() {
         <>
           <Exports />
           <Builder />
+          <Schedules />
         </>
       ) : (
         <Card title={t('reports.exports')}>
