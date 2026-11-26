@@ -968,6 +968,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/devices/catalog-apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Enabled catalog apps for bulk install and removal */
+        get: operations["deviceCatalogApps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -990,20 +1007,20 @@ export interface components {
             }[];
         };
         Device: {
-            id?: string;
-            hostname?: string;
-            os?: string;
-            agent_version?: string;
+            id: string;
+            hostname: string;
+            os: string;
+            agent_version: string;
             /** @description Effective blueprint name */
-            blueprint?: string;
-            tags?: string[];
+            blueprint: string;
+            tags: string[];
             /** @enum {string} */
-            status?: "compliant" | "in grace" | "non-compliant" | "stale" | "pending" | "retired";
-            failing?: number;
-            checks?: number;
+            status: "compliant" | "in grace" | "non-compliant" | "stale" | "pending" | "retired";
+            failing: number;
+            checks: number;
             /** Format: date-time */
-            last_seen?: string | null;
-            retired?: boolean;
+            last_seen: string | null;
+            retired: boolean;
             /** @description Explicitly assigned blueprint (single device only) */
             blueprint_id?: number | null;
             /**
@@ -1014,10 +1031,10 @@ export interface components {
             /** @description Inventory as reported by the agent (single device only) */
             inventory?: Record<string, never>;
             /** @description Desktop environment, empty on servers */
-            desktop?: string;
-            memory_mb?: number;
+            desktop: string;
+            memory_mb: number;
             /** @description Locked by the compliance policy */
-            auto_locked?: boolean;
+            auto_locked: boolean;
         };
         DevicePage: {
             items: components["schemas"]["Device"][];
@@ -3509,6 +3526,33 @@ export interface operations {
             };
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+        };
+    };
+    deviceCatalogApps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            id: string;
+                            name: string;
+                        }[];
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
         };
     };
 }

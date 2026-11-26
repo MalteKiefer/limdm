@@ -125,6 +125,9 @@ func TestAppDevicesAPI(t *testing.T) {
 	if code, p := call(auditor, "GET", "/api/v1/devices/d1/packages", ""); code != 200 || p["items"] == nil {
 		t.Fatalf("packages: %d %v", code, p)
 	}
+	if code, apps := call(help, "GET", "/api/v1/devices/catalog-apps", ""); code != 200 || apps["items"] == nil {
+		t.Fatalf("catalog apps: %d %v", code, apps)
+	}
 	if code, list := call(admin, "GET", "/api/v1/devices?filter=art:arbeitsplatz", ""); code != 200 || len(list["items"].([]any)) != 1 {
 		t.Fatalf("german filter: %d %v", code, list)
 	}

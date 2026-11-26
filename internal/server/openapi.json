@@ -3252,6 +3252,53 @@
           }
         }
       }
+    },
+    "/api/v1/devices/catalog-apps": {
+      "get": {
+        "operationId": "deviceCatalogApps",
+        "summary": "Enabled catalog apps for bulk install and removal",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3433,7 +3480,23 @@
             "type": "boolean",
             "description": "Locked by the compliance policy"
           }
-        }
+        },
+        "required": [
+          "id",
+          "hostname",
+          "os",
+          "agent_version",
+          "blueprint",
+          "tags",
+          "status",
+          "failing",
+          "checks",
+          "last_seen",
+          "retired",
+          "desktop",
+          "memory_mb",
+          "auto_locked"
+        ]
       },
       "DevicePage": {
         "type": "object",

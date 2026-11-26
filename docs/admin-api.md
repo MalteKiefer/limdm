@@ -166,6 +166,7 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `GET /api/v1/devices/{id}/shell-sessions`, `GET /api/v1/shell-sessions/{sid}` | read | | sessions; the transcript for admins and auditors after the end |
 | `POST /api/v1/shell-sessions/{sid}/end` | helpdesk | | `204`; the user who started it or an admin |
 | `POST /api/v1/devices/bulk` | helpdesk | `{"ids": [...], "action": "command:sync", "params": {...}}`; actions `command:<type>` (not `lost`, `wipe`), `agent-update`, `tag-add`, `tag-remove` (admin) | `202` `{"status": "queued"}` or `{"status": "approval", "approvals": n}` |
+| `GET /api/v1/devices/catalog-apps` | read | | `200` enabled catalog apps (`id`, `name`) for bulk install and removal |
 | `GET /api/v1/devices/primary-users` | admin | `q` | `200` up to 20 directory email addresses, 120 searches a minute. The directory is installation wide: an account bound to a tenant or a device scope sees, and may set as primary user, only people who already are the primary user of a device in its tenant and scope (the console device page applies the same rule) |
 | `GET /api/v1/enrollment-tokens` | read | | `200` active tokens with `agent_url`, `public_url`, `fingerprint`, `release_repo` for the install command and `enroll.conf` |
 | `POST /api/v1/enrollment-tokens` | admin | `{"note", "blueprint_id", "uses", "days"}` | `201` `{"id", "token"}` (shown once); audited as `token.create` |

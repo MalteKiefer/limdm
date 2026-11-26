@@ -39,6 +39,7 @@ func (s *Server) appDevicesRoutes(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/shell-sessions/{sid}/end", s.need("helpdesk", s.apiShellEnd))
 	m.HandleFunc("POST /api/v1/devices/bulk", s.need("helpdesk", s.apiDevicesBulk))
 	m.HandleFunc("GET /api/v1/devices/primary-users", s.need("admin", s.apiPrimaryUsers))
+	m.HandleFunc("GET /api/v1/devices/catalog-apps", s.need("read", s.apiDeviceCatalogApps))
 	m.HandleFunc("GET /api/v1/enrollment-tokens", s.need("read", s.apiEnrollTokens))
 	m.HandleFunc("POST /api/v1/enrollment-tokens", s.need("admin", s.apiEnrollTokenCreate))
 	m.HandleFunc("DELETE /api/v1/enrollment-tokens/{id}", s.need("admin", s.apiEnrollTokenRevoke))
@@ -842,6 +843,25 @@ func (s *Server) apiPrimaryUsers(w http.ResponseWriter, r *http.Request, c apiCa
 		return
 	}
 	writeJSON(w, listPage{Items: list})
+}
+
+// apiDeviceCatalogApps lists the enabled catalog apps for the bulk install
+// and removal of the device list (the console list offers the same).
+func (s *Server) apiDeviceCatalogApps(w http.ResponseWriter, r *http.Request, c apiCaller) {
+	apps, err := s.catalogApps(r.Context(), s.db, `WHERE enabled`)
+	if err != nil {
+		s.apiFail(w, err)
+		return
+	}
+	type app struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	out := []app{}
+	for _, a := range apps {
+		out = append(out, app{a.ID, a.Name})
+	}
+	writeJSON(w, listPage{Items: out})
 }
 
 // dirPeopleCond limits directory people (alias u) to those the caller may
