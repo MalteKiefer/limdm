@@ -108,8 +108,13 @@ func (a *Agent) installArtifact(art api.Artifact) error {
 	case "script":
 		_, err = run(30*time.Minute, "/bin/sh", file)
 	case "file":
-		if err = os.MkdirAll(filepath.Dir(art.Path), 0o755); err == nil { //nolint:gosec // system directories such as /etc/opt/vendor are world readable
-			err = copyFile(file, art.Path, os.FileMode(art.FileMode()))
+		// like managed files: no symlink in the path (a user writable
+		// directory could redirect the write), the declared mode despite the
+		// service umask, parents created 0755
+		// ponytail: read whole, the upload size limit bounds it
+		var content []byte
+		if content, err = os.ReadFile(file); err == nil {
+			_, err = writeNoFollow(art.Path, content, os.FileMode(art.FileMode()), 0, 0)
 		}
 	}
 	return err
