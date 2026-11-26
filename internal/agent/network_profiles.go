@@ -350,7 +350,7 @@ func (a *Agent) ensureNetworkCert(ctx context.Context) {
 	if !api.NeedsDeviceCert(a.pol.Extra.Network) {
 		return
 	}
-	if c := netCert(); c != nil && time.Until(c.NotAfter) > renewBefore {
+	if c := netCert(); c != nil && time.Until(c.NotAfter) > renewBefore && !a.renewNetNow {
 		return
 	}
 	keyPEM, csr, err := newCSR()

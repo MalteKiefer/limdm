@@ -53,6 +53,9 @@ const (
 	stateDir     = "/var/lib/limdm"
 	stateFile    = stateDir + "/state.json"
 	renewBefore  = 30 * 24 * time.Hour
+	// commandKeyGrace: how long commands signed with the previous command
+	// key are still accepted after a rollover (commands expire after 7 days)
+	commandKeyGrace = 14 * 24 * time.Hour
 )
 
 type Config struct {
@@ -80,32 +83,34 @@ type State struct {
 	Results       []api.CommandResult  `json:"results"`               // not yet reported
 	Events        []string             `json:"events"`
 
-	PendingKeys    []pendingKey              `json:"pending_keys,omitempty"` // recovery keys not yet escrowed
-	Escrowed       map[string]time.Time      `json:"escrowed,omitempty"`     // LUKS UUID: escrowed at
-	CommandKey     string                    `json:"command_key,omitempty"`  // pinned public key commands are signed with
-	Enrollment     string                    `json:"enrollment,omitempty"`   // server and device ID this state belongs to
-	EscrowNotified time.Time                 `json:"escrow_notified"`
-	Company        string                    `json:"company,omitempty"`
-	BrandingHash   string                    `json:"branding_hash,omitempty"`
-	Catalog        *api.Catalog              `json:"catalog,omitempty"`      // software catalog for the desktop app
-	AppRequests    []api.AppRequest          `json:"app_requests,omitempty"` // requests not yet sent
-	LastContact    time.Time                 `json:"last_contact"`
-	DoneCommands   map[int64]time.Time       `json:"done_commands,omitempty"`  // executed command IDs: the server redelivers until it has the result
-	RemovePending  map[string]bool           `json:"remove_pending,omitempty"` // removed users whose account lock still has to succeed
-	UserLocked     map[string]bool           `json:"user_locked,omitempty"`    // accounts IT locked with user_lock; the SSO rules leave them locked
-	UpdateResult   *api.UpdateResult         `json:"update_result,omitempty"`  // agent update outcome not yet reported
-	OfflineLocked  bool                      `json:"offline_locked,omitempty"`
-	FallbackDNS    bool                      `json:"fallback_dns,omitempty"` // server allows the DNS over HTTPS fallback
-	DNFProxy       string                    `json:"dnf_proxy,omitempty"`    // proxy= value LiMDM wrote to dnf.conf (dnf4)
-	SUSEProxy      *sysconfigOwned           `json:"suse_proxy,omitempty"`   // keys LiMDM manages in /etc/sysconfig/proxy
-	Held           []string                  `json:"held,omitempty"`         // packages LiMDM put on apt hold
-	DNFExclude     string                    `json:"dnf_exclude,omitempty"`  // excludepkgs= value LiMDM wrote to dnf.conf
-	PacmanIgnore   string                    `json:"pacman_ignore,omitempty"`
-	SnapRefresh    string                    `json:"snap_refresh,omitempty"`   // "hold" or "timer=..." LiMDM set in snapd
-	ScriptResults  []api.ScriptResult        `json:"script_results,omitempty"` // recurring script runs not yet reported
-	ManagedFiles   []string                  `json:"managed_files,omitempty"`  // paths written for com.limdm.files, removed when undeclared
-	FirewallRules  []api.FirewallRule        `json:"firewall_rules,omitempty"` // allow rules LiMDM added
-	LocalUsers     map[string]localUserState `json:"local_users,omitempty"`    // accounts com.limdm.localusers manages
+	PendingKeys         []pendingKey              `json:"pending_keys,omitempty"`     // recovery keys not yet escrowed
+	Escrowed            map[string]time.Time      `json:"escrowed,omitempty"`         // LUKS UUID: escrowed at
+	CommandKey          string                    `json:"command_key,omitempty"`      // pinned public key commands are signed with
+	CommandKeyPrev      string                    `json:"command_key_prev,omitempty"` // key before the last rollover, accepted until CommandKeyPrevUntil
+	CommandKeyPrevUntil time.Time                 `json:"command_key_prev_until,omitzero"`
+	Enrollment          string                    `json:"enrollment,omitempty"` // server and device ID this state belongs to
+	EscrowNotified      time.Time                 `json:"escrow_notified"`
+	Company             string                    `json:"company,omitempty"`
+	BrandingHash        string                    `json:"branding_hash,omitempty"`
+	Catalog             *api.Catalog              `json:"catalog,omitempty"`      // software catalog for the desktop app
+	AppRequests         []api.AppRequest          `json:"app_requests,omitempty"` // requests not yet sent
+	LastContact         time.Time                 `json:"last_contact"`
+	DoneCommands        map[int64]time.Time       `json:"done_commands,omitempty"`  // executed command IDs: the server redelivers until it has the result
+	RemovePending       map[string]bool           `json:"remove_pending,omitempty"` // removed users whose account lock still has to succeed
+	UserLocked          map[string]bool           `json:"user_locked,omitempty"`    // accounts IT locked with user_lock; the SSO rules leave them locked
+	UpdateResult        *api.UpdateResult         `json:"update_result,omitempty"`  // agent update outcome not yet reported
+	OfflineLocked       bool                      `json:"offline_locked,omitempty"`
+	FallbackDNS         bool                      `json:"fallback_dns,omitempty"` // server allows the DNS over HTTPS fallback
+	DNFProxy            string                    `json:"dnf_proxy,omitempty"`    // proxy= value LiMDM wrote to dnf.conf (dnf4)
+	SUSEProxy           *sysconfigOwned           `json:"suse_proxy,omitempty"`   // keys LiMDM manages in /etc/sysconfig/proxy
+	Held                []string                  `json:"held,omitempty"`         // packages LiMDM put on apt hold
+	DNFExclude          string                    `json:"dnf_exclude,omitempty"`  // excludepkgs= value LiMDM wrote to dnf.conf
+	PacmanIgnore        string                    `json:"pacman_ignore,omitempty"`
+	SnapRefresh         string                    `json:"snap_refresh,omitempty"`   // "hold" or "timer=..." LiMDM set in snapd
+	ScriptResults       []api.ScriptResult        `json:"script_results,omitempty"` // recurring script runs not yet reported
+	ManagedFiles        []string                  `json:"managed_files,omitempty"`  // paths written for com.limdm.files, removed when undeclared
+	FirewallRules       []api.FirewallRule        `json:"firewall_rules,omitempty"` // allow rules LiMDM added
+	LocalUsers          map[string]localUserState `json:"local_users,omitempty"`    // accounts com.limdm.localusers manages
 }
 
 type Agent struct {
@@ -130,6 +135,7 @@ type Agent struct {
 	failedUpdate                string    // release version whose update already failed, reported once
 	osqueryTried                time.Time // last osquery install attempt
 	syncNow                     bool
+	renewNow, renewNetNow       bool // the server asked for new certificates (CA rotation)
 	proxySet                    bool // a proxy declaration set the environment of this process
 	// for the desktop tray
 	lastCheckin  *time.Time
@@ -148,15 +154,29 @@ func validServerURL(s string) error {
 	return nil
 }
 
+// trustedCAs are the device CAs an enrolled agent trusts (ca.crt); the
+// server replaces them over the pinned channel during a CA rotation.
+var trustedCAs atomic.Pointer[x509.CertPool]
+
 // pinnedTLS trusts only the device CA, never system roots, and presents the
-// device identity when one exists.
-func pinnedTLS(caPEM []byte, withIdentity bool) (*tls.Config, error) {
+// device identity when enrolled (server set). An enrolled agent verifies
+// against trustedCAs, so new trust anchors apply without a restart.
+func pinnedTLS(caPEM []byte, server string) (*tls.Config, error) {
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caPEM) {
 		return nil, errors.New("invalid CA certificate")
 	}
 	tc := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: pool}
-	if withIdentity {
+	if server != "" {
+		u, err := url.Parse(server)
+		if err != nil {
+			return nil, err
+		}
+		trustedCAs.Store(pool)
+		// standard verification against a fixed pool is replaced by the same
+		// verification against the current trustedCAs in VerifyConnection
+		tc.InsecureSkipVerify = true
+		tc.VerifyConnection = verifyTrusted(u.Hostname())
 		tc.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 			b, err := os.ReadFile(identityFile)
 			if err != nil {
@@ -167,6 +187,23 @@ func pinnedTLS(caPEM []byte, withIdentity bool) (*tls.Config, error) {
 		}
 	}
 	return tc, nil
+}
+
+// verifyTrusted verifies the server certificate chain against trustedCAs
+// for host (a name or an IP address, like standard verification).
+func verifyTrusted(host string) func(tls.ConnectionState) error {
+	return func(cs tls.ConnectionState) error {
+		if len(cs.PeerCertificates) == 0 {
+			return errors.New("server sent no certificate")
+		}
+		inter := x509.NewCertPool()
+		for _, c := range cs.PeerCertificates[1:] {
+			inter.AddCert(c)
+		}
+		_, err := cs.PeerCertificates[0].Verify(x509.VerifyOptions{Roots: trustedCAs.Load(), Intermediates: inter,
+			DNSName: host, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}})
+		return err
+	}
 }
 
 func newClient(tc *tls.Config) *http.Client {
@@ -268,7 +305,7 @@ func Enroll(server, token, fingerprint string, allowScripts, allowShell bool) er
 	if err != nil {
 		return err
 	}
-	tc, err := pinnedTLS(caPEM, false)
+	tc, err := pinnedTLS(caPEM, "")
 	if err != nil {
 		return err
 	}
@@ -326,7 +363,7 @@ func forgetServerState() error {
 	if json.Unmarshal(b, &st) != nil {
 		return os.Remove(stateFile)
 	}
-	for _, k := range []string{"command_key", "done_commands"} {
+	for _, k := range []string{"command_key", "command_key_prev", "command_key_prev_until", "done_commands"} {
 		delete(st, k)
 	}
 	out, _ := json.Marshal(st)
@@ -350,7 +387,7 @@ func New(log *slog.Logger) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	tc, err := pinnedTLS(caPEM, true)
+	tc, err := pinnedTLS(caPEM, cfg.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +412,7 @@ func New(log *slog.Logger) (*Agent, error) {
 	if enr := cfg.Server + " " + cfg.DeviceID; a.state.Enrollment != enr {
 		if a.state.Enrollment != "" {
 			log.Info("new enrollment: forgetting the previous server's command key and command IDs")
-			a.state.CommandKey, a.state.DoneCommands, a.state.Results = "", nil, nil
+			a.state.CommandKey, a.state.CommandKeyPrev, a.state.DoneCommands, a.state.Results = "", "", nil, nil
 		}
 		a.state.Enrollment = enr
 	}
@@ -577,7 +614,11 @@ func (a *Agent) cycle(ctx context.Context) {
 	statusHash := hex.EncodeToString(sum[:])
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
 		StatusHash: statusHash, Results: a.state.Results, Events: a.pendingEvents(), Metrics: metrics(), BrandingHash: a.state.BrandingHash,
-		UpdateResult: a.state.UpdateResult, ScriptResults: a.state.ScriptResults}
+		UpdateResult: a.state.UpdateResult, ScriptResults: a.state.ScriptResults, CommandKey: a.state.CommandKey}
+	if b, err := os.ReadFile(caFile); err == nil {
+		sum := sha256.Sum256(b)
+		req.CAHash = hex.EncodeToString(sum[:])
+	}
 	if a.state.Catalog != nil {
 		req.CatalogHash = a.state.Catalog.Hash
 	}
@@ -663,7 +704,11 @@ func (a *Agent) cycle(ctx context.Context) {
 		a.syncNow = true
 	}
 	a.compose()
-	a.pinCommandKey(resp.CommandKey)
+	a.pinCommandKey(resp.CommandKey, resp.CommandKeyRollover)
+	if resp.DeviceCAs != "" {
+		a.updateTrustAnchors(resp.DeviceCAs)
+	}
+	a.renewNow, a.renewNetNow = a.renewNow || resp.RenewCert, a.renewNetNow || resp.RenewNetworkCert
 	a.runCommands(resp.Commands)
 	if u := resp.AgentUpdate; u != nil && u.Version != a.failedUpdate {
 		if err := a.installUpdate(ctx, *u); err != nil {
@@ -998,7 +1043,7 @@ func (a *Agent) renewIdentity(ctx context.Context) {
 		return
 	}
 	c, err := tls.X509KeyPair(b, b)
-	if err != nil || c.Leaf == nil || time.Until(c.Leaf.NotAfter) > renewBefore {
+	if err != nil || c.Leaf == nil || (time.Until(c.Leaf.NotAfter) > renewBefore && !a.renewNow) {
 		return
 	}
 	expired := time.Now().After(c.Leaf.NotAfter)
@@ -1027,6 +1072,7 @@ func (a *Agent) renewIdentity(ctx context.Context) {
 		return
 	}
 	a.client.CloseIdleConnections()
+	a.renewNow = false
 	a.event("client certificate renewed")
 }
 
@@ -1190,8 +1236,10 @@ func (a *Agent) getBytes(path string, limit int64, out *[]byte) error {
 }
 
 // pinCommandKey keeps the first command key the server sends (over the
-// pinned CA and mTLS). A different key later is refused, not adopted.
-func (a *Agent) pinCommandKey(hexKey string) {
+// pinned CA and mTLS). A different key later is adopted only with a
+// rollover record signed by the pinned key; the old key stays accepted for
+// commandKeyGrace. Any other different key is refused.
+func (a *Agent) pinCommandKey(hexKey string, ro *api.KeyRollover) {
 	switch {
 	case hexKey == "" || hexKey == a.state.CommandKey:
 	case a.state.CommandKey == "":
@@ -1199,6 +1247,18 @@ func (a *Agent) pinCommandKey(hexKey string) {
 			a.state.CommandKey = hexKey
 			a.event("command signing key pinned; unsigned commands are refused from now on")
 		}
+	case ro != nil && ro.Key == hexKey:
+		pinned, err := hex.DecodeString(a.state.CommandKey)
+		if err == nil {
+			err = api.VerifyRollover(ed25519.PublicKey(pinned), *ro)
+		}
+		if err != nil {
+			a.event("refused a command key rollover: %v; keeping the pinned key", err)
+			return
+		}
+		a.state.CommandKeyPrev, a.state.CommandKeyPrevUntil = a.state.CommandKey, time.Now().Add(commandKeyGrace)
+		a.state.CommandKey = hexKey
+		a.event("command signing key rolled over to the key announced by the pinned one")
 	default:
 		a.event("the server sent a different command signing key; keeping the pinned one")
 	}
@@ -1215,7 +1275,11 @@ func (a *Agent) verifyCommand(c api.Command) error {
 		return err
 	}
 	if err := api.VerifyCommand(ed25519.PublicKey(pub), a.cfg.DeviceID, c); err != nil {
-		return err
+		prev, perr := hex.DecodeString(a.state.CommandKeyPrev)
+		if a.state.CommandKeyPrev == "" || perr != nil || time.Now().After(a.state.CommandKeyPrevUntil) ||
+			api.VerifyCommand(ed25519.PublicKey(prev), a.cfg.DeviceID, c) != nil {
+			return err
+		}
 	}
 	// the server expires commands after 7 days: an older one, signed or not,
 	// is a replay (a row set back to pending in the database)
@@ -1223,6 +1287,60 @@ func (a *Agent) verifyCommand(c api.Command) error {
 		return errors.New("command older than 8 days")
 	}
 	return nil
+}
+
+// updateTrustAnchors stores the device CAs the server sent over the pinned
+// channel. The new set must share a CA with the current one, so a broken
+// answer cannot cut the agent off; ca.crt and the running client change.
+func (a *Agent) updateTrustAnchors(bundle string) {
+	cur, err := os.ReadFile(caFile)
+	if err != nil {
+		a.log.Error("trust anchors", "err", err)
+		return
+	}
+	certs, err := parseCAs([]byte(bundle))
+	if err != nil {
+		a.event("refused new device CAs from the server: %v", err)
+		return
+	}
+	old, _ := parseCAs(cur)
+	if !slices.ContainsFunc(certs, func(c *x509.Certificate) bool {
+		return slices.ContainsFunc(old, func(o *x509.Certificate) bool { return o.Equal(c) })
+	}) {
+		a.event("refused new device CAs from the server: none of them is trusted now")
+		return
+	}
+	pool := x509.NewCertPool()
+	for _, c := range certs {
+		pool.AddCert(c)
+	}
+	if _, err := writeIfChanged(caFile, bundle, 0o644); err != nil {
+		a.event("storing the device CAs failed: %v", err)
+		return
+	}
+	trustedCAs.Store(pool)
+	a.client.CloseIdleConnections()
+	a.event("trusted device CAs updated (%d)", len(certs))
+}
+
+// parseCAs reads PEM CA certificates; every block must be one.
+func parseCAs(b []byte) ([]*x509.Certificate, error) {
+	var out []*x509.Certificate
+	for {
+		var blk *pem.Block
+		if blk, b = pem.Decode(b); blk == nil {
+			break
+		}
+		c, err := x509.ParseCertificate(blk.Bytes)
+		if err != nil || blk.Type != "CERTIFICATE" || !c.IsCA {
+			return nil, errors.New("not a CA certificate")
+		}
+		out = append(out, c)
+	}
+	if len(out) == 0 {
+		return nil, errors.New("no certificate")
+	}
+	return out, nil
 }
 
 // apiError reads the server's RFC 9457 problem details, if any.
