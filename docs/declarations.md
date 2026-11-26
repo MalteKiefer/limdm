@@ -261,6 +261,39 @@ On the device page, **Edit** and **Disable** next to a reported source open a pr
 item: Edit copies all entries of that file into managed sources (http becomes https, check
 the URL) and disables the original. Assign the item to a blueprint to apply it.
 
+### `com.limdm.artifacts` (list)
+
+Console: **Uploaded packages**. Installs packages, scripts and files an admin uploaded under
+**Software**, **Packages** ([packages.md](packages.md)). The payload names each upload by its
+SHA-256; the library item is signed with the command key, so the hash the agent checks comes
+from signed data.
+
+```json
+{"artifacts": [
+  {"sha256": "3f5a...", "name": "vendor-vpn", "kind": "deb", "size": 1048576},
+  {"sha256": "9c1e...", "name": "vendor-vpn", "kind": "rpm", "size": 1101004},
+  {"sha256": "aa07...", "name": "license", "kind": "file", "size": 812, "path": "/etc/opt/vendor/license.key", "mode": "0600"}]}
+```
+
+| Field | Type | Rules |
+|---|---|---|
+| `artifacts[].sha256` | text | 64 lower case hex characters of an approved upload of the item's tenant |
+| `artifacts[].name` | text | letters, digits, `.`, `_`, `+`, `-` |
+| `artifacts[].kind` | text | `deb`, `rpm`, `apk`, `pacman`, `flatpak`, `script` or `file`, as uploaded |
+| `artifacts[].size` | number | bytes, as uploaded |
+| `artifacts[].path` | text | `file` only: absolute, outside user writable and virtual directories |
+| `artifacts[].mode` | text | `file` only: octal, default `0644`, no setuid, setgid or sticky bit |
+
+Merged by hash and path (a later item wins). Each upload installs once per device: packages
+with the native package manager (dependencies from the configured sources), only on the
+matching family (`deb` on Debian and Ubuntu, `rpm` on Fedora, RHEL and SUSE, `apk` on Alpine,
+`pacman` on Arch), so one item can carry the package for every family. Flatpak bundles go to
+the system installation, scripts run once with `/bin/sh`, files are written as root. Removing
+an upload from the item does not uninstall it.
+
+Every kind acts as root, so devices install uploads only when they were enrolled with
+`allow_scripts`; other devices report the item as failed.
+
 ## System
 
 ### `com.limdm.services` (list)

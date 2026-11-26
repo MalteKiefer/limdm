@@ -146,20 +146,7 @@ func (a *Agent) installUpdate(ctx context.Context, u api.AgentUpdate) error {
 	if err := os.WriteFile(updateMarker, b, 0o600); err != nil {
 		return err
 	}
-	var install []string
-	switch a.host.family {
-	case "debian":
-		install = []string{"apt-get", "install", "-y", "-q", "-o", "Dpkg::Options::=--force-confold", "--allow-downgrades", pkg}
-	case "arch":
-		install = []string{"pacman", "-U", "--noconfirm", pkg}
-	case "alpine":
-		// apk sees an unsigned package; its SHA-256 from the signed sums was checked above
-		install = []string{"apk", "add", "--allow-untrusted", "--no-interactive", pkg}
-	case "suse": // the same for zypper, which refuses unsigned local rpms otherwise
-		install = []string{"zypper", "--non-interactive", "install", "--allow-unsigned-rpm", pkg}
-	default:
-		install = []string{"dnf", "install", "-y", "-q", pkg}
-	}
+	install := localInstall(a.host.family, pkg)
 	if !systemd() { // OpenRC: a detached process outlives the agent's restart
 		cmd := exec.CommandContext(context.WithoutCancel(ctx), install[0], install[1:]...)
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -179,8 +166,33 @@ func (a *Agent) installUpdate(ctx context.Context, u api.AgentUpdate) error {
 	return nil
 }
 
+// localInstall is the command that installs a local package file with the
+// family's package manager; dependencies come from the configured sources.
+// The callers checked the file's SHA-256 against signed data, so apk and
+// zypper may accept it unsigned.
+func localInstall(family, pkg string) []string {
+	switch family {
+	case "debian":
+		return []string{"apt-get", "install", "-y", "-q", "-o", "Dpkg::Options::=--force-confold", "--allow-downgrades", pkg}
+	case "arch":
+		return []string{"pacman", "-U", "--noconfirm", pkg}
+	case "alpine":
+		return []string{"apk", "add", "--allow-untrusted", "--no-interactive", pkg}
+	case "suse": // zypper refuses unsigned local rpms otherwise
+		return []string{"zypper", "--non-interactive", "install", "--allow-unsigned-rpm", pkg}
+	}
+	return []string{"dnf", "install", "-y", "-q", pkg}
+}
+
 func (a *Agent) downloadPackage(ctx context.Context, version, file, dst, wantHex string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.cfg.Server+"/api/v1/agent-packages/"+url.PathEscape(version)+"/"+url.PathEscape(file), nil)
+	return a.downloadVerified(ctx, "/api/v1/agent-packages/"+url.PathEscape(version)+"/"+url.PathEscape(file), dst, wantHex, 200<<20)
+}
+
+// downloadVerified fetches path from the server over mTLS into dst and
+// keeps it only when its SHA-256 is wantHex.
+func (a *Agent) downloadVerified(ctx context.Context, path, dst, wantHex string, limit int64) error {
+	file := filepath.Base(dst)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.cfg.Server+path, nil)
 	if err != nil {
 		return err
 	}
@@ -198,7 +210,7 @@ func (a *Agent) downloadPackage(ctx context.Context, version, file, dst, wantHex
 	}
 	defer os.Remove(tmp.Name())
 	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(resp.Body, 200<<20)); err != nil {
+	if _, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(resp.Body, limit)); err != nil {
 		tmp.Close()
 		return err
 	}

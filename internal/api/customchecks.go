@@ -313,7 +313,7 @@ func (d Declaration) applyCustom(p *Policy) (bool, error) {
 // mergeCustom combines custom checks by ID; a later item wins.
 func mergeCustom(typ string, a, b json.RawMessage) (json.RawMessage, bool, error) {
 	if typ != TypeCustomChecks {
-		return nil, false, nil
+		return mergeArtifacts(typ, a, b) // artifacts.go
 	}
 	var x, y customChecksPayload
 	if err := errors.Join(json.Unmarshal(a, &x), json.Unmarshal(b, &y)); err != nil {
