@@ -245,7 +245,7 @@ func (d Declaration) applySecurity(p *Policy) (bool, error) {
 		}
 		p.Extra.Bootloader = &v
 	default:
-		return false, nil
+		return d.applyCustom(p)
 	}
 	return true, errors.Join(errs...)
 }
@@ -288,5 +288,5 @@ func mergeSecurity(typ string, a, b json.RawMessage) (json.RawMessage, bool, err
 		m, err := json.Marshal(Sudo{Rules: out, TimestampTimeout: x.TimestampTimeout})
 		return m, true, err
 	}
-	return nil, false, nil
+	return mergeCustom(typ, a, b)
 }

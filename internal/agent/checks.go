@@ -228,7 +228,7 @@ func (a *Agent) evaluate() []api.CheckResult {
 		}
 		out = append(out, r)
 	}
-	return out
+	return append(out, a.evaluateCustom()...)
 }
 
 func (a *Agent) runCheck(c check) (string, string) {

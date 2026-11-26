@@ -718,6 +718,7 @@ type CheckResult struct {
 	Detail     string `json:"detail"`
 	Remediated bool   `json:"remediated"`
 	Refs       Refs   `json:"refs"`
+	Severity   string `json:"severity,omitempty"` // custom checks: low | medium | high | critical
 }
 
 // Status is the full status report. The agent only sends it when its hash
