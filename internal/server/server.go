@@ -399,6 +399,11 @@ func (s *Server) background(ctx context.Context, name string, loop func(context.
 				loop(ctx)
 				return
 			}
+			// an instance with an outdated audit key cannot write the
+			// entries its jobs record: it leaves them to the others
+			if stale, err := auditKeyStale(ctx, s.db); err != nil || stale {
+				return
+			}
 			conn, err := s.db.Acquire(ctx)
 			if err != nil {
 				return
@@ -422,6 +427,11 @@ func (s *Server) background(ctx context.Context, name string, loop func(context.
 					case <-t.C:
 						if _, err := conn.Exec(lctx, `SELECT 1`); err != nil && lctx.Err() == nil {
 							s.log.Error("lost the background loop lock", "loop", name, "err", err)
+							cancel()
+							return
+						}
+						if stale, _ := auditKeyStale(lctx, s.db); stale {
+							s.log.Warn("audit key outdated: handing the background loop over", "loop", name)
 							cancel()
 							return
 						}

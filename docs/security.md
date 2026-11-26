@@ -155,8 +155,8 @@ switch.
 the new key records the first entry of the segment in `audit-keys` (one line per segment:
 first entry, key id, and the key of every earlier segment) and writes `audit.key_rotate`
 under the new key, and signs the retention cut again. The table `audit_key` names the
-current key; an instance with another key refuses to write entries until it restarts, so
-the chain never mixes keys. With an HSM command key the audit key is derived from a
+current key; an instance with another key refuses to write entries until it restarts, fails
+`/readyz` and leaves background jobs to the other instances, so the chain never mixes keys. With an HSM command key the audit key is derived from a
 deterministic Ed25519 signature over the label instead of the seed ([keys.md](keys.md)).
 
 **Verification.** The audit page verifies incrementally from the last checkpoint, a

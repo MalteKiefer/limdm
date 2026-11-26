@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -339,15 +340,56 @@ func TestKeyRotationFlow(t *testing.T) {
 	// command key: the audit chain gets a new segment at the restart
 	s = open(cfg)
 	oldPub := pubHex(s.cmdKey)
+	beforeCmd := snapshot()
+	oldAuditKey := auditKeyCur
 	if _, err := s.RotateKey(ctx, "admin@x", kindCommand, "cmd-2"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.FinishKey(ctx, "admin@x", kindCommand, true); err == nil {
 		t.Fatal("finish before a server started with the new key")
 	}
+	copied := snapshot() // keys.json with the new key, audit-keys without its segment
 	s = open(cfg)
 	if len(auditKeys) != 2 || s.kr.rollover == nil {
 		t.Fatalf("segments %d", len(auditKeys))
+	}
+	// an instance with the directory from before the rotation would key
+	// entries with the retired key; a copy taken before the first restart
+	// would start a second segment: both refuse to start
+	if _, err := openErr(beforeCmd); !errors.Is(err, errAuditKeyStale) {
+		t.Fatalf("directory from before the command key rotation: %v", err)
+	}
+	if _, err := openErr(copied); err == nil || !strings.Contains(err.Error(), "older than the audit chain") {
+		t.Fatalf("copied directory without the new segment: %v", err)
+	}
+	s = open(cfg)
+	// an instance still running the old key (simulated: the process wide
+	// key id) writes no entries, is not ready and leads no background job
+	newAuditKey := auditKeyCur
+	auditKeyCur = oldAuditKey
+	if err := s.auditAction(ctx, "admin@x", "test", "", "", nil); !errors.Is(err, errAuditKeyStale) {
+		t.Fatalf("entry with the outdated audit key: %v", err)
+	}
+	s.ha.listening.Store(true)
+	w := httptest.NewRecorder()
+	s.readyz(w, httptest.NewRequest("GET", "/readyz", nil))
+	if w.Code != 503 || !strings.Contains(w.Body.String(), "audit key outdated") {
+		t.Fatalf("readyz with the outdated audit key: %d %s", w.Code, w.Body.String())
+	}
+	defer func(d time.Duration) { leaderRetry = d }(leaderRetry)
+	leaderRetry = 20 * time.Millisecond
+	bctx, stop := context.WithTimeout(ctx, 300*time.Millisecond)
+	led := false
+	s.background(bctx, "stale test", func(context.Context) { led = true }, true)
+	stop()
+	if led {
+		t.Fatal("instance with the outdated audit key led a background job")
+	}
+	auditKeyCur = newAuditKey
+	w = httptest.NewRecorder()
+	s.readyz(w, httptest.NewRequest("GET", "/readyz", nil))
+	if w.Code != 200 {
+		t.Fatalf("readyz after the restart: %d %s", w.Code, w.Body.String())
 	}
 	resp = checkin(s, s.ca, api.CheckinRequest{CommandKey: oldPub})
 	if resp.CommandKeyRollover == nil || resp.CommandKey == oldPub {

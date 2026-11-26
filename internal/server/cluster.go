@@ -221,6 +221,8 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.ca == nil || s.netCA == nil || s.cmdKey == nil || auditKey == nil {
 		problems = append(problems, "keys not loaded")
+	} else if stale, err := auditKeyStale(ctx, s.db); err == nil && stale {
+		problems = append(problems, "audit key outdated after a key rotation: restart this instance")
 	}
 	if !s.ha.listening.Load() {
 		problems = append(problems, "not receiving notifications from other instances")

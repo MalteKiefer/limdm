@@ -159,7 +159,10 @@ still holds the old keys refuses to start. A step waits while an instance starts
    segment keyed from the new key (`audit.key_rotate`). The first process that starts with
    the new key records the segment, a server or a later `limdm-server keys` call; from then
    on an instance that still runs the old key can no longer write audit entries until it
-   restarts. Restart every instance right after `rotate command`.
+   restarts: its `/readyz` answers 503 ("audit key outdated") and it hands its background
+   jobs to an instance with the new key. An instance whose CA directory lacks the new
+   segment (a copy from before the rotation or before the first restart) refuses to start.
+   Restart every instance right after `rotate command`.
 2. Every check in carries the new public key with a rollover record signed by the old key.
    The agent verifies it against its pinned key and pins the new key; commands signed by the
    old key stay valid for 14 days. A rollover not signed by the pinned key is refused and

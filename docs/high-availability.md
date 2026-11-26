@@ -87,7 +87,7 @@ PostgreSQL itself is made highly available with the usual tools (see
 | Path | Meaning | Answer |
 |---|---|---|
 | `/healthz` | liveness: the process serves requests; no database check, so a database outage does not restart every instance | `200 ok` |
-| `/readyz` | readiness: database reachable, it holds the schema of this version, keys loaded, notifications from other instances arrive, not shutting down | `200 ready` or `503` with the reasons |
+| `/readyz` | readiness: database reachable, it holds the schema of this version, keys loaded, the audit key is current (not outdated by a command key rotation), notifications from other instances arrive, not shutting down | `200 ready` or `503` with the reasons |
 
 Both are reachable without sign in and regardless of the console network lists.
 

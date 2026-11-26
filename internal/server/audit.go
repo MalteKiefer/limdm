@@ -234,6 +234,20 @@ func AuditKeysFromDir(caDir string, p KeyProvider) (AuditKeys, error) {
 // entries keyed by this process would break the chain.
 var errAuditKeyStale = errors.New("the audit key changed with a key rotation: restart this server instance")
 
+// auditKeyStale tells whether the chain moved on to a key this process does
+// not have (readyz, leader jobs).
+func auditKeyStale(ctx context.Context, db *pgxpool.Pool) (bool, error) {
+	if auditKey == nil {
+		return false, nil
+	}
+	var id string
+	err := db.QueryRow(ctx, `SELECT key_id FROM audit_key`).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil && id != auditKeyCur, err
+}
+
 // initAuditKey sets the audit keys. At the first start with a key it records
 // the switch point; at the first start with a new command key (prev is the
 // one being retired) it starts a new segment: in the file, in audit_key and
@@ -262,6 +276,10 @@ func initAuditKey(ctx context.Context, db *pgxpool.Pool, caDir string, cmd, prev
 	if err := tx.QueryRow(ctx, `SELECT coalesce(max(id), 0) FROM audit_log`).Scan(&last); err != nil {
 		return err
 	}
+	var dbKey string
+	if err := tx.QueryRow(ctx, `SELECT key_id FROM audit_key`).Scan(&dbKey); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
 	lines, err := readAuditKeyLines(caDir)
 	var entry, action string
 	switch {
@@ -284,6 +302,10 @@ func initAuditKey(ctx context.Context, db *pgxpool.Pool, caDir string, cmd, prev
 	case err != nil:
 		return err
 	case lines[len(lines)-1].id != auditKeyID(key):
+		if dbKey == auditKeyID(key) {
+			// another instance started the new segment in its own copy of the file
+			return fmt.Errorf("%s/%s is older than the audit chain: give every instance the same CA directory (docs/high-availability.md)", caDir, auditKeysFile)
+		}
 		cur := &lines[len(lines)-1]
 		if prevKey == nil || auditKeyID(prevKey) != cur.id {
 			return errors.New("the command key changed, but the key of the current audit segment is not available: " +
@@ -310,6 +332,10 @@ func initAuditKey(ctx context.Context, db *pgxpool.Pool, caDir string, cmd, prev
 		}
 		entry = fmt.Sprintf("command key rotated: entries from id %d on are keyed with audit key %s (previous %s)", last+1, auditKeyID(key), prevID)
 		action = "audit.key_rotate"
+	}
+	if entry == "" && dbKey != "" && dbKey != auditKeyID(key) {
+		// a stale CA directory must not move the chain back to a retired key
+		return errAuditKeyStale
 	}
 	segs, err := segments(lines, key, prevKey)
 	if err != nil {
