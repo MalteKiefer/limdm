@@ -894,6 +894,9 @@ type CheckinResponse struct {
 	Branding *Branding `json:"branding,omitempty"`
 	// Catalog is sent when it differs from the agent's CatalogHash.
 	Catalog *Catalog `json:"catalog,omitempty"`
+	// FallbackDNS allows the agent to ask public DNS over HTTPS resolvers
+	// when the system resolver fails (server setting, default off).
+	FallbackDNS bool `json:"fallback_dns,omitempty"`
 }
 
 // ---- signed agent releases ----

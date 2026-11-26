@@ -24,7 +24,7 @@ the environment.
 | `LIMDM_STALE_HOURS` | `24` | Hours without check in until a device counts as stale. |
 | `LIMDM_RELEASE_DIR` | `/var/lib/limdm-server/agent-releases` | Cache of verified agent packages for updates ([agent.md](agent.md#updates)). |
 | `LIMDM_RELEASE_REPO` | `MalteKiefer/limdm` | GitHub repository for agent updates and `/install.sh`. |
-| `LIMDM_GEOIP_URL` | `https://ipwho.is/` | Location lookup for device public addresses, the IP is appended. `off` disables it ([security.md](security.md#privacy)). |
+| `LIMDM_GEOIP_URL` | `https://ipwho.is/` | Location lookup for device public addresses, the IP is appended. Used only when **Settings, Security, Privacy** turns geolocation on (default off); `off` disables it for good ([security.md](security.md#privacy)). |
 
 The server refuses to start when OIDC and local login are both off, when OIDC is set without
 an administrator, or when the console would listen publicly without a certificate.

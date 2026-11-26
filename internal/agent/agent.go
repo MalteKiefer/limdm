@@ -91,6 +91,7 @@ type State struct {
 	UserLocked     map[string]bool      `json:"user_locked,omitempty"`    // accounts IT locked with user_lock; the SSO rules leave them locked
 	UpdateResult   *api.UpdateResult    `json:"update_result,omitempty"`  // agent update outcome not yet reported
 	OfflineLocked  bool                 `json:"offline_locked,omitempty"`
+	FallbackDNS    bool                 `json:"fallback_dns,omitempty"` // server allows the DNS over HTTPS fallback
 }
 
 type Agent struct {
@@ -344,7 +345,6 @@ func New(log *slog.Logger) (*Agent, error) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, err
 	}
-	fallbackDNS = !cfg.NoFallbackDNS
 	a := &Agent{cfg: cfg, client: newClient(tc), host: h, log: log}
 	if b, err := os.ReadFile(stateFile); err == nil {
 		if err := json.Unmarshal(b, &a.state); err != nil {
@@ -366,6 +366,7 @@ func New(log *slog.Logger) (*Agent, error) {
 	if a.state.DeclToken == "" { // never synced: start from the built in baseline
 		a.state.Declarations = api.DefaultDeclarations()
 	}
+	fallbackDNS.Store(a.state.FallbackDNS && !cfg.NoFallbackDNS)
 	a.compose()
 	return a, nil
 }
@@ -612,6 +613,8 @@ func (a *Agent) cycle(ctx context.Context) {
 		a.state.UpdateResult = nil // reported
 	}
 	a.applyBranding(resp.Branding)
+	a.state.FallbackDNS = resp.FallbackDNS
+	fallbackDNS.Store(resp.FallbackDNS && !a.cfg.NoFallbackDNS)
 	if resp.Catalog != nil {
 		a.state.Catalog = resp.Catalog
 	}

@@ -719,4 +719,7 @@ var deCatalog = map[string]string{
 	"The repository signs its metadata, not each package": "Das Repository signiert seine Metadaten, nicht jedes Paket",
 	"The user is warned on the device":                    "Der Nutzer wird am Gerät gewarnt",
 	"Update agents automatically":                         "Agenten automatisch aktualisieren",
+	// W1
+	"Look up the location of device public addresses (sent to the geolocation service)":                  "Standort der öffentlichen Geräteadressen nachschlagen (wird an den Geolocation Dienst gesendet)",
+	"Agents may ask public DNS over HTTPS resolvers (Cloudflare, Google) when the system resolver fails": "Agenten dürfen öffentliche DNS over HTTPS Resolver (Cloudflare, Google) fragen, wenn der Systemresolver versagt",
 }

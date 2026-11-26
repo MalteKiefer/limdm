@@ -42,6 +42,11 @@ type Settings struct {
 	// Password rules for passwords chosen in the console: local accounts on
 	// devices (create, reset) and local console accounts.
 	Rules PasswordPolicy `json:"password_policy"` // password rules
+	// Privacy opt ins, both off by default: Geolocation sends device public
+	// addresses to LIMDM_GEOIP_URL, FallbackDNS lets agents ask public DNS
+	// over HTTPS resolvers when the system resolver fails.
+	Geolocation bool `json:"geolocation,omitempty"`
+	FallbackDNS bool `json:"fallback_dns,omitempty"`
 }
 
 // PasswordPolicy: the minimum length (12..128, 12 when unset) and the
@@ -379,6 +384,7 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		n, _ := strconv.Atoi(r.FormValue("min_length"))
 		set.Rules = PasswordPolicy{MinLength: n, Upper: r.FormValue("upper") == "on", Lower: r.FormValue("lower") == "on",
 			Digit: r.FormValue("digit") == "on", Symbol: r.FormValue("symbol") == "on", NoName: r.FormValue("no_name") == "on"}
+		set.Geolocation, set.FallbackDNS = r.FormValue("geolocation") == "on", r.FormValue("fallback_dns") == "on"
 	default:
 		http.Error(w, "unknown settings section", http.StatusBadRequest)
 		return
@@ -433,9 +439,9 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		return
 	}
 	doc, _ := json.Marshal(storedSettings{Settings: set, SecretEnc: enc})
-	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d allow=%q block=%q rules=%+v",
+	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d allow=%q block=%q rules=%+v geolocation=%v fallback_dns=%v",
 		set.OIDCIssuer, set.AllowedDomain, set.LocalLogin, set.StaleHours, set.WebhookURL != "", set.OIDCClientSecret != cur.OIDCClientSecret,
-		set.CompanyName, len(set.Logo), set.ConsoleAllow, set.ConsoleBlock, set.Rules)
+		set.CompanyName, len(set.Logo), set.ConsoleAllow, set.ConsoleBlock, set.Rules, set.Geolocation, set.FallbackDNS)
 	err = s.auditAction(ctx, sess.Email, "settings.save", "server", detail, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
 		return err

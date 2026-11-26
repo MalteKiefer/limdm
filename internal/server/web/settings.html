@@ -38,6 +38,11 @@
     <label class="check"><input type="checkbox" name="symbol" {{if .Set.Rules.Symbol}}checked{{end}}><span>{{t "Special character"}}<code>! ? # …</code></span></label>
   </fieldset>
   <label class="check"><input type="checkbox" name="no_name" {{if .Set.Rules.NoName}}checked{{end}}> {{t "Must not contain the user name"}}</label>
+  <fieldset>
+    <legend>{{t "Privacy"}}</legend>
+    <label class="check"><input type="checkbox" name="geolocation" {{if .Set.Geolocation}}checked{{end}}> {{t "Look up the location of device public addresses (sent to the geolocation service)"}}</label>
+    <label class="check"><input type="checkbox" name="fallback_dns" {{if .Set.FallbackDNS}}checked{{end}}> {{t "Agents may ask public DNS over HTTPS resolvers (Cloudflare, Google) when the system resolver fails"}}</label>
+  </fieldset>
   {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
 </form>
 {{else if eq .Tab "sso"}}
