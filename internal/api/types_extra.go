@@ -122,6 +122,12 @@ type Script struct {
 	Body           string            `json:"body"`
 	Params         map[string]string `json:"params,omitempty"`          // environment variables for the script
 	TimeoutMinutes int               `json:"timeout_minutes,omitempty"` // 1..240, default 30
+	// Schedule runs the script at fixed local times instead of every
+	// IntervalHours (which must then be 0).
+	Schedule *ScriptSchedule `json:"schedule,omitempty"`
+	// RunOnChange runs the script once more whenever body, parameters or
+	// timeout change, the first declaration included.
+	RunOnChange bool `json:"run_on_change,omitempty"`
 }
 
 // ScriptCommand is the payload of the "script" command when it carries
@@ -476,8 +482,15 @@ func (d Declaration) applyExtra(p *Policy) (bool, error) {
 			return true, err
 		}
 		for _, sc := range v.Scripts {
-			if !nameRe.MatchString(sc.Name) || sc.IntervalHours < 1 || sc.IntervalHours > 24*30 || sc.Body == "" || len(sc.Body) > 64<<10 {
-				bad("script %q: name, interval 1..720 hours and a body up to 64 KiB are required", sc.Name)
+			okInterval := sc.IntervalHours >= 1 && sc.IntervalHours <= 24*30
+			if sc.Schedule != nil {
+				okInterval = sc.IntervalHours == 0
+				if err := sc.Schedule.Validate(); err != nil {
+					bad("script %q: schedule: %v", sc.Name, err)
+				}
+			}
+			if !nameRe.MatchString(sc.Name) || !okInterval || sc.Body == "" || len(sc.Body) > 64<<10 {
+				bad("script %q: name, a body up to 64 KiB and either an interval of 1..720 hours or a schedule are required", sc.Name)
 			}
 			if err := ValidateScriptParams(sc.Params, sc.TimeoutMinutes); err != nil {
 				bad("script %q: %v", sc.Name, err)
