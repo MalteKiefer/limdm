@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -101,7 +102,34 @@ type Updates struct {
 	Mode   string `json:"mode"`   // off | security | all
 	Window string `json:"window"` // local time "HH:MM-HH:MM"
 	Reboot bool   `json:"reboot"` // reboot inside the window when required
+	// Days limits the window to these weekdays (mon..sun); empty is every
+	// day. A window across midnight belongs to the day it starts on.
+	Days []string `json:"days,omitempty"`
+	// Hold keeps these packages at their installed version (apt-mark hold,
+	// dnf excludepkgs, pacman IgnorePkg).
+	Hold []string `json:"hold,omitempty"`
+	// Autoremove removes packages no longer needed, old kernels included,
+	// after each update run.
+	Autoremove bool `json:"autoremove,omitempty"`
+	// SnapRefresh controls snapd where it exists: "hold" stops automatic
+	// refreshes, "window" moves them into the update window; empty leaves
+	// snapd alone.
+	SnapRefresh string `json:"snap_refresh,omitempty"`
+	// Reboot deferral, see RebootDefer.
+	RebootDefer
 }
+
+// RebootDefer lets desktop users postpone a scheduled reboot: up to
+// MaxDefers times, each for DeferMinutes; the reboot is announced
+// NoticeMinutes ahead. MaxDefers 0 allows no deferral.
+type RebootDefer struct {
+	NoticeMinutes int `json:"reboot_notice_minutes,omitempty"` // 5 when unset, at most 120
+	MaxDefers     int `json:"reboot_max_defers,omitempty"`     // at most 5
+	DeferMinutes  int `json:"reboot_defer_minutes,omitempty"`  // 60 when unset, 15..480
+}
+
+// Weekdays are the values of Updates.Days, in time.Weekday order.
+var Weekdays = []string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
 
 type Packages struct {
 	Install []string `json:"install"`
@@ -120,12 +148,36 @@ type filesPayload struct {
 type File struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
-	Mode    string `json:"mode"` // octal, default 0644
+	Mode    string `json:"mode"`            // octal, default 0644
+	Owner   string `json:"owner,omitempty"` // user name, default root
+	Group   string `json:"group,omitempty"` // group name, default root
 }
 
 type Firewall struct {
-	Enforce bool     `json:"enforce"`
-	Allow   []string `json:"allow"` // "22/tcp", "60000:61000/udp"
+	Enforce bool           `json:"enforce"`
+	Allow   []string       `json:"allow"`           // "22/tcp", "60000:61000/udp"
+	Rules   []FirewallRule `json:"rules,omitempty"` // allow rules limited to source networks
+}
+
+// FirewallRule allows a port only from a source network.
+type FirewallRule struct {
+	Port string `json:"port"` // as in Allow
+	From string `json:"from"` // CIDR or address
+}
+
+// FirewallRules is the effective set of allow rules: Allow without a source
+// plus Rules.
+func (f Firewall) FirewallRules() []FirewallRule {
+	out := make([]FirewallRule, 0, len(f.Allow)+len(f.Rules))
+	for _, a := range f.Allow {
+		out = append(out, FirewallRule{Port: a})
+	}
+	for _, r := range f.Rules {
+		if !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 type osPayload struct {
@@ -266,8 +318,31 @@ func (d Declaration) apply(p *Policy) error {
 		default:
 			bad("mode must be off, security or all")
 		}
-		if p.Updates.Mode != "off" && !windowRe.MatchString(p.Updates.Window) {
+		u := p.Updates
+		if (u.Mode != "off" || u.SnapRefresh == "window") && !windowRe.MatchString(u.Window) {
 			bad("window must be HH:MM-HH:MM")
+		}
+		for i, d := range u.Days {
+			if !slices.Contains(Weekdays, d) || slices.Contains(u.Days[:i], d) {
+				bad("days: %q is not one of mon, tue, wed, thu, fri, sat, sun (each once)", d)
+			}
+		}
+		if len(u.Hold) > 200 {
+			bad("hold: at most 200 packages")
+		}
+		for _, n := range u.Hold {
+			if !pkgRe.MatchString(n) {
+				bad("hold: invalid package name %q", n)
+			}
+		}
+		switch u.SnapRefresh {
+		case "", "hold", "window":
+		default:
+			bad("snap_refresh must be hold or window")
+		}
+		if u.NoticeMinutes < 0 || u.NoticeMinutes > 120 || u.MaxDefers < 0 || u.MaxDefers > 5 ||
+			u.DeferMinutes != 0 && (u.DeferMinutes < 15 || u.DeferMinutes > 480) {
+			bad("reboot_notice_minutes 0..120, reboot_max_defers 0..5, reboot_defer_minutes 15..480")
 		}
 	case TypePackages:
 		if err := strict(d.Payload, &p.Packages); err != nil {
@@ -302,6 +377,11 @@ func (d Declaration) apply(p *Policy) error {
 			if userWritable(f.Path) {
 				bad("file %s: directories writable by users cannot be managed (symlink attacks)", f.Path)
 			}
+			for _, n := range []string{f.Owner, f.Group} {
+				if n != "" && !userRe.MatchString(n) {
+					bad("file %s: invalid owner or group %q", f.Path, n)
+				}
+			}
 		}
 		p.Files = v.Files
 	case TypeFirewall:
@@ -311,6 +391,16 @@ func (d Declaration) apply(p *Policy) error {
 		for _, a := range p.Firewall.Allow {
 			if !validPortRule(a) {
 				bad("invalid firewall rule %q (port 1..65535, ranges low:high)", a)
+			}
+		}
+		for _, r := range p.Firewall.Rules {
+			if !validPortRule(r.Port) {
+				bad("invalid firewall rule %q (port 1..65535, ranges low:high)", r.Port)
+			}
+			if _, err := netip.ParsePrefix(r.From); err != nil {
+				if _, err := netip.ParseAddr(r.From); err != nil || strings.Contains(r.From, "%") {
+					bad("firewall rule %s: from must be a network (CIDR) or an address, got %q", r.Port, r.From)
+				}
 			}
 		}
 	case TypeOSVersion:
@@ -749,7 +839,7 @@ type Command struct {
 
 // CommandTypes are the one off actions an admin can send.
 var CommandTypes = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "script", "lost", "found", "wipe", "allow_uninstall", "message", "app_install", "app_remove",
-	"user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete", "software_remove"}
+	"user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete", "software_remove", "diagnostics"}
 
 // PollResponse answers the agent's frequent poll (POST /api/v1/poll).
 type PollResponse struct {
@@ -843,9 +933,12 @@ type LostMode struct {
 }
 
 type CommandResult struct {
-	ID     int64  `json:"id"`
-	OK     bool   `json:"ok"`
-	Output string `json:"output"`
+	ID     int64         `json:"id"`
+	OK     bool          `json:"ok"`
+	Output string        `json:"output"`
+	Script *ScriptResult `json:"script,omitempty"` // script command: structured result
+	// Diagnostics is the bounded, redacted log bundle of a diagnostics command.
+	Diagnostics string `json:"diagnostics,omitempty"`
 }
 
 type CheckinRequest struct {
@@ -863,7 +956,8 @@ type CheckinRequest struct {
 	UpdateResult      *UpdateResult   `json:"update_result,omitempty"` // outcome of the last agent update
 	Events            []string        `json:"events,omitempty"`
 	CatalogHash       string          `json:"catalog_hash,omitempty"`
-	AppRequests       []AppRequest    `json:"app_requests,omitempty"` // self service requests of users
+	AppRequests       []AppRequest    `json:"app_requests,omitempty"`   // self service requests of users
+	ScriptResults     []ScriptResult  `json:"script_results,omitempty"` // runs of recurring scripts
 }
 
 // Branding is the company name and PNG logo shown by the desktop helper.
@@ -900,6 +994,9 @@ type CheckinResponse struct {
 	Branding *Branding `json:"branding,omitempty"`
 	// Catalog is sent when it differs from the agent's CatalogHash.
 	Catalog *Catalog `json:"catalog,omitempty"`
+	// FallbackDNS allows the agent to ask public DNS over HTTPS resolvers
+	// when the system resolver fails (server setting, default off).
+	FallbackDNS bool `json:"fallback_dns,omitempty"`
 }
 
 // ---- signed agent releases ----
@@ -934,6 +1031,34 @@ func CompareVersions(a, b string) int {
 		}
 	}
 	return 0
+}
+
+// safeFiles and safeDirs (trailing slash) are where a files declaration
+// may write on devices enrolled without allow_scripts: plain text that no
+// program runs as code. Everything else (cron, systemd, sudoers, profiles,
+// PAM, the dynamic linker, D-Bus, binaries, the agent …) needs allow_scripts,
+// the same opt in remote scripts need. An allowlist, because a denylist of
+// code loading paths is never complete.
+var (
+	safeFiles = []string{"/etc/motd", "/etc/issue", "/etc/issue.net"}
+	safeDirs  = []string{"/etc/motd.d/", "/srv/", "/etc/opt/", "/var/opt/"}
+)
+
+// SafeFilePath reports whether p (absolute and clean) may be written by a
+// files declaration on a device without allow_scripts.
+func SafeFilePath(p string) bool {
+	if filepath.Clean(p) != p || !filepath.IsAbs(p) {
+		return false
+	}
+	if slices.Contains(safeFiles, p) {
+		return true
+	}
+	for _, d := range safeDirs {
+		if strings.HasPrefix(p, d) && len(p) > len(d) {
+			return true
+		}
+	}
+	return false
 }
 
 // userWritable reports paths below directories regular users can write to.

@@ -320,26 +320,7 @@ func fixScreenLock(a *Agent) error {
 			dconfChanged = true
 		}
 	}
-	if exists(dconfSettings) {
-		profile := readFile("/etc/dconf/profile/user")
-		if !strings.Contains(profile, "system-db:local") {
-			if profile == "" {
-				profile = "user-db:user\n"
-			}
-			if _, err := writeIfChanged("/etc/dconf/profile/user", strings.TrimRight(profile, "\n")+"\nsystem-db:local\n", 0o644); err != nil {
-				errs = append(errs, err)
-			}
-			dconfChanged = true
-		}
-	}
-	if dconfChanged {
-		if _, err := sh("dconf", "update"); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	if err := dconfReadable(); err != nil {
-		errs = append(errs, err)
-	}
+	errs = append(errs, dconfUpdate(dconfChanged, exists(dconfSettings)))
 	if !sl.allowAutologin {
 		for _, s := range autologinSettings() {
 			content := readFile(s.file)
@@ -562,6 +543,28 @@ func setINIValue(s, section, key, value string) string {
 		}
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// dconfUpdate makes sure the user profile reads the local system database
+// (when local has settings), compiles the databases when something changed and repairs the modes (dconfReadable).
+func dconfUpdate(changed, local bool) error {
+	var errs []error
+	profile := readFile("/etc/dconf/profile/user")
+	if local && !strings.Contains(profile, "system-db:local") {
+		if profile == "" {
+			profile = "user-db:user\n"
+		}
+		if _, err := writeIfChanged("/etc/dconf/profile/user", strings.TrimRight(profile, "\n")+"\nsystem-db:local\n", 0o644); err != nil {
+			errs = append(errs, err)
+		}
+		changed = true
+	}
+	if changed {
+		if _, err := sh("dconf", "update"); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(append(errs, dconfReadable())...)
 }
 
 // dconfReadable repairs the modes of the compiled dconf databases. dconf

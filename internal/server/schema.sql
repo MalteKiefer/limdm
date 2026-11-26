@@ -583,3 +583,26 @@ CREATE INDEX IF NOT EXISTS network_certs_device ON network_certs(device_id);
 -- integration v0.16.0
 -- device scope of helpdesk and auditor API tokens (tags, as for console users)
 ALTER TABLE api_tokens ADD COLUMN IF NOT EXISTS scope_tags TEXT[] NOT NULL DEFAULT '{}';
+-- W1
+-- Structured results of script commands and recurring scripts (newest 200 per device).
+CREATE TABLE IF NOT EXISTS script_results (
+    id          BIGSERIAL PRIMARY KEY,
+    device_id   TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    command_id  BIGINT,
+    name        TEXT NOT NULL DEFAULT '',
+    exit_code   INTEGER NOT NULL,
+    stdout      TEXT NOT NULL DEFAULT '',
+    stderr      TEXT NOT NULL DEFAULT '',
+    started_at  TIMESTAMPTZ NOT NULL,
+    ended_at    TIMESTAMPTZ NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS script_results_device ON script_results(device_id, id);
+-- Log bundles of the diagnostics command (newest 10 per device), downloaded by admins and helpdesk.
+CREATE TABLE IF NOT EXISTS diagnostics (
+    command_id BIGINT PRIMARY KEY,
+    device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    content    TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS diagnostics_device ON diagnostics(device_id, command_id);

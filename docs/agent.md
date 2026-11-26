@@ -180,7 +180,7 @@ Agents are updated from the console, page **Agents**:
 
 1. The server checks `LIMDM_RELEASE_REPO` on GitHub every six hours (or on **Check for new
    versions**), downloads the agent packages and verifies them against the release's
-   `SHA256SUMS`. A release signed with the release key also carries `SHA256SUMS.sig`.
+   `SHA256SUMS` and `SHA256SUMS.sig`.
 2. An admin **approves** a version. Nothing is installed before that.
 3. Rollout: with **update agents automatically**, devices tagged with the pilot tag get an
    approved version at their next check in, all others after the delay (default 7 days).
@@ -188,7 +188,8 @@ Agents are updated from the console, page **Agents**:
    version that is not blocked, on that device only, regardless of policy and delay (also a
    downgrade). Picking a version counts as its approval for this device. **Outdated agents**
    on the Agents page updates single devices to the newest approved version.
-4. The agent checks the signature of the checksums (when it was built with a release key),
+4. The agent checks the signature of the checksums against the release key compiled into
+   it (an agent built without one refuses every self update and reports why),
    downloads the package for its distribution and architecture over mTLS, verifies the
    checksum, keeps a copy of the running binary and installs the package with apt or dnf in
    a separate systemd unit.
@@ -297,8 +298,10 @@ shown) and run an action on all of them, like in RMM tools:
 * **Software**: install or remove a catalog app (also per device under **Software**,
   **Catalog**).
 * **Tags**: add or remove a tag.
+* **Script** (admins only): run a script with parameters and a timeout on every selected
+  device that allows scripts.
 
-Lost mode, wipe and scripts stay single device actions. Filter the list by tag, or follow a
+Lost mode and wipe stay single device actions. Filter the list by tag, or follow a
 count from another page: every device count in the console (catalog installs, Flatpaks and
 remotes on devices, blueprints, agent versions, failing checks) opens the list filtered to
 those devices, ready for a bulk action. Tags are also blueprint conditions.
@@ -343,8 +346,22 @@ Other commands:
   unattended-upgrades or PackageKit) or dnf, then system wide Flatpaks.
 * **Run script**: a shebang (`#!/bin/bash`, `#!/usr/bin/env python3`) picks the
   interpreter, otherwise `/bin/sh`; works on hardened systems with a noexec `/var`.
+  **Parameters** (`NAME=value` per line) arrive as environment variables; names are
+  letters, digits and underscore, and variables that change how code is loaded (`PATH`,
+  `LD_*`, `BASH_ENV`, `PYTHONPATH` …) are refused. The timeout is 1 to 240 minutes
+  (default 30). The device reports exit code, start and end, and the last 16 KiB of stdout
+  and stderr; **Script results** on the **Commands** tab shows the newest 50 (200 are
+  kept per device). Recurring scripts (`com.limdm.scripts`) report the same way instead of
+  an event.
 * **Send message**: a notification and a dialog in every graphical session; the command
   fails when no dialog could be shown.
+* **Collect logs** (admins and helpdesk, **Commands** tab, **Diagnostics**): the agent
+  sends the last 2000 lines of its own journal (agent and watchdog) and the warnings and
+  errors of the current boot (last 1000 lines), at most 512 KiB. Before sending it masks
+  private keys, `key=value` pairs with secret names (password, token, secret, api key …),
+  authorization headers, credentials in URLs and recovery keys. The server keeps the
+  newest 10 bundles per device; admins and the helpdesk download them as text, and every
+  download is in the audit log as `device.diagnostics.download`.
 
 After unlocking, users unlock their screen with their usual password. Lost mode locks the
 passwords the same way and ends the sessions. The device page shows the latest lock,

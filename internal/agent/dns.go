@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -39,9 +40,10 @@ type dohEntry struct {
 	expires time.Time
 }
 
-// fallbackDNS is off with "no_fallback_dns": true in config.json (networks
-// that must not reach public resolvers).
-var fallbackDNS = true
+// fallbackDNS is opt in: the server setting turns it on (remembered in the
+// state for the next start), "no_fallback_dns": true in agent.json keeps it
+// off on a device whatever the server says.
+var fallbackDNS atomic.Bool
 
 var (
 	dohMu    sync.Mutex
@@ -49,7 +51,7 @@ var (
 	// dohClient trusts the system roots: the resolvers' certificates carry
 	// their IP addresses.
 	dohClient = &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
-		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}, Proxy: http.ProxyFromEnvironment}}
+		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}, Proxy: agentProxy}}
 )
 
 // dohAnswer is the JSON format of both Cloudflare and Google.
@@ -141,7 +143,7 @@ func fallbackDial() func(ctx context.Context, network, addr string) (net.Conn, e
 	d := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		conn, err := d.DialContext(ctx, network, addr)
-		if err == nil || !fallbackDNS {
+		if err == nil || !fallbackDNS.Load() {
 			return conn, err
 		}
 		host, port, serr := net.SplitHostPort(addr)

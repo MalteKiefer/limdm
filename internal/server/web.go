@@ -103,7 +103,7 @@ func parsePages(lang, layout string) map[string]*template.Template {
 				"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour", "message": "Message",
 				"app_install": "Install app", "app_remove": "Remove app",
 				"user_create": "Create user", "user_admin": "Change admin rights", "user_lock": "Lock user", "user_unlock": "Unlock user",
-				"user_password": "Reset password", "user_delete": "Delete user", "software_remove": "Remove software"}[a])
+				"user_password": "Reset password", "user_delete": "Delete user", "software_remove": "Remove software", "diagnostics": "Collect logs"}[a])
 		},
 		"join":      strings.Join,
 		"hasPrefix": strings.HasPrefix,
@@ -187,6 +187,7 @@ var typeLabels = map[string]string{
 	api.TypeDiskEncryption: "Disk encryption recovery", api.TypePolkit: "polkit rules", api.TypeSudo: "sudo rules",
 	api.TypeBootloader: "Boot loader password", api.TypeSoftwareStore: "Software store policy",
 	api.TypePrinters: "Printers",
+	api.TypeDconf:    "GNOME settings (dconf)", api.TypeLocalUsers: "Local accounts",
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, name string, data map[string]any) {
@@ -214,6 +215,7 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /devices/{id}", s.page(s.device))
 	mux.HandleFunc("POST /devices/bulk", s.helpdeskPage(s.devicesBulk))
 	mux.HandleFunc("POST /devices/{id}/command", s.helpdeskPage(s.deviceCommand))
+	mux.HandleFunc("GET /devices/{id}/diagnostics/{cid}", s.page(s.diagnosticsDownload))
 	mux.HandleFunc("POST /devices/{id}/agent-update", s.page(s.deviceAgentUpdate))
 	mux.HandleFunc("POST /devices/{id}/recovery", s.helpdeskPage(s.recoveryView))
 	mux.HandleFunc("GET /directory", s.page(s.adminOrAuditor(s.unscoped(s.directoryPage))))
@@ -411,7 +413,8 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 
 // devicesBulk runs one action on the selected devices: a command, an
 // agent update, or adding and removing a tag. Destructive commands (lost
-// mode, wipe) and scripts stay single device actions.
+// mode, wipe) stay single device actions; scripts need the admin role
+// (commandPayload).
 func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
 	if err := r.ParseForm(); err != nil {
@@ -469,8 +472,8 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 			}
 		}
 	case "command":
-		if typ == "lost" || typ == "wipe" || typ == "script" {
-			http.Error(w, "lost mode, wipe and scripts are sent to one device at a time", http.StatusBadRequest)
+		if typ == "lost" || typ == "wipe" {
+			http.Error(w, "lost mode and wipe are sent to one device at a time", http.StatusBadRequest)
 			return
 		}
 		payload, code, msg := s.commandPayload(r, sess, ids[0], typ)
@@ -654,7 +657,20 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		At                       time.Time
 	}
 	var cmds []cmd
+	var scripts []scriptRow
+	var diags []diagRow
 	if tab == "commands" { // outputs can be large; only the commands tab shows them
+		var err error
+		if scripts, err = s.scriptResults(ctx, id); err != nil {
+			s.fail(w, err)
+			return
+		}
+		if sess.Role == "admin" || sess.Role == "helpdesk" {
+			if diags, err = s.diagnosticsList(ctx, id); err != nil {
+				s.fail(w, err)
+				return
+			}
+		}
 		rows, err := s.db.Query(ctx, `SELECT id, type, status, output, created_by, created_at FROM commands WHERE device_id=$1 ORDER BY id DESC LIMIT 50`, id)
 		if err == nil {
 			cmds, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (cmd, error) {
@@ -873,7 +889,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
 		"CommandTypes": commandTypesFor(sess.Role),
-		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
+		"Commands":     cmds, "Scripts": scripts, "Diagnostics": diags, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
 		"Resolved": res, "Tags": strings.Join(tags, ", "), "TagList": tags, "Protective": protect, "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery, "Tampered": tampered, "Events": events, "EvPage": evPage, "EvPages": evPages, "EvTotal": evTotal, "EvFrom": min((evPage-1)*evSize+1, evTotal), "EvTo": min(evPage*evSize, evTotal),
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"},
 		"Sub": sub, "ShowSystem": r.URL.Query().Get("system") == "1", "NetworkInfo": len(data.Inv.DNS)+len(data.Inv.Routes) > 0 || hasIPs(data.Inv.Interfaces),
@@ -1052,6 +1068,11 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		payload = ""
 	case sess.Role != "admin":
 		return "", http.StatusForbidden, "scripts require the admin role"
+	default:
+		var err error
+		if payload, err = scriptCommandPayload(r); err != nil {
+			return "", http.StatusBadRequest, err.Error()
+		}
 	}
 	return payload, 0, ""
 }

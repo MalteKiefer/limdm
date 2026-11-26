@@ -39,17 +39,24 @@ Rollout of agent versions to devices: [agent.md](agent.md#updates).
 
 ### Release key
 
-Without a release key agents trust the checksums the server hands them (over mTLS). With it,
-a compromised server or GitHub account cannot push a package the key did not sign:
+Self updates fail closed. An agent installs an update only when the release `SHA256SUMS`
+carry a valid signature of the release key whose public half is compiled into it. An agent
+built without a public key (`make build` without `UPDATE_PUBKEY`) refuses every self update
+and reports the event "agent update to X failed: ... built without a release signing key";
+update such devices with the package manager.
 
 ```sh
-limdm-server keygen -out release.key          # once; keep the private key offline
+limdm-server keygen -out release.key          # once
 ```
 
-* Repository secret `RELEASE_SIGNING_KEY`: content of `release.key`. The release workflow
-  signs `SHA256SUMS` and uploads `SHA256SUMS.sig`.
-* Repository variable `UPDATE_PUBKEY`: the printed public key. Release builds embed it; such
-  agents refuse unsigned or wrongly signed updates.
+* Secret `RELEASE_SIGNING_KEY` of the protected `release` environment: content of
+  `release.key`. The release workflow signs `SHA256SUMS` and uploads `SHA256SUMS.sig`.
+* Variable `UPDATE_PUBKEY`: the printed public key. Release builds embed it.
+* The workflow fails when either is missing; it never publishes unsigned checksums.
+
+The private key is a CI secret, not an offline key. It is protected by the environment's
+required reviewers and the tag ruleset, so anyone who can approve a release run can sign.
+Keep a copy of `release.key` outside GitHub to rotate or recover it.
 
 Manual signing: `limdm-server sign -key release.key limdm_<version>_SHA256SUMS`.
 

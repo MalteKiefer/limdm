@@ -22,9 +22,13 @@ provenance attestation signed with Sigstore, and an SPDX SBOM:
 gh attestation verify limdm-agent_<version>_amd64.deb --repo MalteKiefer/limdm
 ```
 
-Agent self updates are additionally signed with an offline Ed25519 release key
-whose public half is compiled into the agent. Agents refuse unsigned releases
-and downgrades.
+Agent self updates are additionally signed with an Ed25519 release key whose
+public half is compiled into the agent. The private key is a CI secret of the
+protected `release` environment (required reviewers, tag ruleset), not an
+offline key: whoever can approve a release run can sign. The release workflow
+fails when the key or the public key is missing. Agents refuse unsigned or
+wrongly signed releases and downgrades; an agent built without a public key
+(for example a local `make build`) refuses every self update.
 
 ## Security model
 

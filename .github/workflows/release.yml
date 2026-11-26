@@ -38,6 +38,15 @@ jobs:
         run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Require release keys
+        # Agents built without UPDATE_PUBKEY refuse every self update, and
+        # unsigned checksums would be refused by released agents.
+        env:
+          UPDATE_PUBKEY: ${{ vars.UPDATE_PUBKEY }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          [ -n "$UPDATE_PUBKEY" ] || { echo "::error::UPDATE_PUBKEY is not set"; exit 1; }
+          [ -n "$RELEASE_SIGNING_KEY" ] || { echo "::error::RELEASE_SIGNING_KEY is not set"; exit 1; }
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
@@ -48,13 +57,13 @@ jobs:
           # Public Ed25519 key the agent accepts self updates from (limdm-server keygen).
           UPDATE_PUBKEY: ${{ vars.UPDATE_PUBKEY }}
       - name: Sign release checksums
-        # Agents built with UPDATE_PUBKEY only install updates whose SHA256SUMS
-        # carry this signature. Skipped while no signing key is configured.
+        # Agents only install updates whose SHA256SUMS carry this signature.
+        # A missing key fails the release instead of shipping unsigned sums.
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          [ -n "$RELEASE_SIGNING_KEY" ] || { echo "no RELEASE_SIGNING_KEY, checksums stay unsigned"; exit 0; }
+          [ -n "$RELEASE_SIGNING_KEY" ] || { echo "::error::RELEASE_SIGNING_KEY is not set in the release environment"; exit 1; }
           sums=$(ls dist/*_SHA256SUMS)
           go run ./cmd/limdm-server sign -key-env RELEASE_SIGNING_KEY "$sums" > "$sums.sig"
           gh release upload "$GITHUB_REF_NAME" "$sums.sig"

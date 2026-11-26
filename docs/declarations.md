@@ -49,6 +49,34 @@ switching it off also deletes stored values. `logged_in_users` reports active se
 `mode` is `off`, `security` or `all`. Updates run inside the local time window; with
 `reboot` the device restarts in the window when the update requires it.
 
+Optional patch management fields:
+
+```json
+{"mode": "security", "window": "22:00-04:00", "days": ["sat", "sun"], "hold": ["nginx"],
+ "autoremove": true, "snap_refresh": "window"}
+```
+
+* `days`: weekdays (`mon` … `sun`) the window applies to; empty means every day. A window
+  across midnight belongs to the day it starts on. Pending security updates count as
+  handled until the next window (up to 8 days with `days`, 48 hours without).
+* `hold`: packages kept at their installed version, also when `mode` is `off`. Debian
+  family: `apt-mark hold` (installed packages only); Fedora family: `excludepkgs` in a
+  libdnf5 drop in and in `/etc/dnf/dnf.conf` (dnf4), so dnf neither upgrades nor installs
+  them; Arch: `IgnorePkg` in `/etc/pacman.conf`. Not supported on Alpine (pin versions in
+  `/etc/apk/world`). Packages removed from the list are released again; values changed by
+  hand in `dnf.conf` or `pacman.conf` are left alone.
+* `autoremove`: after each update run remove packages nothing needs any more, old kernels
+  included (`apt-get autoremove --purge`, `dnf autoremove`, pacman orphans).
+* `snap_refresh` (only where snapd is installed): `hold` stops automatic snap refreshes,
+  `window` sets `refresh.timer` to the update window and days. Removing it restores the
+  snapd default.
+* Restart notice and deferral (with `reboot`): the restart is scheduled
+  `reboot_notice_minutes` ahead (default 5, at most 120) and announced in every desktop
+  session. With `reboot_max_defers` (0 to 5, default 0) the desktop helper offers to
+  postpone it by `reboot_defer_minutes` (15 to 480, default 60) that many times; it asks
+  again shortly before each new time. After the last deferral the restart happens. Every
+  deferral is reported as an event with the user name.
+
 ### `com.limdm.packages` (list)
 
 ```json
@@ -114,10 +142,22 @@ check the URL) and disables the original. Assign the item to a blueprint to appl
 ### `com.limdm.files` (list)
 
 ```json
-{"files": [{"path": "/etc/motd", "content": "...", "mode": "0644"}]}
+{"files": [{"path": "/etc/motd", "content": "...", "mode": "0644", "owner": "root", "group": "root"}]}
 ```
 
-Absolute, clean paths; merged by path.
+Absolute, clean paths; merged by path. `owner` and `group` are names (default root).
+Files removed from the declaration are deleted from the device: the agent remembers the
+paths it wrote (from this version on) and removes the undeclared ones, except while a files
+declaration is invalid.
+
+On devices enrolled without `allow_scripts` (the opt in remote scripts need) only plain
+text locations are accepted: `/etc/motd`, `/etc/issue`, `/etc/issue.net`, and files below
+`/etc/motd.d`, `/srv`, `/etc/opt` and `/var/opt`. Everything else is refused, because
+almost every other system path is read as code by something running as root (cron,
+systemd, sudo, PAM, shell profiles, the dynamic linker, D-Bus, package manager hooks …).
+There the agent also refuses files with an execute bit and paths with a symlink in any
+component, the file itself included, so a link cannot redirect the write. With
+`allow_scripts` any absolute path outside user writable directories works as before.
 
 ### `com.limdm.certificates` (list)
 
@@ -148,16 +188,27 @@ SHA-256 fingerprint of what is installed.
 ```
 
 DNS uses systemd-resolved; NTP uses systemd-timesyncd or chrony. Proxy values are written
-to `/etc/profile.d`, `/etc/environment.d` and the apt or dnf configuration; they are checked
-against strict patterns because they end up in shell files.
+to `/etc/profile.d`, `/etc/environment.d`, apt (`/etc/apt/apt.conf.d/60limdm-proxy`), dnf5
+(`/etc/dnf/libdnf5.conf.d`) and dnf4 (`proxy=` in `/etc/dnf/dnf.conf`, RHEL 9 family). They
+also reach the agent itself: a systemd drop in for `limdm-agent.service` (followed by
+`systemctl daemon-reload`) sets them for the next start, and the running agent applies them
+at once to its own connections and to every tool it runs (pacman, apk, flatpak, dnf, apt).
+Removing the declaration removes all of this; a `proxy=` in `dnf.conf` that was changed by
+hand stays. The values are checked against strict patterns because they end up in shell
+files.
 
 ### `com.limdm.scripts` (list)
 
 ```json
-{"scripts": [{"name": "cleanup", "interval_hours": 24, "body": "#!/bin/sh\njournalctl --vacuum-time=30d"}]}
+{"scripts": [{"name": "cleanup", "interval_hours": 24, "body": "#!/bin/sh\njournalctl --vacuum-time=$KEEP",
+              "params": {"KEEP": "30d"}, "timeout_minutes": 10}]}
 ```
 
-Recurring root scripts, only on devices enrolled with `allow_scripts`.
+Recurring root scripts, only on devices enrolled with `allow_scripts`. `params` are passed as
+environment variables (names as for the script command, reserved ones such as `PATH` and
+`LD_*` are refused), `timeout_minutes` is 1 to 240 (default 30). Each run is reported to the
+server with exit code, start, end and truncated output and shown under **Script results**
+on the device page.
 
 ### `com.limdm.network` (list)
 
@@ -206,8 +257,16 @@ CUPS print queues, set up with `lpadmin` (separate arguments, no shell).
 ### `com.limdm.firewall` (list)
 
 ```json
-{"enforce": true, "allow": ["22/tcp"]}
+{"enforce": true, "allow": ["22/tcp"], "rules": [{"port": "5432/tcp", "from": "10.0.0.0/8"}]}
 ```
+
+`allow` opens ports for everybody, `rules` opens a port only for a source network (CIDR)
+or address. ufw (Debian family) gets `ufw allow from … to any port … proto …`, firewalld a
+rich rule in the default zone. The agent keeps the rules in line with the declaration also
+while the firewall is active: new rules are added first, rules it added earlier and that
+are no longer declared are deleted. Rules added by hand or by agents before 0.16 are never
+deleted. Without a firewall declaration (or with `enforce` off) the rules are left as they
+are, so a dropped item cannot lock out SSH.
 
 ### `com.limdm.ssh` (list), `com.limdm.banner`
 
@@ -255,6 +314,41 @@ which would otherwise win. `"hide_users": true` hides the user list (GDM
 `disable-user-list`, LightDM `greeter-hide-users`, SDDM does not remember the last user).
 LightDM guest sessions are off whenever the login screen is managed. Agents before 0.9.2
 reject the two keys as unknown, so add them only after the fleet runs 0.9.2.
+
+### `com.limdm.localusers` (list)
+
+```json
+{"users": [{"name": "svc-backup", "uid": 1500, "full_name": "Backup", "groups": ["backup"],
+            "shell": "/bin/bash", "locked": false, "authorized_keys": ["ssh-ed25519 AAAA... backup@example.com"]}]}
+```
+
+Local accounts that must exist; items are merged by name. A missing account is created
+with a home (`uid` is used only then, 1000 to 60000; an existing account is never
+renumbered) and without a password, so it signs in with its SSH keys. Shell and groups are
+kept in line: declared groups are added, groups an earlier version of the declaration
+added and that are no longer listed are removed, other memberships stay. `locked` locks
+the account and ends its sessions; unlocking undoes only a lock the declaration set.
+`authorized_keys` are plain public keys (no options); they are written root owned to
+`/etc/ssh/limdm_authorized_keys/<user>`, never into the home, and a drop in
+(`00-limdm-keys.conf`) makes sshd read them besides `~/.ssh/authorized_keys`. This drop in
+takes precedence over an `AuthorizedKeysFile` set with `com.limdm.ssh`.
+
+Accounts removed from the declaration are locked, never deleted, and their key file is
+removed. The imperative user commands on the device page keep working.
+
+### `com.limdm.dconf` (list)
+
+```json
+{"settings": {"/org/gnome/desktop/interface/clock-show-seconds": "true",
+              "/org/gnome/desktop/background/picture-uri": "'file:///usr/share/backgrounds/corp.png'"},
+ "locks": ["/org/gnome/desktop/background/"]}
+```
+
+Defaults for every user of GNOME and other dconf based desktops. Keys are full paths, values
+GVariant text (strings in single quotes) on one line. `locks` lists keys or directories
+(ending in `/`) users cannot change. Written to `/etc/dconf/db/local.d/70-limdm-custom`
+and its locks file next to the screen lock settings, compiled with `dconf update`; items
+are merged by key, locks are joined. Removing the declaration removes both files.
 
 ### `com.limdm.sudo` (list)
 

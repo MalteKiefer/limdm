@@ -14,8 +14,10 @@
   possession of the key and the serial must still be the registered one. This exception
   applies to the renewal endpoint only; every other endpoint verifies the certificate
   against the device CA in the server, not only in the handshake.
-* **Agent updates** need an Ed25519 signature from an offline release key compiled into
-  the agent. Downgrades are refused.
+* **Agent updates** need an Ed25519 signature from the release key whose public half is
+  compiled into the agent; an agent built without it refuses self updates (fail closed).
+  The private key is a CI secret of the protected `release` environment, not an offline
+  key, and the release fails without it. Downgrades are refused.
 * **Signed commands.** Every command (lock, wipe, script, message …) is signed when it
   is created, with an Ed25519 key in `command.key` next to the CA key, never in the
   database. The signature covers device, command ID, type, creation time and payload. The
@@ -29,12 +31,14 @@
   network and network certificates never reach the agent API. Agents send only a CSR; the
   server sets subject and SANs. Retire and wipe revoke them on the CRL. See
   [Network profiles](network.md).
-* **Fallback DNS.** When the system resolver cannot resolve the server's name or none of
+* **Fallback DNS (opt in).** Off by default. When an admin turns on **Settings, Security,
+  Privacy, public DNS over HTTPS resolvers**, agents learn it at their next check in and
+  remember it. Then, when the system resolver cannot resolve the server's name or none of
   its addresses answers, the agent asks Cloudflare (1.1.1.1, 1.0.0.1) and Google (8.8.8.8,
   8.8.4.4) over DNS over HTTPS, by IP and with their certificates checked; plain DNS on
   port 53 is never used for this. A wrong answer cannot redirect the agent: TLS still
   verifies the server's name against the pinned CA. `"no_fallback_dns": true` in
-  `/etc/limdm/config.json` turns it off for networks that must not reach public resolvers.
+  `/etc/limdm/agent.json` keeps it off on a device whatever the server setting says.
 
 ## Console
 
@@ -188,17 +192,24 @@ Failed local and OIDC sign ins and rejected enrollments are logged with the clie
 
 ## Privacy
 
+* **Diagnostics.** Log bundles (the **Collect logs** command) are redacted on the device
+  before they leave it, capped at 512 KiB, kept for the newest 10 per device and only
+  downloadable by admins and the helpdesk; each download is audited. Redaction is pattern
+  based: review a bundle before passing it on outside IT.
+
 * By default the agent reports everything, including IP addresses, DNS, routes and logged
   in users. `com.limdm.privacy` switches items off per blueprint.
 * The server records the public address of every check in (the agent port is never behind
-  a proxy) and looks up its location (country, region, city, provider) at
-  `LIMDM_GEOIP_URL`, default `https://ipwho.is/`. Only the address is sent, and only when it
-  changed. `LIMDM_GEOIP_URL=off` disables the lookup; the address is still shown. Devices
+  a proxy). Looking up its location (country, region, city, provider) is opt in: off by
+  default, turned on in **Settings, Security, Privacy**. Then the server asks
+  `LIMDM_GEOIP_URL`, default `https://ipwho.is/`, a third party possibly outside the EU.
+  Only the address is sent, and only when it changed. `LIMDM_GEOIP_URL=off` disables the
+  lookup regardless of the setting; the address is still shown. Devices
   with `network_info: false` get neither: the server stores no public address or location
   for them and deletes what was stored.
 * Outbound connections: the server talks to the configured OIDC provider, the Google
   Directory API (if configured), the webhook URL (if configured), GitHub for agent releases
-  and the location service. Devices talk to the
+  and the location service (only when geolocation is on). Devices talk to the
   LiMDM server, the identity provider during desktop login, their package repositories and
   the osquery repository. `/install.sh` downloads from GitHub.
 

@@ -72,6 +72,7 @@ func (a *Agent) applyExtra() {
 	run(api.TypeProxy, a.applyProxy(x.Proxy))
 	run(api.TypeFlatpak, a.applyFlatpak(x.Flatpak))
 	run(api.TypeScripts, a.applyScripts(x.Scripts))
+	run(api.TypeDconf, applyDconf(x.Dconf))
 	run(api.TypePolkit, applyPolkit(x.Polkit))
 	run(api.TypeSudo, applySudo(x.Sudo))
 	run(api.TypeBootloader, a.applyBootloader(x.Bootloader))
@@ -377,44 +378,6 @@ func applyNTP(n *api.NTP) error {
 	return errors.New("no supported time service (systemd-timesyncd, or chrony with /etc/chrony/sources.d)")
 }
 
-func (a *Agent) applyProxy(p *api.Proxy) error {
-	var profile, envd, apt, dnf string
-	if p != nil {
-		var b, e strings.Builder
-		b.WriteString(managedHeader)
-		e.WriteString(managedHeader)
-		for k, v := range map[string]string{"http_proxy": p.HTTP, "https_proxy": p.HTTPS, "no_proxy": p.NoProxy} {
-			if v != "" {
-				q := "'" + strings.ReplaceAll(v, "'", `'\''`) + "'" // single quotes: no shell expansion
-				fmt.Fprintf(&b, "export %s=%s\nexport %s=%s\n", k, q, strings.ToUpper(k), q)
-				fmt.Fprintf(&e, "%s=%s\n%s=%s\n", k, v, strings.ToUpper(k), v)
-			}
-		}
-		profile, envd = b.String(), e.String()
-		if a.host.family == "debian" {
-			apt = managedHeader
-			if p.HTTP != "" {
-				apt += fmt.Sprintf("Acquire::http::Proxy %q;\n", p.HTTP)
-			}
-			if p.HTTPS != "" {
-				apt += fmt.Sprintf("Acquire::https::Proxy %q;\n", p.HTTPS)
-			}
-		} else if proxy := firstNonEmpty(p.HTTPS, p.HTTP); proxy != "" {
-			dnf = managedHeader + "[main]\nproxy=" + proxy + "\n"
-		}
-	}
-	_, e1 := writeOrRemove("/etc/profile.d/limdm-proxy.sh", profile, 0o644)
-	_, e2 := writeOrRemove("/etc/environment.d/60-limdm-proxy.conf", envd, 0o644)
-	var e3 error
-	switch a.host.family { // pacman and apk read http_proxy from the environment
-	case "debian":
-		_, e3 = writeOrRemove("/etc/apt/apt.conf.d/60limdm-proxy", apt, 0o644)
-	case "fedora":
-		_, e3 = writeOrRemove("/etc/dnf/libdnf5.conf.d/60-limdm-proxy.conf", dnf, 0o644)
-	}
-	return errors.Join(e1, e2, e3)
-}
-
 func (a *Agent) applyFlatpak(f *api.Flatpak) error {
 	if f == nil || (len(f.Remotes) == 0 && len(f.Install) == 0 && len(f.Remove) == 0) {
 		return nil
@@ -494,12 +457,15 @@ func (a *Agent) applyScripts(scripts []api.Script) error {
 			continue
 		}
 		a.state.ScriptRuns[sc.Name] = time.Now().Round(0) // wall clock, suspend included
-		out, err := runScript(sc.Body)
+		res, err := runScript(sc.Body, sc.Params, sc.TimeoutMinutes)
+		res.Name = sc.Name
+		if len(a.state.ScriptResults) >= 50 { // bounded while offline: the oldest go first
+			a.state.ScriptResults = a.state.ScriptResults[1:]
+		}
+		a.state.ScriptResults = append(a.state.ScriptResults, res)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", sc.Name, err))
-			continue
 		}
-		a.event("script %s ran: %s", sc.Name, lastLines(out, 2))
 	}
 	return errors.Join(errs...)
 }

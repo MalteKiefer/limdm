@@ -773,6 +773,14 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := storeDiagnostics(ctx, tx, id, req.Results); err != nil {
+		s.failAPI(w, err)
+		return
+	}
+	if err := storeScriptResults(ctx, tx, id, req); err != nil {
+		s.failAPI(w, err)
+		return
+	}
 	tamperEvent, err := s.storeEvents(ctx, tx, id, req.Events)
 	if err != nil {
 		s.failAPI(w, err)
@@ -780,7 +788,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := api.CheckinResponse{ServerTime: time.Now().UTC(), CommandKey: hex.EncodeToString(s.cmdKey.Public().(ed25519.PublicKey)),
-		NeedStatus: statusHash != req.StatusHash, NeedPackages: pkgHash != req.PackagesHash}
+		NeedStatus: statusHash != req.StatusHash, NeedPackages: pkgHash != req.PackagesHash, FallbackDNS: s.settings().FallbackDNS}
 	res, err := resolveDevice(ctx, tx, id)
 	if err != nil {
 		s.failAPI(w, err)

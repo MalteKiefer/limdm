@@ -728,7 +728,7 @@ func runSecurityUpdates(a *Agent) (string, string) {
 		return pass, detail
 	}
 	// Patch process working: pending updates are tolerated until the next window run.
-	if m := a.pol.Updates.Mode; m != "" && m != "off" && time.Since(a.state.LastUpdateRun) < 48*time.Hour {
+	if m := a.pol.Updates.Mode; m != "" && m != "off" && time.Since(a.state.LastUpdateRun) < updateGap(a.pol.Updates) {
 		return pass, detail + ", installed in the next maintenance window"
 	}
 	return fail, detail
@@ -837,10 +837,8 @@ func (a *Agent) applyFirewall() error {
 			}
 		}
 		// allow rules first so enabling never cuts an active SSH session
-		for _, rule := range a.pol.Firewall.Allow {
-			if _, err := sh("ufw", "allow", rule); err != nil {
-				return err
-			}
+		if err := a.syncFirewallRules(); err != nil {
+			return err
 		}
 		if _, err := sh("ufw", "default", "deny", "incoming"); err != nil {
 			return err
@@ -856,14 +854,7 @@ func (a *Agent) applyFirewall() error {
 	if err := svc("enable-now", "firewalld"); err != nil {
 		return err
 	}
-	for _, rule := range a.pol.Firewall.Allow {
-		port := strings.Replace(rule, ":", "-", 1)
-		if _, err := sh("firewall-cmd", "--permanent", "--add-port="+port); err != nil {
-			return err
-		}
-	}
-	_, err := sh("firewall-cmd", "--reload")
-	return err
+	return a.syncFirewallRules()
 }
 
 func runMACEnabled(a *Agent) (string, string) {

@@ -445,7 +445,7 @@
   <form method="post" action="/devices/{{$id}}/command">
     {{template "csrf" .CSRF}}
     <div class="inline">
-      <label>{{t "Command"}}<select name="type">{{$pre := .PreType}}<optgroup label="{{t "Updates"}}"><option value="sync" {{if eq $pre "sync"}}selected{{end}}>{{actionLabel "sync"}}</option><option value="update" {{if eq $pre "update"}}selected{{end}}>{{actionLabel "update"}}</option></optgroup><optgroup label="{{t "Power"}}"><option value="reboot" {{if eq $pre "reboot"}}selected{{end}}>{{actionLabel "reboot"}}</option><option value="shutdown" {{if eq $pre "shutdown"}}selected{{end}}>{{actionLabel "shutdown"}}</option></optgroup><optgroup label="{{t "Security"}}"><option value="lock" {{if eq $pre "lock"}}selected{{end}}>{{actionLabel "lock"}}</option><option value="unlock" {{if eq $pre "unlock"}}selected{{end}}>{{actionLabel "unlock"}}</option><option value="lost" {{if eq $pre "lost"}}selected{{end}}>{{actionLabel "lost"}}</option><option value="found" {{if eq $pre "found"}}selected{{end}}>{{actionLabel "found"}}</option><option value="wipe" {{if eq $pre "wipe"}}selected{{end}}>{{actionLabel "wipe"}}</option></optgroup><optgroup label="{{t "Agent"}}"><option value="script" {{if eq $pre "script"}}selected{{end}}>{{actionLabel "script"}}</option><option value="allow_uninstall" {{if eq $pre "allow_uninstall"}}selected{{end}}>{{actionLabel "allow_uninstall"}}</option></optgroup></select></label>
+      <label>{{t "Command"}}<select name="type">{{$pre := .PreType}}<optgroup label="{{t "Updates"}}"><option value="sync" {{if eq $pre "sync"}}selected{{end}}>{{actionLabel "sync"}}</option><option value="update" {{if eq $pre "update"}}selected{{end}}>{{actionLabel "update"}}</option></optgroup><optgroup label="{{t "Power"}}"><option value="reboot" {{if eq $pre "reboot"}}selected{{end}}>{{actionLabel "reboot"}}</option><option value="shutdown" {{if eq $pre "shutdown"}}selected{{end}}>{{actionLabel "shutdown"}}</option></optgroup><optgroup label="{{t "Security"}}"><option value="lock" {{if eq $pre "lock"}}selected{{end}}>{{actionLabel "lock"}}</option><option value="unlock" {{if eq $pre "unlock"}}selected{{end}}>{{actionLabel "unlock"}}</option><option value="lost" {{if eq $pre "lost"}}selected{{end}}>{{actionLabel "lost"}}</option><option value="found" {{if eq $pre "found"}}selected{{end}}>{{actionLabel "found"}}</option><option value="wipe" {{if eq $pre "wipe"}}selected{{end}}>{{actionLabel "wipe"}}</option></optgroup><optgroup label="{{t "Agent"}}"><option value="script" {{if eq $pre "script"}}selected{{end}}>{{actionLabel "script"}}</option><option value="allow_uninstall" {{if eq $pre "allow_uninstall"}}selected{{end}}>{{actionLabel "allow_uninstall"}}</option><option value="diagnostics" {{if eq $pre "diagnostics"}}selected{{end}}>{{actionLabel "diagnostics"}}</option></optgroup></select></label>
       <label class="delay-only">{{t "Delay in minutes"}}<input name="minutes" type="number" min="0" max="1440" value="5"><small class="field-hint">{{t "0 = now"}}</small></label>
     </div>
     <div class="lost-only notice">{{t "Blocks every login, ends running sessions and shows your message. With an escrowed recovery key, every other disk key slot is removed: after the next power off only IT can open the disk."}}</div>
@@ -453,6 +453,8 @@
     <div class="wipe-only notice error">{{t "Erases the disk encryption headers: all data on the device is lost for good. Devices without disk encryption are refused."}}</div>
     <label class="confirm-only">{{t "Type the host name to confirm"}} <span class="mono">{{.D.Hostname}}</span><input name="confirm" autocomplete="off" spellcheck="false"></label>
     <label class="script-only">{{t "Script"}}<textarea name="payload" rows="6" class="code" placeholder="#!/bin/sh"></textarea><small class="field-hint">{{t "Runs as root, only if the device allows scripts"}}</small></label>
+    <label class="script-only">{{t "Parameters"}}<textarea name="params" rows="3" class="code" placeholder="TARGET=/srv/data" spellcheck="false"></textarea><small class="field-hint">{{t "One NAME=value per line, passed as environment variables"}}</small></label>
+    <label class="script-only">{{t "Timeout in minutes"}}<input name="timeout_minutes" type="number" min="1" max="240" placeholder="30"></label>
     <button>{{t "Send"}}</button>
   </form>
 </section>
@@ -462,6 +464,24 @@
   <div class="scroll"><table>
     <thead><tr><th>#</th><th>{{t "Command"}}</th><th>{{t "Status"}}</th><th>{{t "By"}}</th><th>{{t "Created"}}</th><th>{{t "Output"}}</th></tr></thead>
     <tbody>{{range .Commands}}<tr><td class="num">{{.ID}}</td><td>{{actionLabel .Type}}</td><td><span class="pill {{if eq .Status "ok"}}ok{{else if eq .Status "failed"}}bad{{else}}warn{{end}}">{{t .Status}}</span></td><td>{{.By}}</td><td>{{fmtTime .At}}</td><td><pre>{{.Output}}</pre></td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No commands sent."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+{{if and (or (eq .Sess.Role "admin") (eq .Sess.Role "helpdesk")) (ne .D.Status "retired")}}
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "Diagnostics"}}</h2>
+    <form method="post" action="/devices/{{$id}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="diagnostics"><button class="secondary small">{{t "Collect logs"}}</button></form></div>
+  <p class="muted">{{t "The agent journal and recent system warnings, size limited and with secrets masked. Every download is audited."}}</p>
+  <div class="scroll"><table>
+    <thead><tr><th>#</th><th>{{t "Collected"}}</th><th class="num">{{t "Size"}}</th><th></th></tr></thead>
+    <tbody>{{range .Diagnostics}}<tr><td class="num">{{.CommandID}}</td><td class="nowrap">{{fmtTime .At}}</td><td class="num">{{.Size}}</td><td><a class="button secondary small" href="/devices/{{$id}}/diagnostics/{{.CommandID}}">{{t "Download"}}</a></td></tr>{{else}}<tr><td colspan="4" class="empty">{{t "No logs collected yet."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+{{end}}
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "Script results"}}</h2><span class="muted">{{t "newest 200 kept"}}</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Script"}}</th><th>{{t "Exit code"}}</th><th>{{t "Started"}}</th><th>{{t "Ended"}}</th><th>{{t "Output"}}</th><th>{{t "Errors"}}</th></tr></thead>
+    <tbody>{{range .Scripts}}<tr><td>{{if .CommandID}}#{{.CommandID}}{{else}}{{.Name}}{{end}}</td><td><span class="pill {{if eq .ExitCode 0}}ok{{else}}bad{{end}}">{{.ExitCode}}</span></td><td class="nowrap">{{fmtTime .Start}}</td><td class="nowrap">{{fmtTime .End}}</td><td><pre>{{.Stdout}}</pre></td><td><pre>{{.Stderr}}</pre></td></tr>{{else}}<tr><td colspan="6" class="empty">{{t "No script results yet."}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 <section class="tablecard">

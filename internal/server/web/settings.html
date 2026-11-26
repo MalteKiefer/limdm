@@ -43,6 +43,11 @@
   <label class="check"><input type="checkbox" name="four_eyes_recovery" {{if .Set.FourEyesRecovery}}checked{{end}}> {{t "Also for recovery key views (the viewer gives a reason or ticket reference)"}}</label>
   <div class="card-head stacked"><h2>{{t "Audit log retention"}}</h2><p class="muted">{{t "Entries older than this are deleted once a day after the hash chain was verified; a signed checkpoint keeps the rest verifiable. 0 keeps everything."}}</p></div>
   <label>{{t "Keep audit entries (days)"}}<input name="audit_retention_days" type="number" min="0" max="36500" value="{{.Set.AuditRetentionDays}}"><small class="field-hint">{{t "0 or 365 to 36500"}}</small></label>
+  <fieldset>
+    <legend>{{t "Privacy"}}</legend>
+    <label class="check"><input type="checkbox" name="geolocation" {{if .Set.Geolocation}}checked{{end}}> {{t "Look up the location of device public addresses (sent to the geolocation service)"}}</label>
+    <label class="check"><input type="checkbox" name="fallback_dns" {{if .Set.FallbackDNS}}checked{{end}}> {{t "Agents may ask public DNS over HTTPS resolvers (Cloudflare, Google) when the system resolver fails"}}</label>
+  </fieldset>
   {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
 </form>
 {{else if eq .Tab "sso"}}

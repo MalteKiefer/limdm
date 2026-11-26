@@ -71,26 +71,38 @@ type State struct {
 	Users         []api.User           `json:"users"`
 	LastUpdateRun time.Time            `json:"last_update_run"`
 	RebootSince   time.Time            `json:"reboot_since"`
-	RebootPlanned time.Time            `json:"reboot_planned"`        // when a post update reboot was scheduled
+	RebootPlanned time.Time            `json:"reboot_planned"`     // when a post update reboot was scheduled
+	RebootAt      time.Time            `json:"reboot_at,omitzero"` // when it happens, deferrals included (guarded by evMu)
+	RebootDefers  int                  `json:"reboot_defers,omitempty"`
 	ScriptRuns    map[string]time.Time `json:"script_runs,omitempty"` // last run of recurring scripts
 	Results       []api.CommandResult  `json:"results"`               // not yet reported
 	Events        []string             `json:"events"`
 
-	PendingKeys    []pendingKey         `json:"pending_keys,omitempty"` // recovery keys not yet escrowed
-	Escrowed       map[string]time.Time `json:"escrowed,omitempty"`     // LUKS UUID: escrowed at
-	CommandKey     string               `json:"command_key,omitempty"`  // pinned public key commands are signed with
-	Enrollment     string               `json:"enrollment,omitempty"`   // server and device ID this state belongs to
-	EscrowNotified time.Time            `json:"escrow_notified"`
-	Company        string               `json:"company,omitempty"`
-	BrandingHash   string               `json:"branding_hash,omitempty"`
-	Catalog        *api.Catalog         `json:"catalog,omitempty"`      // software catalog for the desktop app
-	AppRequests    []api.AppRequest     `json:"app_requests,omitempty"` // requests not yet sent
-	LastContact    time.Time            `json:"last_contact"`
-	DoneCommands   map[int64]time.Time  `json:"done_commands,omitempty"`  // executed command IDs: the server redelivers until it has the result
-	RemovePending  map[string]bool      `json:"remove_pending,omitempty"` // removed users whose account lock still has to succeed
-	UserLocked     map[string]bool      `json:"user_locked,omitempty"`    // accounts IT locked with user_lock; the SSO rules leave them locked
-	UpdateResult   *api.UpdateResult    `json:"update_result,omitempty"`  // agent update outcome not yet reported
-	OfflineLocked  bool                 `json:"offline_locked,omitempty"`
+	PendingKeys    []pendingKey              `json:"pending_keys,omitempty"` // recovery keys not yet escrowed
+	Escrowed       map[string]time.Time      `json:"escrowed,omitempty"`     // LUKS UUID: escrowed at
+	CommandKey     string                    `json:"command_key,omitempty"`  // pinned public key commands are signed with
+	Enrollment     string                    `json:"enrollment,omitempty"`   // server and device ID this state belongs to
+	EscrowNotified time.Time                 `json:"escrow_notified"`
+	Company        string                    `json:"company,omitempty"`
+	BrandingHash   string                    `json:"branding_hash,omitempty"`
+	Catalog        *api.Catalog              `json:"catalog,omitempty"`      // software catalog for the desktop app
+	AppRequests    []api.AppRequest          `json:"app_requests,omitempty"` // requests not yet sent
+	LastContact    time.Time                 `json:"last_contact"`
+	DoneCommands   map[int64]time.Time       `json:"done_commands,omitempty"`  // executed command IDs: the server redelivers until it has the result
+	RemovePending  map[string]bool           `json:"remove_pending,omitempty"` // removed users whose account lock still has to succeed
+	UserLocked     map[string]bool           `json:"user_locked,omitempty"`    // accounts IT locked with user_lock; the SSO rules leave them locked
+	UpdateResult   *api.UpdateResult         `json:"update_result,omitempty"`  // agent update outcome not yet reported
+	OfflineLocked  bool                      `json:"offline_locked,omitempty"`
+	FallbackDNS    bool                      `json:"fallback_dns,omitempty"` // server allows the DNS over HTTPS fallback
+	DNFProxy       string                    `json:"dnf_proxy,omitempty"`    // proxy= value LiMDM wrote to dnf.conf (dnf4)
+	Held           []string                  `json:"held,omitempty"`         // packages LiMDM put on apt hold
+	DNFExclude     string                    `json:"dnf_exclude,omitempty"`  // excludepkgs= value LiMDM wrote to dnf.conf
+	PacmanIgnore   string                    `json:"pacman_ignore,omitempty"`
+	SnapRefresh    string                    `json:"snap_refresh,omitempty"`   // "hold" or "timer=..." LiMDM set in snapd
+	ScriptResults  []api.ScriptResult        `json:"script_results,omitempty"` // recurring script runs not yet reported
+	ManagedFiles   []string                  `json:"managed_files,omitempty"`  // paths written for com.limdm.files, removed when undeclared
+	FirewallRules  []api.FirewallRule        `json:"firewall_rules,omitempty"` // allow rules LiMDM added
+	LocalUsers     map[string]localUserState `json:"local_users,omitempty"`    // accounts com.limdm.localusers manages
 }
 
 type Agent struct {
@@ -115,6 +127,7 @@ type Agent struct {
 	failedUpdate                string    // release version whose update already failed, reported once
 	osqueryTried                time.Time // last osquery install attempt
 	syncNow                     bool
+	proxySet                    bool // a proxy declaration set the environment of this process
 	// for the desktop tray
 	lastCheckin  *time.Time
 	lastError    string
@@ -154,7 +167,7 @@ func pinnedTLS(caPEM []byte, withIdentity bool) (*tls.Config, error) {
 
 func newClient(tc *tls.Config) *http.Client {
 	return &http.Client{Timeout: 2 * time.Minute, Transport: &http.Transport{
-		TLSClientConfig: tc, Proxy: http.ProxyFromEnvironment, ForceAttemptHTTP2: true, DialContext: fallbackDial()}}
+		TLSClientConfig: tc, Proxy: agentProxy, ForceAttemptHTTP2: true, DialContext: fallbackDial()}}
 }
 
 func newCSR() (keyPEM []byte, csrPEM string, err error) {
@@ -344,7 +357,6 @@ func New(log *slog.Logger) (*Agent, error) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, err
 	}
-	fallbackDNS = !cfg.NoFallbackDNS
 	a := &Agent{cfg: cfg, client: newClient(tc), host: h, log: log}
 	if b, err := os.ReadFile(stateFile); err == nil {
 		if err := json.Unmarshal(b, &a.state); err != nil {
@@ -366,6 +378,7 @@ func New(log *slog.Logger) (*Agent, error) {
 	if a.state.DeclToken == "" { // never synced: start from the built in baseline
 		a.state.Declarations = api.DefaultDeclarations()
 	}
+	fallbackDNS.Store(a.state.FallbackDNS && !cfg.NoFallbackDNS)
 	a.compose()
 	return a, nil
 }
@@ -560,7 +573,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	statusHash := hex.EncodeToString(sum[:])
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
 		StatusHash: statusHash, Results: a.state.Results, Events: a.pendingEvents(), Metrics: metrics(), BrandingHash: a.state.BrandingHash,
-		UpdateResult: a.state.UpdateResult}
+		UpdateResult: a.state.UpdateResult, ScriptResults: a.state.ScriptResults}
 	if a.state.Catalog != nil {
 		req.CatalogHash = a.state.Catalog.Hash
 	}
@@ -597,6 +610,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	a.enforceOffline(true)
 	// drop only what was sent: entries added meanwhile (unlock events, desktop) stay
 	a.state.Results = a.state.Results[len(req.Results):]
+	a.state.ScriptResults = a.state.ScriptResults[len(req.ScriptResults):]
 	a.evMu.Lock()
 	// by content, not by count: a full queue drops its oldest routine line
 	// while the check in runs, so the sent lines are no longer a prefix
@@ -614,6 +628,8 @@ func (a *Agent) cycle(ctx context.Context) {
 		a.state.UpdateResult = nil // reported
 	}
 	a.applyBranding(resp.Branding)
+	a.state.FallbackDNS = resp.FallbackDNS
+	fallbackDNS.Store(resp.FallbackDNS && !a.cfg.NoFallbackDNS)
 	if resp.Catalog != nil {
 		a.state.Catalog = resp.Catalog
 	}
@@ -679,14 +695,7 @@ func (a *Agent) enforce() {
 	} else if len(present) > 0 {
 		a.event("removed %v", present)
 	}
-	for _, f := range p.Files {
-		mode, _ := f.FileMode()
-		if changed, err := writeIfChanged(f.Path, f.Content, os.FileMode(mode)); err != nil {
-			a.problem(api.TypeFiles, "file %s: %v", f.Path, err)
-		} else if changed {
-			a.event("wrote %s", f.Path)
-		}
-	}
+	a.applyFiles(p.Files)
 	for _, s := range p.Services.Enable {
 		if !unitActive(s) {
 			if err := svc("enable-now", s); err != nil {
@@ -706,14 +715,27 @@ func (a *Agent) enforce() {
 		}
 	}
 	if p.Firewall.Enforce {
+		var err error
 		if st, _ := runFirewall(a); st != pass {
-			if err := a.applyFirewall(); err != nil {
-				a.problem(api.TypeFirewall, "firewall: %v", err)
-			}
+			err = a.applyFirewall()
+		} else {
+			err = a.syncFirewallRules() // active: keep its rules in line with the declaration
+		}
+		if err != nil {
+			a.problem(api.TypeFirewall, "firewall: %v", err)
 		}
 	}
 	if err := a.applyUsers(); err != nil {
 		a.problem(api.TypeLogin, "users: %v", err)
+	}
+	if err := a.applyLocalUsers(p.Extra.LocalUsers); err != nil {
+		a.problem(api.TypeLocalUsers, "local users: %v", err)
+	}
+	if err := a.applyHolds(p.Updates.Hold); err != nil {
+		a.problem(api.TypeUpdates, "hold: %v", err)
+	}
+	if err := a.applySnapRefresh(p.Updates); err != nil {
+		a.problem(api.TypeUpdates, "snap refresh: %v", err)
 	}
 	a.applyExtra()
 	// osquery is mandatory as inventory source; retry hourly, not every cycle
@@ -754,7 +776,7 @@ func inWindow(now time.Time, window string) bool {
 // maintenance installs updates once per window and reboots if declared.
 func (a *Agent) maintenance(now time.Time) {
 	u := a.pol.Updates
-	if u.Mode == "" || u.Mode == "off" || !inWindow(now, u.Window) {
+	if u.Mode == "" || u.Mode == "off" || !inWindow(now, u.Window) || !updateDay(now, u.Window, u.Days) {
 		return
 	}
 	if now.Sub(a.state.LastUpdateRun) > 20*time.Hour {
@@ -764,13 +786,19 @@ func (a *Agent) maintenance(now time.Time) {
 			a.problem(api.TypeUpdates, "updates (%s) failed: %v", u.Mode, err)
 		} else {
 			a.event("updates (%s) installed: %s", u.Mode, lastLines(out, 3))
+			if u.Autoremove {
+				if out, err := a.host.autoremove(); err != nil {
+					a.problem(api.TypeUpdates, "autoremove failed: %v", err)
+				} else if strings.TrimSpace(out) != "" {
+					a.event("autoremove: %s", lastLines(out, 3))
+				}
+			}
 		}
 	}
 	// Schedule once: a new shutdown call would replace and postpone the pending one.
-	if u.Reboot && now.Sub(a.state.RebootPlanned) > time.Hour && a.host.rebootRequired() {
-		if _, err := sh("shutdown", "-r", "+5", "LiMDM: rebooting in 5 minutes to finish updates"); err == nil {
-			a.state.RebootPlanned = now.Round(0)
-			a.event("reboot scheduled after updates")
+	if u.Reboot && !a.rebootPending(now) && a.host.rebootRequired() {
+		if err := a.scheduleReboot(now, u.RebootDefer); err != nil {
+			a.problem(api.TypeUpdates, "reboot after updates: %v", err)
 		}
 	}
 }
@@ -806,6 +834,9 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = a.showMessage(c.Payload)
 	case "software_remove":
 		out, err = a.removeSoftware(c.Payload)
+	case "diagnostics":
+		r.Diagnostics = a.collectDiagnostics()
+		out = fmt.Sprintf("diagnostics collected (%d bytes)", len(r.Diagnostics))
 	case "user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete":
 		out, err = a.userCommand(c.Type, c.Payload)
 	case "app_install", "app_remove":
@@ -815,13 +846,23 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 			err = errors.New("remote scripts are disabled on this device (allow_scripts)")
 			break
 		}
-		out, err = runScript(c.Payload)
+		var sc api.ScriptCommand
+		if sc, err = parseScriptCommand(c.Payload); err != nil {
+			break
+		}
+		var res api.ScriptResult
+		res, err = runScript(sc.Body, sc.Params, sc.TimeoutMinutes)
+		res.CommandID = c.ID
+		r.Script, out = &res, scriptOutput(res)
 	default:
 		err = fmt.Errorf("unknown command %q", c.Type)
 	}
 	a.event("command %d (%s) executed, error=%v", c.ID, c.Type, err)
 	r.OK = err == nil
 	r.Output = lastLines(out, 200)
+	if r.Script != nil {
+		r.Output = out
+	}
 	if err != nil {
 		r.Output += "\n" + err.Error()
 	}
@@ -833,25 +874,6 @@ const (
 	nologinFile = "/etc/nologin"
 	nologinText = "This device is locked by IT (LiMDM). Contact your administrator.\n"
 )
-
-// runScript runs a script IT sent. A shebang line picks the interpreter
-// (bash, python …); without one it runs with /bin/sh.
-func runScript(body string) (string, error) {
-	f, err := os.CreateTemp(stateDir, "script-*")
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(f.Name())
-	_, err = f.WriteString(strings.ReplaceAll(body, "\r\n", "\n")) // pasted from Windows editors
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return "", err
-	}
-	argv := append(scriptInterpreter(body), f.Name())
-	return run(30*time.Minute, argv[0], argv[1:]...)
-}
 
 // scriptInterpreter reads the shebang ("#!/usr/bin/env python3",
 // "#!/bin/bash -e"); the file itself is never executed, so a noexec
