@@ -252,6 +252,30 @@ func (c apiCaller) allows(level string) bool {
 	return false
 }
 
+// levelScopes are the token scopes that open an access level outside a
+// route (can); routeScope decides for routes.
+var levelScopes = map[string][]string{
+	"read": {"read"}, "self": {"read"}, "audit": {"audit"}, "helpdesk": {"commands"}, "admin": {"library", "admin"},
+}
+
+// can tells whether the caller passes an access level by role and token
+// scopes, as need does for a route. Handlers use it for data or actions
+// beyond their route's own level (audit entries in a stream, sharing).
+func (c apiCaller) can(level string) bool {
+	if !c.allows(level) {
+		return false
+	}
+	if len(c.Scopes) == 0 {
+		return true
+	}
+	for _, sc := range levelScopes[level] {
+		if slices.Contains(c.Scopes, sc) {
+			return true
+		}
+	}
+	return false
+}
+
 // need guards an API handler with an access level (allows) and the
 // token's scopes.
 func (s *Server) need(level string, h apiHandlerFunc) http.HandlerFunc {

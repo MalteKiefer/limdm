@@ -74,6 +74,14 @@ func (s *Server) apiEventStream(w http.ResponseWriter, r *http.Request, c apiCal
 	ctx, cancel := context.WithTimeout(r.Context(), eventStreamFor)
 	defer cancel()
 	sess := c.sess()
+	// streamed audit entries are reads of the audit log: audited as the
+	// audit endpoint is (LIMDM_AUDIT_API_READS)
+	if c.can("audit") && s.auditRead(r, "audit") {
+		if err := s.auditAction(r.Context(), c.actor(), "api.read", "GET /api/v1/events/stream", "activity events", nil); err != nil {
+			s.apiFail(w, err)
+			return
+		}
+	}
 	st := eventState{pending: -1}
 	if err := s.db.QueryRow(ctx, `SELECT now(), coalesce(max(id), 0) FROM audit_log`).Scan(&st.since, &st.auditID); err != nil {
 		s.apiFail(w, err)
@@ -139,7 +147,7 @@ func (s *Server) pollEvents(ctx context.Context, w http.ResponseWriter, c apiCal
 		}
 		st.since = *d.LastSeen
 	}
-	if c.allows("audit") { // the audit log is not the helpdesk's to read
+	if c.can("audit") { // the audit log is not the helpdesk's to read
 		cond, args := auditScope(sess, 1)
 		rows, err := s.db.Query(ctx, `SELECT id, at, actor, action, target FROM audit_log WHERE id > $1 AND `+cond+` ORDER BY id LIMIT 200`, append([]any{st.auditID}, args...)...)
 		if err != nil {

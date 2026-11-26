@@ -275,6 +275,65 @@ func TestAppAPI(t *testing.T) {
 		t.Fatalf("unknown schema: %d", code)
 	}
 
+	// events and attention honor role, token scope, tenant and device scope
+	if _, err := db.Exec(ctx, `INSERT INTO tenants(id, name) VALUES (2, 'other')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, tags, last_seen, checks, failing, tenant_id) VALUES
+		('t2', 's', now(), 'foreign', '{}', now(), '[]', 0, 2)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.auditAction(withTenant(ctx, 2), "x@other", "secret.change", "t2", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.auditAction(withTenant(ctx, 1), "x@one", "device.change", "d1", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	poll := func(c apiCaller) string {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		st := eventState{since: time.Now().Add(-time.Hour), pending: -1}
+		if err := s.pollEvents(ctx, rec, c, c.sess(), &st); err != nil {
+			t.Fatal(err)
+		}
+		return rec.Body.String()
+	}
+	tenantAuditor := session{Email: "audit@firma.de", Role: "auditor", Tenant: 1}
+	if out := poll(apiCaller{Role: "auditor", Tenant: 1, Sess: &tenantAuditor}); !strings.Contains(out, "device.change") || strings.Contains(out, "secret.change") || strings.Contains(out, "foreign") || !strings.Contains(out, "alpha") {
+		t.Fatalf("tenant 1 auditor: %s", out)
+	}
+	if out := poll(apiCaller{Role: "auditor", Name: "r", ID: 9, ReadOnly: true, Scopes: []string{"read"}}); strings.Contains(out, "event: activity") || !strings.Contains(out, "foreign") {
+		t.Fatalf("read scoped token: %s", out)
+	}
+	helpdesk := session{Email: "desk@firma.de", Role: "helpdesk"}
+	if out := poll(apiCaller{Role: "helpdesk", Sess: &helpdesk}); strings.Contains(out, "event: activity") {
+		t.Fatalf("helpdesk: %s", out)
+	}
+	if out := poll(apiCaller{Role: "auditor", Name: "a", ID: 8, ReadOnly: true, Scopes: []string{"audit"}}); !strings.Contains(out, "secret.change") {
+		t.Fatalf("audit scoped token: %s", out)
+	}
+	scopedTok := apiCaller{Role: "auditor", ReadOnly: true, Scopes: []string{"read"}}
+	if scopedTok.can("audit") || !(apiCaller{Role: "auditor"}).can("audit") || (apiCaller{Role: "admin", Scopes: []string{"read"}}).can("admin") {
+		t.Fatal("can ignores role or scopes")
+	}
+	if strings.Contains(strings.Join(scopedTok.permissions(false), ","), "audit") {
+		t.Fatal("permissions ignore token scopes")
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO backups(name, status) VALUES ('b1', 'ok')`); err != nil {
+		t.Fatal(err)
+	}
+	attention := func(c apiCaller) string {
+		rec := httptest.NewRecorder()
+		s.apiStatsAttention(rec, httptest.NewRequest("GET", "/api/v1/stats/attention", nil), c)
+		return rec.Body.String()
+	}
+	if out := attention(scopedTok); !strings.Contains(out, `"last_backup":null`) {
+		t.Fatalf("read scoped token sees the backup: %s", out)
+	}
+	if out := attention(apiCaller{Role: "auditor"}); !strings.Contains(out, `"status":"ok"`) {
+		t.Fatalf("auditor misses the backup: %s", out)
+	}
+
 	// live events: a check in shows up as a device event
 	sreq, _ := http.NewRequest("GET", srv.URL+"/api/v1/events/stream", nil)
 	sreq.AddCookie(&http.Cookie{Name: sessionCookie, Value: s.seal(admin)})

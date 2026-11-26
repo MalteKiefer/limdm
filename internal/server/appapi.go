@@ -3,7 +3,6 @@ package server
 import (
 	"fmt"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/maltekiefer/limdm/internal/api"
@@ -94,22 +93,20 @@ type apiMeInfo struct {
 	CSRFToken   string       `json:"csrf_token,omitempty"`
 }
 
-// permissionLevels map the permission names of /api/v1/me to the access
-// levels of need and the token scope each one needs.
-var permissionLevels = []struct{ Name, Level, Scope string }{
-	{"read", "read", "read"}, {"audit", "audit", "audit"},
-	{"commands", "helpdesk", "commands"}, {"admin", "admin", "library"},
+// permissionLevels map the permission names of /api/v1/me to access levels.
+var permissionLevels = []struct{ Name, Level string }{
+	{"read", "read"}, {"audit", "audit"}, {"commands", "helpdesk"}, {"admin", "admin"},
 }
 
-// permissions lists what the caller may do, by the same rules need applies.
+// permissions lists what the caller may do, by role and token scopes (can).
 func (c apiCaller) permissions(multiTenant bool) []string {
 	out := []string{}
 	for _, p := range permissionLevels {
-		if c.allows(p.Level) && (len(c.Scopes) == 0 || slices.Contains(c.Scopes, p.Scope) || p.Level == "admin" && slices.Contains(c.Scopes, "admin")) {
+		if c.can(p.Level) {
 			out = append(out, p.Name)
 		}
 	}
-	if multiTenant && c.allows("admin") && (c.Tenant == 0 || c.Sess != nil && c.Sess.Super) {
+	if multiTenant && c.can("admin") && (c.Tenant == 0 || c.Sess != nil && c.Sess.Super) {
 		out = append(out, "tenants")
 	}
 	return out

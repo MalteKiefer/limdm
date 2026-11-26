@@ -242,7 +242,7 @@ func (s *Server) apiStatsAttention(w http.ResponseWriter, r *http.Request, c api
 			return
 		}
 	}
-	if sess.Tenant == 0 && !sess.scoped() && c.allows("audit") {
+	if sess.Tenant == 0 && !sess.scoped() && c.can("audit") {
 		var b statsBackup
 		err := s.db.QueryRow(ctx, `SELECT status, started_at, size, error FROM backups WHERE deleted_at IS NULL ORDER BY started_at DESC LIMIT 1`).
 			Scan(&b.Status, &b.StartedAt, &b.Size, &b.Error)

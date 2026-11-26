@@ -112,7 +112,7 @@ func (s *Server) apiViewSave(w http.ResponseWriter, r *http.Request, c apiCaller
 		s.apiFail(w, err)
 		return
 	}
-	if in.Shared && !c.allows("admin") {
+	if in.Shared && !c.can("admin") {
 		s.deny(w, r, c, "only admins share views")
 		return
 	}
@@ -188,7 +188,7 @@ func (s *Server) apiViewDelete(w http.ResponseWriter, r *http.Request, c apiCall
 		var name string
 		var shared bool
 		err := tx.QueryRow(ctx, `DELETE FROM saved_views WHERE id=$1 AND (owner=$2 OR $3 AND shared AND tenant_id IS NOT DISTINCT FROM $4) RETURNING name, shared`,
-			id, c.actor(), c.allows("admin"), viewTenant(c)).Scan(&name, &shared)
+			id, c.actor(), c.can("admin"), viewTenant(c)).Scan(&name, &shared)
 		if err != nil || !shared {
 			return err
 		}
