@@ -27,8 +27,9 @@ func (h *host) repoPath(name string) string {
 		return "/etc/apt/sources.list"
 	case h.family == "debian" && (strings.HasSuffix(name, ".list") || strings.HasSuffix(name, ".sources")):
 		return "/etc/apt/sources.list.d/" + name
-	case h.family == "fedora" && strings.HasSuffix(name, ".repo"):
-		return "/etc/yum.repos.d/" + name
+	case (h.family == "fedora" || h.family == "suse") && strings.HasSuffix(name, ".repo"):
+		_, dir := h.repoDirs()
+		return dir + "/" + name
 	}
 	return ""
 }

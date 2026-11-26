@@ -161,6 +161,7 @@
       <dt>{{t "Vendor"}}</dt><dd>{{.Inv.Vendor}}</dd><dt>{{t "Model"}}</dt><dd>{{.Inv.Model}}</dd>
       <dt>{{t "Serial number"}}</dt><dd class="mono">{{.Inv.Serial}}</dd>
       <dt>{{t "Firmware"}}</dt><dd>{{.Inv.BIOSVendor}} {{.Inv.BIOSVersion}}</dd>
+      <dt>{{t "TPM"}}</dt><dd>{{with .Inv.TPM}}{{if .Present}}{{.Version}}{{range .LUKSBound}}<br><span class="mono">{{.}}</span> {{t "bound to the TPM"}}{{end}}{{else}}{{t "none"}}{{end}}{{else}}{{t "n/a"}}{{end}}</dd>
     </dl>
   </section>
   <section class="card">

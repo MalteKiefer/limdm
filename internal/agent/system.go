@@ -24,7 +24,7 @@ import (
 	"github.com/maltekiefer/limdm/internal/api"
 )
 
-// host describes the local system. family is "debian" (Debian, Ubuntu) or "fedora".
+// host describes the local system. family is debian, fedora, suse, arch or alpine (see familyOf).
 type host struct {
 	ID, Version, Name, family string
 
@@ -54,6 +54,7 @@ func (h *host) pkgDBStamp() string {
 		"fedora": {"/var/lib/rpm/rpmdb.sqlite", "/var/lib/rpm/Packages", "/usr/lib/sysimage/rpm/rpmdb.sqlite"},
 		"arch":   {"/var/lib/pacman/local"},
 		"alpine": {"/lib/apk/db/installed"},
+		"suse":   {"/usr/lib/sysimage/rpm/Packages.db", "/usr/lib/sysimage/rpm/rpmdb.sqlite", "/var/lib/rpm/Packages"},
 	}[h.family]
 	var b strings.Builder
 	for _, p := range paths {
@@ -81,13 +82,16 @@ func detectHost() (*host, error) {
 }
 
 // familyOf maps os-release to the package family: debian (apt), fedora
-// (dnf: Fedora, CentOS Stream, RHEL, Rocky, Alma), arch (pacman: Arch,
-// Manjaro, EndeavourOS) or alpine (apk, OpenRC).
+// (dnf: Fedora, CentOS Stream, RHEL, Rocky, Alma), suse (zypper: openSUSE
+// Leap, Tumbleweed, SLES), arch (pacman: Arch, Manjaro, EndeavourOS) or
+// alpine (apk, OpenRC).
 func familyOf(osr map[string]string) string {
 	like := " " + osr["ID"] + " " + osr["ID_LIKE"] + " "
 	switch {
 	case strings.Contains(like, " debian ") || strings.Contains(like, " ubuntu "):
 		return "debian"
+	case strings.Contains(like, " suse ") || strings.Contains(like, " opensuse ") || strings.Contains(like, " sles "):
+		return "suse"
 	case strings.Contains(like, " fedora ") || strings.Contains(like, " rhel ") || strings.Contains(like, " centos "):
 		return "fedora"
 	case strings.Contains(like, " arch "):
@@ -317,6 +321,8 @@ func (h *host) installLocked(pkgs ...string) error {
 		_, err = run(30*time.Minute, "pacman", append([]string{"-Syu", "--noconfirm", "--needed", "--"}, pkgs...)...)
 	case "alpine":
 		_, err = run(30*time.Minute, "apk", append([]string{"add", "--no-interactive", "--"}, pkgs...)...)
+	case "suse":
+		err = h.zypperInstall(pkgs)
 	default:
 		_, err = run(30*time.Minute, "dnf", append([]string{"install", "-y", "-q", "--"}, pkgs...)...)
 	}
@@ -339,6 +345,8 @@ func (h *host) remove(pkgs ...string) error {
 		_, err = run(30*time.Minute, "pacman", append([]string{"-R", "--noconfirm", "--"}, pkgs...)...)
 	case "alpine":
 		_, err = run(30*time.Minute, "apk", append([]string{"del", "--no-interactive", "--"}, pkgs...)...)
+	case "suse":
+		_, err = zypper(30*time.Minute, append([]string{"remove", "--"}, pkgs...)...)
 	default:
 		_, err = run(30*time.Minute, "dnf", append([]string{"remove", "-y", "-q", "--"}, pkgs...)...)
 	}
@@ -358,6 +366,8 @@ func (h *host) upgrade(securityOnly bool) (string, error) {
 	case "alpine":
 		out, err := run(2*time.Hour, "apk", "upgrade", "--update-cache", "--no-interactive")
 		return out + flatpakUpgrade(), err
+	case "suse":
+		return h.zypperUpgrade(securityOnly)
 	}
 	if h.family == "debian" {
 		h.aptUpdated = time.Time{}
@@ -431,6 +441,8 @@ func (h *host) pendingUpdates() (all, security int, err error) {
 		}
 		n := max(countLines(out)-1, 0) // first line is a header; no separate security channel
 		return n, n, nil
+	case "suse":
+		return h.zypperPending()
 	}
 	if h.family == "debian" {
 		h.pkgMu.Lock()
@@ -505,6 +517,8 @@ func (h *host) rebootRequired() bool {
 		return exists("/run/reboot-required")
 	case "arch", "alpine":
 		return kernelReplaced()
+	case "suse":
+		return zypperRebootRequired()
 	}
 	if !hasCmd("dnf") {
 		return false
@@ -519,7 +533,7 @@ func (h *host) adminGroup() string {
 	if h.family == "debian" {
 		return "sudo"
 	}
-	return "wheel" // Fedora family, Arch, Alpine
+	return "wheel" // Fedora and SUSE family, Arch, Alpine
 }
 
 // metrics reads memory, root filesystem usage and load for history charts.
@@ -605,6 +619,7 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 		}
 	}
 	inv.Disks, inv.Volumes = nativeDisks(), nativeVolumes()
+	inv.TPM = tpmInventory()
 	inv.Accounts, inv.Groups = nssAccounts()
 	annotateSSO(inv.Accounts)
 	inv.Repos = h.repos()

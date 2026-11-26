@@ -123,6 +123,9 @@ var catalog = []check{
 	{ID: "disk.recovery", Title: "Disk encryption recovery keys are escrowed", Level: 1,
 		Refs: refs(l(bsiCrypto), l("A.8.24", "A.8.13")),
 		Run:  runRecoveryEscrow},
+	{ID: "disk.tpm", Title: "LUKS volumes are bound to the TPM", Level: 1,
+		Refs: refs(l(bsiCrypto, bsiClient), l("A.8.24", "A.7.10")),
+		Run:  runTPMBinding},
 	{ID: "boot.password", Title: "Boot loader is password protected", Level: 1,
 		Refs: refs(l(bsiClient, bsiLinux), l("A.8.2", "A.8.9"), "1.4.1 Ensure bootloader password is set", "1.4.2 Ensure access to bootloader config is configured"),
 		Run:  runBootPassword},
@@ -1019,9 +1022,14 @@ func runPWQuality(a *Agent) (string, string) {
 }
 
 func fixPWQuality(a *Agent) error {
-	if pkg := map[string]string{"debian": "libpam-pwquality", "arch": "libpwquality", "alpine": "libpwquality"}[a.host.family]; pkg != "" && !a.host.isInstalled(pkg) {
+	if pkg := map[string]string{"debian": "libpam-pwquality", "arch": "libpwquality", "alpine": "libpwquality", "suse": "pam_pwquality"}[a.host.family]; pkg != "" && !a.host.isInstalled(pkg) {
 		if err := a.host.install(pkg); err != nil {
 			return err
+		}
+	}
+	if a.host.family == "suse" && !pamHasPWQuality() { // pam-config owns common-password there
+		if out, err := sh("pam-config", "--add", "--pwquality"); err != nil {
+			return fmt.Errorf("pam-config --add --pwquality: %s", lastLines(out, 2))
 		}
 	}
 	_, err := writeIfChanged("/etc/security/pwquality.conf.d/60-limdm.conf",
@@ -1201,7 +1209,7 @@ func runAuditd(a *Agent) (string, string) {
 
 func fixAuditd(a *Agent) error {
 	pkg := "auditd"
-	if a.host.family == "fedora" {
+	if a.host.family == "fedora" || a.host.family == "suse" {
 		pkg = "audit"
 	}
 	if !a.host.isInstalled(pkg) {

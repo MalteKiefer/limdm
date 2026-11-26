@@ -50,15 +50,23 @@ func (h *host) ensureOsquery() error {
 			return err
 		}
 		h.aptStale.Store(true) // pick up the new repository
-	} else {
+	} else { // Fedora and SUSE family: the osquery rpm repository works with dnf and zypper
 		const key = "/etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery"
 		if _, err := writeIfChanged(key, osqueryKey, 0o644); err != nil {
 			return err
 		}
+		if err := h.trustKeys(key); err != nil {
+			return err
+		}
+		_, dir := h.repoDirs()
 		repo := managedHeader + "[limdm-osquery]\nname=osquery\nbaseurl=" + osqueryRepoURL + "/rpm/$basearch/\n" +
 			"enabled=1\ngpgcheck=1\ngpgkey=file://" + key + "\n"
-		if _, err := writeIfChanged("/etc/yum.repos.d/limdm-osquery.repo", repo, 0o644); err != nil {
+		changed, err := writeIfChanged(dir+"/limdm-osquery.repo", repo, 0o644)
+		if err != nil {
 			return err
+		}
+		if changed {
+			h.aptStale.Store(true)
 		}
 	}
 	return h.install("osquery")
@@ -456,7 +464,7 @@ func displayManager() string {
 
 // osqueryPackages returns installed packages from osquery.
 func (h *host) osqueryPackages() ([]api.Package, error) {
-	if !hasOsquery() || (h.family != "debian" && h.family != "fedora") {
+	if !hasOsquery() || (h.family != "debian" && h.family != "fedora" && h.family != "suse") {
 		return nil, errors.New("osquery packages unavailable") // pacman and apk lists come from the native collector
 	}
 	q := "SELECT name, version, arch FROM deb_packages WHERE status LIKE '%installed'"

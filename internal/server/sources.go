@@ -58,6 +58,9 @@ func (s *Server) sourceTemplate(ctx context.Context, deviceID, file, mode string
 			fam := "debian"
 			if r.Type == "rpm" {
 				fam = "fedora"
+				if strings.HasPrefix(r.File, "/etc/zypp/") {
+					fam = "suse"
+				}
 			}
 			t := repoT{Name: strings.Trim(name, "-._"), Family: fam, URL: strings.Replace(r.URL, "http://", "https://", 1),
 				Suites: r.Suites, Components: r.Components, KeyFile: r.KeyFile}

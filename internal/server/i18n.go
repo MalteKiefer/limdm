@@ -876,4 +876,6 @@ var deCatalog = map[string]string{
 	"Revocation list":         "Sperrliste",
 	"Certificates of retired and wiped devices. Valid for 7 days, fetch it at least daily.": "Zertifikate ausgemusterter und gelöschter Geräte. 7 Tage gültig, mindestens täglich abrufen.",
 	"Download CRL": "CRL herunterladen",
+	// E2
+	"Printers": "Drucker", "TPM": "TPM", "bound to the TPM": "an das TPM gebunden",
 }

@@ -587,6 +587,7 @@ type Inventory struct {
 	Groups         []Group             `json:"groups,omitempty"`
 	IPs            []string            `json:"ips,omitempty"`             // only with privacy.network_info
 	Users          []string            `json:"logged_in_users,omitempty"` // only with privacy.logged_in_users
+	TPM            *TPMInfo            `json:"tpm,omitempty"`
 }
 
 type Account struct {

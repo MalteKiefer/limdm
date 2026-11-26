@@ -76,7 +76,7 @@ func familyPackages(src api.AppSource, family string) []string {
 	if family == "debian" {
 		return strings.Fields(src.Debian)
 	}
-	return strings.Fields(src.Fedora)
+	return strings.Fields(src.Fedora) // rpm names; SUSE mostly uses the same ones
 }
 
 // installedFlatpaks are the Flatpak IDs installed system wide or for any user.

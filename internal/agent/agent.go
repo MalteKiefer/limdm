@@ -499,7 +499,7 @@ func (a *Agent) Run(ctx context.Context) error {
 
 // checkToDecl links compliance checks to the declaration whose goal they verify.
 var checkToDecl = map[string]string{
-	"disk.recovery": api.TypeDiskEncryption, "boot.password": api.TypeBootloader,
+	"disk.recovery": api.TypeDiskEncryption, "disk.tpm": api.TypeDiskEncryption, "boot.password": api.TypeBootloader,
 	"desktop.screenlock": api.TypeScreenLock, "firewall.active": api.TypeFirewall, "os.supported": api.TypeOSVersion,
 	"updates.auto": api.TypeUpdates, "updates.security": api.TypeUpdates, "updates.reboot": api.TypeUpdates, "auth.sso": api.TypeLogin,
 	"agent.osquery": api.TypeAgent,

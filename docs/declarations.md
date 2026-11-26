@@ -86,11 +86,13 @@ Package sources managed by LiMDM, and unmanaged sources to switch off.
  "disable": ["netbird.list"]}
 ```
 
-* `family`: `debian` (written as deb822 `.sources`) or `fedora` (`.repo`); each device only
+* `family`: `debian` (written as deb822 `.sources`), `fedora` (`.repo` in `/etc/yum.repos.d`)
+  or `suse` (`.repo` in `/etc/zypp/repos.d`, key imported into rpm); each device only
   uses entries of its family.
 * `url` must be https. Every source is signed: either an armored `key` (written to
   `/etc/apt/keyrings` or `/etc/pki/rpm-gpg`) or a `key_file` that already exists on the device
-  under `/usr/share/keyrings`, `/etc/apt/keyrings` or `/etc/pki/rpm-gpg`.
+  under `/usr/share/keyrings`, `/etc/apt/keyrings`, `/etc/pki/rpm-gpg` or `/usr/lib/rpm/gnupg/keys`
+  (SUSE distribution keys).
 * The name `osquery` is reserved for the agent's own source.
 * `disable` lists file names of unmanaged sources (`*.list`, `*.sources`, `*.repo`,
   `sources.list`). The agent keeps the original in `/var/lib/limdm/repo-backup`, switches
@@ -169,6 +171,35 @@ certificates item (`ca_cert`) and the server domain. EAP-TLS uses a device certi
 server issues from its network CA. Secrets are masked in the console, the audit log, the
 version history, the admin API, the desktop app and `limdm profiles`. Every field, the device side and the CRL for the RADIUS
 server: [Network profiles](network.md).
+
+### `com.limdm.printers`
+
+```json
+{"printers": [{"name": "office", "uri": "ipps://printer.example.com/ipp/print", "location": "2nd floor",
+  "description": "Office printer", "default": true, "duplex": "two-sided-long-edge", "paper_size": "A4"}],
+ "install_cups": false}
+```
+
+CUPS print queues, set up with `lpadmin` (separate arguments, no shell).
+
+* The queue is named `limdm-<name>`; `name` uses lower case letters, digits, `.`, `_` and `-`.
+  Queues with the `limdm-` prefix that are no longer declared are deleted, every other queue
+  is left alone. Removing the item deletes all managed queues.
+* `uri`: `ipp://` or `ipps://` gives a driverless IPP Everywhere queue (`lpadmin -m everywhere`).
+  `socket://` and `lpd://` need a `ppd`. Credentials in the URI, spaces, quotes and control
+  characters are refused.
+* `ppd`: a model as `lpinfo -m` lists it (for example `drv:///sample.drv/generic.ppd`);
+  `package` names the package that provides it and is installed first.
+* `description` is the name print dialogs show (defaults to `name`), `location` is shown
+  next to it. Both are one line of up to 128 characters.
+* `duplex`: `one-sided`, `two-sided-long-edge` or `two-sided-short-edge` (`sides-default`);
+  `paper_size`: a media name such as `A4`, `Letter` or `iso_a4_210x297mm` (`media-default`).
+* `default`: the system default printer; at most one.
+* Queues are never shared (`printer-is-shared=false`).
+* A queue is only set up again when its entry changes: `-m everywhere` asks the printer for
+  its capabilities and fails while it is off, then the agent retries on the next cycle.
+* Devices without CUPS are skipped, unless `install_cups` is true: then the agent installs
+  the `cups` package and starts the service.
 
 ## Security
 
@@ -291,6 +322,12 @@ Store policy of the software catalog per blueprint; see [software.md](software.m
 ```
 
 LUKS recovery key escrow. See [disk-encryption.md](disk-encryption.md).
+
+`"tpm2": {"pcrs": [7], "pin": false, "require": true}` also binds every LUKS volume to the
+TPM 2.0 with `systemd-cryptenroll` when its recovery key is escrowed; the recovery key stays
+valid. `pcrs` are 0..23 (default 7), `pin` asks the user for a PIN at boot, `require` makes
+the check `disk.tpm` fail while a volume is not bound. See
+[disk-encryption.md](disk-encryption.md#tpm-unlock).
 
 Without `require_all` the check `disk.encryption` only looks at `/`. With it, every local
 volume must be on LUKS except the mount points in `exclude`; an entry covers everything below

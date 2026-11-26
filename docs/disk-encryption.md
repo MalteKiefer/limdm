@@ -60,6 +60,50 @@ With `rotate_after_view` a key is replaced after someone viewed it:
 The device page shows "rotation pending" until then. If the device is offline, the viewed
 key keeps working until the device checks in again.
 
+## TPM unlock
+
+With a `tpm2` entry the agent binds LUKS volumes to the TPM 2.0, so the disk opens at boot
+without a passphrase as long as the measured boot state is unchanged:
+
+```json
+{"escrow": true, "rotate_after_view": true, "tpm2": {"pcrs": [7], "pin": false, "require": true}}
+```
+
+* `pcrs`: the PCRs the key is sealed to, default 7 (Secure Boot state and its certificates).
+  Add 0, 2 or 4 for firmware and boot loader measurements; every firmware or boot loader
+  update then needs the recovery key once and a new binding.
+* `pin`: the TPM also needs a PIN at boot.
+* `require`: the compliance check `disk.tpm` fails while a volume is not bound. Without it the
+  check only reports the state.
+
+How it works:
+
+1. Binding needs a current key of the volume. The agent holds one only right after a recovery
+   key was created or rotated, so a volume is bound when the server confirmed its new
+   recovery key: `systemd-cryptenroll --unlock-key-file=<recovery key> --tpm2-device=auto
+   --tpm2-pcrs=7 --wipe-slot=tpm2`. The key file lives in a private tmpfs directory and is
+   removed right after.
+2. The recovery key slot stays; only an earlier TPM2 slot is replaced, so a changed PCR list
+   applies with the next binding.
+3. Volumes escrowed before the `tpm2` entry are bound with their next key rotation: view the
+   key in the console with `rotate_after_view`, or run `sudo limdm-agent recovery-key --all`.
+4. With `pin` the agent never binds by itself, because only the user may know the PIN.
+   `sudo limdm-agent recovery-key --all` asks for the passphrase, adds a new recovery key,
+   asks for a PIN (at least 6 characters, twice) and binds the volume. The PIN goes to
+   `systemd-cryptenroll` in its environment, never on the command line.
+5. Where dracut builds the initrd (Fedora, SUSE, Arch with dracut) the agent adds
+   `/etc/dracut.conf.d/60-limdm-tpm2.conf` with the `tpm2-tss` module and runs
+   `dracut -f --regenerate-all` once. Debian and Ubuntu with initramfs-tools cannot unseal a
+   TPM2 key at boot; there the binding exists but the passphrase prompt stays until the
+   initrd uses dracut or systemd.
+
+Requirements: a TPM 2.0 (`/sys/class/tpm/tpm0`), LUKS2 and systemd 252 or newer
+(`--unlock-key-file`). The device page shows the TPM version and the bound volumes in the
+Hardware tab; the inventory reports them as `tpm`.
+
+Lost mode removes every key slot except the recovery key, the TPM slot included; the agent
+binds again only with the next escrowed recovery key.
+
 ## Lost or stolen devices
 
 Two admin actions on the device page (Actions menu), each confirmed by typing the host name
@@ -84,6 +128,7 @@ without LUKS are refused, because there is no fast way to guarantee deletion; us
 ## Limits
 
 * Only volumes visible to `lsblk` as `crypto_LUKS` are handled.
-* TPM or FIDO2 unlock (`systemd-cryptenroll`) is not managed; such slots are left alone,
-  except in lost mode, which removes every slot but the recovery key.
+* FIDO2 unlock is not managed; such slots are left alone, except in lost mode, which
+  removes every slot but the recovery key.
+* The agent device key stays a file (`/etc/limdm/device.pem`); it is not kept in the TPM.
 * Changing `LIMDM_SESSION_KEY` makes stored keys unreadable. Escrow again after a change.

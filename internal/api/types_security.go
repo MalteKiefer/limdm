@@ -28,10 +28,11 @@ const (
 )
 
 type DiskEncryption struct {
-	Escrow          bool     `json:"escrow"`                // every LUKS volume needs a recovery key stored on the server
-	RotateAfterView bool     `json:"rotate_after_view"`     // replace a key once someone viewed it in the console
-	RequireAll      bool     `json:"require_all,omitempty"` // every local volume must be on LUKS, not only /
-	Exclude         []string `json:"exclude,omitempty"`     // mount points exempt from require_all, e.g. /boot
+	Escrow          bool         `json:"escrow"`                // every LUKS volume needs a recovery key stored on the server
+	RotateAfterView bool         `json:"rotate_after_view"`     // replace a key once someone viewed it in the console
+	RequireAll      bool         `json:"require_all,omitempty"` // every local volume must be on LUKS, not only /
+	Exclude         []string     `json:"exclude,omitempty"`     // mount points exempt from require_all, e.g. /boot
+	TPM2            *TPM2Binding `json:"tpm2,omitempty"`        // also unlock the volumes with the TPM
 }
 
 // Excluded reports whether mount is exempt from require_all. An entry
@@ -170,6 +171,11 @@ func (d Declaration) applySecurity(p *Policy) (bool, error) {
 				bad("exclude %q: an absolute mount point other than /", e)
 			}
 		}
+		if v.TPM2 != nil {
+			if err := v.TPM2.validate(); err != nil {
+				errs = append(errs, err)
+			}
+		}
 		p.Extra.DiskEncryption = &v
 	case TypePolkit:
 		var v struct {
@@ -245,7 +251,10 @@ func (d Declaration) applySecurity(p *Policy) (bool, error) {
 		}
 		p.Extra.Bootloader = &v
 	default:
-		return d.applyNetwork(p)
+		if ok, err := d.applyNetwork(p); ok {
+			return ok, err
+		}
+		return d.applyPlatform(p)
 	}
 	return true, errors.Join(errs...)
 }

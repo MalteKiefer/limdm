@@ -197,15 +197,24 @@ func (a *Agent) applyBootloader(b *api.Bootloader) error {
 	if !changed {
 		return nil
 	}
-	if out, err := sh("grub-mkconfig", "-o", "/boot/grub/grub.cfg"); err != nil {
+	mkconfig, cfg := grubConfig(a.host.family)
+	if out, err := sh(mkconfig, "-o", cfg); err != nil {
 		os.Remove(grubDebianScript) // retried on the next cycle
-		return fmt.Errorf("grub-mkconfig: %s", lastLines(out, 3))
+		return fmt.Errorf("%s: %s", mkconfig, lastLines(out, 3))
 	}
-	if err := os.Chmod("/boot/grub/grub.cfg", 0o600); err != nil { // contains the password hash
+	if err := os.Chmod(cfg, 0o600); err != nil { // contains the password hash
 		return err
 	}
 	a.event("boot loader password configuration updated")
 	return nil
+}
+
+// grubConfig is the config generator and its output: SUSE names them grub2.
+func grubConfig(family string) (mkconfig, cfg string) {
+	if family == "suse" {
+		return "grub2-mkconfig", "/boot/grub2/grub.cfg"
+	}
+	return "grub-mkconfig", "/boot/grub/grub.cfg"
 }
 
 func runBootPassword(a *Agent) (string, string) {
@@ -215,7 +224,8 @@ func runBootPassword(a *Agent) (string, string) {
 		}
 		return fail, "no GRUB password (declare a boot loader item)"
 	}
-	cfg := readFile("/boot/grub/grub.cfg")
+	_, path := grubConfig(a.host.family)
+	cfg := readFile(path)
 	if cfg == "" {
 		return na, "GRUB not used"
 	}
@@ -388,6 +398,7 @@ func (a *Agent) escrowConfirmed(sent []pendingKey) {
 		a.state.Escrowed[k.UUID] = time.Now().UTC()
 		a.event("recovery key for %s escrowed", k.Device)
 	}
+	a.bindEscrowed(sent)
 	a.state.PendingKeys = a.state.PendingKeys[len(sent):]
 }
 
@@ -487,6 +498,9 @@ func CreateRecoveryKeys(readPass func(prompt string) (string, error), all bool) 
 		}
 		done++
 		fmt.Printf("%s: recovery key added\n", v.Path)
+		if err := bindWithPIN(st.Declarations, v.Path, k, readPass); err != nil {
+			fmt.Printf("%s: TPM binding failed: %v\n", v.Path, err)
+		}
 	}
 	if done > 0 {
 		fmt.Println("The agent sends the new keys to your IT department with its next check in. Your passphrase stays unchanged.")
