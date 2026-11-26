@@ -79,7 +79,7 @@ test('activity: timeline, filter, verify the chain', async ({ page }) => {
   await expect(page.getByRole('feed').getByText('approval.reject').first()).toBeVisible()
   // the result is either state: the CLI's local-admin entries of the global setup are not keyed
   await page.getByRole('button', { name: 'Ganze Kette prüfen' }).click()
-  await expect(page.getByText(/Hash Kette vollständig geprüft|Die Hash Kette bricht bei Eintrag \d+\.$/).first()).toBeVisible()
+  await expect(page.getByText(/^(?:Hash Kette vollständig geprüft|Die Hash Kette bricht bei Eintrag \d+\.)/).first()).toBeVisible()
   await expect(page.getByText(/Letzte vollständige Prüfung|Integritätsfehler/).first()).toBeVisible()
   const csv = await page.request.get('/api/v1/exports/audit.csv?action=approval')
   expect(csv.status()).toBe(200)

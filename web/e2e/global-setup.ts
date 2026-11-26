@@ -4,7 +4,7 @@
 // credentials and signs the first one in for the tests that need a session.
 import { execFileSync, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { request } from '@playwright/test'
 import { baseURL, port } from '../playwright.config'
@@ -57,7 +57,11 @@ export default async function globalSetup() {
   execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-days', '2', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost', '-keyout', key, '-out', cert], { stdio: 'ignore' })
   // the server seals secrets in the database with the session key: keep it across runs
   const keyFile = join(dir, 'session.key')
-  if (!existsSync(keyFile)) writeFileSync(keyFile, randomBytes(32).toString('hex'), { mode: 0o600 })
+  try {
+    writeFileSync(keyFile, randomBytes(32).toString('hex'), { mode: 0o600, flag: 'wx' })
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
+  }
   const env = {
     ...process.env,
     LIMDM_DATABASE_URL: db,

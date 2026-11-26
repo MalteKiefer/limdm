@@ -49,7 +49,8 @@ export function presetHref(p: Preset, now = new Date()): string {
     else q.set(k, String(v))
   }
   const qs = q.toString()
-  return `/api/v1/exports/${p.kind}${qs ? `?${qs}` : ''}`
+  const kind = (kinds as readonly string[]).includes(p.kind) ? p.kind : kinds[0]
+  return `/api/v1/exports/${encodeURIComponent(kind)}${qs ? `?${qs}` : ''}`
 }
 
 /** E-mail addresses from free text: split on commas, semicolons and spaces, empty parts dropped. */

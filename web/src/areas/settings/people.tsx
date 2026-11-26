@@ -19,6 +19,7 @@ import { useT, type MessageKey } from '../../i18n'
 import { useAction, useShared, useTenant, useTenantList, useTokens, useUsers } from './api'
 import { Confirm, Facts, OnceSecret, SectionHead, SelectField, SettingsForm, TextField, Toggle } from '../../components/settingsform'
 import { colorCheck, fileBase64, lines } from './logic'
+import { blobURL } from '../../lib/blob'
 
 type Pending = { approval_id?: number }
 const isPending = (r: unknown): r is Pending => typeof r === 'object' && r !== null && 'approval_id' in r
@@ -570,7 +571,7 @@ function TenantEdit({ id, embedded }: { id: number; embedded?: boolean }) {
             <Field label={t('settings.branding.logo')} help={t('settings.branding.logoHelp')}>
               {({ id: fid, describedBy }) => (
                 <div className="flex flex-wrap items-center gap-3">
-                  {(logo || (x.has_logo && !remove)) && <img src={logo?.url ?? `/tenants/${x.id}/logo.png?v=${encodeURIComponent(x.created_at)}${q.dataUpdatedAt}`} alt={t('settings.branding.preview')} className="size-14 rounded-md border border-line object-contain" />}
+                  {(logo || (x.has_logo && !remove)) && <img src={blobURL(logo?.url) ?? `/tenants/${x.id}/logo.png?v=${encodeURIComponent(x.created_at)}${q.dataUpdatedAt}`} alt={t('settings.branding.preview')} className="size-14 rounded-md border border-line object-contain" />}
                   <label className="btn cursor-pointer">
                     {t('settings.branding.choose')}
                     <input

@@ -13,6 +13,7 @@ import { useT, type MessageKey } from '../../i18n'
 import { useSaveSection, useSettings, type Section, type Settings, type SettingsInput } from './api'
 import { Facts, ListField, SectionHead, SelectField, SettingsForm, TextField, Toggle } from '../../components/settingsform'
 import { badNet, fileBase64, isPEM, isSyslog, lines, parseRoleGroups, roleGroupsText, unlines } from './logic'
+import { blobURL } from '../../lib/blob'
 
 
 /** Loads the settings once and hands them to a section. */
@@ -91,7 +92,7 @@ function Branding({ s, save, ro }: { s: Settings; save: (section: Section, body:
           <Field label={t('settings.branding.logo')} help={t('settings.branding.logoHelp')}>
             {({ id, describedBy }) => (
               <div className="flex flex-wrap items-center gap-3">
-                {(logo || (s.has_logo && !remove)) && <img src={logo?.url ?? `/branding/logo.png?v=${v}`} alt={t('settings.branding.preview')} className="size-14 rounded-md border border-line bg-surface-2 object-contain" />}
+                {(logo || (s.has_logo && !remove)) && <img src={blobURL(logo?.url) ?? `/branding/logo.png?v=${v}`} alt={t('settings.branding.preview')} className="size-14 rounded-md border border-line bg-surface-2 object-contain" />}
                 <label className="btn cursor-pointer">
                   <ImageUp size={14} aria-hidden /> {t('settings.branding.choose')}
                   <input

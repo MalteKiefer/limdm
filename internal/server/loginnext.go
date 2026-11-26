@@ -15,7 +15,7 @@ const defaultNext = "/app/"
 // scheme relative URL, the sign in pages themselves or the API. Anything
 // else gives defaultNext, so the parameter is no open redirect.
 func safeNext(v string) string {
-	if v == "" || len(v) > 2000 || !strings.HasPrefix(v, "/") || strings.HasPrefix(v, "//") ||
+	if v == "" || len(v) > 2000 || v[0] != '/' || (len(v) > 1 && (v[1] == '/' || v[1] == '\\')) ||
 		strings.ContainsAny(v, `\`) || strings.ContainsFunc(v, unicode.IsControl) {
 		return defaultNext
 	}
