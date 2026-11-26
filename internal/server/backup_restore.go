@@ -457,6 +457,10 @@ func parseReplay(r io.Reader) ([]replayEntry, error) {
 	return out, sc.Err()
 }
 
+// hexPrefixRe is the token hash prefix of a token.revoke entry; LIKE
+// wildcards in a forged entry must not match every token.
+var hexPrefixRe = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
+
 // replay applies the revocations among entries written after the backup
 // (id above the backup's audit head) and returns the entries it did not
 // apply for a manual review.
@@ -473,7 +477,11 @@ func (s *Server) replay(ctx context.Context, actor string, head int64, entries [
 		case "device.delete":
 			sql, args = `UPDATE devices SET retired=true, cert_serial='', pending_serial=NULL WHERE id=$1`, []any{e.Target}
 		case "token.revoke":
-			sql, args = `DELETE FROM enroll_tokens WHERE encode(token_hash, 'hex') LIKE $1 || '%' AND length($1) >= 12`, []any{e.Target}
+			if !hexPrefixRe.MatchString(e.Target) {
+				manual = append(manual, e)
+				continue
+			}
+			sql, args = `DELETE FROM enroll_tokens WHERE starts_with(encode(token_hash, 'hex'), $1)`, []any{e.Target}
 		case "api_token.revoke":
 			sql, args = `UPDATE api_tokens SET revoked_at=now() WHERE prefix=$1 AND revoked_at IS NULL`, []any{strings.TrimPrefix(e.Detail, "prefix=")}
 		default:

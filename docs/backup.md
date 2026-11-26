@@ -237,7 +237,9 @@ database and copy `ca/` from there.
 | a key rotation step | restore the archive made **after** the rotation (a rotation triggers a backup); an older CA directory does not match newer device certificates |
 
 `-replay` reads JSON Lines exports (**Audit**, export) and the RFC 5424 messages the server
-sends to syslog. Only entries with an id above the archive's audit head are used. Without a
+sends to syslog. Only entries with an id above the archive's audit head are used. Syslog
+messages carry no signature: replay only a copy you trust (a collector that accepts the
+server alone), since a forged line can retire devices. Without a
 surviving copy nothing is replayed: retire devices that were lost in between by hand.
 
 The restore window only widens which certificate of an **existing, active** device is

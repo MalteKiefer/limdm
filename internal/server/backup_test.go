@@ -233,6 +233,9 @@ func TestBackupRestore(t *testing.T) {
 	if err != nil || applied != 1 || len(manual) != 1 || !retired {
 		t.Fatalf("replay: %d %v %v %v", applied, manual, err, retired)
 	}
+	if _, manual, err := rs.replay(ctx, "admin", m.AuditHead.ID, []replayEntry{{ID: retireID + 2, Action: "token.revoke", Target: "%%%%%%%%%%%%"}}); err != nil || len(manual) != 1 {
+		t.Fatalf("token.revoke with wildcards applied: %v %v", manual, err)
+	}
 	if rs.restoreRepin(ctx, "d2", cert(time.Now())) {
 		t.Fatal("retired device pinned")
 	}
