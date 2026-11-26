@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -186,19 +185,28 @@ func (s *Server) resignRows(ctx context.Context, need func(storedData) bool) err
 	return nil
 }
 
-// signExistingData signs the unsigned rows once, on the upgrade that
-// introduced these signatures and on a fresh installation (seeded apps and
-// remotes). A marker file next to the key records it, like items-signed-v1.
+// signExistingData signs the unsigned rows once per installation, on the
+// upgrade that introduced these signatures and on a fresh installation
+// (seeded apps and remotes). The database records it (settings key
+// data-signed-v1), so an instance added or rebuilt later never signs rows
+// written into the database meanwhile; the caller holds lockStartup.
 // Migrations that seed such rows later must sign them themselves.
 func (s *Server) signExistingData(ctx context.Context) error {
-	marker := filepath.Join(s.cfg.CADir, "data-signed-v1")
-	if _, err := os.Stat(marker); err == nil || itemKey == nil {
+	if itemKey == nil {
 		return nil
 	}
-	if err := s.resignRows(ctx, func(d storedData) bool { return d.sig == "" }); err != nil {
+	var done bool
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM settings WHERE key='data-signed-v1')`).Scan(&done); err != nil || done {
 		return err
 	}
-	return os.WriteFile(marker, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o600)
+	// pre-release builds recorded it in a file next to the key
+	if _, err := os.Stat(filepath.Join(s.cfg.CADir, "data-signed-v1")); err != nil {
+		if err := s.resignRows(ctx, func(d storedData) bool { return d.sig == "" }); err != nil {
+			return err
+		}
+	}
+	_, err := s.db.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('data-signed-v1', to_jsonb(now())) ON CONFLICT (key) DO NOTHING`)
+	return err
 }
 
 // resignData signs again what carries a signature of the previous command

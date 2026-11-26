@@ -42,7 +42,9 @@
   event. Older agents ignore the signatures; they get no user list while the stored one does
   not verify. A change that keeps signed fields (allowing or blocking a remote, opening up an
   app on request) is refused when the stored entry no longer verifies, so a database change
-  is never signed later by accident.
+  is never signed later by accident. Rows that existed before these signatures are signed
+  once per installation, at the first start of 0.17, recorded in the database
+  (`settings` key `data-signed-v1`); an instance added or rebuilt later signs nothing.
 
   Whoever can only write to the database cannot make a device run, install or trust anything
   an admin did not sign. They can still change which signed items and apps reach which

@@ -23,6 +23,20 @@ func TestSignedCatalogAndUsers(t *testing.T) {
 	if err := s.signExistingData(ctx); err != nil { // seeded apps and Flathub
 		t.Fatal(err)
 	}
+	// recorded in the database: another instance (its own CA directory
+	// copy) never signs a row emptied in the database later
+	var firefoxSig string
+	db.QueryRow(ctx, `SELECT signature FROM catalog_apps WHERE slug='firefox'`).Scan(&firefoxSig)
+	db.Exec(ctx, `UPDATE catalog_apps SET signature='' WHERE slug='firefox'`)
+	s.cfg.CADir = t.TempDir()
+	if err := s.signExistingData(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var sig string
+	if db.QueryRow(ctx, `SELECT signature FROM catalog_apps WHERE slug='firefox'`).Scan(&sig); sig != "" || firefoxSig == "" {
+		t.Fatalf("signed again on a second instance: %q (first %q)", sig, firefoxSig)
+	}
+	db.Exec(ctx, `UPDATE catalog_apps SET signature=$1 WHERE slug='firefox'`, firefoxSig)
 	if code, _ := ui("POST", "/software/apps", url.Values{"new": {"1"}, "id": {"tool"}, "name": {"Tool"}, "mode": {"available"},
 		"enabled": {"on"}, "flatpak": {"org.example.Tool"}}); code != http.StatusSeeOther {
 		t.Fatalf("save app: %d", code)
