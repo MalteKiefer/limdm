@@ -44,11 +44,11 @@ func (s *Server) apiFail(w http.ResponseWriter, err error) {
 		return
 	}
 	if overloaded(err) {
-		s.log.Warn("admin api request: database busy", "err", err)
+		s.log.Warn("admin api request: database busy", "err", err, "request_id", requestID(w))
 		retryLater(w, 30, "server busy, retry later")
 		return
 	}
-	s.log.Error("admin api request failed", "err", err)
+	s.log.Error("admin api request failed", "err", err, "request_id", requestID(w))
 	problem(w, http.StatusInternalServerError, "internal error")
 }
 
@@ -150,6 +150,22 @@ func (s *Server) deny(w http.ResponseWriter, r *http.Request, c apiCaller, msg s
 	problem(w, http.StatusForbidden, msg)
 }
 
+// auditRead tells whether a read through the API goes to the audit log
+// (LIMDM_AUDIT_API_READS): all reads, none, or (default) the sensitive
+// ones, which are the audit log and a single device with its inventory.
+func (s *Server) auditRead(r *http.Request, level string) bool {
+	if r.Method != http.MethodGet {
+		return false // writes audit themselves
+	}
+	switch s.cfg.AuditAPIReads {
+	case "all":
+		return true
+	case "off":
+		return false
+	}
+	return level == "audit" || r.Pattern == "GET /api/v1/devices/{id}"
+}
+
 type apiHandlerFunc func(w http.ResponseWriter, r *http.Request, c apiCaller)
 
 // need guards an API handler. Levels: read (every API role), audit (admin
@@ -175,6 +191,12 @@ func (s *Server) need(level string, h apiHandlerFunc) http.HandlerFunc {
 		}
 		if c.Tenant != 0 {
 			r = r.WithContext(withTenant(r.Context(), c.Tenant))
+		}
+		if s.auditRead(r, level) {
+			if err := s.auditAction(r.Context(), c.actor(), "api.read", r.Method+" "+truncate(r.URL.Path, 200), truncate(r.URL.RawQuery, 500), nil); err != nil {
+				s.apiFail(w, err)
+				return
+			}
 		}
 		h(w, r, c)
 	}

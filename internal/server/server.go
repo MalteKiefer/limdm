@@ -77,6 +77,8 @@ type Config struct {
 	UpdateDownloads int
 	MaxCheckins     int    // check ins decoded and processed at once per instance (LIMDM_MAX_CHECKINS)
 	SyslogCA        string // CA file for tcp+tls syslog targets; empty: system roots
+	AccessLog       bool   // a log line per request (LIMDM_ACCESS_LOG)
+	AuditAPIReads   string // off, sensitive or all: API reads written to the audit log (LIMDM_AUDIT_API_READS)
 	// load balancers that send a PROXY v2 header to the agent listener (LIMDM_AGENT_PROXY_PROTOCOL)
 	AgentProxyFrom []netip.Prefix
 }
@@ -121,6 +123,8 @@ func ConfigFromEnv() (Config, error) {
 		GeoIPURL:      envOr("LIMDM_GEOIP_URL", "https://ipwho.is/"),
 		Syslog:        os.Getenv("LIMDM_SYSLOG"),
 		SyslogCA:      os.Getenv("LIMDM_SYSLOG_CA"),
+		AccessLog:     os.Getenv("LIMDM_ACCESS_LOG") == "true",
+		AuditAPIReads: envOr("LIMDM_AUDIT_API_READS", "sensitive"),
 		MultiTenant:   os.Getenv("LIMDM_MULTI_TENANT") == "true",
 	}
 	if c.GeoIPURL == "off" {
@@ -160,6 +164,9 @@ func ConfigFromEnv() (Config, error) {
 	}
 	if c.MaxCheckins, err = envInt("LIMDM_MAX_CHECKINS", 64, 1, 10000); err != nil {
 		return c, err
+	}
+	if !slices.Contains([]string{"off", "sensitive", "all"}, c.AuditAPIReads) {
+		return c, errors.New("LIMDM_AUDIT_API_READS must be off, sensitive or all")
 	}
 	var missing []string
 	required := map[string]string{
@@ -517,7 +524,7 @@ func (s *Server) AdminHandler() http.Handler {
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	s.webRoutes(mux)
 	s.apiRoutes(mux)
-	return countRequests("console", securityHeaders(s.consoleFilter(mux)))
+	return s.countRequests("console", securityHeaders(s.consoleFilter(mux)))
 }
 
 // AgentHandler serves the agent API. Everything except fetching the CA and
@@ -538,7 +545,7 @@ func (s *Server) AgentHandler() http.Handler {
 	mux.HandleFunc("GET /api/v1/catalog/search", s.deviceAuth(s.deviceLimit(30, s.flathubSearchJSON), false))
 	mux.HandleFunc("GET /api/v1/catalog/flathub-icon", s.deviceAuth(s.deviceLimit(300, s.flathubIcon), false))
 	s.shellAgentRoutes(mux)
-	return countRequests("agent", securityHeaders(mux))
+	return s.countRequests("agent", securityHeaders(mux))
 }
 
 // AgentTLSConfig: TLS 1.3 only, server certificate from the device CA. The
@@ -1267,22 +1274,22 @@ func retryLater(w http.ResponseWriter, seconds int, detail string) {
 // agent retries after Retry-After.
 func (s *Server) failAPI(w http.ResponseWriter, err error) {
 	if overloaded(err) {
-		s.log.Warn("agent request: database busy", "err", err)
+		s.log.Warn("agent request: database busy", "err", err, "request_id", requestID(w))
 		retryLater(w, 30+mrand.IntN(90), "server busy, retry later") //nolint:gosec // jitter, not a secret
 		return
 	}
-	s.log.Error("agent request failed", "err", err)
+	s.log.Error("agent request failed", "err", err, "request_id", requestID(w))
 	problem(w, http.StatusInternalServerError, "internal error")
 }
 
 func (s *Server) fail(w http.ResponseWriter, err error) {
 	if overloaded(err) {
-		s.log.Warn("request: database busy", "err", err)
+		s.log.Warn("request: database busy", "err", err, "request_id", requestID(w))
 		w.Header().Set("Retry-After", "30")
 		http.Error(w, "server busy, try again in a moment", http.StatusServiceUnavailable)
 		return
 	}
-	s.log.Error("request failed", "err", err)
+	s.log.Error("request failed", "err", err, "request_id", requestID(w))
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
 

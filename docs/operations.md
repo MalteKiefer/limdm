@@ -178,6 +178,7 @@ scrape_configs:
 | `limdm_audit_chain_intact` | | 1 while the audit hash chain verifies, 0 after an entry was changed |
 | `limdm_audit_verified_timestamp_seconds` | | Last audit chain verification |
 | `limdm_http_requests_total` | `listener`, `method`, `code` | Requests since the process started, console and agent listener; per instance, scrape every instance |
+| `limdm_http_request_duration_seconds` | `listener`, `le` | Histogram of request durations (5 ms to 30 s buckets), console and agent listener; per instance |
 
 Useful alerts: `limdm_audit_chain_intact == 0`, `increase(limdm_notifications_24h{result="failed"}[1h]) > 0`,
 `limdm_devices{status="stale"} > 0`. Each scrape verifies the audit entries written since the

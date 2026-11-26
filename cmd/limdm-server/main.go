@@ -3,6 +3,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -24,7 +25,13 @@ import (
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// LIMDM_LOG_LEVEL: debug, info (default), warn or error
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(cmp.Or(os.Getenv("LIMDM_LOG_LEVEL"), "info"))); err != nil {
+		fmt.Fprintln(os.Stderr, "error: LIMDM_LOG_LEVEL must be debug, info, warn or error")
+		os.Exit(1)
+	}
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 	cmd := "serve"
 	if len(os.Args) > 1 {
 		cmd = os.Args[1]
@@ -75,6 +82,8 @@ func serve(log *slog.Logger) error {
 	newServer := func(addr string, h http.Handler, tc *tls.Config) *http.Server {
 		return &http.Server{
 			Addr: addr, Handler: h, TLSConfig: tc,
+			// TLS handshake and protocol errors as structured lines, not plain stderr
+			ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 			ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 60 * time.Second, WriteTimeout: 5 * time.Minute, IdleTimeout: 120 * time.Second,
 		}
 	}

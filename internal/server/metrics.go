@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,11 +50,66 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 
 func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
-// countRequests counts every request of a listener by method and status.
-func countRequests(listener string, next http.Handler) http.Handler {
+// latencyBuckets are the upper bounds (seconds) of the request duration
+// histogram.
+var latencyBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30}
+
+// httpLatency is the request duration histogram per listener: counts per
+// bucket (not cumulative; the last is +Inf), sum and count.
+var httpLatency = struct {
+	sync.Mutex
+	m map[string]*latencyHist
+}{m: map[string]*latencyHist{}}
+
+type latencyHist struct {
+	buckets []uint64
+	sum     float64
+	n       uint64
+}
+
+func observeLatency(listener string, d time.Duration) {
+	sec := d.Seconds()
+	httpLatency.Lock()
+	defer httpLatency.Unlock()
+	h := httpLatency.m[listener]
+	if h == nil {
+		h = &latencyHist{buckets: make([]uint64, len(latencyBuckets)+1)}
+		httpLatency.m[listener] = h
+	}
+	i := sort.SearchFloat64s(latencyBuckets, sec) // first bound >= sec
+	h.buckets[i]++
+	h.sum += sec
+	h.n++
+}
+
+// requestIDRe is a request id a client or proxy may hand in.
+var requestIDRe = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
+
+// requestID is the id of the request w answers (X-Request-ID), for log
+// lines of handlers that only have the writer.
+func requestID(w http.ResponseWriter) string { return w.Header().Get("X-Request-ID") }
+
+// countRequests gives every request of a listener a request id (an
+// X-Request-ID a proxy set, else a random one; returned in the answer),
+// counts it by method and status, records its duration and, with
+// LIMDM_ACCESS_LOG, writes an access log line.
+func (s *Server) countRequests(listener string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		id := r.Header.Get("X-Request-ID")
+		if !requestIDRe.MatchString(id) {
+			id = randToken(9)
+		}
+		w.Header().Set("X-Request-ID", id)
 		rec := &statusRecorder{ResponseWriter: w}
 		next.ServeHTTP(rec, r)
+		took := time.Since(start)
+		observeLatency(listener, took)
+		if s.cfg.AccessLog {
+			// the path only: query strings can carry codes and filters
+			s.log.Info("request", "listener", listener, "method", r.Method, "path", truncate(r.URL.Path, 200), "status", max(rec.code, 200),
+				"ms", took.Milliseconds(), "remote", clientIP(r), "request_id", id)
+		}
 		method := r.Method
 		switch method {
 		case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions:
@@ -208,6 +264,24 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		p.sample("limdm_http_requests_total", float64(httpCounts.m[k]), "listener", k.listener, "method", k.method, "code", strconv.Itoa(k.code))
 	}
 	httpCounts.Unlock()
+
+	p.family("limdm_http_request_duration_seconds", "histogram", "HTTP request duration by listener.")
+	httpLatency.Lock()
+	for _, l := range []string{"agent", "console"} {
+		h := httpLatency.m[l]
+		if h == nil {
+			continue
+		}
+		var cum uint64
+		for i, le := range latencyBuckets {
+			cum += h.buckets[i]
+			p.sample("limdm_http_request_duration_seconds_bucket", float64(cum), "listener", l, "le", strconv.FormatFloat(le, 'g', -1, 64))
+		}
+		p.sample("limdm_http_request_duration_seconds_bucket", float64(h.n), "listener", l, "le", "+Inf")
+		p.sample("limdm_http_request_duration_seconds_sum", h.sum, "listener", l)
+		p.sample("limdm_http_request_duration_seconds_count", float64(h.n), "listener", l)
+	}
+	httpLatency.Unlock()
 
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	p.WriteTo(w)

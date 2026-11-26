@@ -64,6 +64,7 @@ through the API carry the same name as creator. In addition:
 | `api_token.create`, `api_token.revoke` | A token was created (detail: role, read only, days, prefix, scope tags) or revoked in the console |
 | `api.auth_failed` | An unknown, expired, revoked or disabled tenant token was sent (detail: reason and client address) |
 | `api.denied` | A valid token tried something its role, read only flag or scope does not allow (target: method and path) |
+| `api.read` | A read through the API (target: method and path, detail: query). By default only the sensitive reads, `GET /api/v1/audit` and `GET /api/v1/devices/{id}`; `LIMDM_AUDIT_API_READS=all` records every read, `off` none ([configuration.md](configuration.md)) |
 
 Audit entries in `GET /api/v1/audit` carry `tenant_id` when they belong to a tenant; it is
 hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-notifications-approvals)).
@@ -89,7 +90,10 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
   queued or approval requested, `204` deleted, `400` malformed request, `401` token missing
   or invalid, `403` role does not allow it, `404` not found or outside the token's tenant or
   scope, `409` name taken, object still in use or device retired, `415` not JSON, `422`
-  rejected by validation, `429` rate limited.
+  rejected by validation, `429` rate limited, `503` server busy (database lock or statement
+  timeout; retry after `Retry-After`).
+* Every answer carries `X-Request-ID`; a well formed one sent with the request is kept.
+  Server log lines of failed requests name it.
 * Lists take `limit` (1 to 500, default 100) and return `{"items": [...], "next_cursor": "..."}`.
   Pass `next_cursor` as `cursor` for the next page; it is absent on the last page.
   `GET /api/v1/tags` is not paged.
