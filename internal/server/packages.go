@@ -404,7 +404,9 @@ func (s *Server) packagesSettings(w http.ResponseWriter, r *http.Request, sess s
 		s.renderPackages(w, r, sess, "", err.Error())
 		return
 	}
-	if (cur.S3 == nil) != (c.S3 == nil) {
+	moved := (cur.S3 == nil) != (c.S3 == nil) || cur.S3 != nil && c.S3 != nil &&
+		(cur.S3.Endpoint != c.S3.Endpoint || cur.S3.Region != c.S3.Region || cur.S3.Bucket != c.S3.Bucket || cur.S3.Prefix != c.S3.Prefix)
+	if moved {
 		var n int
 		if err := s.db.QueryRow(ctx, `SELECT count(*) FROM artifacts`).Scan(&n); err != nil {
 			s.fail(w, err)
