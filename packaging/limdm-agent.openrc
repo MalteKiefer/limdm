@@ -12,6 +12,8 @@ error_log="/var/log/limdm-agent.log"
 umask=0077
 supervisor="supervise-daemon"
 respawn_delay=10
+# background work yields to the user and to server workloads
+supervise_daemon_args="--nicelevel 10 --ionice 2:7"
 
 depend() {
 	need net

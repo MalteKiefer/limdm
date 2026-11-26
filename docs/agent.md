@@ -215,6 +215,11 @@ in [concepts.md](concepts.md#agent-cycle). In addition it
 * keeps enforcing the stored declarations while the server is unreachable, and locks the
   device after `offline_lock_hours` without contact when that is set.
 
+The agent runs with lower CPU and I/O priority (systemd `Nice=10`, `CPUWeight=20`,
+`IOSchedulingClass=best-effort` with priority 7; on OpenRC nice 10 and ionice 2:7), so its
+background work yields to users on laptops and to workloads on servers. Package installs it
+starts inherit that priority.
+
 ### Privacy options
 
 Two features send data to third parties. Both are off by default and switched on in

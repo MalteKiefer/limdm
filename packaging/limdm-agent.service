@@ -19,6 +19,12 @@ RestartSec=10
 ProtectClock=yes
 ProtectKernelLogs=yes
 UMask=0077
+# Background work (inventory, package queries, convergence, osquery) yields
+# to the user and to server workloads; package installs it starts inherit it.
+Nice=10
+CPUWeight=20
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
 
 [Install]
 WantedBy=multi-user.target
