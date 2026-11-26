@@ -42,8 +42,7 @@
   <label class="check"><input type="checkbox" name="four_eyes" {{if .Set.FourEyes}}checked{{end}}> {{t "Require a second administrator's approval"}}</label>
   <label class="check"><input type="checkbox" name="four_eyes_recovery" {{if .Set.FourEyesRecovery}}checked{{end}}> {{t "Also for recovery key views (the viewer gives a reason or ticket reference)"}}</label>
   <label class="check"><input type="checkbox" name="four_eyes_shell" {{if .Set.FourEyesShell}}checked{{end}}> {{t "Also for remote shell sessions (open the approved session within one hour)"}}</label>
-  <div class="card-head stacked"><h2>{{t "Audit log retention"}}</h2><p class="muted">{{t "Entries older than this are deleted once a day after the hash chain was verified; a signed checkpoint keeps the rest verifiable. 0 keeps everything."}}</p></div>
-  <label>{{t "Keep audit entries (days)"}}<input name="audit_retention_days" type="number" min="0" max="36500" value="{{.Set.AuditRetentionDays}}"><small class="field-hint">{{t "0 or 365 to 36500"}}</small></label>
+  <p class="muted">{{t "The audit log retention is set with the other data types under Data retention."}} <a href="/settings?tab=retention">{{t "Data retention"}}</a></p>
   <fieldset>
     <legend>{{t "Privacy"}}</legend>
     <label class="check"><input type="checkbox" name="geolocation" {{if .Set.Geolocation}}checked{{end}}> {{t "Look up the location of device public addresses (sent to the geolocation service)"}}</label>
@@ -162,6 +161,20 @@
   <label>{{t "Logo"}}<input type="file" name="logo" accept="image/png"><small class="field-hint">{{t "PNG, square, up to 256 KiB"}}</small></label>
   {{if .Set.Logo}}<div class="logo-preview"><img src="/branding/logo.png?v={{.Brand.V}}" alt=""><label class="check"><input type="checkbox" name="remove_logo"> {{t "Remove logo"}}</label></div>{{end}}
   {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
+</form>
+{{else if eq .Tab "retention"}}
+<form class="card" method="post" action="/settings">
+  {{template "csrf" .CSRF}}<input type="hidden" name="section" value="retention">
+  <div class="card-head stacked"><h2>{{t "Data retention"}}</h2><p class="muted">{{t "Data older than its period is deleted every hour. The audit log is cut only behind a verified hash chain, with a signed checkpoint. Set periods with your data protection officer; the hints name the usual legal basis, they are no legal advice."}} {{template "doclink" "retention.md"}}</p></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Data type"}}</th><th class="num">{{t "Days"}}</th><th>{{t "Reason"}}</th></tr></thead>
+    <tbody>{{range .Retention}}<tr>
+      <td><label for="ret-{{.Key}}">{{t .Label}}</label></td>
+      <td class="num"><input id="ret-{{.Key}}" name="retention_{{.Key}}" type="number" min="{{if .Forever}}0{{else}}{{.Min}}{{end}}" max="{{.Max}}" value="{{.Days}}" {{if not $admin}}readonly{{end}}><small class="field-hint">{{if .Forever}}{{t "0 keeps everything;"}} {{end}}{{.Min}} – {{.Max}}, {{t "default"}} {{.Default}}</small></td>
+      <td class="muted">{{t .Hint}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+  {{if $admin}}<div class="form-foot"><span class="muted">{{t "Expired backups are deleted by the backup schedule (Backup tab)."}}</span><button>{{t "Save"}}</button></div>{{end}}
 </form>
 {{end}}
 </div>

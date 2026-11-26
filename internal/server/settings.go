@@ -52,8 +52,12 @@ type Settings struct {
 	// (amr), or, with MFAACR set, whose acr is not one of these values.
 	RequireMFA bool     `json:"require_mfa,omitempty"`
 	MFAACR     []string `json:"mfa_acr,omitempty"`
-	// AuditRetentionDays deletes audit entries older than this (0 keeps them).
+	// AuditRetentionDays is the audit period saved before Retention existed;
+	// it still applies until the retention tab is saved (retention.go).
 	AuditRetentionDays int `json:"audit_retention_days,omitempty"`
+	// Retention is the period in days per data type (retentionKinds); a
+	// missing entry uses the default.
+	Retention map[string]int `json:"retention,omitempty"`
 	// RoleGroups give console roles to members of directory groups or OIDC
 	// group claims.
 	RoleGroups []RoleGroup `json:"role_groups,omitempty"`
@@ -254,6 +258,9 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 	if d := set.AuditRetentionDays; d != 0 && (d < 365 || d > 36500) {
 		return nil, errors.New("audit log retention: 0 (keep forever) or 365 to 36500 days")
 	}
+	if err := validRetention(set.Retention); err != nil {
+		return nil, err
+	}
 	if len(set.MFAACR) > 10 {
 		return nil, errors.New("accepted acr values: at most 10")
 	}
@@ -360,6 +367,10 @@ func consoleAllowed(rt *runtimeState, ip string) bool {
 // ---- settings page ----
 
 func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, sess session) {
+	if r.URL.Query().Get("tab") == "backup" && !sess.TenantOnly() { // its own page (backup.go)
+		http.Redirect(w, r, "/settings/backup", http.StatusSeeOther)
+		return
+	}
 	s.renderSettings(w, r, sess, s.settings(), "", "")
 }
 
@@ -398,15 +409,16 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 	s.render(w, r, sess, "settings", map[string]any{"Set": set, "ClientIP": clientIP(r), "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
 		"Tab": tab, "Tabs": tabs, "Channels": data["Channels"], "NotifyEvents": data["NotifyEvents"], "Keys": data["Keys"], "TenantOnly": sess.TenantOnly(),
 		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": map[bool]string{false: hex.EncodeToString(s.whKey)}[sess.TenantOnly()],
-		"RoleGroupsText": roleGroupsText(set.RoleGroups)})
+		"RoleGroupsText": roleGroupsText(set.RoleGroups), "Retention": retentionRows(set)})
 }
 
 // settingsTabs are the sections of the settings page; each tab saves only
 // its own fields.
-var settingsTabs = []string{"general", "security", "sso", "notifications", "branding"}
+var settingsTabs = []string{"general", "security", "sso", "notifications", "branding", "retention", "backup"}
 
 var settingsTabLabels = []struct{ Key, Label string }{
 	{"general", "General"}, {"security", "Security"}, {"sso", "SSO"}, {"notifications", "Notifications"}, {"branding", "Branding"},
+	{"retention", "Data retention"}, {"backup", "Backup"},
 }
 
 func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess session) {
@@ -461,7 +473,6 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		set.FourEyes = r.FormValue("four_eyes") == "on"
 		set.FourEyesRecovery = set.FourEyes && r.FormValue("four_eyes_recovery") == "on"
 		set.FourEyesShell = set.FourEyes && r.FormValue("four_eyes_shell") == "on"
-		set.AuditRetentionDays, _ = strconv.Atoi(r.FormValue("audit_retention_days"))
 		if set.FourEyes && !cur.FourEyes {
 			n, err := s.activeAdmins(ctx)
 			if err != nil {
@@ -476,6 +487,17 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		set.Geolocation, set.FallbackDNS = r.FormValue("geolocation") == "on", r.FormValue("fallback_dns") == "on"
 	case "remote_shell":
 		set.RemoteShell = remoteShellForm(r)
+	case "retention":
+		set.Retention = map[string]int{}
+		for _, k := range retentionKinds {
+			d, err := strconv.Atoi(r.FormValue("retention_" + k.Key))
+			if err != nil {
+				s.renderSettings(w, r, sess, set, "", "retention: whole days only")
+				return
+			}
+			set.Retention[k.Key] = d
+		}
+		set.AuditRetentionDays = 0 // replaced by Retention["audit"]
 	default:
 		s.errorPage(w, r, sess, http.StatusBadRequest, "unknown settings section")
 		return
@@ -533,7 +555,7 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d allow=%q block=%q rules=%+v four_eyes=%v four_eyes_recovery=%v four_eyes_shell=%v require_mfa=%v acr=%q audit_retention_days=%d role_groups=%+v geolocation=%v fallback_dns=%v",
 		set.OIDCIssuer, set.AllowedDomain, set.LocalLogin, set.StaleHours, set.WebhookURL != "", set.OIDCClientSecret != cur.OIDCClientSecret,
 		set.CompanyName, len(set.Logo), set.ConsoleAllow, set.ConsoleBlock, set.Rules,
-		set.FourEyes, set.FourEyesRecovery, set.FourEyesShell, set.RequireMFA, set.MFAACR, set.AuditRetentionDays, set.RoleGroups, set.Geolocation, set.FallbackDNS) + fmt.Sprintf(" remote_shell=%+v", set.RemoteShell)
+		set.FourEyes, set.FourEyesRecovery, set.FourEyesShell, set.RequireMFA, set.MFAACR, set.AuditRetentionDays, set.RoleGroups, set.Geolocation, set.FallbackDNS) + fmt.Sprintf(" remote_shell=%+v retention=%v", set.RemoteShell, set.Retention)
 	err = s.auditAction(ctx, sess.Email, "settings.save", "server", detail, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()
 			RETURNING updated_at`, string(doc)).Scan(&at)

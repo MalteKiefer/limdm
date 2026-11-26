@@ -7,31 +7,116 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
 
-// Retention: finished commands, routine device events and (when configured)
-// old audit entries are deleted by the hourly history job. audit_log and
-// device_events refuse deletes unless the transaction sets limdm.retention
-// (schema.sql), which only this file does.
+// Retention: the hourly history job deletes data older than the period set
+// per data type in the settings (retentionKinds, docs/retention.md).
+// audit_log and device_events refuse deletes unless the transaction sets
+// limdm.retention (schema.sql), which only this file does. The latest
+// protective commands (lock, lost mode, wipe) and the latest compliance
+// change per device and check always stay.
 
-// commandRetention keeps finished commands this long; the latest protective
-// actions (lock, lost mode, wipe) stay, the device page shows them.
-const commandRetention = "180 days"
+// retentionKind is a data type with its default period and bounds in days.
+// Forever allows 0 (keep everything); Hint names the legal reasoning shown
+// next to the field.
+type retentionKind struct {
+	Key, Label, Hint  string
+	Default, Min, Max int
+	Forever           bool
+}
+
+var retentionKinds = []retentionKind{
+	{"audit", "Audit log", "Proof of administrative actions (ISO 27001 A.5.33, A.8.15). Three years covers a certification cycle; longer only with a documented reason (GDPR Art. 5(1)(e)).", 1095, 365, 36500, true},
+	{"device_events", "Device events", "Operational logs with user and host names: keep as short as troubleshooting and incident review allow (GDPR Art. 5(1)(e), works council agreements).", 365, 30, 3650, false},
+	{"compliance", "Compliance history", "Evidence of the compliance state for audits (ISO 27001 A.5.36); the latest change per device and check always stays.", 1095, 90, 3650, false},
+	{"commands", "Finished commands", "Who did what on which device; the latest lock, lost mode and wipe stay regardless.", 180, 30, 3650, false},
+	{"script_results", "Script results", "Script output can contain personal data; besides the period at most 200 results per device are kept.", 90, 7, 3650, false},
+	{"diagnostics", "Diagnostics bundles", "Logs with user and host names; besides the period at most 10 bundles per device are kept.", 30, 1, 365, false},
+	{"shell_transcripts", "Remote shell transcripts", "Screen output of support sessions: subject to co-determination (BetrVG section 87(1) no. 6); keep short.", 90, 7, 3650, false},
+	{"metrics", "Device metrics", "Performance samples for the device charts.", 30, 1, 365, false},
+	{"notification_log", "Notification log", "Delivery results of notification channels, for troubleshooting.", 30, 7, 365, false},
+}
+
+// retentionDays is the period of a data type: the saved value, the legacy
+// audit setting, or the default.
+func (set Settings) retentionDays(key string) int {
+	if d, ok := set.Retention[key]; ok {
+		return d
+	}
+	if key == "audit" && set.AuditRetentionDays != 0 {
+		return set.AuditRetentionDays
+	}
+	for _, k := range retentionKinds {
+		if k.Key == key {
+			return k.Default
+		}
+	}
+	return 0
+}
+
+// validRetention checks every period against its bounds.
+func validRetention(m map[string]int) error {
+	for key, d := range m {
+		i := slices.IndexFunc(retentionKinds, func(k retentionKind) bool { return k.Key == key })
+		if i < 0 {
+			return fmt.Errorf("retention: unknown data type %q", key)
+		}
+		k := retentionKinds[i]
+		if (d != 0 || !k.Forever) && (d < k.Min || d > k.Max) {
+			return fmt.Errorf("retention of %s: %d to %d days", strings.ToLower(k.Label), k.Min, k.Max)
+		}
+	}
+	return nil
+}
+
+// retentionRow is one line of the retention form.
+type retentionRow struct {
+	retentionKind
+	Days int
+}
+
+func retentionRows(set Settings) []retentionRow {
+	out := make([]retentionRow, len(retentionKinds))
+	for i, k := range retentionKinds {
+		out[i] = retentionRow{k, set.retentionDays(k.Key)}
+	}
+	return out
+}
 
 func (s *Server) prune(ctx context.Context) error {
-	if _, err := s.db.Exec(ctx, `DELETE FROM device_metrics WHERE at < now() - interval '30 days';
-		DELETE FROM fleet_history WHERE day < current_date - 400;
-		DELETE FROM commands WHERE status IN ('ok', 'failed', 'expired') AND updated_at < now() - interval '`+commandRetention+`'
-			AND type NOT IN ('lock', 'unlock', 'lost', 'found', 'wipe');
-		DELETE FROM compliance_changes c WHERE c.at < now() - interval '365 days' AND EXISTS (SELECT 1 FROM compliance_changes n
-			WHERE n.device_id = c.device_id AND n.check_id = c.check_id AND n.id > c.id AND n.at < now() - interval '365 days')`); err != nil {
+	set := s.settings()
+	d := set.retentionDays
+	if _, err := s.db.Exec(ctx, `DELETE FROM device_metrics WHERE at < now() - make_interval(days => $1)`, d("metrics")); err != nil {
 		return err
 	}
+	for _, q := range []struct {
+		sql  string
+		days int
+	}{
+		{`DELETE FROM fleet_history WHERE day < current_date - 400`, 0},
+		{`DELETE FROM commands WHERE status IN ('ok', 'failed', 'expired') AND updated_at < now() - make_interval(days => $1)
+			AND type NOT IN ('lock', 'unlock', 'lost', 'found', 'wipe')`, d("commands")},
+		{`DELETE FROM compliance_changes c WHERE c.at < now() - make_interval(days => $1) AND EXISTS (SELECT 1 FROM compliance_changes n
+			WHERE n.device_id = c.device_id AND n.check_id = c.check_id AND n.id > c.id AND n.at < now() - make_interval(days => $1))`, d("compliance")},
+		{`DELETE FROM script_results WHERE received_at < now() - make_interval(days => $1)`, d("script_results")},
+		{`DELETE FROM diagnostics WHERE created_at < now() - make_interval(days => $1)`, d("diagnostics")},
+		{`DELETE FROM shell_sessions WHERE created_at < now() - make_interval(days => $1)`, d("shell_transcripts")},
+		{`DELETE FROM notification_log WHERE at < now() - make_interval(days => $1)`, d("notification_log")},
+	} {
+		args := []any{q.days}
+		if q.days == 0 {
+			args = nil
+		}
+		if _, err := s.db.Exec(ctx, q.sql, args...); err != nil {
+			return err
+		}
+	}
 	if err := s.retentionTx(ctx, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `DELETE FROM device_events WHERE at < now() - interval '365 days'`)
+		_, err := tx.Exec(ctx, `DELETE FROM device_events WHERE at < now() - make_interval(days => $1)`, d("device_events"))
 		return err
 	}); err != nil {
 		return err
@@ -61,7 +146,7 @@ func (s *Server) retentionTx(ctx context.Context, fn func(pgx.Tx) error) error {
 // audit chain key (HKDF from command.key, audit.go), from which verification
 // starts afterwards. The prune itself is an audit entry.
 func (s *Server) pruneAudit(ctx context.Context) error {
-	days := s.settings().AuditRetentionDays
+	days := s.settings().retentionDays("audit")
 	if days == 0 {
 		return nil
 	}
