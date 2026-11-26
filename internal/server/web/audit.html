@@ -9,7 +9,7 @@
 <form class="filters audit-filters" method="get" action="/audit">
   <input type="search" name="q" value="{{.F.q}}" placeholder="{{t "Search all fields"}}" aria-label="{{t "Search the audit log"}}">
   <input name="actor" value="{{.F.actor}}" placeholder="{{t "Actor"}}" aria-label="{{t "Actor"}}">
-  <select name="action" aria-label="{{t "Action"}}"><option value="">{{t "All actions"}}</option>{{range .Actions}}<option {{if eq . $.F.action}}selected{{end}}>{{.}}</option>{{end}}</select>
+  <select name="action" aria-label="{{t "Action"}}"><option value="">{{t "All actions"}}</option>{{range .Actions}}<option value="{{.}}" {{if eq . $.F.action}}selected{{end}}>{{auditLabel .}}{{if ne (auditLabel .) .}} ({{.}}){{end}}</option>{{end}}</select>
   <input name="target" value="{{.F.target}}" placeholder="{{t "Target"}}" aria-label="{{t "Target"}}">
   <input type="date" name="from" value="{{.F.from}}" aria-label="{{t "From"}}">
   <input type="date" name="to" value="{{.F.to}}" aria-label="{{t "To"}}">
@@ -18,6 +18,6 @@
 </form>
 <div class="tablecard"><div class="scroll"><table>
   <thead><tr><th class="num">#</th><th>{{t "Time"}}</th><th>{{t "Actor"}}</th><th>{{t "Action"}}</th><th>{{t "Target"}}</th><th>{{t "Detail"}}</th></tr></thead>
-  <tbody>{{range .Entries}}<tr><td class="num muted">{{.ID}}</td><td>{{fmtTime .At}}</td><td><a href="/audit?actor={{.Actor}}">{{.Actor}}</a></td><td class="mono"><a href="/audit?action={{.Action}}">{{.Action}}</a></td><td class="mono"><a href="/audit?target={{.Target}}">{{.Target}}</a></td><td><pre>{{.Detail}}</pre></td></tr>{{end}}</tbody>
+  <tbody>{{range .Entries}}<tr><td class="num muted">{{.ID}}</td><td>{{fmtTime .At}}</td><td><a href="/audit?actor={{.Actor}}">{{.Actor}}</a></td><td><a href="/audit?action={{.Action}}">{{auditLabel .Action}}</a><span class="sub mono">{{.Action}}</span></td><td class="mono"><a href="/audit?target={{.Target}}">{{.Target}}</a></td><td><pre>{{.Detail}}</pre></td></tr>{{end}}</tbody>
 </table></div></div>
 {{end}}

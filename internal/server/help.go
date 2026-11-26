@@ -86,6 +86,11 @@ var statusHelp = map[string]string{
 	"stale":         "Silent: no check in for longer than the stale threshold in the settings, so the shown state may be outdated.",
 	"pending":       "No report: enrolled, but the device has not sent compliance results yet.",
 	"retired":       "No longer managed; the certificate is revoked and the device cannot check in.",
+	// check results
+	"pass":     "The check passed at the last report.",
+	"fail":     "The check failed at the last report.",
+	"excepted": "Documented exception: excluded on purpose in the compliance item, never counted as passed.",
+	"na":       "Not applicable on this device.",
 }
 
 // glossary lists the terms the console uses, with a documentation page.

@@ -45,6 +45,14 @@ func TestHelpComplete(t *testing.T) {
 		keys = append(keys, v)
 	}
 	keys = append(keys, checkDetailPrefixes...)
+	// compliance check titles come from the agent; the console translates them
+	src, err := os.ReadFile("../agent/checks.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range regexp.MustCompile(`\{ID: "[^"]+", Title: "([^"]+)"`).FindAllStringSubmatch(string(src), -1) {
+		keys = append(keys, m[1])
+	}
 	for _, k := range keys {
 		if _, ok := deCatalog[k]; !ok {
 			t.Errorf("missing German text for %q", k)

@@ -69,3 +69,4 @@
 {{/* an error notice: translated text, the technical message folded away */}}
 {{define "err"}}{{with .}}{{$m := errmsg .}}<div class="notice error" role="alert">{{$m.Text}}{{with $m.Detail}}<details class="err-detail"><summary>{{t "Technical detail"}}</summary><code>{{.}}</code></details>{{end}}</div>{{end}}{{end}}
 {{define "doclink"}}<a class="doclink" href="{{docs .}}" rel="noopener" target="_blank" title="{{t "Open the documentation"}}" aria-label="{{t "Open the documentation"}}">?</a>{{end}}
+{{define "lvl"}}<a class="lvl" href="/help#l1-and-l2" title="{{if eq . 2}}{{t "Level 2: strict checks (CIS Level 2) that can limit how a device is used"}}{{else}}{{t "Level 1: baseline for every device"}}{{end}}">{{t "L"}}{{.}}</a>{{end}}
