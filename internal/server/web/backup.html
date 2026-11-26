@@ -1,0 +1,165 @@
+{{define "title"}}{{t "Backup"}} · LiMDM{{end}}
+{{define "content"}}
+<div class="page-head"><div><h1>{{t "Settings"}} {{template "doclink" "backup.md"}}</h1><div class="meta"><span>{{t "Encrypted backups of database, keys and uploaded packages"}}</span></div></div></div>
+<nav class="tabs" aria-label="{{t "Settings"}}">
+  {{range .Tabs}}<a href="/settings?tab={{.Key}}" {{if eq $.Tab .Key}}class="on" aria-current="page"{{end}}>{{t .Label}}</a>{{end}}
+</nav>
+{{template "err" .Error}}
+{{if .Msg}}<div class="notice ok" role="status">{{t .Msg}}</div>{{end}}
+{{if .Test}}<div class="notice ok" role="status">{{t "Connection test"}}: {{.Test}}</div>{{end}}
+<div class="narrow">
+<section class="card">
+  <div class="card-head"><h2>{{t "State"}}</h2>
+    <form method="post" action="/settings/backup/run">{{template "csrf" .CSRF}}<button class="small">{{t "Back up now"}}</button></form></div>
+  <dl class="kv">
+    <dt>{{t "Schedules"}}</dt><dd>{{len .Schedules}}</dd>
+    <dt>{{t "Time zone"}}</dt><dd class="mono">{{.Zone}}</dd>
+    <dt>{{t "3-2-1 rule"}}</dt><dd>{{if .Rule321}}<span class="pill ok">{{t "met"}}</span>{{else}}<span class="pill warn">{{t "not met"}}</span> <span class="muted">{{t "two or more targets, one off site, one with S3 Object Lock"}}</span>{{end}}</dd>
+  </dl>
+  <p class="muted">{{t "Besides the schedules, a backup runs after every key rotation and before package upgrades; the newest archive is verified weekly."}}</p>
+</section>
+
+<form class="card" method="post" action="/settings/backup">
+  {{template "csrf" .CSRF}}
+  <div class="card-head stacked"><h2>{{t "Encryption, time zone and general retention"}}</h2><p class="muted">{{t "Archives are encrypted with age to these public keys. Keep the private keys offline (password safe, hardware key); the server never holds them. Two recipients let two people restore independently."}}</p></div>
+  <label>{{t "age recipients (public keys, one per line)"}}<textarea name="recipients" rows="3" class="code" placeholder="age1...">{{.Recipients}}</textarea><small class="field-hint">{{t "Create a key pair offline with age-keygen."}}</small></label>
+  <label>{{t "Time zone of the schedules"}}<input name="time_zone" value="{{.Cfg.TimeZone}}" placeholder="Europe/Berlin"><small class="field-hint">{{t "IANA name; empty uses the server time zone. Changes of daylight saving time never run a slot twice."}}</small></label>
+  <fieldset class="event-grid">
+    <legend>{{t "Keep archives outside a schedule (manual, key rotation, upgrade)"}}</legend>
+    {{template "keepfields" .Cfg.Keep}}
+  </fieldset>
+  <div class="form-foot"><span class="muted">{{t "An archive stays when any rule keeps it. Older archives are deleted after each run, unless S3 Object Lock still protects them."}}</span><button>{{t "Save"}}</button></div>
+</form>
+
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "Targets"}}</h2></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Name"}}</th><th>{{t "Kind"}}</th><th>{{t "Location"}}</th><th>{{t "Object Lock"}}</th><th></th></tr></thead>
+    <tbody>{{range .Cfg.Targets}}<tr>
+      <td class="mono">{{.Name}}</td><td>{{.Kind}}</td>
+      <td class="mono">{{if eq .Kind "s3"}}{{.Endpoint}}/{{.Bucket}}{{with .Prefix}}/{{.}}{{end}}{{else if eq .Kind "b2"}}b2 {{.Region}}/{{.Bucket}}{{with .Prefix}}/{{.}}{{end}}{{else if eq .Kind "webdav"}}{{.Endpoint}}{{else if eq .Kind "sftp"}}{{.User}}@{{.Host}}:{{.Dir}}{{else}}{{.Dir}}{{end}}</td>
+      <td>{{if .LockMode}}{{.LockMode}}, {{.LockDays}} {{t "days"}}{{else}}<span class="muted">{{t "none"}}</span>{{end}}</td>
+      <td class="actions">
+        <form method="post" action="/settings/backup/targets/{{.Name}}/test">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Test"}}</button></form>
+        <form method="post" action="/settings/backup/targets/{{.Name}}/delete">{{template "csrf" $.CSRF}}<button class="secondary small" data-confirm="{{t "Remove this target? Archives on it stay."}}">{{t "Remove"}}</button></form>
+      </td>
+    </tr>{{else}}<tr><td colspan="5" class="empty">{{t "No target yet."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+
+<form class="card" method="post" action="/settings/backup/targets">
+  {{template "csrf" .CSRF}}
+  <div class="card-head stacked"><h2>{{t "Add or change a target"}}</h2><p class="muted">{{t "Saving a target with an existing name replaces it; empty secret fields keep the stored secret. Secrets are sealed with the session key and never shown again."}}</p></div>
+  <label>{{t "Name"}}<input name="name" required pattern="[a-z0-9][a-z0-9_-]{0,31}" placeholder="offsite"></label>
+  <label>{{t "Kind"}}<select name="kind"><option value="local">{{t "Local directory"}}</option><option value="s3">S3</option><option value="b2">Backblaze B2</option><option value="sftp">SFTP</option><option value="webdav">WebDAV</option></select></label>
+  <label>{{t "Directory (local and SFTP)"}}<input name="dir" placeholder="/srv/backup/limdm"></label>
+  <fieldset><legend>S3, Backblaze B2</legend>
+    <label>{{t "Endpoint"}}<input name="endpoint" placeholder="https://s3.eu-central-1.amazonaws.com"><small class="field-hint">{{t "S3 only; B2 derives it from the region."}}</small></label>
+    <label>{{t "Region"}}<input name="region" placeholder="eu-central-1, B2: us-west-004"></label>
+    <label>{{t "Bucket"}}<input name="bucket"></label>
+    <label>{{t "Prefix"}}<input name="prefix" placeholder="limdm"></label>
+    <label>{{t "Access key (B2: application key ID)"}}<input name="access_key" autocomplete="off"></label>
+    <label class="check"><input type="checkbox" name="path_style"> {{t "Path style URLs (MinIO, Ceph, most S3 compatible services)"}}</label>
+    <label>{{t "Object Lock mode"}}<select name="lock_mode"><option value="">{{t "none"}}</option><option value="GOVERNANCE">GOVERNANCE</option><option value="COMPLIANCE">COMPLIANCE</option></select><small class="field-hint">{{t "Needs a bucket created with Object Lock. COMPLIANCE cannot be shortened by anyone, not even the account owner."}}</small></label>
+    <label>{{t "Lock days"}}<input name="lock_days" type="number" min="1" max="3650"></label>
+  </fieldset>
+  <fieldset><legend>WebDAV</legend>
+    <p class="muted">{{t "Folder URL in Endpoint (https only), e.g. Nextcloud https://cloud.example.com/remote.php/dav/files/USER/limdm or a Hetzner Storage Box https://uXXXXX.your-storagebox.de/limdm. With a user the secret is the password (an app password), without one a bearer token."}}</p>
+  </fieldset>
+  <fieldset><legend>SFTP</legend>
+    <label>{{t "Host"}}<input name="host"></label>
+    <label>{{t "Port"}}<input name="port" type="number" min="1" max="65535" placeholder="22"></label>
+    <label>{{t "User (SFTP, WebDAV)"}}<input name="user" autocomplete="off"></label>
+    <label>{{t "Host key"}}<input name="host_key" class="code" placeholder="ssh-ed25519 AAAA... or SHA256:..."><small class="field-hint">{{t "From ssh-keyscan HOST; the connection is refused when the key differs."}}</small></label>
+    <label>{{t "Private key (OpenSSH, unencrypted)"}}<textarea name="private_key" rows="3" class="code" autocomplete="off"></textarea></label>
+  </fieldset>
+  <label>{{t "Secret (S3 secret key, B2 application key, SFTP or WebDAV password, WebDAV token)"}}<input name="secret" type="password" autocomplete="new-password"></label>
+  <div class="form-foot"><span></span><button>{{t "Save target"}}</button></div>
+</form>
+
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "Schedules"}}</h2></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Name"}}</th><th>{{t "When"}}</th><th>{{t "Targets"}}</th><th>{{t "Next runs"}}</th><th>{{t "Retention preview"}}</th><th></th></tr></thead>
+    <tbody>{{range .Schedules}}<tr>
+      <td class="mono">{{.Name}}{{if .Paused}} <span class="pill warn">{{t "paused"}}</span>{{end}}</td>
+      <td>{{.Describe}}</td>
+      <td>{{join .Targets ", "}}</td>
+      <td class="mono">{{range .Next}}{{.}}<br>{{else}}<span class="muted">{{t "none"}}</span>{{end}}</td>
+      <td>{{.Preview.Kept}} {{t "of"}} {{.Preview.Runs}} {{t "archives of a year"}}{{if .Kept}}<details><summary>{{t "kept"}}</summary><span class="mono">{{join .Kept ", "}}</span></details>{{end}}</td>
+      <td class="actions">
+        <a class="button secondary small" href="/settings/backup?edit={{.Name}}#schedule-form">{{t "Edit"}}</a>
+        <form method="post" action="/settings/backup/schedules/{{.Name}}/run">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Run now"}}</button></form>
+        {{if .Paused}}<form method="post" action="/settings/backup/schedules/{{.Name}}/resume">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Resume"}}</button></form>
+        {{else}}<form method="post" action="/settings/backup/schedules/{{.Name}}/pause">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Pause"}}</button></form>{{end}}
+        <form method="post" action="/settings/backup/schedules/{{.Name}}/delete">{{template "csrf" $.CSRF}}<button class="secondary small" data-confirm="{{t "Delete this schedule? Its archives stay and follow the general retention."}}">{{t "Delete"}}</button></form>
+      </td>
+    </tr>{{else}}<tr><td colspan="6" class="empty">{{t "No schedule yet: backups run only by hand."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+
+<form class="card" id="schedule-form" method="post" action="/settings/backup/schedules">
+  {{template "csrf" .CSRF}}
+  <div class="card-head stacked"><h2>{{t "Add or change a schedule"}}</h2><p class="muted">{{t "Saving with an existing name replaces that schedule. Times are in the time zone above."}}</p></div>
+  <label>{{t "Name"}}<input name="name" required pattern="[a-z0-9_]{1,32}" value="{{.Edit.Name}}" placeholder="nightly"></label>
+  <label>{{t "Kind"}}<select name="kind">
+    <option value="interval" {{if eq .Edit.Kind "interval"}}selected{{end}}>{{t "Every N hours"}}</option>
+    <option value="weekly" {{if eq .Edit.Kind "weekly"}}selected{{end}}>{{t "Weekdays at times"}}</option>
+    <option value="monthly" {{if eq .Edit.Kind "monthly"}}selected{{end}}>{{t "Monthly on a day"}}</option>
+    <option value="cron" {{if eq .Edit.Kind "cron"}}selected{{end}}>{{t "Cron expression"}}</option></select></label>
+  <fieldset><legend>{{t "Every N hours"}}</legend>
+    <label>{{t "Hours (1 to 168)"}}<input name="every" type="number" min="1" max="168" value="{{if .Edit.Every}}{{.Edit.Every}}{{end}}"></label>
+    <label>{{t "Offset (minutes after midnight)"}}<input name="offset" type="number" min="0" max="1439" value="{{.Edit.Offset}}"><small class="field-hint">{{t "Intervals that divide a day run at the same local times every day; others count hours from midnight UTC."}}</small></label>
+  </fieldset>
+  <fieldset><legend>{{t "Weekdays at times"}}, {{t "Monthly on a day"}}</legend>
+    <div class="event-grid">{{range $i, $d := .Weekdays}}<label class="check"><input type="checkbox" name="days" value="{{$i}}" {{range $.Edit.Days}}{{if eq . $i}}checked{{end}}{{end}}> {{t $d}}</label>{{end}}</div>
+    <label>{{t "Times (HH:MM, several separated by spaces)"}}<input name="times" class="code" value="{{join .Edit.Times " "}}" placeholder="02:00 14:00"></label>
+    <label>{{t "Day of month (1 to 31; the last day in shorter months)"}}<input name="day" type="number" min="1" max="31" value="{{if .Edit.Day}}{{.Edit.Day}}{{end}}"></label>
+  </fieldset>
+  <fieldset><legend>{{t "Cron expression"}}</legend>
+    <label>{{t "minute hour day-of-month month day-of-week"}}<input name="cron" class="code" value="{{.Edit.Cron}}" placeholder="30 1 * * 1-5"><small class="field-hint">{{t "Numbers with *, lists, ranges and steps; no names, no @ shortcuts. With both day fields set, either matches."}}</small></label>
+  </fieldset>
+  <fieldset class="event-grid"><legend>{{t "Targets"}}</legend>
+    {{range .Cfg.Targets}}<label class="check"><input type="checkbox" name="targets" value="{{.Name}}" {{if index $.EditTargets .Name}}checked{{end}}> {{.Name}}</label>{{else}}<span class="muted">{{t "No target yet."}}</span>{{end}}
+  </fieldset>
+  <fieldset class="event-grid"><legend>{{t "Retention of this schedule's archives (per target)"}}</legend>
+    {{template "keepfields" .Edit.Keep}}
+  </fieldset>
+  <label class="check"><input type="checkbox" name="paused" {{if .Edit.Paused}}checked{{end}}> {{t "Paused"}}</label>
+  <div class="form-foot"><span class="muted">{{t "The list shows the next five runs and which archives of a simulated year the retention keeps."}}</span><button>{{t "Save schedule"}}</button></div>
+</form>
+
+<section class="tablecard">
+  <div class="card-head"><h2>{{t "History"}}</h2></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Started"}}</th><th>{{t "Archive"}}</th><th>{{t "Reason"}}</th><th class="num">{{t "Size"}}</th><th>{{t "Targets"}}</th><th>{{t "Result"}}</th><th>{{t "Checksum verified"}}</th><th>{{t "Restore tested"}}</th></tr></thead>
+    <tbody>{{range .History}}<tr>
+      <td>{{fmtTime .StartedAt}}</td>
+      <td class="mono">{{.Name}}{{if .DeletedAt}} <span class="pill">{{t "deleted"}}</span>{{end}}</td>
+      <td>{{.Reason}}<span class="sub">{{.Actor}}</span></td>
+      <td class="num">{{.SizeMB}}</td>
+      <td>{{join .Targets ", "}}</td>
+      <td>{{if eq .Status "ok"}}<span class="pill ok">{{t "ok"}}</span>{{else}}<span class="pill bad">{{t "failed"}}</span><span class="sub">{{.Error}}</span>{{end}}</td>
+      <td>{{if .VerifiedAt}}{{if .VerifyError}}<span class="pill bad">{{t "failed"}}</span><span class="sub">{{.VerifyError}}</span>{{else}}<span class="pill ok">{{fmtTime (derefTime .VerifiedAt)}}</span>{{end}}{{else if and (eq .Status "ok") (not .DeletedAt)}}<form method="post" action="/settings/backup/{{.ID}}/verify">{{template "csrf" $.CSRF}}<button class="secondary small">{{t "Verify"}}</button></form>{{end}}</td>
+      <td>{{if .RestoreTestedAt}}{{if .RestoreTestError}}<span class="pill bad">{{t "failed"}}</span><span class="sub">{{.RestoreTestError}}</span>{{else}}<span class="pill ok">{{fmtTime (derefTime .RestoreTestedAt)}}</span>{{end}}{{else}}<span class="muted">{{t "never"}}</span>{{end}}</td>
+    </tr>{{else}}<tr><td colspan="8" class="empty">{{t "No backup yet."}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+
+<section class="card">
+  <div class="card-head stacked"><h2>{{t "Restore"}}</h2><p class="muted">{{t "A restore runs on the command line of the target host, never in the console. It needs the age private key and the LIMDM_SESSION_KEY of the backup, which is kept apart from the archives."}}</p></div>
+  <pre class="code">limdm-server backup verify -identity backup.agekey ARCHIVE.lbk
+limdm-server backup restore -identity backup.agekey -replay audit-after-backup.jsonl ARCHIVE.lbk
+limdm-server backup restore-test -identity backup.agekey -from TARGET ARCHIVE.lbk</pre>
+  <p class="muted">{{t "Devices that renewed their certificate after the backup are let in again during the restore window (7 days) and audited. Revocations after the backup are applied again from the audit export or syslog copy with -replay."}}</p>
+</section>
+</div>
+{{end}}
+{{define "keepfields"}}
+    <label>{{t "Keep last"}}<input name="keep_last" type="number" min="0" max="3660" value="{{.Last}}"></label>
+    <label>{{t "Keep for days"}}<input name="keep_days" type="number" min="0" max="3660" value="{{.Days}}"></label>
+    <label>{{t "Daily"}}<input name="keep_daily" type="number" min="0" max="3660" value="{{.Daily}}"></label>
+    <label>{{t "Weekly"}}<input name="keep_weekly" type="number" min="0" max="3660" value="{{.Weekly}}"></label>
+    <label>{{t "Monthly"}}<input name="keep_monthly" type="number" min="0" max="3660" value="{{.Monthly}}"></label>
+    <label>{{t "Yearly"}}<input name="keep_yearly" type="number" min="0" max="3660" value="{{.Yearly}}"></label>
+{{end}}

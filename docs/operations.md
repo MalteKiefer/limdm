@@ -2,25 +2,25 @@
 
 ## Backup
 
-Back up regularly and before every upgrade:
+LiMDM backs up database, CA directory (with `keys.json` and the audit key files) and local
+uploads itself: on configurable schedules, after every key rotation and before package
+upgrades, encrypted with age, signed with the command key, to local, S3 (with Object Lock),
+Backblaze B2, SFTP or WebDAV targets, with retention rules per schedule, weekly checksum
+verification and restore tests. Set it up under **Settings, Backup**;
+the full description is [backup.md](backup.md).
 
-| What | Where | Why |
+| What | In the archive | Why |
 |---|---|---|
-| PostgreSQL database | `pg_dump limdm` | devices, configuration, audit log, sealed secrets, webhook signing secret |
-| CA directory | `LIMDM_CA_DIR` (default `/var/lib/limdm-server/ca`) | device and network CA, command key, `keys.json` (active and retiring key names), `audit-keys` (audit key segments of earlier command keys), `audit-keyed-from` (switch point of the keyed audit chain). Without it no device can check in and the audit log cannot be verified |
-| `LIMDM_SESSION_KEY` | `server.env` or `.env` | without it sealed secrets and recovery keys are unreadable |
+| PostgreSQL database | yes (`COPY` export of one snapshot) | devices, configuration, audit log, sealed secrets, webhook signing secret |
+| CA directory | yes | device and network CA, command key, `keys.json`, `audit-keys`, `audit-keyed-from`. Without it no device can check in and the audit log cannot be verified |
+| Uploaded packages in `LIMDM_ARTIFACT_DIR` | yes | [packages.md](packages.md); uploads in S3 stay in their bucket (enable versioning) |
+| `LIMDM_SESSION_KEY` | **no** | keep it apart from the archives (password safe); without it sealed secrets and recovery keys are unreadable |
+| age private key | **no** | offline, never on the server |
 
-```sh
-sudo -u postgres pg_dump -Fc limdm > limdm-$(date +%F).dump          # package install
-docker compose exec db pg_dump -U limdm -Fc limdm > limdm-$(date +%F).dump   # Docker
-```
-
-Store the CA directory and the session key apart from the database dump, encrypted. Back
-up the CA directory again after every key rotation step. With `LIMDM_KEY_PROVIDER=pkcs11`
-the private keys are in the HSM: back up the token as its vendor describes, and the CA
-directory for the certificates, `keys.json`, `audit-keys` and `audit-keyed-from`.
-For point in time recovery, RPO and RTO guidance and a restore test procedure see
-[high-availability.md](high-availability.md#backup).
+With `LIMDM_KEY_PROVIDER=pkcs11` the private keys are in the HSM: back up the token as its
+vendor describes; the archive holds the certificates and key files. For point in time
+recovery, RPO and RTO guidance see [high-availability.md](high-availability.md#backup); a
+`pg_dump -Fc` next to the built in backup does no harm.
 
 ## Key rotation
 
@@ -31,15 +31,34 @@ Agents must run 0.16 or newer. Runbooks: [keys.md](keys.md).
 
 ## Restore
 
-1. Install the same or a newer server version.
-2. Restore the CA directory and `LIMDM_SESSION_KEY`.
-3. `pg_restore -d limdm limdm-<date>.dump` into an empty database.
-4. Start the server. Devices continue checking in without enrolling again.
+`limdm-server backup restore` restores an archive into an empty database and CA directory
+([backup.md](backup.md#restore)):
+
+1. Install the same or a newer server version; keep the agent port closed.
+2. Set `LIMDM_SESSION_KEY` of the backup and a new, empty `LIMDM_DATABASE_URL`.
+3. `limdm-server backup verify`, then `limdm-server backup restore -identity KEY -replay
+   AUDIT_AFTER_BACKUP FILE`.
+4. Start one instance, check `/readyz` and the audit chain, then open the agent port.
+
+Devices keep checking in without enrolling again, with these limits:
+
+* A device that **renewed its certificate after the backup** presents a certificate the
+  restored database does not know. During the restore window (default 7 days) the server
+  accepts a certificate of its own device CA issued after the backup once and pins it
+  (`device.cert_repin` audit entry). After the window such a device must enroll again.
+* A device **enrolled after the backup** is unknown and must enroll again.
+* **Retirements, deletions and token revocations after the backup** are undone by the restore.
+  `-replay` applies them again from the syslog copy or an audit export; without such a copy
+  retire lost devices by hand.
+* Other changes after the backup (console users, roles, settings, library, blueprints) are
+  listed by `restore` for a manual review.
 
 ## Upgrades
 
 See [installation.md](installation.md#upgrades). Read the release notes; migrations run
-automatically and are not reversible, so keep the backup until the new version runs.
+automatically and are not reversible: the server packages back up before the upgrade when
+backups are configured ([backup.md](backup.md#before-upgrades)); keep that archive until the
+new version runs.
 With several instances upgrade one at a time, unless the release notes ask for a full stop
 ([high-availability.md](high-availability.md#upgrades)).
 
@@ -177,6 +196,10 @@ scrape_configs:
 | `limdm_notifications_24h` | `result` | Notification deliveries in the last 24 hours, `ok` or `failed` |
 | `limdm_audit_chain_intact` | | 1 while the audit hash chain verifies, 0 after an entry was changed |
 | `limdm_audit_verified_timestamp_seconds` | | Last audit chain verification |
+| `limdm_backup_last_success_timestamp_seconds` | | Start of the last successful backup ([backup.md](backup.md)) |
+| `limdm_backup_last_size_bytes` | | Size of the last successful archive |
+| `limdm_backup_last_run_failed` | | 1 when the last backup run failed |
+| `limdm_backup_failures_total` | | Failed backup runs of this instance since its start |
 | `limdm_http_requests_total` | `listener`, `method`, `code` | Requests since the process started, console and agent listener; per instance, scrape every instance |
 | `limdm_http_request_duration_seconds` | `listener`, `le` | Histogram of request durations (5 ms to 30 s buckets), console and agent listener; per instance |
 
@@ -203,18 +226,13 @@ file in `LIMDM_SYSLOG_CA` for a private CA.
 
 ## Retention
 
-An hourly job (one instance) deletes:
-
-| Data | Kept |
-|---|---|
-| Finished commands (`ok`, `failed`, `expired`) | 180 days; lock, unlock, lost mode, end of lost mode and wipe stay |
-| Device events | 365 days (`device_events` refuses deletes outside this job) |
-| Compliance changes | 365 days; the latest change per device and check stays |
-| Device metrics (memory, disk, load) | 30 days; the table is partitioned by day and whole days are dropped (no bloat from deletes) |
-| Fleet history (overview chart) | 400 days |
-| Notification delivery log | 30 days |
-| Approval requests | expire after 24 hours |
-| Audit log | forever, or **Settings, Security, Audit log retention** (365 to 36500 days) |
+An hourly job (one instance) deletes data older than the period set per data type under
+**Settings, Data retention**: audit log (default 3 years), device events, compliance history,
+finished commands, script results, diagnostics bundles, remote shell transcripts, device
+metrics and the notification log. Device metrics are partitioned by day and whole days are
+dropped, so their expiry leaves no bloat. Defaults, bounds and the legal reasoning:
+[retention.md](retention.md). Fleet history is kept 400 days; approval requests expire after
+24 hours.
 
 Audit retention runs once a day and only behind a fully verified chain. The last deleted
 entry's id and hash become a checkpoint signed with the audit key, from which verification
@@ -271,6 +289,11 @@ Notes:
 | `audit [-ca DIR] verify FILE.jsonl` | verify a JSON Lines audit export (**Audit**, export) outside the server; prints the range and "chain intact" or the first broken entry |
 | `audit [-ca DIR] key` | print the audit key segments (`key=<hex> keyed_from=<id>`, one line per command key) for an auditor who verifies on another machine |
 | `audit -key HEX -keyed-from ID verify FILE.jsonl` | verify with a printed key instead of the CA directory (one segment) |
+| `backup [-env FILE] create [-reason TEXT] [-if-configured]` | back up now to the configured targets ([backup.md](backup.md)) |
+| `backup [-env FILE] list [-from TARGET]` | runs of the history, or the archives on a target |
+| `backup [-env FILE] verify -identity KEY [-command-key HEX] FILE` | decrypt and check an archive against its signed manifest |
+| `backup [-env FILE] restore -identity KEY [-replay FILE] [-window 168h] FILE` | restore into an empty database and CA directory ([backup.md](backup.md#restore)) |
+| `backup [-env FILE] restore-test -identity KEY [-from TARGET] FILE` | restore into a scratch database, verify, record the result |
 | `keygen [-out FILE]` | create a release signing key (default `release.key`), print the public key |
 | `sign -key FILE\|-key-env VAR\|-pkcs11 LABEL SHA256SUMS` | sign release checksums ([release key](#release-key)) |
 

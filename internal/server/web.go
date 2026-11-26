@@ -183,7 +183,7 @@ func (s *Server) pageFor(h handler, postRole string) http.HandlerFunc {
 			return
 		}
 		if r.Method == http.MethodPost {
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+			r.Body = http.MaxBytesReader(w, r.Body, s.bodyLimit(w, r)) // 1 MiB, uploads more (packages.go)
 			if sess.Role != "admin" && postRole != "self" && (postRole != "helpdesk" || sess.Role != "helpdesk") {
 				s.errorPage(w, r, sess, http.StatusForbidden, "your role cannot change this")
 				return
@@ -264,6 +264,18 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /software/apps/{id}/delete", s.page(s.appDelete))
 	mux.HandleFunc("POST /software/requests/{id}/{op}", s.page(s.requestDecide))
 	mux.HandleFunc("POST /software/settings", s.page(s.softwareSettingsSave))
+	mux.HandleFunc("GET /software/packages", s.page(s.adminOrAuditor(s.packagesPage))) // packages.go
+	mux.HandleFunc("POST /software/packages", s.page(s.packageUpload))
+	mux.HandleFunc("POST /software/packages/{id}/delete", s.page(s.packageDelete))
+	mux.HandleFunc("POST /software/packages/settings", s.page(s.packagesSettings))
+	mux.HandleFunc("GET /settings/backup", s.page(s.unscoped(s.backupPage))) // backup_web.go
+	mux.HandleFunc("POST /settings/backup", s.page(s.unscoped(s.backupSave)))
+	mux.HandleFunc("POST /settings/backup/targets", s.page(s.unscoped(s.backupTargetSave)))
+	mux.HandleFunc("POST /settings/backup/targets/{name}/{op}", s.page(s.unscoped(s.backupTargetOp)))
+	mux.HandleFunc("POST /settings/backup/run", s.page(s.unscoped(s.backupRunNow)))
+	mux.HandleFunc("POST /settings/backup/schedules", s.page(s.unscoped(s.backupScheduleSave)))
+	mux.HandleFunc("POST /settings/backup/schedules/{name}/{op}", s.page(s.unscoped(s.backupScheduleOp)))
+	mux.HandleFunc("POST /settings/backup/{id}/verify", s.page(s.unscoped(s.backupVerifyNow)))
 	mux.HandleFunc("POST /agents/policy", s.page(s.agentsPolicy))
 	mux.HandleFunc("POST /agents/fetch", s.page(s.agentsFetch))
 	mux.HandleFunc("POST /agents/{version}/{op}", s.page(s.agentsRelease))

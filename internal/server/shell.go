@@ -31,7 +31,6 @@ import (
 const (
 	shellTranscriptCap = 1 << 20         // bytes of output kept per session
 	shellConnectWait   = 3 * time.Minute // the device polls every minute
-	shellRetention     = "365 days"      // like device events
 )
 
 // RemoteShellSettings are the server side switches of the remote shell. A
@@ -438,8 +437,7 @@ func (s *Server) finishShell(l *liveShell) {
 		if _, err := tx.Exec(ctx, `UPDATE commands SET status='expired', updated_at=now() WHERE id=$1 AND status='pending'`, l.cmdID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `DELETE FROM shell_sessions WHERE created_at < now() - interval '`+shellRetention+`'`)
-		return err
+		return nil // old transcripts: the retention job (retention.go)
 	})
 	if err != nil {
 		s.log.Error("store remote shell session", "session", l.id, "err", err)

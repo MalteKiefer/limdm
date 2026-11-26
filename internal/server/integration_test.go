@@ -805,6 +805,35 @@ func TestIntegration(t *testing.T) {
 	if code, _ := ui("POST", "/settings", url.Values{"section": {"bogus"}}, adminSess); code != http.StatusBadRequest {
 		t.Fatalf("unknown section: %d", code)
 	}
+	// B: backup schedules, retention and packages in the console
+	backupTargetDir := t.TempDir()
+	if code, body := ui("POST", "/settings/backup/targets", url.Values{"name": {"local"}, "kind": {"local"}, "dir": {backupTargetDir}}, adminSess); code != http.StatusSeeOther {
+		t.Fatalf("backup target: %d %s", code, body)
+	}
+	if code, body := ui("POST", "/settings/backup/schedules", url.Values{"name": {"nightly"}, "kind": {"cron"}, "cron": {"0 2 * * 1-5"},
+		"targets": {"local"}, "keep_last": {"5"}, "keep_daily": {"7"}, "paused": {"on"}}, adminSess); code != http.StatusSeeOther {
+		t.Fatalf("backup schedule: %d %s", code, body)
+	}
+	if _, body := ui("POST", "/settings/backup/schedules", url.Values{"name": {"bad"}, "kind": {"cron"}, "cron": {"61 * * * *"}, "targets": {"local"}, "keep_last": {"1"}}, adminSess); !strings.Contains(body, "outside 0 to 59") {
+		t.Fatal("invalid cron accepted")
+	}
+	if code, body := ui("GET", "/settings/backup?edit=nightly", nil, adminSess); code != 200 || !strings.Contains(body, "0 2 * * 1-5") || !strings.Contains(body, "nightly") {
+		t.Fatalf("backup page: %d", code)
+	}
+	if _, body := ui("POST", "/settings/backup/schedules/nightly/resume", url.Values{}, adminSess); !strings.Contains(body, "need at least one recipient") {
+		t.Fatal("schedule resumed without an age recipient")
+	}
+	if code, _ := ui("GET", "/settings/backup", nil, auditor); code != http.StatusForbidden {
+		t.Fatalf("auditor sees backups: %d", code)
+	}
+	if _, body := ui("POST", "/settings", url.Values{"section": {"retention"}, "retention_audit": {"730"}, "retention_device_events": {"365"}, "retention_compliance": {"1095"},
+		"retention_commands": {"180"}, "retention_script_results": {"90"}, "retention_diagnostics": {"30"}, "retention_shell_transcripts": {"90"},
+		"retention_metrics": {"30"}, "retention_notification_log": {"30"}}, adminSess); !strings.Contains(body, "Settings saved") || s.settings().retentionDays("audit") != 730 {
+		t.Fatal("retention not saved")
+	}
+	if code, body := ui("GET", "/software/packages", nil, adminSess); code != 200 || !strings.Contains(body, "Upload") {
+		t.Fatalf("packages page: %d", code)
+	}
 	if _, body := ui("POST", "/settings", url.Values{"section": {"general"}, "stale_hours": {"48"}, "local_login": {"on"}}, adminSess); !strings.Contains(body, "Settings saved") {
 		t.Fatalf("general settings not saved: %s", body)
 	}

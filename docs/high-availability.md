@@ -339,8 +339,8 @@ replication can lose the last seconds.
 
 | What | How | Notes |
 |---|---|---|
-| Database | continuous archiving with point in time recovery (pgBackRest, WAL-G, Barman, or the managed service's backups), plus a daily `pg_dump -Fc` | PITR gives an RPO of seconds to minutes |
-| CA directory | once after the first start and after every key change, encrypted | identical on all instances, back it up once |
+| Database | continuous archiving with point in time recovery (pgBackRest, WAL-G, Barman, or the managed service's backups), plus the built in daily backup ([backup.md](backup.md)) | PITR gives an RPO of seconds to minutes |
+| CA directory | in every built in backup; it runs again after every key rotation step | identical on all instances |
 | `LIMDM_SESSION_KEY` | with the CA directory, apart from the database backups | |
 | `LIMDM_RELEASE_DIR` | not needed | downloaded again |
 
@@ -360,12 +360,15 @@ that time without server contact, so keep it well above your RTO.
 
 ## Restore test
 
-Practice at least twice a year and after major changes, on a separate host:
+`limdm-server backup restore-test` restores an archive into a scratch database, verifies the
+audit chain and the sealed values and records the result; run it monthly
+([backup.md](backup.md#restore-test)). In addition, practice a full restore at least twice a
+year and after major changes, on a separate host:
 
 1. Restore the CA directory and `LIMDM_SESSION_KEY` to a test host; set a different
    `LIMDM_PUBLIC_URL`, keep `LIMDM_AGENT_URL` unreachable for devices.
-2. Restore the database (PITR to a recent time, or `pg_restore -d limdm` into an empty
-   database).
+2. Restore the database (PITR to a recent time, or `limdm-server backup restore` into an
+   empty database).
 3. Start one instance and check `/readyz`.
 4. Sign in, open **Audit**, run **Verify whole chain**: it must report the chain intact.
 5. Open a device and an item; open a recovery key of a test device (sealed secrets

@@ -9,12 +9,10 @@ import (
 )
 
 // device_metrics is partitioned by day: at 50,000 devices it holds about 140
-// million rows for its 30 days, and dropping a day's partition replaces the
+// million rows for its default 30 days, and dropping a day's partition replaces the
 // hourly DELETE that left the table and its indexes bloated. Partitions are
 // created a week ahead; a default partition catches rows of a day whose
 // partition is missing, so a check in never fails on it.
-
-const metricDays = 30 // days device_metrics keeps (see prune)
 
 // metricPartition names the partition of day (UTC).
 func metricPartition(day time.Time) string { return "device_metrics_" + day.Format("20060102") }
@@ -65,7 +63,7 @@ func ensureMetricPartitions(ctx context.Context, q execer, day time.Time) error 
 }
 
 // metricPartitions keeps the partitions of device_metrics: a week ahead,
-// none older than metricDays, the legacy partition until it is empty. Run
+// none older than the metrics retention (Settings, Data retention), the legacy partition until it is empty. Run
 // by the history job next to prune.
 func (s *Server) metricPartitions(ctx context.Context) error {
 	today := time.Now().UTC().Truncate(24 * time.Hour)
@@ -81,7 +79,7 @@ func (s *Server) metricPartitions(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cutoff := today.AddDate(0, 0, -metricDays)
+	cutoff := today.AddDate(0, 0, -s.settings().retentionDays("metrics"))
 	for _, n := range names {
 		if day, err := time.Parse("20060102", n[len("device_metrics_"):]); err == nil && day.AddDate(0, 0, 1).Before(cutoff) {
 			if _, err := s.db.Exec(ctx, `DROP TABLE `+n); err != nil {

@@ -294,6 +294,16 @@ func (s *Server) decideApproval(ctx context.Context, sess session, id int64, op 
 				if creds, err = applyTokenApproval(ctx, tx, a, sess.Email); err != nil {
 					return err
 				}
+			case "artifact.upload": // the upload becomes installable (packages.go)
+				var c struct {
+					Tenant int64 `json:"tenant"`
+				}
+				if err := json.Unmarshal(a.Payload, &c); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `UPDATE artifacts SET approved_by=$3 WHERE tenant_id=$1 AND sha256=$2 AND approved_by IS NULL`, c.Tenant, a.Target, sess.Email); err != nil {
+					return err
+				}
 			case "recovery.view", "remote_shell":
 				expires = time.Now().Add(viewWindow) // the requester opens the key or shell within the hour
 			default:

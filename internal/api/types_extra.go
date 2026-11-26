@@ -227,6 +227,8 @@ type ExtraPolicy struct {
 	CustomChecks   []CustomCheck   `json:"custom_checks,omitempty"`
 
 	Network []NetworkProfile `json:"network,omitempty"`
+
+	Artifacts []Artifact `json:"artifacts,omitempty"` // artifacts.go
 }
 
 var extraExamples = map[string]string{

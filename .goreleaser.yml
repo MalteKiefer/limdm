@@ -188,6 +188,7 @@ nfpms:
       - src: packaging/limdm-server.sysusers
         dst: /usr/lib/sysusers.d/limdm-server.conf
     scripts:
+      preinstall: packaging/server-preinstall.sh
       postinstall: packaging/server-postinstall.sh
 
 dockers_v2:

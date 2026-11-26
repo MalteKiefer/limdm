@@ -18,7 +18,7 @@ import (
 
 // Console pages of the software catalog.
 
-var softwareTabs = []struct{ Key, Label string }{{"catalog", "Catalog"}, {"requests", "Requests"}, {"remotes", "Remotes"}, {"settings", "Settings"}}
+var softwareTabs = []struct{ Key, Label string }{{"catalog", "Catalog"}, {"requests", "Requests"}, {"remotes", "Remotes"}, {"packages", "Packages"}, {"settings", "Settings"}}
 
 // remoteRow is a managed remote with the number of devices that have it.
 type remoteRow struct {
@@ -44,6 +44,10 @@ type appRequestRow struct {
 }
 
 func (s *Server) softwarePage(w http.ResponseWriter, r *http.Request, sess session) {
+	if r.FormValue("tab") == "packages" { // its own page (packages.go)
+		http.Redirect(w, r, "/software/packages", http.StatusSeeOther)
+		return
+	}
 	s.renderSoftware(w, r, sess, "", "")
 }
 

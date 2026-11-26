@@ -49,12 +49,15 @@ Read by `limdm-server serve` (`ConfigFromEnv`). The package reads them from
 | `LIMDM_SYSLOG` | | Forward audit entries and device events as RFC 5424 syslog, `udp://host:514`, `tcp://host:514` or over TLS `tcp+tls://host:6514` ([operations.md](operations.md#syslog)). |
 | `LIMDM_SYSLOG_CA` | | CA certificate file (PEM) that verifies a `tcp+tls` syslog collector; without it the system roots apply. |
 | `LIMDM_MULTI_TENANT` | `false` | `true` shows the tenant pages and the tenant switcher to global administrators ([tenants.md](tenants.md)). Tenant isolation applies regardless. |
+| `LIMDM_ARTIFACT_DIR` | `/var/lib/limdm-server/artifacts` | Local store of uploaded packages, content addressed per tenant ([packages.md](packages.md)). Part of every backup. Not used when **Software, Packages** keeps uploads in S3. |
+| `LIMDM_SKIP_UPGRADE_BACKUP` | | Set to `1` in the environment of apt or dnf to skip the backup the server package makes before an upgrade ([backup.md](backup.md#before-upgrades)). |
+| `TMPDIR` | `/tmp` | Where backup archives and uploads are staged before they go to their target. Needs room for one archive or upload; the Docker example points it at the state volume. |
 
 The server refuses to start when OIDC and local login are both off, when OIDC is set without
 an administrator in `LIMDM_ADMINS`, when `LIMDM_PUBLIC_URL` or `LIMDM_AGENT_URL` is not
 `https`, or when the console would listen on a public address without a certificate.
 
-`limdm-server local-admin -env FILE` and `limdm-server keys -env FILE` read the same
+`limdm-server local-admin -env FILE`, `limdm-server keys -env FILE` and `limdm-server backup -env FILE` read the same
 variables from an env file ([operations.md](operations.md#command-line)).
 
 ### install.sh
@@ -92,7 +95,8 @@ network namespace) and `LIMDM_AGENT_LISTEN` itself. Other variables of the table
 ## Console settings
 
 **Settings** is open to admins (edit) and auditors (read). It has the tabs General,
-Security, SSO, Notifications and Branding; each form saves only its own fields, changes take
+Security, SSO, Notifications, Branding, Data retention and Backup (Backup: global admins
+only); each form saves only its own fields, changes take
 effect at once on every instance and are written to the audit log (`settings.save`).
 Accounts of a tenant see only the Notifications tab with their own channels
 ([tenants.md](tenants.md)).
@@ -120,9 +124,8 @@ Accounts of a tenant see only the Notifications tab with their own channels
   viewer gives a reason or ticket reference) and **Also for remote shell sessions** (the
   approved session must be opened within one hour). Needs at least two active
   administrators ([security.md](security.md#four-eyes-approval)).
-* **Audit log retention.** **Keep audit entries (days)**: 0 keeps everything (default),
-  otherwise 365 to 36500. Older entries are deleted once a day after the full chain
-  verified; a signed checkpoint keeps the rest verifiable ([security.md](security.md#audit-log)).
+* **Audit log retention** moved to **Data retention** (below). A period saved here before
+  still applies until that tab is saved.
 * **Privacy.** Both off by default: **Look up the location of device public addresses**
   (sends them to `LIMDM_GEOIP_URL`) and **Agents may ask public DNS over HTTPS resolvers
   (Cloudflare, Google) when the system resolver fails** ([security.md](security.md#privacy)).
@@ -171,6 +174,22 @@ to 256 KiB, square works best; **Remove logo**). Shown in the console, on the si
 in the desktop helper's dialogs and notifications on devices. Only PNG is accepted because an
 SVG served from the console's origin could carry script. With multi tenancy each tenant can
 have its own name, logo and accent color, this one is the fallback ([tenants.md](tenants.md#branding)).
+
+### Data retention
+
+One period in days per data type: audit log (default 3 years, 0 keeps everything), device
+events, compliance history, finished commands, script results, diagnostics bundles, remote
+shell transcripts, device metrics and the notification log. Each has bounds that keep
+security evidence and a hint on the legal reasoning. Defaults, bounds and the reasoning:
+[retention.md](retention.md).
+
+### Backup
+
+Targets (local directory, S3 with Object Lock, Backblaze B2, SFTP, WebDAV) with a connection test,
+the age recipients, the time zone, schedules (every N hours, weekdays at times, monthly,
+cron) with their own targets and retention, and the history of runs with size, checksum verification
+and restore test. **Back up now** starts a run. Only global administrators see the tab;
+restores run on the command line ([backup.md](backup.md)).
 
 ## Google Workspace as identity provider
 

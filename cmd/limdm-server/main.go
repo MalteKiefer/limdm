@@ -50,11 +50,14 @@ func main() {
 		err = auditCmd(os.Args[2:])
 	case "keys":
 		err = keysCmd(log, os.Args[2:])
+	case "backup":
+		err = backupCmd(log, os.Args[2:])
 	default:
 		err = errors.New(`usage: limdm-server [serve | keygen -out FILE | sign -key FILE|-key-env VAR|-pkcs11 LABEL SHA256SUMS
                      | local-admin [-env FILE] [-role admin|auditor] [-out FILE] add|reset|disable|enable|list [NAME]
                      | audit [-ca DIR] [-key HEX -keyed-from ID] verify FILE.jsonl | audit [-ca DIR] key
-                     | keys [-env FILE] status | rotate KIND [-name NAME] | finish KIND [-force]]`)
+                     | keys [-env FILE] status | rotate KIND [-name NAME] | finish KIND [-force]
+                     | backup [-env FILE] create | list | verify | restore | restore-test ...]`)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -219,7 +222,7 @@ func localAdmin(args []string) error {
 
 // loadEnvFile applies KEY=VALUE lines (systemd EnvironmentFile syntax subset).
 func loadEnvFile(path string) error {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // the operator names the env file on the command line
 	if err != nil {
 		return err
 	}
@@ -360,4 +363,17 @@ func keysCmd(log *slog.Logger, args []string) error {
 	}
 	fmt.Println(msg)
 	return nil
+}
+
+// backupCmd creates, lists, verifies and restores backups (docs/backup.md).
+func backupCmd(log *slog.Logger, args []string) error {
+	if len(args) >= 2 && args[0] == "-env" {
+		if err := loadEnvFile(args[1]); err != nil {
+			return err
+		}
+		args = args[2:]
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return server.BackupCommand(ctx, log, args, os.Stdout)
 }

@@ -429,7 +429,7 @@ func (s *Server) Close() {
 // Background runs periodic jobs until ctx ends.
 func (s *Server) Background(ctx context.Context) {
 	for name, loop := range map[string]func(context.Context){"google sync": s.googleSyncLoop, "history": s.historyLoop,
-		"catalog icons": s.iconLoop, "syslog": s.syslogLoop, "reseal": s.resealLoop} {
+		"catalog icons": s.iconLoop, "syslog": s.syslogLoop, "reseal": s.resealLoop, "backup": s.backupLoop} {
 		go s.background(ctx, name, loop, true)
 	}
 	// every instance serves agent packages from its own release directory
@@ -551,6 +551,7 @@ func (s *Server) AgentHandler() http.Handler {
 	mux.HandleFunc("POST /api/v1/network-cert", s.deviceAuth(s.deviceLimit(5, s.networkCert), false))
 	mux.HandleFunc("GET /api/v1/agent-packages/{version}/{file}", s.deviceAuth(s.agentPackage, false))
 	mux.HandleFunc("GET /api/v1/catalog/icons/{id}", s.deviceAuth(s.catalogIcon, false))
+	mux.HandleFunc("GET /api/v1/artifacts/{sha}", s.deviceAuth(s.deviceLimit(10, s.agentArtifact), false)) // packages.go
 	mux.HandleFunc("GET /api/v1/catalog/search", s.deviceAuth(s.deviceLimit(30, s.flathubSearchJSON), false))
 	mux.HandleFunc("GET /api/v1/catalog/flathub-icon", s.deviceAuth(s.deviceLimit(300, s.flathubIcon), false))
 	s.shellAgentRoutes(mux)
@@ -699,6 +700,8 @@ func (s *Server) deviceAuth(next http.HandlerFunc, allowExpired bool) http.Handl
 				s.failAPI(w, err)
 				return
 			}
+		case err == nil && s.restoreRepin(r.Context(), id, leaf):
+			// renewed after the restored backup (backup_restore.go)
 		default:
 			s.log.Warn("rejected device certificate", "device", id, "serial", serial)
 			problem(w, http.StatusForbidden, "certificate revoked")

@@ -791,3 +791,53 @@ CREATE TABLE IF NOT EXISTS local_login_failures (
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (name, source)
 );
+-- B
+-- backup runs (backup.go): one row per run, with the targets that hold the
+-- archive, the result of the checksum verification and of the last restore test
+CREATE TABLE IF NOT EXISTS backups (
+    id                 BIGSERIAL PRIMARY KEY,
+    name               TEXT NOT NULL,
+    reason             TEXT NOT NULL DEFAULT '',
+    actor              TEXT NOT NULL DEFAULT '',
+    started_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    size               BIGINT NOT NULL DEFAULT 0,
+    sha256             TEXT NOT NULL DEFAULT '',
+    targets            TEXT[] NOT NULL DEFAULT '{}',
+    status             TEXT NOT NULL,
+    error              TEXT NOT NULL DEFAULT '',
+    keys_hash          TEXT NOT NULL DEFAULT '',
+    server_version     TEXT NOT NULL DEFAULT '',
+    verified_at        TIMESTAMPTZ,
+    verify_error       TEXT NOT NULL DEFAULT '',
+    restore_tested_at  TIMESTAMPTZ,
+    restore_test_error TEXT NOT NULL DEFAULT '',
+    deleted_at         TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS backups_started ON backups(started_at DESC);
+ALTER TABLE backups ADD COLUMN IF NOT EXISTS schedule TEXT NOT NULL DEFAULT '';
+-- the last restore: while window_until lies ahead, a device certificate of
+-- our CA issued after backup_at is pinned again (restoreRepin)
+CREATE TABLE IF NOT EXISTS restore_state (
+    one          BOOLEAN PRIMARY KEY DEFAULT true CHECK (one),
+    backup_name  TEXT NOT NULL,
+    backup_at    TIMESTAMPTZ NOT NULL,
+    restored_at  TIMESTAMPTZ NOT NULL,
+    window_until TIMESTAMPTZ NOT NULL
+);
+-- uploaded packages (packages.go): content addressed per tenant; approved_by
+-- stays NULL while a four eyes approval is pending
+CREATE TABLE IF NOT EXISTS artifacts (
+    id          BIGSERIAL PRIMARY KEY,
+    tenant_id   BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id),
+    sha256      TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    version     TEXT NOT NULL DEFAULT '',
+    kind        TEXT NOT NULL,
+    filename    TEXT NOT NULL,
+    size        BIGINT NOT NULL,
+    store       TEXT NOT NULL,
+    uploaded_by TEXT NOT NULL,
+    approved_by TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, sha256)
+);
