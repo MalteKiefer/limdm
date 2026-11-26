@@ -978,7 +978,14 @@ func (s *Server) apiItemSave(w http.ResponseWriter, r *http.Request, c apiCaller
 	it.ID = id
 	it.Name, it.Description = strings.TrimSpace(it.Name), strings.TrimSpace(it.Description)
 	if id != 0 && s.itemNeedsApproval(it) { // a request is no save: compare before it is queued
-		if err := pgx.BeginFunc(r.Context(), s.db, func(tx pgx.Tx) error { return checkIfMatch(withIfMatch(r), tx, "library_items", id) }); err != nil {
+		err := pgx.BeginFunc(r.Context(), s.db, func(tx pgx.Tx) error {
+			ctx := withIfMatch(r)
+			if err := tenantGuard(ctx, tx, "library_items", id); err != nil { // 404, never another tenant's ETag
+				return err
+			}
+			return checkIfMatch(ctx, tx, "library_items", id)
+		})
+		if err != nil {
 			s.preconditionFail(w, r, "library_items", id, err)
 			return
 		}
