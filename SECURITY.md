@@ -13,8 +13,8 @@ impact and steps to reproduce it. You will get an answer within five working day
 
 | Version | Security fixes |
 |---|---|
-| 0.16.x | yes |
-| older than 0.16 | no |
+| 0.18.x | yes |
+| older than 0.18 | no |
 
 Only the latest release line receives security fixes.
 
