@@ -1455,6 +1455,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/glossary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Glossary
+         * @description Terms of the console and the device states, translated (lang de or en).
+         */
+        get: operations["getGlossary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2350,6 +2370,18 @@ export interface components {
         };
         Token1: {
             token: string;
+        };
+        Glossary: {
+            terms: {
+                id: string;
+                term: string;
+                text: string;
+                doc?: string;
+            }[];
+            states: {
+                [key: string]: string;
+            };
+            docs: string;
         };
     };
     responses: {
@@ -5187,6 +5219,36 @@ export interface operations {
                     "application/json": {
                         codes: string[];
                     };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getGlossary: {
+        parameters: {
+            query?: {
+                lang?: "de" | "en";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Glossary"];
                 };
             };
             400: components["responses"]["Problem"];

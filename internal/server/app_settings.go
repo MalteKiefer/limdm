@@ -70,6 +70,7 @@ func (s *Server) appSettingsRoutes(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/agents/fetch", s.need("admin", s.globalOnly(s.apiAgentFetch)))
 	m.HandleFunc("POST /api/v1/agents/releases/{version}/{op}", s.need("admin", s.globalOnly(s.apiAgentRelease)))
 
+	m.HandleFunc("GET /api/v1/glossary", s.need("read", s.apiGlossary))
 	m.HandleFunc("GET /api/v1/profile", s.need("read", s.sessionOnly(s.apiProfile)))
 	m.HandleFunc("POST /api/v1/profile/password", s.need("self", s.sessionOnly(s.apiProfilePassword)))
 	m.HandleFunc("GET /api/v1/profile/totp/qr.svg", s.need("read", s.sessionOnly(s.apiProfileQR)))
@@ -1085,6 +1086,38 @@ func (s *Server) apiAgentFetch(w http.ResponseWriter, r *http.Request, c apiCall
 
 func (s *Server) apiAgentRelease(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	s.apiDone(w, s.releaseOp(r.Context(), c.sess(), r.PathValue("version"), r.PathValue("op")))
+}
+
+// ---- help ----
+
+// apiGlossary serves the console glossary and the device states in the
+// language of lang (de or en; else the request's language), sorted by term.
+func (s *Server) apiGlossary(w http.ResponseWriter, r *http.Request, c apiCaller) {
+	lang := r.URL.Query().Get("lang")
+	if lang != "de" && lang != "en" {
+		lang = requestLang(r)
+	}
+	type term struct {
+		ID   string `json:"id"`
+		Term string `json:"term"`
+		Text string `json:"text"`
+		Doc  string `json:"doc,omitempty"`
+	}
+	terms := make([]term, 0, len(glossary))
+	for _, g := range glossary {
+		e := term{ID: strings.ReplaceAll(strings.ToLower(g.Term), " ", "-"), Term: translate(lang, g.Term), Text: translate(lang, g.Text)}
+		if g.Doc != "" {
+			e.Doc = docsURL + g.Doc
+		}
+		terms = append(terms, e)
+	}
+	slices.SortStableFunc(terms, func(a, b term) int { return strings.Compare(strings.ToLower(a.Term), strings.ToLower(b.Term)) })
+	states := map[string]string{}
+	for k, v := range statusHelp {
+		states[k] = translate(lang, v)
+	}
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	writeJSON(w, map[string]any{"terms": terms, "states": states, "docs": docsURL})
 }
 
 // ---- own profile ----

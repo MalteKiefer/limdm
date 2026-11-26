@@ -4877,6 +4877,62 @@
           }
         }
       }
+    },
+    "/api/v1/glossary": {
+      "get": {
+        "operationId": "getGlossary",
+        "summary": "Glossary",
+        "description": "Terms of the console and the device states, translated (lang de or en).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Glossary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "lang",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "de",
+                "en"
+              ]
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -8216,6 +8272,50 @@
         },
         "required": [
           "token"
+        ]
+      },
+      "Glossary": {
+        "type": "object",
+        "properties": {
+          "terms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "term": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "doc": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "term",
+                "text"
+              ]
+            }
+          },
+          "states": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "docs": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "terms",
+          "states",
+          "docs"
         ]
       }
     }

@@ -203,6 +203,11 @@ func TestAppSettingsAPI(t *testing.T) {
 	}
 	code, body = call(admin, "POST", "/api/v1/profile/password", `{"current":"x","new":"y","repeat":"y"}`)
 	want(code, body, 422, "OIDC password")
+	code, body = call(auditor, "GET", "/api/v1/glossary?lang=de", "")
+	want(code, body, 200, "glossary")
+	if !strings.Contains(body, `"terms":[{`) {
+		t.Fatalf("glossary: %s", body)
+	}
 	code, body = call(admin, "GET", "/api/v1/profile", "")
 	want(code, body, 200, "profile")
 }
