@@ -224,3 +224,23 @@ func TestB2Store(t *testing.T) {
 		t.Fatalf("multipart uploads: %d", *multipart)
 	}
 }
+
+func TestStoreClientNoRedirect(t *testing.T) {
+	followed := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/other" {
+			followed = true
+			return
+		}
+		http.Redirect(w, r, "/other", http.StatusFound)
+	}))
+	defer srv.Close()
+	resp, err := storeClient().Get(srv.URL + "/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if followed || resp.StatusCode != http.StatusFound {
+		t.Fatal("store client followed a redirect")
+	}
+}

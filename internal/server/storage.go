@@ -143,6 +143,17 @@ var hostNameRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,252}[A-Za-z0-9
 
 func hostOrIPName(s string) bool { return net.ParseIP(s) != nil || hostNameRe.MatchString(s) }
 
+// storeClient talks to S3, B2 and WebDAV targets. It follows no
+// redirect (Go would resend the credentials to the same host over plain
+// http, and a redirect could reach an internal host) and gives up on a
+// server that does not answer, which would hold the backup lock forever.
+// Bodies have no overall timeout: archives are large.
+func storeClient() *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout = 5 * time.Minute
+	return &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
+
 // openStore builds the store of a target with its secrets opened.
 func (s *Server) openStore(t StoreTarget) (blobStore, error) {
 	secret, err := s.openField("store."+t.Name+".secret", t.SecretEnc)
@@ -155,15 +166,15 @@ func (s *Server) openStore(t StoreTarget) (blobStore, error) {
 	case "s3":
 		return &s3Store{endpoint: strings.TrimRight(t.Endpoint, "/"), region: t.Region, bucket: t.Bucket, prefix: t.Prefix,
 			key: t.AccessKey, secret: secret, pathStyle: t.PathStyle, lockMode: t.LockMode, lockDays: t.LockDays,
-			client: &http.Client{Timeout: 0}, now: time.Now}, nil
+			client: storeClient(), now: time.Now}, nil
 	case "b2":
 		// Backblaze's S3 compatible API: the same signing, multipart upload
 		// for large files and Object Lock headers (file lock) as S3
 		return &s3Store{endpoint: "https://s3." + t.Region + ".backblazeb2.com", region: t.Region, bucket: t.Bucket, prefix: t.Prefix,
 			key: t.AccessKey, secret: secret, pathStyle: true, lockMode: t.LockMode, lockDays: t.LockDays,
-			client: &http.Client{Timeout: 0}, now: time.Now}, nil
+			client: storeClient(), now: time.Now}, nil
 	case "webdav":
-		return &davStore{base: strings.TrimRight(t.Endpoint, "/"), user: t.User, secret: secret, client: &http.Client{Timeout: 0}}, nil
+		return &davStore{base: strings.TrimRight(t.Endpoint, "/"), user: t.User, secret: secret, client: storeClient()}, nil
 	case "sftp":
 		key, err := s.openField("store."+t.Name+".key", t.KeyEnc)
 		if err != nil {
