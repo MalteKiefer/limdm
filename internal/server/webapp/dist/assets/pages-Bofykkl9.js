@@ -1,0 +1,1 @@
+import{V as e,p as t,q as n}from"./index-BxY7N6n4.js";var r=n();function i(){let n=e();return(0,r.jsx)(t,{title:n(`activity.title`),sub:n(`activity.sub`),oldPath:`/audit`})}export{i as ActivityPage};

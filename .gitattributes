@@ -1,0 +1,3 @@
+# build output of web/ (make web), committed so go build needs no Node
+internal/server/webapp/dist/** linguist-generated=true
+web/src/api/schema.d.ts linguist-generated=true
