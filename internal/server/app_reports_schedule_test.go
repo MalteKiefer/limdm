@@ -98,7 +98,7 @@ func TestAppReportSchedules(t *testing.T) {
 		t.Fatalf("download: %d %s", code, body)
 	}
 	db.Exec(ctx, `INSERT INTO tenants(id, name) VALUES (2, 'Zweig')`)
-	if code, _ := call(session{Email: "admin@firma.de", Role: "admin", Tenant: 2}, "GET","/api/v1/report-runs/"+itoa(run.ID), ""); code == 200 {
+	if code, _ := call(session{Email: "admin@firma.de", Role: "admin", Tenant: 2}, "GET", "/api/v1/report-runs/"+itoa(run.ID), ""); code == 200 {
 		t.Fatal("another tenant's view downloads the report")
 	}
 	if code, body := call(dashAuditor, "GET", "/api/v1/report-schedules/"+itoa(sch.ID)+"/runs", ""); code != 200 || !strings.Contains(body, `"rows":3`) {
