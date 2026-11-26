@@ -132,6 +132,13 @@ With all patch management fields:
 | `reboot_notice_minutes` | number | 0 to 120; 0 or absent means 5 |
 | `reboot_max_defers` | number | 0 to 5, default 0 |
 | `reboot_defer_minutes` | number | 15 to 480; 0 or absent means 60 |
+| `rules` | list | rules per source; when present they replace `mode` (which may then be `off` or empty); see below |
+| `rules[].source` | text | `os_security`, `os_all`, `third_party` or `flatpak`, each once |
+| `rules[].mode` | text | `off`, `notify` (report only) or `install` |
+| `rules[].window`, `rules[].days` | text, list | as `window` and `days`; an empty window takes the declaration's window and days |
+| `rules[].rings` | true or false | install once per wave of the device's update ring |
+| `rules[].repos` | list of text | `third_party` only: up to 50 apt origins, dnf repo IDs or zypper aliases (glob); empty is every third party repository |
+| `security_max_days` | number | 0 to 365; the check `updates.security_age` fails after this many days of pending security updates, 14 when 0 |
 
 What runs per distribution family:
 
@@ -162,6 +169,20 @@ What runs per distribution family:
   `reboot_max_defers` the desktop helper offers to postpone it by `reboot_defer_minutes` that
   many times; it asks again shortly before each new time. After the last deferral the restart
   happens. Every deferral is reported as a device event with the user name.
+
+With rules per source and update rings:
+
+```json
+{"window": "02:00-05:00", "reboot": true, "security_max_days": 7, "rules": [
+  {"source": "os_security", "mode": "install"},
+  {"source": "os_all", "mode": "install", "rings": true},
+  {"source": "third_party", "mode": "install", "rings": true, "repos": ["Docker*", "google-chrome"]},
+  {"source": "flatpak", "mode": "notify"}]}
+```
+
+What the sources cover per distribution, how they run, the update rings and the reported
+results are in [Patch management](patching.md). Flatpak is its own source now: `all` without
+rules still updates Flatpak, `security` never did.
 
 The default library item "Security updates at night" sets `security`, `02:00-05:00`, no
 reboot.

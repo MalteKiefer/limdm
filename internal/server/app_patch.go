@@ -565,7 +565,7 @@ func (s *Server) apiUpdateWaveStart(w http.ResponseWriter, r *http.Request, c ap
 type deviceUpdates struct {
 	Ring    *updateRing      `json:"ring"`
 	Status  api.UpdateStatus `json:"status"`
-	Reports bool             `json:"reports"` // the agent sent an update status (0.19 and later)
+	Reports bool             `json:"reports"` // the agent sends an update status (older agents do not)
 }
 
 func (s *Server) apiDeviceUpdates(w http.ResponseWriter, r *http.Request, c apiCaller) {

@@ -22,6 +22,7 @@ German, British, US) follows the account across devices.
 | Devices | `/app/devices` | device list with filters, saved views, exports and bulk actions; device page with every command, the remote shell, recovery keys and diagnostics; **Add device** (`/app/devices/enroll`) with the enrollment tokens |
 | Compliance | `/app/compliance` | checks, heatmap, history, policies, risk exceptions |
 | Configuration | `/app/config` | blueprints, library items, software catalog, uploaded packages, with version history, preview and rollback |
+| Updates | `/app/updates` | update rings and waves, open security updates and CVEs, installed package versions; the device page has an **Updates** tab ([Patch management](patching.md)) |
 | Activity | `/app/activity` | audit log with filters and chain verification |
 | Reports | `/app/reports` | exports and scheduled reports |
 | Settings | `/app/settings` | sign in, security, users, tenants, API tokens, notifications, backup, retention, operations, directory, network certificates, agents |
@@ -96,7 +97,7 @@ device scope only, also when they switched to a tenant. See
 ### Four eyes rules
 
 With **Require a second administrator's approval** on (**Settings**, **Security**), wipe,
-lost mode, scripts (also bulk and through the admin API, which answers 202 with an
+lost mode, scripts, package downgrades (also bulk and through the admin API, which answers 202 with an
 `approval_id`) and role changes of console users wait for a second admin. Optional:
 **Also for recovery key views** and **Also for remote shell sessions**. The requester never
 approves their own request, requests expire after 24 hours, and the setting needs at least

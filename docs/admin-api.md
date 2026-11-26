@@ -215,6 +215,13 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `GET /api/v1/activity/histogram` | read | the filters of `/api/v1/activity` | `200` counts per day and category, default the last 30 days, at most 400 |
 | `GET /api/v1/audit/status`, `POST /api/v1/audit/verify` | audit | | `200` first broken entry (0 = intact), last full verification, keyed from, known actions; `verify` checks the whole chain now (audited as `audit.verify`) |
 | `GET /api/v1/stats/updates` | read | `days` (1 to 400, default 30) | `200` devices with pending security updates (from the detail of the check `updates.security`), their sum, devices failing it for more than 14 days, devices on the newest approved agent release (else the newest reported); daily history in the global view |
+| `GET /api/v1/update-rings` | read | | `200` update rings of the tenant view with wave, pause, approval and devices (by their last check in), the newest 20 waves, devices in no ring; see [Patch management](patching.md#update-rings) |
+| `POST /api/v1/update-rings`, `PUT /api/v1/update-rings/{id}` | admin | `{"name", "position", "deferral_days", "wave_days", "require_approval", "all_devices", "tags", "groups", "blueprints"}` | `200` the ring; `422` names the field; audited as `update_ring.save` |
+| `DELETE /api/v1/update-rings/{id}`, `POST /api/v1/update-rings/{id}/{action}` | admin | `action` `pause`, `resume`, `approve` | `204` or the ring; audited as `update_ring.delete` and `update_ring.<action>` |
+| `POST /api/v1/update-waves` | admin | | `201` the new wave of the caller's tenant (the default tenant in the global view); `409` without rings; audited as `update_wave.start` |
+| `GET /api/v1/devices/{id}/updates` | read | | `200` ring, pending updates with versions, security flag, severity and CVEs, last run per source |
+| `GET /api/v1/updates/fleet` | read | `cve` | `200` devices with security and pending updates, open CVEs with severity and devices, pending updates per package; with `cve` the devices it affects |
+| `GET /api/v1/updates/package-versions` | read | `name` | `200` installed versions of the package with device counts |
 | `GET /api/v1/stats/annotations` | audit | `days` | `200` key rotations, approved agent releases, blueprint changes and failed backups per day, for the history charts |
 | `GET /api/v1/report-schedules` | audit | | `200` own schedules (admins: all of the tenant view) and the channels a schedule may use |
 | `POST /api/v1/report-schedules` | admin or auditor person, not a token | `{"view_id", "cadence", "channels", "emails"}` | `200` schedule of a saved report (list `reports`); audited as `report.schedule`; see [Scheduled reports](#scheduled-reports) |
@@ -334,12 +341,13 @@ strings, numbers or booleans; `true` is sent as a checked box.
 | Types | Roles |
 |---|---|
 | `sync`, `update`, `reboot`, `shutdown`, `lock`, `unlock`, `message`, `user_password`, `user_lock`, `user_unlock`, `diagnostics` | admin, helpdesk |
-| `script`, `lost`, `found`, `wipe`, `allow_uninstall`, `app_install`, `app_remove`, `user_create`, `user_admin`, `user_delete`, `software_remove` | admin |
+| `script`, `lost`, `found`, `wipe`, `allow_uninstall`, `app_install`, `app_remove`, `user_create`, `user_admin`, `user_delete`, `software_remove`, `package_hold`, `package_downgrade` | admin |
 
 Fields: `minutes` (reboot, shutdown: 0 to 1440, default 1), `confirm` and `message` (lost,
 wipe: `confirm` is the host name), `title` and `text` (message), `payload` (script), `app`
 (app_install, app_remove), `username`, `full_name`, `password`, `admin`, `keep_home` (user
-commands), `kind`, `name`, `installation` (software_remove), `reason` (shown with an
+commands), `kind`, `name`, `installation` (software_remove), `name` and `release` (package_hold),
+`name` and `version` (package_downgrade, see [Patch management](patching.md#rollback)), `reason` (shown with an
 approval request, up to 500 characters). A type the token's role may not send answers `403`
 and is audited as `api.denied`; other rule violations answer `422`. A retired device answers
 `409`.
@@ -353,7 +361,7 @@ answers `422`, while the first is still running `409`. Poll
 `sent` are still open; commands expire after 7 days). The payload is never returned, since
 it can hold a password.
 
-With four eyes approval on (Settings, Security), wipe, lost mode and scripts do not run:
+With four eyes approval on (Settings, Security), wipe, lost mode, scripts and package downgrades do not run:
 the answer is `202` with `{"approval_id": 12, "status": "pending"}` (`ApprovalPending` in the
 OpenAPI document, `Location: /api/v1/approvals/{id}`) instead of a command, and another
 admin decides under **Approvals** in the console (`params.reason` is shown there) or through
