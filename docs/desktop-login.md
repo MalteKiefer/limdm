@@ -67,10 +67,27 @@ with longer values.
    The agent creates the accounts (home directory, `/bin/bash`), adds `admin` users to
    `sudo` or `wheel` and removes the right again when the flag is gone.
 
-The agent inserts `pam_exec` with `limdm-agent pam-auth` before `pam_unix`: via
-`pam-auth-update` on Debian and Ubuntu, via its own `authselect` profile on Fedora. This
-covers every login manager and service that uses the common PAM stack: GDM, SDDM, LightDM,
-text console, SSH and the lock screen. Removing the declaration removes the PAM integration.
+The agent inserts `pam_exec` with `limdm-agent pam-auth` before `pam_unix` in the shared
+auth stack:
+
+| Family | How |
+|---|---|
+| Debian, Ubuntu | `pam-auth-update` with the profile `/usr/share/pam-configs/limdm` |
+| Fedora, RHEL | its own `authselect` profile `custom/limdm`, cloned from the current one; the previous profile is restored on removal |
+| SUSE | `/etc/pam.d/common-auth` (the `common-auth-pc` file of pam-config) |
+| Arch | `/etc/pam.d/system-auth` |
+| Alpine | `/etc/pam.d/base-auth`, needs linux-pam |
+
+On SUSE, Arch and Alpine the original file is kept in `/var/lib/limdm/pam-<name>.orig`. If
+another tool removes the line, the agent adds it again. Removing the declaration removes the PAM integration.
+
+The device flow runs only for services at the device: display managers (GDM, SDDM,
+LightDM, LXDM, greetd, cosmic-greeter and others), screen lockers (GNOME, KDE, Xfce,
+Cinnamon, MATE, swaylock, hyprlock, i3lock and others), the text console (`login`), `sudo`,
+`su` and polkit. `sshd` and every other remote service never start a device flow: for them
+`pam_unix` decides with the local password alone. A managed user whose local password is
+locked (confirmation due, SSO only mode, offline lock) therefore cannot sign in over SSH,
+and a network client cannot find out which accounts are managed.
 
 ## Local password after SSO
 
@@ -79,7 +96,8 @@ text console, SSH and the lock screen. Removing the declaration removes the PAM 
 1. The login screen asks for the password. The user types the password they want to use on
    this device (at least 14 characters, must not contain the user name).
 2. The screen shows a URL and a code. The user opens the URL on a phone or another device,
-   signs in at the identity provider (with MFA, if configured) and confirms the code.
+   signs in at the identity provider (with MFA, if configured) and confirms the code. The
+   login waits up to five minutes.
 3. The agent verifies the ID token: signature, issuer, audience, verified email, the email
    mapped to this user and the allowed domain.
 4. The typed password becomes the local password, the confirmation time is stored, and the
@@ -151,8 +169,10 @@ both periods for offline ones.
 ## What the console shows
 
 The device page lists for every managed account the last SSO confirmation and whether the
-local password is currently locked. Every desktop login (success and failure, with reason)
-is reported to the server and appears in the audit log.
+local password is currently locked. Every SSO login (success and failure, with reason) is
+written to `/var/lib/limdm/auth-events.log`, reported with the next check in and shown under
+**Device events** on the device's **Commands** tab (kept 365 days). A user deactivated in
+the directory also raises the notification event `directory.user_disabled`.
 
 ## Files on the device
 
@@ -173,8 +193,10 @@ is reported to the server and appears in the audit log.
 * The client secret of the device flow client is stored encrypted on the server: the console
   seals `client_secret` of a `com.limdm.login` item with AES-256-GCM under a key derived from
   `LIMDM_SESSION_KEY` (the editor then shows `sealed:v1:…`; type a new secret in clear to
-  replace it). Items saved by older versions are sealed at the first start. The audit log
-  records the sealed form only. The server opens the secret when it builds a device's
+  replace it). Items saved by older versions are sealed at the first start, and after a
+  session key rotation the secrets are sealed again with the new key
+  ([keys.md](keys.md#session-key)). The audit log and the version history record the
+  sealed form only. The server opens the secret when it builds a device's
   declarations and sends it over mTLS.
 * On the device the secret stays in clear (`/etc/limdm/login.json` and the agent state, root
   only, 0600): the agent sends it to the provider in the device authorization grant and has
@@ -186,4 +208,5 @@ is reported to the server and appears in the audit log.
 ## Login managers
 
 GDM, SDDM and LightDM show the PAM messages (URL and code) as text; how they look depends
-on the theme. QR codes are not shown. A plain text console and SSH show the same text.
+on the theme. QR codes are not shown. A plain text console shows the same text. SSH shows
+nothing of it, because remote services never run the device flow.

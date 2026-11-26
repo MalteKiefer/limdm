@@ -56,8 +56,10 @@ notification channels (the only tab of **Settings** they see), network certifica
 their devices, and **Company** for the branding. Helpdesk and auditor accounts of a tenant
 can be limited further with device scopes ([configuration.md](configuration.md#console-users-and-roles)).
 
-Every other page answers 403: Directory, Agents, Software, the other settings tabs, the
-network CRL and its token, Tenants, and pages added later until they are made tenant aware.
+Every other page answers 403: Directory, Agents, Software, the other settings tabs
+(including the **Keys** card), the network CRL and its token, Tenants, **Verify whole
+chain** on the audit log (the chain is global), and pages added later until they are made
+tenant aware.
 Objects of other tenants answer 404, whether addressed in the console, in an export or in
 the admin API.
 
@@ -66,8 +68,9 @@ the admin API.
 On **Tenants**, **Shared objects**, global administrators mark library items and blueprints
 of the Default tenant as shared. Every tenant can read them and use them in its own
 blueprints (a shared blueprint as parent, a shared item in an assignment), but cannot change
-or delete them. The `default` blueprint, which applies to every device without a
-blueprint, is always shared.
+or delete them. There is one `default` blueprint for the whole installation: it belongs to
+Default, applies to every device of every tenant without another blueprint, and is shared
+(the server shares it again at every start, even if it was unchecked).
 
 A blueprint can only reference items and a parent the tenant can see; saving any other
 reference is refused. When a device's declarations are resolved, only library items of the

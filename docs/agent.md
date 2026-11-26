@@ -1,8 +1,21 @@
 # Agent deployment
 
-`limdm-agent` runs as a root systemd service on every device. Every release ships it as deb
-and rpm for amd64 and arm64; the package also contains the desktop helper `limdm-desktop`.
-osquery is a hard dependency and comes from the official osquery repository.
+`limdm-agent` runs as a root service on every device (systemd, OpenRC on Alpine). Every
+release ships the agent package as `.deb`, `.rpm`, Arch package (`.pkg.tar.zst`) and
+`.apk` for amd64 and arm64, plus a `tar.gz`. The package contains
+
+* `limdm-agent`, the agent,
+* `limdm`, the command line for users ([Command line for users](#command-line-for-users)),
+* `limdm-desktop` and `/usr/lib/limdm/limdm-desktop-ui`, the tray and the desktop app
+  ([Desktop app and tray](#desktop-app-and-tray)),
+* the units `limdm-agent.service`, `limdm-watchdog.service` and `limdm-watchdog.timer`
+  (or `/etc/init.d/limdm-agent`), the rollback script `/usr/lib/limdm/limdm-watchdog.sh`,
+  the PAM profile for `pam-auth-update`, the XDG autostart entry, the systemd user unit
+  `limdm-desktop.service` and the menu entries.
+
+osquery is a hard dependency of the deb and rpm and comes from the official osquery
+repository. Arch and Alpine have no osquery package; the agent uses its native inventory
+there.
 
 ## Supported distributions
 
@@ -11,7 +24,7 @@ osquery is a hard dependency and comes from the official osquery repository.
 | Debian | Debian, Ubuntu, Mint, Pop!_OS | apt, `.deb` | systemd | full feature set |
 | Fedora | Fedora, CentOS Stream, RHEL, Rocky, Alma | dnf, `.rpm` | systemd | full feature set |
 | SUSE | openSUSE Leap, openSUSE Tumbleweed, SLES, SLED | zypper, `.rpm` | systemd | see [SUSE](#suse) |
-| Arch | Arch, Manjaro, EndeavourOS | pacman, `.pkg.tar.zst` | systemd | no osquery (native inventory); pending updates need `pacman-contrib`; updates are always full upgrades |
+| Arch | Arch, Manjaro, EndeavourOS | pacman, `.pkg.tar.zst` | systemd | no osquery (native inventory); pending updates through `pacman-contrib`; updates are always full upgrades |
 | Alpine | Alpine | apk, `.apk` | OpenRC | no osquery; no host firewall management; SSO login needs linux-pam; no systemd watchdog (supervise-daemon restarts the agent) |
 
 Arch and Alpine are rolling or have no separate security channel: every pending update
@@ -47,8 +60,12 @@ dependencies, and the agent installs any missing tool itself.
 * Admins join `wheel`. openSUSE's default sudoers asks for the root password
   (`Defaults targetpw`) and does not grant `wheel`; add a `com.limdm.sudo` rule for
   `%wheel` to make it an admin group.
-* The proxy declaration writes the environment files; zypper reads `/etc/sysconfig/proxy`,
-  which the agent does not manage yet.
+* The proxy declaration writes the environment files and sets `PROXY_ENABLED`,
+  `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` in `/etc/sysconfig/proxy`, which zypper and
+  YaST read. Only these keys are changed, and only while they still hold the value LiMDM
+  wrote.
+* Agent self updates install the package with `zypper install --allow-unsigned-rpm`; its
+  SHA-256 was checked against the signed release checksums before.
 * Transactional systems (openSUSE MicroOS, SL Micro) are not supported: their read only
   root needs `transactional-update`.
 
@@ -57,7 +74,9 @@ dependencies, and the agent installs any missing tool itself.
 **Enrollment** in the console creates tokens with a note, an optional blueprint, a number of
 uses (1 to 10000) and a validity (1 to 90 days). The token is shown once. The page shows the
 commands below with the token filled in. **Revoke** ends a token at once (audit
-`token.revoke`); devices already enrolled with it are not affected.
+`token.revoke`); devices already enrolled with it are not affected. With multi tenancy a
+token enrolls into the tenant it was created in, and tokens of a disabled tenant stop
+working ([tenants.md](tenants.md)).
 
 ## One device: install script
 
@@ -69,18 +88,24 @@ curl -fsSL https://mdm.example.com/install.sh | sudo LIMDM_TOKEN=lmt_... sh
 fingerprint, no secret. It
 
 1. detects the architecture (amd64, arm64) and the package manager (apt, dnf, zypper,
-   pacman or apk),
-2. writes `/etc/limdm/enroll.conf` (0600) from `LIMDM_TOKEN`,
+   pacman or apk); other systems use the tar.gz release by hand,
+2. writes `/etc/limdm/enroll.conf` (0600) from `LIMDM_TOKEN`; without `LIMDM_TOKEN` it uses
+   an existing `/etc/limdm/enroll.conf`,
 3. finds the newest release of `LIMDM_RELEASE_REPO` through the GitHub API, downloads
-   `limdm-agent_<version>_linux_<arch>.deb|rpm` and verifies it against
+   `limdm-agent_<version>_linux_<arch>.<deb|rpm|pkg.tar.zst|apk>` and verifies it against
    `limdm_<version>_SHA256SUMS`,
-4. adds the osquery repository, trusting only the embedded signing key
-   `1484 120A C4E9 F8A1 A577 AEEE 97A8 0C63 C9D8 B80B`,
-5. installs osquery and the agent; the package enrolls the device and starts the service.
+4. on apt, dnf and zypper systems adds the osquery repository, trusting only the embedded
+   signing key `1484 120A C4E9 F8A1 A577 AEEE 97A8 0C63 C9D8 B80B`,
+5. installs osquery and the agent; the package enrolls the device from `enroll.conf` in its
+   post install step, and the script enables and starts the service.
 
-Optional: `LIMDM_ALLOW_SCRIPTS=true` allows remote scripts and `LIMDM_ALLOW_REMOTE_SHELL=true`
-remote support shells ([remote-shell.md](remote-shell.md)) on this device. Running the
-script again on an enrolled device upgrades the agent.
+| Variable | |
+|---|---|
+| `LIMDM_TOKEN` | enrollment token |
+| `LIMDM_ALLOW_SCRIPTS=true` | allow remote scripts on this device |
+| `LIMDM_ALLOW_REMOTE_SHELL=true` | allow remote support shells ([remote-shell.md](remote-shell.md)) |
+
+Running the script again on an enrolled device upgrades the agent.
 
 ## Mass deployment: enroll.conf
 
@@ -93,6 +118,18 @@ token = "lmt_..."
 allow_scripts = false
 allow_remote_shell = false
 ```
+
+| Key | Required | |
+|---|---|---|
+| `server` | yes | agent API URL (the agent listener, port 8444 by default) |
+| `fingerprint` | yes | SHA-256 of the device CA, shown on **Enrollment** |
+| `token` | yes | enrollment token |
+| `allow_scripts` | no | `true` allows remote scripts and `com.limdm.files` targets outside the plain text allowlist; default `false` |
+| `allow_remote_shell` | no | `true` allows remote support shells; default `false` |
+
+Lines starting with `#` are comments. Both `allow_*` values are stored in
+`/etc/limdm/agent.json` and cannot be switched on from the server later; enroll again to
+change them.
 
 Then install the package by any means (your own apt or dnf mirror, the release files, or the
 install script without `LIMDM_TOKEN`). The agent enrolls
@@ -123,14 +160,14 @@ Example with Ansible:
 ## Manual installation and other systems
 
 ```sh
-sudo sh install-agent.sh ./limdm-agent_0.6.0_linux_amd64.deb   # adds osquery, installs both
+sudo sh install-agent.sh ./limdm-agent_0.16.0_linux_amd64.deb   # adds osquery, installs both
 sudo limdm-agent enroll --config /etc/limdm/enroll.conf
 sudo systemctl enable --now limdm-agent
 ```
 
 or with flags: `limdm-agent enroll --server URL --fingerprint FP --token TOKEN [--allow-scripts] [--allow-remote-shell]`.
-Distributions without apt, dnf or zypper use the tar.gz release; the agent falls back to native
-inventory when osquery is missing.
+Distributions without apt, dnf, zypper, pacman or apk use the tar.gz release; the agent
+falls back to native inventory when osquery is missing.
 
 ## What enrollment does
 
@@ -138,27 +175,178 @@ The agent fetches the device CA over TLS, accepts it only when its SHA-256 match
 fingerprint, creates a P-256 key locally and sends only a certificate signing request with
 the token. The key never leaves the device (`/etc/limdm/device.pem`, 0600). From then on
 every connection is mTLS with TLS 1.3, pinned to that CA. Certificates last 90 days and
-rotate automatically.
+rotate automatically 30 days before they expire, or earlier when the server asks (device CA
+rotation, [keys.md](keys.md)).
+
+## Agent command line
+
+All subcommands except `version` and `pam-auth` need root.
+
+| Command | |
+|---|---|
+| `limdm-agent run` | the service; enrolls from `/etc/limdm/enroll.conf` first when the device is not enrolled |
+| `limdm-agent enroll --config FILE` | enroll with an enroll.conf file |
+| `limdm-agent enroll --server URL --fingerprint FP --token TOKEN [--allow-scripts] [--allow-remote-shell]` | enroll with flags; the three values are required |
+| `limdm-agent check [--level 1\|2]` | local compliance report, changes nothing; `--level` overrides the declared level |
+| `limdm-agent recovery-key [--all]` | create and escrow LUKS recovery keys; asks for each disk passphrase; `--all` also replaces keys already escrowed |
+| `limdm-agent watchdog` | run by `limdm-watchdog.timer`: unmasks, enables and starts the agent when needed |
+| `limdm-agent tamper-report MSG` | queue a tamper event (used by the package scripts) |
+| `limdm-agent pam-auth` | PAM helper for the desktop login, called by `pam_exec` ([desktop-login.md](desktop-login.md)) |
+| `limdm-agent version` | installed version |
+
+Other useful commands:
+
+| Command | |
+|---|---|
+| `systemctl kill --kill-who=main -s USR1 limdm-agent` | check in now |
+| `journalctl -u limdm-agent` | agent log |
+
+## What the agent does
+
+Each cycle (default every 5 minutes) the agent renews certificates when due, applies the
+declarations, runs the compliance checks, collects inventory and checks in; the steps are
+in [concepts.md](concepts.md#agent-cycle). In addition it
+
+* asks the server every minute whether a command or an agent update waits
+  ([Command delivery](#command-delivery)),
+* serves the desktop app, the tray and `limdm` on `/run/limdm/agent.sock`,
+* installs missing tools it needs once a day ([Dependencies](#dependencies)),
+* starts the desktop helper in graphical sessions that did not start it themselves,
+* keeps enforcing the stored declarations while the server is unreachable, and locks the
+  device after `offline_lock_hours` without contact when that is set.
+
+### Privacy options
+
+Two features send data to third parties. Both are off by default and switched on in
+**Settings**, **Security**, **Privacy**:
+
+* **Look up the location of device public addresses**: the server sends a device's
+  public address to `LIMDM_GEOIP_URL` (default ipwho.is) when it changes. The device page
+  shows the location. The agent is not involved.
+* **Agents may ask public DNS over HTTPS resolvers (Cloudflare, Google) when the system
+  resolver fails**: when the system resolver cannot resolve the server name, the agent asks
+  `1.1.1.1`, `8.8.8.8`, `1.0.0.1` and `8.8.4.4` over HTTPS. The agent remembers the setting
+  for its next start. `"no_fallback_dns": true` in `/etc/limdm/agent.json` keeps the
+  fallback off on one device, whatever the server says.
+
+The agent uses the declared proxy (`com.limdm.proxy`) for its own connections.
 
 ## Dependencies
 
 The packages depend on the tools the agent calls (osquery, systemd, util-linux, cryptsetup,
-iproute, procps, kmod, gnupg) and recommend the ones compliance remediation uses (firewall,
-audit, nftables, unattended upgrades or dnf plugins). The agent does not rely on them being
-present: once a day it installs whatever is missing. On devices with a desktop that includes
-zenity (kdialog on KDE Plasma), libnotify, dconf and Python with GTK 4 and libadwaita for
-the desktop app; servers never get desktop packages.
+iproute, procps, kmod, gnupg; on Arch also shadow and pacman-contrib, on Alpine OpenRC and
+the util-linux tools) and recommend the ones compliance remediation uses (firewall, audit,
+nftables, unattended upgrades, libpam-pwquality or dnf plugins). The agent does not rely on
+them being present: once a day it installs whatever is missing. Desktop tools are only
+suggested by the packages, so servers never get GTK: on devices with a desktop the agent
+installs zenity (kdialog on KDE Plasma), libnotify, dconf, Python with GTK 4 and
+libadwaita for the desktop app and, with a wlroots compositor, swayidle, and retries daily if that fails.
 
-## Desktop helper
+## Desktop app and tray
 
-`limdm-desktop` starts with every desktop session (`/etc/xdg/autostart`) as the user and
-asks for what only the user can provide, today the disk passphrase for a recovery key
-([disk-encryption.md](disk-encryption.md)). It shows zenity (GNOME) or kdialog (KDE)
-dialogs with the company name and logo from the console settings; the packages recommend
-zenity. The menu entry "Disk recovery key" runs it on demand.
+`limdm-desktop` runs as the user in every graphical session. It shows a tray icon, opens the
+desktop app and asks the user for what only the user can provide. It talks only to the
+agent socket `/run/limdm/agent.sock`; the agent identifies callers by their peer
+credentials and only serves users with an active local session (and root).
 
-The helper talks to the agent over `/run/limdm/agent.sock`. The agent identifies callers by
-their peer credentials and only serves users with an active local session.
+### Starting
+
+The helper starts through the systemd user unit `limdm-desktop.service` (enabled for all
+users, bound to `graphical-session.target`), through XDG autostart
+(`/etc/xdg/autostart`), and where neither applies (sway or Hyprland without systemd
+integration, i3) the agent starts it on its next cycle. A lock in `$XDG_RUNTIME_DIR` keeps
+one instance per user.
+
+| Option | |
+|---|---|
+| `limdm-desktop` | tray icon and reminders |
+| `--no-tray` | only the reminders, for sessions without a tray host |
+| `--now` | ask for a missing recovery key right away (menu entry **Disk recovery key**) |
+| `--message TEXT`, `--message-title TITLE` | show a message from IT (started by the agent) |
+| `--reboot-at HH:MM`, `--reboot-defers N`, `--reboot-defer-minutes M` | offer to postpone a planned restart (started by the agent) |
+
+### Tray
+
+The tray icon is the LiMDM logo with a status dot: green (compliant), amber (checks
+failing), red (no contact to the server or locked). The menu names who manages the device,
+shows the state and the last check in, and offers **Open LiMDM…**, **Install Software…**,
+**Compliance…**, **Set Up Recovery Key…** and **Confirm Company Account…** when needed,
+**Check In Now** (at most every 30 seconds) and **Agent Log…**; the agent version is at the
+bottom and in the tooltip. While IT runs a remote shell it shows **IT remote support
+session running**. The tray uses StatusNotifierItem: sway with waybar, KDE Plasma, Xfce,
+Cinnamon and Ubuntu show it; stock GNOME needs the AppIndicator extension.
+
+### Desktop app
+
+**LiMDM** in the applications menu (or **Open LiMDM…** in the tray) opens a window in the
+style of GNOME Settings (GTK 4, libadwaita 1.4) with these pages:
+
+| Page | |
+|---|---|
+| Overview | state, who manages the device, last check in, **Check In Now**, open tasks such as a missing recovery key |
+| Software | the company catalog: install, remove or request apps ([software.md](software.md)) |
+| Compliance | every check with its result, grouped by failing, exceptions, not applicable and passed |
+| Profiles | every declaration in force with its settings, secrets masked |
+| Certificates | CA certificates IT installed, with subject, issuer, validity and fingerprint |
+| Disk Encryption | store a recovery key with the disk passphrase |
+| Agent Log | journal entries of the agent and its watchdog, optionally only warnings and errors |
+| About | versions and server |
+
+It shows the company logo, or the LiMDM logo, and follows the system's light or dark style;
+the button next to the logo switches between system, dark and light. Without GTK 4 and
+libadwaita 1.4 (Ubuntu 22.04) the tray falls back to simple dialogs.
+
+### Dialogs and notifications
+
+Dialogs are libadwaita message dialogs from the desktop app (`limdm-desktop-ui --dialog`);
+without GTK 4 and libadwaita 1.4 the helper uses zenity (kdialog on KDE Plasma). Texts
+follow the session language and fall back to the system locale (English and German).
+Dialogs follow the GNOME HIG: a short heading, one sentence, buttons named after their
+action.
+
+Users see a notification when IT schedules a restart or shutdown (with the time), locks the
+device, starts or ends a remote shell, or needs a recovery key. **Send message…** on a
+device page shows a notification and a dialog to everyone signed in on the desktop.
+
+### Restart after updates
+
+When `com.limdm.updates` restarts the device after updates (`reboot`), the agent schedules
+the restart with `shutdown -r` `reboot_notice_minutes` ahead (default 5) and notifies every
+graphical session. With `reboot_max_defers` above 0 the helper asks **Restart scheduled**
+with the buttons **Postpone N minutes** and **Restart as planned**. Each postponement moves
+the restart by `reboot_defer_minutes` (default 60) and is recorded as a device event; the
+dialog comes again shortly before the new time until no postponements are left
+([declarations.md](declarations.md#comlimdmupdates)).
+
+## Command line for users
+
+`limdm` does on a terminal what the desktop app does in its window. It runs as the signed
+in user, talks only to the agent socket and needs no root; over SSH it is refused unless
+the user also has an active local session (root is always allowed).
+
+| Command | |
+|---|---|
+| `limdm info` (alias `status`) | everything about this device and the agent: manager, system, hardware, server, check in, declarations, updates, locks, compliance, recovery keys, company account, remote support session |
+| `limdm checks` | every compliance check with its result |
+| `limdm profiles` | declarations in force (secrets masked) |
+| `limdm certificates` (alias `certs`) | CA certificates IT installed |
+| `limdm log [-n 50]` | latest entries of the agent log |
+| `limdm sync` | check in now |
+| `limdm software list` (alias `limdm software`, `limdm apps`, `ls`) | catalog apps with mode and state |
+| `limdm software install APP`, `limdm software remove APP` | install or remove an app the catalog offers (ID or name) |
+| `limdm software request APP [--note TEXT]` | ask IT for a catalog app in request mode |
+| `limdm software search QUERY` | search Flathub for apps outside the catalog |
+| `limdm software request-new FLATPAK_ID [--remote flathub] [--name NAME] [--note TEXT]` | ask for an app outside the catalog |
+| `limdm software requests` | your requests for apps outside the catalog |
+| `limdm sso [status]` | company account of your session and when it was last confirmed |
+| `limdm sso confirm` | confirm the company account: prints a URL and a code and waits up to ten minutes for the sign in |
+| `limdm recovery-key` | create the disk recovery key IT asks for (reads the passphrase from the terminal) |
+| `limdm support end` | end the remote support session IT opened ([remote-shell.md](remote-shell.md)) |
+| `limdm version` | agent version |
+
+`--json` prints `info`, `checks`, `profiles`, `certificates`, `log` and `software list` as
+JSON. The agent decides as for the app: only catalog apps install, and only in the modes the
+catalog allows.
 
 ## Tamper protection
 
@@ -166,11 +354,12 @@ their peer credentials and only serves users with an active local session.
   kill (`Restart=always`).
 * `limdm-watchdog.timer` runs `limdm-agent watchdog` every 5 minutes: it unmasks, enables and
   starts the agent when needed. The agent in turn keeps the watchdog timer enabled.
-* Removing the package needs a release from the console (Actions, *Allow uninstall for 1
-  hour*); otherwise the package manager stops with an error. Upgrades are not affected.
+* Removing the package needs a release from the console (**More actions**, **Agent**,
+  **Allow uninstall for 1 hour**); otherwise the package manager stops with an error.
+  Upgrades are not affected.
 * Everything found and fixed, and every removal attempt, is reported as a tamper event: the
-  device page shows a notice, the audit log has an `agent.tamper` entry and the webhook sends
-  `device.tamper`.
+  device page shows a notice, the audit log has an `agent.tamper` entry and the
+  notification event `device.tamper` goes out.
 
 A root user can still defeat this, for example by deleting the binaries or overriding the
 units. The goal is detection and self healing, not an absolute barrier: a device whose agent
@@ -184,17 +373,19 @@ Agents are updated from the console, page **Agents**:
    versions**), downloads the agent packages and verifies them against the release's
    `SHA256SUMS` and `SHA256SUMS.sig`.
 2. An admin **approves** a version. Nothing is installed before that.
-3. Rollout: with **update agents automatically**, devices tagged with the pilot tag get an
-   approved version at their next check in, all others after the delay (default 7 days).
-   **Update agent…** on a device page installs the newest approved version, or any fetched
-   version that is not blocked, on that device only, regardless of policy and delay (also a
-   downgrade). Picking a version counts as its approval for this device. **Outdated agents**
-   on the Agents page updates single devices to the newest approved version.
-4. The agent checks the signature of the checksums against the release key compiled into
-   it (an agent built without one refuses every self update and reports why),
-   downloads the package for its distribution and architecture over mTLS, verifies the
-   checksum, keeps a copy of the running binary and installs the package with apt or dnf in
-   a separate systemd unit.
+3. Rollout: with **Update agents automatically**, devices tagged with the **Pilot tag** get
+   an approved version at their next check in, all others after the delay (default 7
+   days). **Update agent…** on a device page installs the newest approved version, or any
+   fetched version that is not blocked and newer than the running one, on that device
+   only, regardless of policy and delay. Picking a version counts as its approval for this
+   device. Agents never downgrade: an older pick is dropped. **Outdated agents** on the
+   Agents page updates single devices to the newest approved version.
+4. The agent checks the Ed25519 signature of the checksums against the release key
+   compiled into it (an agent built without one refuses every self update and reports
+   why), downloads the package for its distribution and architecture over mTLS, verifies
+   the checksum, keeps a copy of the running binary in `/var/lib/limdm/rollback` and
+   installs the package in a separate transient systemd unit (a detached process on
+   OpenRC) with apt, dnf, zypper, pacman or apk.
 5. The new agent confirms the update at its first start. If it does not within 15 minutes,
    the watchdog (`/usr/lib/limdm/limdm-watchdog.sh`, plain shell) restores the previous
    binary and restarts the agent, which reports the rollback.
@@ -203,123 +394,32 @@ The device page shows the update state (`offered`, `ok`, `failed`, `rolled_back`
 outcome is in the audit log as `agent.update`. After three failed or rolled back devices a
 version is blocked automatically. Admins can block and approve versions at any time; only
 newer versions are offered, so blocking stops a rollout but does not downgrade devices.
+How releases are signed is in [operations.md](operations.md#releases-and-agent-updates).
 
 Hosting the packages in your own repository and updating with the package manager works as
 well.
-
-## Command line for users
-
-`limdm` does on a terminal what the LiMDM app does in its window. It runs as the signed in
-user, talks only to the agent socket and needs no root; over SSH it is refused unless the
-user also has an active local session (root is always allowed).
-
-| Command | |
-|---|---|
-| `limdm info` | everything about this device and the agent: manager, system, hardware, server, check in, declarations, updates, locks, compliance, recovery keys, company account |
-| `limdm checks` | every compliance check with its result |
-| `limdm profiles`, `limdm certificates` | declarations in force (secrets masked), CA certificates IT installed |
-| `limdm log [-n 50]` | agent log |
-| `limdm sync` | check in now |
-| `limdm software list` | catalog apps with mode and state |
-| `limdm software install APP`, `remove APP` | install or remove an app the catalog offers (ID or name) |
-| `limdm software request APP [--note TEXT]` | ask IT for an app in request mode |
-| `limdm software search QUERY` | search Flathub for apps outside the catalog |
-| `limdm software request-new FLATPAK_ID [--remote R] [--name N] [--note TEXT]`, `requests` | ask for an app outside the catalog, list own requests |
-| `limdm sso [status\|confirm]` | company account sign in state, confirm with a code |
-| `limdm recovery-key` | escrow the LUKS recovery key with the disk passphrase |
-| `limdm support end` | end the remote support session IT opened ([remote-shell.md](remote-shell.md)) |
-
-`--json` prints `info`, `checks`, `profiles`, `certificates`, `log` and `software list` as JSON.
-The agent decides as for the app: only catalog apps install, and only in the modes the
-catalog allows.
-
-## Useful commands on a device
-
-| Command | |
-|---|---|
-| `limdm-agent check --level 2` | local compliance report, changes nothing |
-| `limdm-agent version` | installed version |
-| `sudo limdm-agent recovery-key` | create and escrow LUKS recovery keys from a terminal |
-| `systemctl kill --kill-who=main -s USR1 limdm-agent` | check in now |
-| `journalctl -u limdm-agent` | agent log |
 
 ## Files
 
 | Path | Content |
 |---|---|
-| `/etc/limdm/agent.json`, `/etc/limdm/device.pem` | server URL, CA, device key and certificate (0600) |
-| `/var/lib/limdm/state.json` | stored declarations, pending results, last server contact (0600) |
+| `/etc/limdm/agent.json` | server URL, device ID, `allow_scripts`, `allow_remote_shell`, `no_fallback_dns` |
+| `/etc/limdm/device.pem` | device key and client certificate in one file (0600) |
+| `/etc/limdm/ca.crt` | pinned device CA, the only trust anchor of the agent channel |
+| `/etc/limdm/enroll.conf` | enrollment settings, deleted after enrollment |
+| `/etc/limdm/users.json`, `/etc/limdm/login.json` | desktop login ([desktop-login.md](desktop-login.md#files-on-the-device)) |
+| `/var/lib/limdm/state.json` | stored declarations, pending results and events, pinned command key, last server contact (0600) |
 | `/var/lib/limdm/repo-backup/` | originals of package sources switched off |
-| `/var/cache/limdm/logo.png` | company logo for the desktop helper |
-| `/run/limdm/agent.sock` | socket for the desktop helper |
-
-## Desktop helper
-
-**LiMDM** in the applications menu (or **Open LiMDM** in the tray) opens a window in the
-style of GNOME Settings (GTK 4, libadwaita 1.4): a sidebar with Overview (state, last check
-in, check in now), Compliance (every check with its result), Profiles (every declaration in
-force with its settings, secrets masked, like the profiles list on macOS), Certificates (CA
-certificates IT installed, with subject, issuer, validity and fingerprint), Disk Encryption
-(store a recovery key right there), Agent Log (every journal entry, optionally only warnings
-and errors) and About. It shows the company logo, or the LiMDM logo, and follows the system's
-light or dark style; the button next to the logo switches between system, dark and light. It runs as the user and talks only to the agent socket.
-Without GTK 4 and libadwaita 1.4 (Ubuntu 22.04) the tray falls back to simple dialogs.
-
-`limdm-desktop` shows a tray icon (the LiMDM logo with a status dot) with the device state: green (compliant), amber (checks
-failing), red (no contact to the server or locked). Its menu names who manages the device,
-shows the state and the last check in, opens the app (overview, software, compliance),
-starts a check in (at most every 30 seconds), shows the agent log and, at the bottom, the
-agent version; the tooltip carries the version too. The tray uses StatusNotifierItem: sway with waybar, KDE Plasma,
-Xfce, Cinnamon and Ubuntu show it; stock GNOME needs the AppIndicator extension. Without a
-tray host the reminders still work; `limdm-desktop --no-tray` runs only those.
-
-It also asks the user for what only they can provide, currently the disk passphrase
-to escrow a LUKS recovery key. Dialogs are libadwaita message dialogs from the LiMDM app
-(`limdm-desktop-ui --dialog`, the same look as GNOME's own); without GTK 4 and libadwaita
-1.4 it uses zenity (kdialog on KDE Plasma), which the agent installs on every device with a
-desktop and retries daily if that fails. Texts follow
-the session language and fall back to the system locale (English and German). Dialogs
-follow the GNOME HIG: a short heading, one sentence, buttons named after their action.
-
-The helper starts in every graphical session: through the systemd user unit
-`limdm-desktop.service` (enabled for all users, bound to `graphical-session.target`),
-through XDG autostart, and where neither applies (sway or Hyprland without systemd
-integration, i3) the agent starts it on its next cycle. A lock in `$XDG_RUNTIME_DIR` keeps
-one instance per user. Manually: `limdm-desktop --now` asks for a missing recovery key.
-
-Users see a notification when IT schedules a restart or shutdown (with the time), locks the
-device, or needs a recovery key. **Send message…** on a device page shows a notification and
-a dialog to everyone signed in on the desktop.
-
-## Device list, tags and bulk actions
-
-**Devices** lists every device with its tags. Select devices with the checkboxes (or all
-shown) and run an action on all of them, like in RMM tools:
-
-* **Run**: sync now, install all updates, update the agent to the newest version, reboot
-  now, lock, unlock.
-* **Software**: install or remove a catalog app (also per device under **Software**,
-  **Catalog**).
-* **Tags**: add or remove a tag.
-* **Script** (admins only): run a script with parameters and a timeout on every selected
-  device that allows scripts.
-
-Lost mode and wipe stay single device actions. Filter the list by tag, or follow a
-count from another page: every device count in the console (catalog installs, Flatpaks and
-remotes on devices, blueprints, agent versions, failing checks) opens the list filtered to
-those devices, ready for a bulk action. Tags are also blueprint conditions.
-
-Filters combine: a tag, a failing check, the search text and a status all apply at the same
-time, and each active filter shows as a chip you can remove on its own. The **Package** field
-finds devices by installed package from their inventory: `openssl` matches any version,
-`openssl < 3.0.13` compares versions (operators `<`, `<=`, `=`, `!=`, `>=`, `>`). Versions
-compare by their runs of digits, the epoch is ignored, so `3.0.2-0ubuntu1.15` is lower than
-`3.0.13` and `3.0.13-1~deb12u1` is higher; letters and the Debian `~` ordering are not
-evaluated. The list shows 200 devices per page. **Inventory CSV** exports the hardware
-inventory, **Packages CSV** one row per installed package and device.
-
-The action menu on a device page groups actions in submenus that open on hover or keyboard
-focus.
+| `/var/lib/limdm/network/` | EAP-TLS device key and certificate (0600) |
+| `/var/lib/limdm/printers.json` | printer queues LiMDM manages |
+| `/var/lib/limdm/updates/`, `/var/lib/limdm/rollback/`, `update-pending.json`, `update-result.json` | agent self update and rollback |
+| `/var/lib/limdm/tamper.log` | tamper events queued by the package scripts |
+| `/var/lib/limdm/uninstall-allowed` | uninstall release from the console, valid for one hour |
+| `/var/lib/limdm/sso-verified.json`, `/var/lib/limdm/auth-events.log` | desktop login state |
+| `/var/lib/limdm/device-lock-users.json`, `/var/lib/limdm/lock-after-lost` | accounts locked by a device lock or lost mode |
+| `/var/lib/limdm-support` | home of the remote shell support account `limdm-support` |
+| `/var/cache/limdm/logo.png`, `/var/cache/limdm/catalog/`, `/var/cache/limdm/search/` | company logo and app icons for the desktop helper |
+| `/run/limdm/agent.sock` | socket for the desktop helper and `limdm` |
 
 ## Lock and unlock
 
@@ -343,10 +443,16 @@ where neither shows after a few seconds does the agent start swaylock or i3lock 
 Sessions are found through logind, one by one (also several sessions of one user), and
 each gets the display and D-Bus environment of its own processes.
 
-Other commands:
+After unlocking, users unlock their screen with their usual password. Lost mode locks the
+passwords the same way and ends the sessions. The device page shows the latest lock,
+unlock, lost mode, wipe and uninstall release with who sent it and whether the device
+carried it out.
+
+## Other commands
 
 * **Install all updates**: apt (waits up to 15 minutes for a dpkg lock held by
-  unattended-upgrades or PackageKit) or dnf, then system wide Flatpaks.
+  unattended-upgrades or PackageKit), dnf, zypper, pacman or apk, then system wide
+  Flatpaks.
 * **Run script**: a shebang (`#!/bin/bash`, `#!/usr/bin/env python3`) picks the
   interpreter, otherwise `/bin/sh`; works on hardened systems with a noexec `/var`.
   **Parameters** (`NAME=value` per line) arrive as environment variables; names are
@@ -355,7 +461,8 @@ Other commands:
   (default 30). The device reports exit code, start and end, and the last 16 KiB of stdout
   and stderr; **Script results** on the **Commands** tab shows the newest 50 (200 are
   kept per device). Recurring scripts (`com.limdm.scripts`) report the same way instead of
-  an event.
+  an event. Scripts only run on devices enrolled with `allow_scripts`; with four eyes
+  approval on they wait for a second admin.
 * **Send message**: a notification and a dialog in every graphical session; the command
   fails when no dialog could be shown.
 * **Collect logs** (admins and helpdesk, **Commands** tab, **Diagnostics**): the agent
@@ -366,10 +473,8 @@ Other commands:
   newest 10 bundles per device; admins and the helpdesk download them as text, and every
   download is in the audit log as `device.diagnostics.download`.
 
-After unlocking, users unlock their screen with their usual password. Lost mode locks the
-passwords the same way and ends the sessions. The device page shows the latest lock,
-unlock, lost mode, wipe and uninstall release with who sent it and whether the device
-carried it out.
+The device list, bulk actions and every action of the device page are described in
+[console.md](console.md#devices).
 
 ## Command delivery
 
@@ -378,7 +483,7 @@ Besides the regular check in, the agent asks the server every minute whether som
 agent update that is due (a version picked for the device, an admin request, or an approved
 version the rollout policy releases for it). Agent updates can carry security fixes, so they
 do not wait for the next regular check in. A version being installed or one that already
-failed on the device does not trigger check ins. Restart and shutdown
+failed on the device does not trigger check ins. After failed polls the agent waits longer,
+up to 5 minutes, and returns to one minute with the first answer. Restart and shutdown
 delays count from when the command was sent in the console; a command that arrives late
 still gives users at least one minute of warning.
-

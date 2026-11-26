@@ -15,17 +15,22 @@ A session needs all of these:
 
    | Setting | Default | |
    |---|---|---|
-   | Allow remote shells | off | admins may start sessions |
+   | Allow remote shells (admins) | off | admins may start sessions |
    | The helpdesk role may start sessions | off | |
    | Sessions may run as root | off | otherwise `root` and every other account with UID 0 are refused |
-   | Maximum duration | 60 minutes | 5 to 480 |
-   | Idle timeout | 15 minutes | 1 to 120, no keyboard input from the console |
+   | Maximum duration (minutes) | 60 | 5 to 480 |
+   | Idle timeout (minutes) | 15 | 1 to 120 and not longer than the maximum; no keyboard input from the console |
+
+   The settings are global. With multi tenancy, tenant admins (and tenant helpdesk accounts
+   when allowed) start sessions on the devices of their tenant
+   ([tenants.md](tenants.md#tenant-accounts)).
 
 3. **Approval** (optional): with **Settings**, **Security**, **Four eyes approval** and
    **Also for remote shell sessions** on, the first start files a request under
-   **Approvals** ([security.md](security.md#four-eyes-approval)). Once another admin
-   approves it, the requester starts the session within one hour; the approval is used up
-   by that start.
+   **Approvals** ([security.md](security.md#four-eyes-approval)) and the shell page says
+   **The session waits for approval.** Once another admin approves it, the requester
+   starts the session within one hour; the approval is used up by that start. This applies
+   to helpdesk accounts as well.
 4. **Scope**: helpdesk and auditor accounts limited to device tags or groups can open the
    shell page, start sessions, connect and read transcripts only for devices in their
    scope. The admin API cannot start shells (`shell` is no API command type).
@@ -34,10 +39,11 @@ Auditors never start sessions.
 
 ## Starting a session
 
-Device page, **More actions**, **Agent**, **Remote shell…** (or the link on the Commands
-tab). Leave **Local user** empty for the support account `limdm-support` (a system account
-with a locked password and the home `/var/lib/limdm-support`, created on first use, not in
-any admin group) or name an existing local account. The page opens the terminal and waits
+Device page, **More actions**, **Agent**, **Remote shell…** (admins), or **Remote shell
+sessions** on the **Commands** tab. The page lists the sessions of the device and shows the
+limits from the settings; **Start session** starts one. Leave **Local user** empty for the
+support account `limdm-support` (a system account with a locked password and the home
+`/var/lib/limdm-support`, created on first use, not in any admin group) or name an existing local account. The page opens the terminal and waits
 for the device: it receives the command with its next poll, at most about a minute later,
 and the session gives up after three minutes.
 
