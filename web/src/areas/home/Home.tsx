@@ -3,16 +3,18 @@
 // and the live feed. Every number links to the list behind it.
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { ArrowRight, CheckCircle2, CircleAlert, DatabaseBackup, Monitor, ShieldAlert, TriangleAlert, WifiOff, type LucideIcon } from 'lucide-react'
+import { ArrowRight, CheckCircle2, CircleAlert, Circle, DatabaseBackup, Monitor, ShieldAlert, TriangleAlert, WifiOff, X, type LucideIcon } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { api, unwrap, type Schemas } from '../../api/client'
 import { useLiveActivity } from '../../api/live'
-import { useMe } from '../../api/me'
+import { useCan, useMe } from '../../api/me'
+import { actionLabel, risk } from '../inbox/risk'
 import { axisX, axisY, baseOption, Bullet, ChartFrame, EChart, FleetGrid, StackBar, type Colors } from '../../components/charts'
 import { KpiCard } from '../../components/kpi'
 import { EmptyState, ErrorState } from '../../components/states'
 import { Avatar, Badge, Card, Delta, PageHeader, Segmented, Skeleton } from '../../components/ui'
-import { useT } from '../../i18n'
+import { useT, type MessageKey } from '../../i18n'
+import { switchTenant } from '../../app/tenants'
 import { ago, bytes, dateLong, dateShort, dateTime, fmt, fmt1, pct } from '../../i18n/format'
 import { cx } from '../../lib/cx'
 
@@ -36,6 +38,11 @@ export function Home() {
     queryKey: ['approvals', 'pending'],
     queryFn: () => unwrap(api.GET('/api/v1/approvals', { params: { query: { status: 'pending', limit: 7 } } })).then((p) => p.items ?? []),
   })
+  const cmdDays = useQuery({
+    queryKey: ['stats', 'commands', 14],
+    queryFn: () => unwrap(api.GET('/api/v1/stats/commands', { params: { query: { days: 14 } } })).then((p) => p.items),
+  })
+  const canAudit = useCan('audit')
   const err = fleet.error ?? attention.error ?? comp.error
   if (err) return <ErrorState error={err} onRetry={() => void Promise.all([fleet.refetch(), attention.refetch(), comp.refetch()])} />
   if (!fleet.data || !attention.data || !comp.data) return <HomeSkeleton />
@@ -69,6 +76,7 @@ export function Home() {
           </Link>
         }
       />
+      <Onboarding />
       {f.total === 0 ? (
         <div className="card">
           <EmptyState icon={Monitor} title={t('home.noDevices')} action={<a className="btn btn-primary" href="/devices">{t('home.enroll')}</a>}>
@@ -82,8 +90,8 @@ export function Home() {
             <KpiCard to="/devices" label={t('home.kpi.online')} value={fmt(f.online)} unit={t('home.kpi.ofTotal', { total: f.total })} delta={<span className="text-[12px] text-muted">{t('home.kpi.offline', { count: f.total - f.online })}</span>} spark={hist.map((h) => h.compliant + h.noncompliant + h.in_grace)} tone="muted" />
             <KpiCard to="/devices" search={{ q: 'status:non-compliant' }} label={t('home.kpi.noncompliant')} value={fmt(a.noncompliant)} delta={week !== undefined ? <Delta value={a.noncompliant - hist[hist.length - 8].noncompliant} unit="" goodUp={false} label={t('home.d7')} /> : undefined} spark={hist.map((h) => h.noncompliant)} tone="bad" />
             <KpiCard to="/devices" search={{ q: 'status:stale' }} label={t('home.kpi.stale')} value={fmt(a.stale)} delta={<span className="text-[12px] text-muted">{t('home.kpi.staleHint', { hours: me.stale_hours })}</span>} spark={hist.map((h) => h.stale)} tone="muted" />
-            <KpiCard to="/inbox" label={t('home.kpi.approvals')} value={fmt(a.approvals_pending)} delta={<span className={cx('text-[12px]', a.exceptions_expiring_7d ? 'font-medium text-warn' : 'text-muted')}>{t('home.kpi.exceptions', { count: a.exceptions_expiring_7d })}</span>} />
-            <KpiCard to="/activity" search={{ q: 'kind:command status:failed' }} label={t('home.kpi.failed')} value={fmt(a.commands_failed_24h)} unit={t('home.kpi.h24')} delta={<span className="text-[12px] text-muted">{t('home.kpi.sent', { count: a.commands_sent_24h })}</span>} />
+            <KpiCard to="/inbox" search={{ group: 'approvals' }} label={t('home.kpi.approvals')} value={fmt(a.approvals_pending)} delta={<span className={cx('text-[12px]', a.exceptions_expiring_7d ? 'font-medium text-warn' : 'text-muted')}>{t('home.kpi.exceptions', { count: a.exceptions_expiring_7d })}</span>} />
+            <KpiCard to="/inbox" search={{ group: 'commands' }} label={t('home.kpi.failed')} value={fmt(a.commands_failed_24h)} unit={t('home.kpi.h24')} delta={<span className="text-[12px] text-muted">{t('home.kpi.sent', { count: a.commands_sent_24h })}</span>} spark={cmdDays.data?.map((d) => d.failed)} sparkLabel={t('home.kpi.failedSpark')} tone="bad" />
           </div>
 
           <div className="grid gap-[var(--gap)] xl:grid-cols-12">
@@ -95,6 +103,8 @@ export function Home() {
               <TopFailing items={c.top_failing} />
             </Card>
           </div>
+
+          {me.super && me.multi_tenant && !me.tenant && <Tenants />}
 
           <div className="grid gap-[var(--gap)] xl:grid-cols-12">
             <Card className="xl:col-span-8" title={t('home.trend')} sub={t('home.trendSub', { days: Number(days), target: TARGET })} id="h-trend" action={<Segmented label={t('home.range')} value={days} onChange={setDays} options={[{ value: '30', label: t('home.d30') }, { value: '90', label: t('home.d90') }]} />}>
@@ -115,9 +125,11 @@ export function Home() {
             <Card title={t('home.backup')} id="h-backup">
               <Backup b={a.last_backup} />
             </Card>
-            <Card title={t('home.live')} sub={t('home.liveSub')} id="h-live" bodyClass="!pt-2" action={<Link to="/activity" className="btn btn-ghost text-accent">{t('home.all')} <ArrowRight size={14} aria-hidden /></Link>}>
-              <LiveFeed />
-            </Card>
+            {canAudit && (
+              <Card title={t('home.live')} sub={t('home.liveSub')} id="h-live" bodyClass="!pt-2" action={<Link to="/activity" className="btn btn-ghost text-accent">{t('home.all')} <ArrowRight size={14} aria-hidden /></Link>}>
+                <LiveFeed />
+              </Card>
+            )}
           </div>
         </>
       )}
@@ -147,19 +159,20 @@ function Attention({ approvals, a }: { approvals: Schemas['Approval'][]; a: Sche
   const items: Item[] = approvals.map((x) => ({
     id: `a${x.id}`,
     icon: ShieldAlert,
-    risk: x.action === 'remote_shell' || x.action === 'recovery.view' ? 2 : 1,
-    title: `${x.action} · ${x.target}`,
+    risk: risk(x) >= 3 ? 2 : risk(x) === 2 ? 1 : 0,
+    title: `${actionLabel(x, t)} · ${x.target}`,
     meta: `${t('home.approval')} · ${x.requested_by} · ${x.created_at ? ago(x.created_at) : ''}`,
     at: x.created_at,
     to: '/inbox',
-    search: { item: String(x.id) },
+    search: { item: `a${x.id}` },
     approval: true,
   }))
   const b = a.last_backup
   if (b && b.status !== 'ok' && b.status !== 'running')
     items.push({ id: 'backup', icon: DatabaseBackup, risk: 2, title: t('home.warnBackup'), meta: `${t('home.warning')} · ${b.error || dateTime(b.started_at)}`, to: '/settings', search: { s: 'backup' } })
   if (a.noncompliant) items.push({ id: 'nc', icon: CircleAlert, risk: 1, title: t('home.warnNoncompliant', { count: a.noncompliant }), meta: t('home.warning'), to: '/devices', search: { q: 'status:non-compliant' } })
-  if (a.commands_failed_24h) items.push({ id: 'cmd', icon: TriangleAlert, risk: 1, title: t('home.warnFailed', { count: a.commands_failed_24h }), meta: `${t('home.warning')} · ${t('home.kpi.h24')}`, to: '/activity' })
+  if (a.commands_failed_24h) items.push({ id: 'cmd', icon: TriangleAlert, risk: 1, title: t('home.warnFailed', { count: a.commands_failed_24h }), meta: `${t('home.warning')} · ${t('home.kpi.h24')}`, to: '/inbox', search: { group: 'commands' } })
+  if (a.exceptions_expiring_7d) items.push({ id: 'exc', icon: CircleAlert, risk: 1, title: t('home.kpi.exceptions', { count: a.exceptions_expiring_7d }), meta: t('home.warning'), to: '/inbox', search: { item: 'w-exc' } })
   if (a.stale) items.push({ id: 'stale', icon: WifiOff, risk: 0, title: t('home.warnStale', { count: a.stale }), meta: t('home.warning'), to: '/devices', search: { q: 'status:stale' } })
   items.sort((x, y) => y.risk - x.risk || (y.at ?? '').localeCompare(x.at ?? ''))
   if (!items.length)
@@ -338,5 +351,117 @@ function LiveFeed() {
         </li>
       ))}
     </ul>
+  )
+}
+
+// The first steps of a new installation (admins, global view) until all are
+// done; hiding them is remembered in this browser.
+const ONBOARDING_KEY = 'limdm.home.onboarding'
+const onboardingLinks: Record<string, { to: string; search?: Record<string, string> }> = {
+  branding: { to: '/settings' },
+  sso: { to: '/settings' },
+  token: { to: '/devices' },
+  blueprint: { to: '/config' },
+  device: { to: '/devices' },
+}
+
+function Onboarding() {
+  const t = useT()
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return localStorage.getItem(ONBOARDING_KEY) === 'hidden'
+    } catch {
+      return false
+    }
+  })
+  const steps = useQuery({ queryKey: ['stats', 'onboarding'], enabled: !hidden, queryFn: () => unwrap(api.GET('/api/v1/onboarding')).then((p) => p.items) })
+  if (hidden || !steps.data?.length) return null
+  const hide = () => {
+    try {
+      localStorage.setItem(ONBOARDING_KEY, 'hidden')
+    } catch {
+      // private mode: hidden for this page only
+    }
+    setHidden(true)
+  }
+  return (
+    <Card
+      title={t('home.onboarding')}
+      sub={t('home.onboardingSub')}
+      id="h-onb"
+      action={
+        <button type="button" className="btn btn-ghost" onClick={hide}>
+          <X size={14} aria-hidden /> {t('home.onboardingHide')}
+        </button>
+      }
+    >
+      <ol className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+        {steps.data.map((s) => (
+          <li key={s.id}>
+            <Link to={onboardingLinks[s.id].to} className={cx('flex h-full items-start gap-2 rounded-lg border border-line p-3 hover:border-line-strong', s.done && 'opacity-70')}>
+              {s.done ? <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-ok" aria-hidden /> : <Circle size={18} className="mt-0.5 shrink-0 text-muted" aria-hidden />}
+              <span>
+                <span className="block font-medium">
+                  {t(`home.step.${s.id}` as MessageKey)}
+                  {s.done && <span className="sr-only"> ({t('home.stepDone')})</span>}
+                </span>
+                <span className="block text-[12.5px] text-muted">{t(`home.stepHint.${s.id}` as MessageKey)}</span>
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ol>
+    </Card>
+  )
+}
+
+// The tenants side by side (super admins in the all tenants view): score
+// against the target, non compliant, silent, pending approvals. A click
+// switches the view to the tenant.
+function Tenants() {
+  const t = useT()
+  const q = useQuery({ queryKey: ['stats', 'tenants'], queryFn: () => unwrap(api.GET('/api/v1/stats/tenants')).then((p) => p.items) })
+  if (q.error) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
+  if (!q.data) return <Skeleton className="h-[160px]" />
+  return (
+    <Card title={t('home.tenants')} sub={t('home.tenantsSub', { target: TARGET })} id="h-tenants">
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-[13px]">
+          <thead>
+            <tr className="border-b border-line text-muted">
+              <th scope="col" className="py-2 pr-4 font-medium">{t('home.tenant')}</th>
+              <th scope="col" className="w-[30%] py-2 pr-4 font-medium">{t('home.score')}</th>
+              <th scope="col" className="num py-2 pr-4 text-right font-medium">{t('home.kpi.noncompliant')}</th>
+              <th scope="col" className="num py-2 pr-4 text-right font-medium">{t('home.kpi.stale')}</th>
+              <th scope="col" className="num py-2 pr-4 text-right font-medium">{t('home.kpi.approvals')}</th>
+              <th scope="col" className="num py-2 text-right font-medium">{t('home.devices')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {q.data.map((x) => (
+              <tr key={x.id} className="border-b border-line last:border-0">
+                <th scope="row" className="py-2 pr-4 font-medium">
+                  <button type="button" className="text-left text-accent hover:underline" onClick={() => void switchTenant(x.id)}>
+                    {x.name}
+                  </button>
+                </th>
+                <td className="py-2 pr-4">
+                  <div className="flex items-center gap-2">
+                    <span className="num w-14 shrink-0">{pct(x.score)}</span>
+                    <span className="min-w-[80px] flex-1">
+                      <Bullet value={x.score} target={TARGET} label={t('home.frameworkBullet', { name: x.name, value: pct(x.score), target: TARGET })} />
+                    </span>
+                  </div>
+                </td>
+                <td className={cx('num py-2 pr-4 text-right', x.noncompliant > 0 && 'font-semibold text-bad')}>{fmt(x.noncompliant)}</td>
+                <td className="num py-2 pr-4 text-right">{fmt(x.stale)}</td>
+                <td className={cx('num py-2 pr-4 text-right', x.approvals_pending > 0 && 'font-semibold text-warn')}>{fmt(x.approvals_pending)}</td>
+                <td className="num py-2 text-right">{fmt(x.devices)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   )
 }
