@@ -33,8 +33,20 @@ type check struct {
 	Fix       func(a *Agent) error
 }
 
-// Framework references. BSI: IT-Grundschutz-Kompendium modules; CIS: recommendation
-// titles shared by the Ubuntu, Debian and RHEL family benchmarks; ISO: 27001:2022 Annex A.
+// CatalogVersion identifies the check catalog and its framework mapping. It
+// is reported with every result; raise it whenever a check, its level or a
+// reference changes, so evidence can be tied to the mapping it was made with.
+const CatalogVersion = "2026.11.1"
+
+// cisBenchmark is the benchmark edition the CIS recommendation numbers refer
+// to. The titles are shared by the Debian and RHEL family benchmarks, whose
+// numbers differ.
+const cisBenchmark = "CIS Ubuntu Linux 24.04 LTS Benchmark v1.0.0"
+
+// Framework references. BSI: IT-Grundschutz-Kompendium Edition 2023, the
+// module and, where one fits, the requirement; CIS: recommendation number and
+// title of cisBenchmark (number omitted where the benchmark has none for the
+// exact setting); ISO: 27001:2022 Annex A.
 const (
 	bsiClient  = "SYS.2.1"
 	bsiLinux   = "SYS.2.3"
@@ -46,8 +58,26 @@ const (
 	bsiLinuxSv = "SYS.1.3"
 )
 
-func refs(bsi, iso []string, cis ...string) api.Refs { return api.Refs{BSI: bsi, ISO: iso, CIS: cis} }
-func l(s ...string) []string                         { return s }
+// BSI requirements (Edition 2023) the checks give evidence for.
+const (
+	bsiUpdatesAuto = "SYS.2.1.A3"    // Aktivieren von Autoupdate-Mechanismen
+	bsiAdminAuth   = "SYS.2.3.A1"    // Authentisierung von Administratoren
+	bsiUpdates     = "SYS.2.3.A4"    // Einspielen von Updates und Patches
+	bsiMAC         = "SYS.2.3.A8"    // Einsatz von Sicherheitserweiterungen
+	bsiPasswords   = "SYS.2.3.A9"    // Sichere Verwendung von Passwörtern
+	bsiPatchRegul  = "OPS.1.1.3.A15" // Regelmäßige Aktualisierung von IT-Systemen und Software
+	bsiLogConfig   = "OPS.1.1.5.A3"  // Konfiguration der Protokollierung auf System- und Netzebene
+	bsiCryptoAlgo  = "CON.1.A1"      // Auswahl geeigneter kryptografischer Verfahren
+)
+
+func refs(bsi, iso []string, cis ...string) api.Refs {
+	r := api.Refs{BSI: bsi, ISO: iso, CIS: cis}
+	if len(cis) > 0 {
+		r.CISBenchmark = cisBenchmark
+	}
+	return r
+}
+func l(s ...string) []string { return s }
 
 var catalog = []check{
 	{ID: "agent.osquery", Title: "osquery inventory source installed", Level: 1,
@@ -62,10 +92,10 @@ var catalog = []check{
 			return fail, "osquery missing, inventory incomplete (installed by the agent, retried hourly)"
 		}},
 	{ID: "os.supported", Title: "Operating system version is supported", Level: 1,
-		Refs: refs(l(bsiClient, bsiPatch), l("A.8.8"), "Ensure updates, patches, and additional security software are installed"),
+		Refs: refs(l(bsiClient, bsiPatch, bsiUpdates), l("A.8.8"), "1.2.2.1 Ensure updates, patches, and additional security software are installed"),
 		Run:  runOSSupported},
 	{ID: "updates.auto", Title: "Automatic updates are declared", Level: 1,
-		Refs: refs(l(bsiClient, bsiPatch), l("A.8.8", "A.8.32")),
+		Refs: refs(l(bsiClient, bsiPatch, bsiUpdatesAuto, bsiPatchRegul), l("A.8.8", "A.8.32")),
 		Run: func(a *Agent) (string, string) {
 			if m := a.pol.Updates.Mode; m == "" || m == "off" {
 				return fail, "updates mode is off or not declared"
@@ -73,28 +103,28 @@ var catalog = []check{
 			return pass, "mode " + a.pol.Updates.Mode + ", window " + a.pol.Updates.Window
 		}},
 	{ID: "updates.security", Title: "Security updates are installed", Level: 1,
-		Refs: refs(l(bsiClient, bsiLinux, bsiPatch), l("A.8.8"), "Ensure updates, patches, and additional security software are installed"),
+		Refs: refs(l(bsiClient, bsiLinux, bsiPatch, bsiUpdates, bsiPatchRegul), l("A.8.8"), "1.2.2.1 Ensure updates, patches, and additional security software are installed"),
 		Run:  runSecurityUpdates},
 	{ID: "updates.reboot", Title: "No pending reboot older than 7 days", Level: 1,
-		Refs: refs(l(bsiPatch), l("A.8.8")),
+		Refs: refs(l(bsiPatch, bsiPatchRegul), l("A.8.8")),
 		Run:  runRebootPending},
 	{ID: "disk.encryption", Title: "System disk is encrypted", Level: 1,
 		Refs: refs(l(bsiClient, bsiCrypto), l("A.8.1", "A.8.24", "A.7.10")),
 		Run:  runDiskEncryption},
 	{ID: "firewall.active", Title: "Host firewall is active", Level: 1,
-		Refs: refs(l(bsiClient, bsiLinux), l("A.8.20"), "Ensure a single firewall configuration utility is in use", "Ensure ufw/firewalld service is enabled"),
+		Refs: refs(l(bsiClient, bsiLinux), l("A.8.20"), "4.1.1 Ensure a single firewall configuration utility is in use", "4.2.3 Ensure ufw service is enabled"),
 		Run:  runFirewall, Fix: fixFirewall},
 	{ID: "mac.enabled", Title: "Mandatory access control is enabled (AppArmor/SELinux)", Level: 1,
-		Refs: refs(l(bsiLinux, bsiLinuxSv), l("A.8.7", "A.8.9"), "Ensure AppArmor/SELinux is installed and enabled"),
+		Refs: refs(l(bsiLinux, bsiLinuxSv, bsiMAC), l("A.8.7", "A.8.9"), "1.3.1.1 Ensure AppArmor is installed", "1.3.1.2 Ensure AppArmor is enabled in the bootloader configuration"),
 		Run:  runMACEnabled},
 	{ID: "mac.enforcing", Title: "Mandatory access control is enforcing", Level: 2,
-		Refs: refs(l(bsiLinux, bsiLinuxSv), l("A.8.7", "A.8.9"), "Ensure all AppArmor profiles are enforcing", "Ensure the SELinux mode is enforcing"),
+		Refs: refs(l(bsiLinux, bsiLinuxSv, bsiMAC), l("A.8.7", "A.8.9"), "1.3.1.4 Ensure all AppArmor profiles are enforcing"),
 		Run:  runMACEnforcing},
 	{ID: "disk.recovery", Title: "Disk encryption recovery keys are escrowed", Level: 1,
 		Refs: refs(l(bsiCrypto), l("A.8.24", "A.8.13")),
 		Run:  runRecoveryEscrow},
 	{ID: "boot.password", Title: "Boot loader is password protected", Level: 1,
-		Refs: refs(l(bsiClient, bsiLinux), l("A.8.2", "A.8.9"), "Ensure bootloader password is set", "Ensure permissions on bootloader config are configured"),
+		Refs: refs(l(bsiClient, bsiLinux), l("A.8.2", "A.8.9"), "1.4.1 Ensure bootloader password is set", "1.4.2 Ensure access to bootloader config is configured"),
 		Run:  runBootPassword},
 	{ID: "boot.secureboot", Title: "Secure Boot is enabled", Level: 2,
 		Refs: refs(l(bsiClient), l("A.8.1", "A.8.9")),
@@ -102,19 +132,19 @@ var catalog = []check{
 
 	{ID: "kernel.aslr", Title: "Full ASLR is enabled", Level: 1, Group: "sysctl",
 		KV:   map[string]string{"kernel.randomize_va_space": "2"},
-		Refs: refs(l(bsiLinux), l("A.8.9"), "Ensure address space layout randomization is enabled")},
+		Refs: refs(l(bsiLinux), l("A.8.9"), "1.5.1 Ensure address space layout randomization is enabled")},
 	{ID: "kernel.ptrace", Title: "ptrace is restricted", Level: 1, Group: "sysctl",
 		KV:   map[string]string{"kernel.yama.ptrace_scope": "1"},
-		Refs: refs(l(bsiLinux), l("A.8.9"), "Ensure ptrace_scope is restricted")},
+		Refs: refs(l(bsiLinux), l("A.8.9"), "1.5.2 Ensure ptrace_scope is restricted")},
 	{ID: "kernel.coredumps", Title: "Core dumps are restricted", Level: 1, Group: "sysctl",
 		KV:   map[string]string{"fs.suid_dumpable": "0"},
-		Refs: refs(l(bsiLinux), l("A.8.9", "A.8.12"), "Ensure core dumps are restricted")},
+		Refs: refs(l(bsiLinux), l("A.8.9", "A.8.12"), "1.5.3 Ensure core dumps are restricted")},
 	{ID: "kernel.dmesg", Title: "Kernel log and pointers are restricted", Level: 2, Group: "sysctl",
 		KV:   map[string]string{"kernel.dmesg_restrict": "1", "kernel.kptr_restrict": "2"},
 		Refs: refs(l(bsiLinux), l("A.8.9"))},
 	{ID: "net.forwarding", Title: "IP forwarding is disabled", Level: 1, Group: "sysctl",
 		KV:   map[string]string{"net.ipv4.ip_forward": "0", "net.ipv6.conf.all.forwarding": "0"},
-		Refs: refs(l(bsiLinux), l("A.8.20"), "Ensure ip forwarding is disabled")},
+		Refs: refs(l(bsiLinux), l("A.8.20"), "3.3.1 Ensure ip forwarding is disabled")},
 	{ID: "net.redirects", Title: "ICMP redirects and source routing are disabled", Level: 1, Group: "sysctl",
 		KV: map[string]string{
 			"net.ipv4.conf.all.accept_redirects": "0", "net.ipv4.conf.default.accept_redirects": "0",
@@ -124,27 +154,27 @@ var catalog = []check{
 			"net.ipv4.conf.all.accept_source_route": "0", "net.ipv4.conf.default.accept_source_route": "0",
 			"net.ipv6.conf.all.accept_source_route": "0", "net.ipv6.conf.default.accept_source_route": "0",
 		},
-		Refs: refs(l(bsiLinux), l("A.8.20"), "Ensure ICMP redirects are not accepted", "Ensure packet redirect sending is disabled", "Ensure source routed packets are not accepted")},
+		Refs: refs(l(bsiLinux), l("A.8.20"), "3.3.5 Ensure ICMP redirects are not accepted", "3.3.2 Ensure packet redirect sending is disabled", "3.3.8 Ensure source routed packets are not accepted")},
 	{ID: "net.tcp", Title: "TCP SYN cookies, martian logging, broadcast ICMP ignored", Level: 1, Group: "sysctl",
 		KV: map[string]string{
 			"net.ipv4.tcp_syncookies": "1", "net.ipv4.icmp_echo_ignore_broadcasts": "1",
 			"net.ipv4.icmp_ignore_bogus_error_responses": "1",
 			"net.ipv4.conf.all.log_martians":             "1", "net.ipv4.conf.default.log_martians": "1",
 		},
-		Refs: refs(l(bsiLinux), l("A.8.20"), "Ensure tcp syn cookies is enabled", "Ensure suspicious packets are logged", "Ensure broadcast ICMP requests are ignored")},
+		Refs: refs(l(bsiLinux), l("A.8.20"), "3.3.10 Ensure tcp syn cookies is enabled", "3.3.9 Ensure suspicious packets are logged", "3.3.4 Ensure broadcast ICMP requests are ignored")},
 
 	{ID: "modules.filesystems", Title: "Unused filesystems are disabled", Level: 1, Group: "modprobe",
 		KV:   map[string]string{"cramfs": "", "freevxfs": "", "hfs": "", "hfsplus": "", "jffs2": ""},
-		Refs: refs(l(bsiLinux), l("A.8.9"), "Ensure cramfs, freevxfs, hfs, hfsplus, jffs2 kernel modules are not available")},
+		Refs: refs(l(bsiLinux), l("A.8.9"), "1.1.1.1-1.1.1.5 Ensure cramfs, freevxfs, hfs, hfsplus, jffs2 kernel modules are not available")},
 	{ID: "modules.udf", Title: "UDF is disabled", Level: 2, Group: "modprobe",
 		KV:   map[string]string{"udf": ""},
-		Refs: refs(l(bsiLinux), l("A.8.9"), "Ensure udf kernel module is not available")},
+		Refs: refs(l(bsiLinux), l("A.8.9"), "1.1.1.8 Ensure udf kernel module is not available")},
 	{ID: "modules.usbstorage", Title: "USB mass storage is blocked", Level: 2, Group: "modprobe",
 		KV:   map[string]string{"usb-storage": "", "uas": ""},
-		Refs: refs(l(bsiClient, bsiLinux), l("A.7.10", "A.8.12"), "Ensure usb-storage kernel module is not available")},
+		Refs: refs(l(bsiClient, bsiLinux), l("A.7.10", "A.8.12"), "1.1.1.9 Ensure usb-storage kernel module is not available")},
 	{ID: "modules.netproto", Title: "Unused network protocols are disabled", Level: 2, Group: "modprobe",
 		KV:   map[string]string{"dccp": "", "sctp": "", "rds": "", "tipc": ""},
-		Refs: refs(l(bsiLinux), l("A.8.20"), "Ensure dccp, sctp, rds, tipc kernel modules are not available")},
+		Refs: refs(l(bsiLinux), l("A.8.20"), "3.2.1-3.2.4 Ensure dccp, sctp, rds, tipc kernel modules are not available")},
 
 	{ID: "ssh.baseline", Title: "SSH server is hardened", Level: 1, Group: "sshd",
 		KV: map[string]string{
@@ -152,47 +182,47 @@ var catalog = []check{
 			"hostbasedauthentication": "no", "ignorerhosts": "yes", "permituserenvironment": "no", "x11forwarding": "no",
 			"clientaliveinterval": "<=300", "clientalivecountmax": "<=3",
 		},
-		Refs: refs(l(bsiLinux, bsiLinuxSv), l("A.8.5", "A.8.20"), "Ensure sshd PermitRootLogin is disabled", "Ensure sshd PermitEmptyPasswords is disabled",
-			"Ensure sshd MaxAuthTries is configured", "Ensure sshd LoginGraceTime is configured", "Ensure sshd HostbasedAuthentication is disabled",
-			"Ensure sshd IgnoreRhosts is enabled", "Ensure sshd PermitUserEnvironment is disabled", "Ensure sshd ClientAliveInterval and ClientAliveCountMax are configured")},
+		Refs: refs(l(bsiLinux, bsiLinuxSv), l("A.8.5", "A.8.20"), "5.1.20 Ensure sshd PermitRootLogin is disabled", "5.1.19 Ensure sshd PermitEmptyPasswords is disabled",
+			"5.1.16 Ensure sshd MaxAuthTries is configured", "5.1.13 Ensure sshd LoginGraceTime is configured", "5.1.10 Ensure sshd HostbasedAuthentication is disabled",
+			"5.1.11 Ensure sshd IgnoreRhosts is enabled", "5.1.21 Ensure sshd PermitUserEnvironment is disabled", "5.1.7 Ensure sshd ClientAliveInterval and ClientAliveCountMax are configured")},
 	{ID: "ssh.crypto", Title: "SSH offers no weak algorithms or host keys", Level: 1,
-		Refs: refs(l(bsiLinux, bsiLinuxSv, bsiCrypto), l("A.8.24"), "Ensure sshd Ciphers are configured", "Ensure sshd MACs are configured", "Ensure sshd KexAlgorithms is configured"),
+		Refs: refs(l(bsiLinux, bsiLinuxSv, bsiCrypto, bsiCryptoAlgo), l("A.8.24"), "5.1.6 Ensure sshd Ciphers are configured", "5.1.15 Ensure sshd MACs are configured", "5.1.12 Ensure sshd KexAlgorithms is configured"),
 		Run:  runSSHCrypto, Fix: fixSSHCrypto},
 	{ID: "ssh.strict", Title: "SSH allows keys only and no forwarding", Level: 2, Group: "sshd",
 		KV:   map[string]string{"passwordauthentication": "no", "kbdinteractiveauthentication": "no", "allowtcpforwarding": "no"},
-		Refs: refs(l(bsiLinux, bsiLinuxSv), l("A.8.5"), "Ensure sshd DisableForwarding is enabled")},
+		Refs: refs(l(bsiLinux, bsiLinuxSv), l("A.8.5"), "5.1.8 Ensure sshd DisableForwarding is enabled")},
 
 	{ID: "accounts.empty_passwords", Title: "No accounts with empty passwords", Level: 1,
-		Refs: refs(l(bsiIAM, bsiLinux), l("A.5.17", "A.8.5"), "Ensure /etc/shadow password fields are not empty"),
+		Refs: refs(l(bsiIAM, bsiLinux, bsiPasswords), l("A.5.17", "A.8.5"), "7.2.2 Ensure /etc/shadow password fields are not empty"),
 		Run:  runEmptyPasswords, Fix: fixEmptyPasswords},
 	{ID: "accounts.uid0", Title: "Only root has UID 0", Level: 1,
-		Refs: refs(l(bsiIAM, bsiLinux), l("A.8.2"), "Ensure root is the only UID 0 account"),
+		Refs: refs(l(bsiIAM, bsiLinux), l("A.8.2"), "5.4.2.1 Ensure root is the only UID 0 account"),
 		Run:  runUID0},
 	{ID: "accounts.admins", Title: "Admin rights only for centrally approved users", Level: 1,
-		Refs: refs(l(bsiIAM, bsiClient), l("A.5.15", "A.5.18", "A.8.2")),
+		Refs: refs(l(bsiIAM, bsiClient, bsiAdminAuth), l("A.5.15", "A.5.18", "A.8.2")),
 		Run:  runAdmins},
 	{ID: "accounts.pwquality", Title: "Password quality (minimum length 14)", Level: 1,
-		Refs: refs(l(bsiIAM), l("A.5.17"), "Ensure password length is configured", "Ensure password complexity is configured"),
+		Refs: refs(l(bsiIAM, bsiPasswords), l("A.5.17"), "5.3.3.2.2 Ensure minimum password length is configured", "5.3.3.2.3 Ensure password complexity is configured"),
 		Run:  runPWQuality, Fix: fixPWQuality},
 	{ID: "auth.sso", Title: "Desktop login through the central identity provider", Level: 1,
 		Refs: refs(l(bsiIAM), l("A.5.16", "A.8.5")),
 		Run:  runSSO, Fix: func(a *Agent) error { return a.installPAM() }},
 
 	{ID: "time.sync", Title: "Time synchronisation is active", Level: 1,
-		Refs: refs(l(bsiNTP, bsiLog), l("A.8.17"), "Ensure a single time synchronization daemon is in use"),
+		Refs: refs(l(bsiNTP, bsiLog), l("A.8.17"), "2.3.1.1 Ensure a single time synchronization daemon is in use"),
 		Run:  runTimeSync, Fix: fixTimeSync},
 	{ID: "logging.journald", Title: "System log is persistent", Level: 1,
-		Refs: refs(l(bsiLog, bsiLinux), l("A.8.15"), "Ensure journald is configured to write logfiles to persistent disk"),
+		Refs: refs(l(bsiLog, bsiLinux, bsiLogConfig), l("A.8.15"), "Ensure journald is configured to write logfiles to persistent disk"),
 		Run:  runJournald, Fix: fixJournald},
 	{ID: "logging.sudo", Title: "sudo logs and uses a PTY", Level: 1,
-		Refs: refs(l(bsiLog, bsiIAM), l("A.8.2", "A.8.15"), "Ensure sudo commands use pty", "Ensure sudo log file exists"),
+		Refs: refs(l(bsiLog, bsiIAM, bsiLogConfig), l("A.8.2", "A.8.15"), "5.2.2 Ensure sudo commands use pty", "5.2.3 Ensure sudo log file exists"),
 		Run:  runSudoLog, Fix: fixSudoLog},
 	{ID: "logging.auditd", Title: "auditd is active with LiMDM rules", Level: 2,
-		Refs: refs(l(bsiLog, bsiLinux), l("A.8.15", "A.8.16"), "Ensure auditd service is enabled and active", "Ensure changes to system administration scope (sudoers) is collected",
-			"Ensure events that modify user/group information are collected", "Ensure events that modify date and time information are collected", "Ensure kernel module loading unloading and modification is collected"),
+		Refs: refs(l(bsiLog, bsiLinux, bsiLogConfig), l("A.8.15", "A.8.16"), "6.2.1.2 Ensure auditd service is enabled and active", "6.2.3.1 Ensure changes to system administration scope (sudoers) is collected",
+			"6.2.3.8 Ensure events that modify user/group information are collected", "6.2.3.4 Ensure events that modify date and time information are collected", "6.2.3.19 Ensure kernel module loading unloading and modification is collected"),
 		Run: runAuditd, Fix: fixAuditd},
 	{ID: "desktop.screenlock", Title: "Screen lock on idle is enforced", Level: 1,
-		Refs: refs(l(bsiClient), l("A.8.1", "A.7.7"), "Ensure GDM screen locks when the user is idle", "Ensure GDM screen locks cannot be overridden"),
+		Refs: refs(l(bsiClient), l("A.8.1", "A.7.7"), "1.7.4 Ensure GDM screen locks when the user is idle", "1.7.5 Ensure GDM screen locks cannot be overridden"),
 		Run:  runScreenLock, Fix: fixScreenLock},
 }
 

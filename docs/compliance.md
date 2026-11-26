@@ -1,8 +1,9 @@
 # Compliance
 
 The agent runs the checks of the declared level, remediates where that is safe and reports
-the result at every check in. Every check references BSI IT-Grundschutz, the CIS
-Benchmarks and ISO/IEC 27001:2022 Annex A. The **Compliance** page shows pass and fail per
+the result at every check in. Every check references BSI IT-Grundschutz and ISO/IEC
+27001:2022 Annex A; most also reference a CIS Benchmark recommendation (see
+[Framework mapping](#framework-mapping)). The **Compliance** page shows pass and fail per
 check, filters by state, level and framework, and coverage per framework.
 
 ISO 27001 and BSI IT-Grundschutz certify an organisation's ISMS, not a tool. LiMDM provides
@@ -41,6 +42,29 @@ training stay with the ISMS.
 | `desktop.screenlock` screen lock on idle | 1 | yes |
 
 `limdm-agent check --level 2` prints the same report locally without changing anything.
+
+## Framework mapping
+
+The catalog has a version (`CatalogVersion` in `internal/agent/checks.go`, currently
+`2026.11.1`). The agent reports it with every result; the evidence export carries it per
+row, so a result can always be tied to the mapping it was made with. The version is raised
+whenever a check, its level or a reference changes.
+
+* **CIS:** recommendation number and title of the *CIS Ubuntu Linux 24.04 LTS Benchmark
+  v1.0.0* (field `cis_benchmark` of each result). The titles are shared by the Debian and
+  RHEL family benchmarks, whose numbers differ. No CIS reference exists for
+  `agent.osquery`, `updates.auto`, `updates.reboot`, `disk.encryption`, `disk.recovery`,
+  `boot.secureboot`, `kernel.dmesg`, `accounts.admins` and `auth.sso`; `logging.journald`
+  names the recommendation by title only.
+* **BSI:** IT-Grundschutz-Kompendium Edition 2023. Every check names the module (for
+  example `SYS.2.3`); where a single requirement fits it is named as well (`SYS.2.3.A4`
+  updates, `SYS.2.3.A8` AppArmor/SELinux, `SYS.2.3.A9` passwords, `SYS.2.3.A1`
+  administrators, `SYS.2.1.A3` automatic updates, `OPS.1.1.3.A15` regular updates,
+  `OPS.1.1.5.A3` logging, `CON.1.A1` SSH algorithms).
+* **ISO:** ISO/IEC 27001:2022 Annex A controls.
+
+The mapping is a technical proposal. It has not been reviewed by a certification body;
+the information security officer confirms it for the own scope.
 
 ## Policy: `com.limdm.compliance`
 
