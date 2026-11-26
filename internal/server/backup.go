@@ -700,8 +700,11 @@ func (s *Server) pruneBackups(ctx context.Context, actor string) error {
 		if len(deleted) > 0 {
 			slices.Sort(deleted)
 			if err := s.auditAction(ctx, actor, "backup.prune", t.Name, "deleted "+strings.Join(deleted, ", "), func(tx pgx.Tx) error {
-				_, err := tx.Exec(ctx, `UPDATE backups SET deleted_at=now() WHERE name = ANY($1) AND deleted_at IS NULL
-					AND NOT EXISTS (SELECT 1 FROM unnest(targets) t WHERE t <> $2)`, deleted, t.Name)
+				// targets lists where the archive still is; it is deleted
+				// once the last copy is gone
+				_, err := tx.Exec(ctx, `UPDATE backups SET targets=array_remove(targets, $2),
+					deleted_at=CASE WHEN cardinality(array_remove(targets, $2)) = 0 THEN now() END
+					WHERE name = ANY($1) AND deleted_at IS NULL`, deleted, t.Name)
 				return err
 			}); err != nil {
 				errs = append(errs, err)
