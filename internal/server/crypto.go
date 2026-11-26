@@ -13,10 +13,23 @@ import (
 // Data at rest is sealed with AES-256-GCM. Each purpose gets its own key,
 // derived with HKDF from LIMDM_SESSION_KEY, and every ciphertext is bound to
 // its field or record through the additional data, so sealed values cannot
-// be swapped between fields or rows.
+// be swapped between fields or rows. During a session key rotation values
+// are sealed with the first key and opened with any (keys.go).
 
 func (s *Server) aead(info string) (cipher.AEAD, error) {
-	key, err := hkdf.Key(sha256.New, s.cfg.SessionKey, nil, info, 32)
+	m := multiAEAD{}
+	for _, k := range append([][]byte{s.cfg.SessionKey}, s.cfg.OldSessionKeys...) {
+		a, err := aeadFor(k, info)
+		if err != nil {
+			return nil, err
+		}
+		m = append(m, a)
+	}
+	return m, nil
+}
+
+func aeadFor(sessionKey []byte, info string) (cipher.AEAD, error) {
+	key, err := hkdf.Key(sha256.New, sessionKey, nil, info, 32)
 	if err != nil {
 		return nil, err
 	}

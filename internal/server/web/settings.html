@@ -61,6 +61,22 @@
   <label>{{t "Idle timeout (minutes)"}}<input name="shell_idle_minutes" type="number" min="1" max="120" {{with .Set.RemoteShell.IdleMinutes}}value="{{.}}"{{end}} placeholder="15"></label>
   {{if $admin}}<div class="form-foot"><span class="muted">{{t "Empty: 60 and 15 minutes."}}</span><button>{{t "Save"}}</button></div>{{end}}
 </form>
+{{if and $admin .Keys}}
+<section class="tablecard">
+  <div class="card-head stacked"><h2>{{t "Keys"}}</h2><p class="muted">{{t "Private keys of the server and their rotation without enrolling devices again. Each step is audited and takes effect when every server instance has restarted; Finish waits until all devices use the new key."}} {{template "doclink" "keys.md"}}</p></div>
+  <div class="scroll"><table>
+    <thead><tr><th>{{t "Key"}}</th><th>{{t "Active"}}</th><th>{{t "Retiring"}}</th><th>{{t "Progress"}}</th><th>{{t "Stored in"}}</th><th></th></tr></thead>
+    <tbody>{{range .Keys}}<tr>
+      <td>{{t .Label}}</td>
+      <td class="mono">{{.Active}}</td>
+      <td class="mono">{{if .Previous}}{{.Previous}}{{if not .Since.IsZero}} <span class="muted nowrap">{{fmtTime .Since}}</span>{{end}}{{else}}<span class="muted">{{t "none"}}</span>{{end}}</td>
+      <td>{{if .Previous}}{{if eq .Kind "session"}}{{.Total}} {{t "values sealed with an old key"}}{{else}}{{.Done}} / {{.Total}}{{end}}{{end}}{{if .Restart}} <span class="pill bad">{{t "restart required"}}</span>{{end}}</td>
+      <td class="mono">{{.Location}}</td>
+      <td>{{if .Previous}}<form class="inline-form" method="post" action="/settings/keys/finish/{{.Kind}}">{{template "csrf" $.CSRF}}<input type="hidden" name="section" value="security">{{if ne .Kind "session"}}<label class="check"><input type="checkbox" name="force"> {{t "force"}}</label>{{end}}<button class="small" data-confirm="{{t "Finish the rotation? The retiring key is no longer trusted and its key file is deleted."}}">{{t "Finish"}}</button></form>{{else if eq .Kind "session"}}<span class="muted">limdm-server keys rotate session</span>{{else}}<form class="inline-form" method="post" action="/settings/keys/rotate/{{.Kind}}">{{template "csrf" $.CSRF}}<input type="hidden" name="section" value="security"><input name="name" placeholder="{{t "new key name (HSM: required)"}}" aria-label="{{t "new key name (HSM: required)"}}"><button class="small" data-confirm="{{t "Start the rotation? A new key becomes active after the restart of every server instance."}}">{{t "Rotate"}}</button></form>{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+</section>
+{{end}}
 {{else if eq .Tab "sso"}}
 <form class="card" method="post" action="/settings">
   {{template "csrf" .CSRF}}<input type="hidden" name="section" value="sso">

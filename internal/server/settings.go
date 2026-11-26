@@ -380,8 +380,15 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 		}
 		data["Channels"], data["NotifyEvents"] = views, notifyEvents
 	}
+	if tab == "security" && sess.Role == "admin" && !sess.scoped() {
+		if keys, err := s.KeysStatus(r.Context()); err != nil {
+			s.log.Error("key status", "err", err)
+		} else {
+			data["Keys"] = keys
+		}
+	}
 	s.render(w, r, sess, "settings", map[string]any{"Set": set, "ClientIP": clientIP(r), "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
-		"Tab": tab, "Tabs": settingsTabLabels, "Channels": data["Channels"], "NotifyEvents": data["NotifyEvents"],
+		"Tab": tab, "Tabs": settingsTabLabels, "Channels": data["Channels"], "NotifyEvents": data["NotifyEvents"], "Keys": data["Keys"],
 		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": s.webhookSecretHex(),
 		"RoleGroupsText": roleGroupsText(set.RoleGroups)})
 }

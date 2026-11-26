@@ -48,6 +48,7 @@ var notifyEvents = []struct{ Type, Label string }{
 	{"approval.request", "Four eyes approval requested"},
 	{"audit.broken", "Audit log verification failed"},
 	{"network.crl_token", "Network CRL token rotated"},
+	{"keys.rotate", "Key rotation started or finished"},
 }
 
 // notifyCommand announces privileged commands once they are queued.

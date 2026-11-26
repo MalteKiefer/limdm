@@ -72,7 +72,7 @@ func (s *Server) seal(v any) string {
 
 func (s *Server) unseal(raw string, v any) error {
 	p, m, ok := strings.Cut(raw, ".")
-	if !ok || !hmac.Equal([]byte(m), []byte(s.mac(p))) {
+	if !ok || !s.macOK(p, m) {
 		return errors.New("bad signature")
 	}
 	b, err := base64.RawURLEncoding.DecodeString(p)
@@ -82,10 +82,23 @@ func (s *Server) unseal(raw string, v any) error {
 	return json.Unmarshal(b, v)
 }
 
-func (s *Server) mac(p string) string {
-	h := hmac.New(sha256.New, s.cfg.SessionKey)
+func (s *Server) mac(p string) string { return macWith(s.cfg.SessionKey, p) }
+
+func macWith(key []byte, p string) string {
+	h := hmac.New(sha256.New, key)
 	h.Write([]byte(p))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// macOK accepts a MAC by any session key, so a session key rotation does
+// not sign everybody out.
+func (s *Server) macOK(p, m string) bool {
+	for _, k := range append([][]byte{s.cfg.SessionKey}, s.cfg.OldSessionKeys...) {
+		if hmac.Equal([]byte(m), []byte(macWith(k, p))) {
+			return true
+		}
+	}
+	return false
 }
 
 // setCookie sets a cookie for maxAge; maxAge <= 0 deletes it (Max-Age=0 on
@@ -281,5 +294,5 @@ func (s *Server) csrfOK(r *http.Request, sess session) bool {
 	if o := r.Header.Get("Origin"); o != "" && o != s.cfg.PublicURL {
 		return false
 	}
-	return hmac.Equal([]byte(r.FormValue("csrf")), []byte(s.csrfToken(sess)))
+	return s.macOK(fmt.Sprintf("csrf|%s|%d", sess.Email, sess.IAT.UnixNano()), r.FormValue("csrf"))
 }

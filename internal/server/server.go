@@ -5,6 +5,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -42,28 +43,30 @@ import (
 var schema string
 
 type Config struct {
-	DatabaseURL   string
-	Listen        string // admin UI
-	PublicURL     string // admin UI URL, used for the OIDC redirect
-	TLSCert       string // admin UI certificate (public CA); without it the UI binds to loopback only
-	TLSKey        string
-	AgentListen   string   // agent API, mTLS terminated here, never by a proxy
-	AgentURL      string   // URL agents use, its host goes into the server certificate
-	AgentHosts    []string // additional names/IPs for the agent certificate, e.g. the IP older agents enrolled with
-	ReleaseRepo   string   // GitHub owner/name the install script downloads agent packages from
-	GeoIPURL      string   // location lookup for device addresses, the IP is appended; "" disables
-	CADir         string
-	LocalLogin    bool // local admin accounts with password and TOTP
-	OIDCIssuer    string
-	OIDCClientID  string
-	OIDCSecret    string
-	AllowedDomain string
-	Admins        []string
-	Auditors      []string
-	SessionKey    []byte
-	ReleaseDir    string
-	StaleAfter    time.Duration
-	Syslog        string // udp://host:port or tcp://host:port: audit entries and device events as RFC 5424
+	DatabaseURL    string
+	Listen         string // admin UI
+	PublicURL      string // admin UI URL, used for the OIDC redirect
+	TLSCert        string // admin UI certificate (public CA); without it the UI binds to loopback only
+	TLSKey         string
+	AgentListen    string   // agent API, mTLS terminated here, never by a proxy
+	AgentURL       string   // URL agents use, its host goes into the server certificate
+	AgentHosts     []string // additional names/IPs for the agent certificate, e.g. the IP older agents enrolled with
+	ReleaseRepo    string   // GitHub owner/name the install script downloads agent packages from
+	GeoIPURL       string   // location lookup for device addresses, the IP is appended; "" disables
+	CADir          string
+	LocalLogin     bool // local admin accounts with password and TOTP
+	OIDCIssuer     string
+	OIDCClientID   string
+	OIDCSecret     string
+	AllowedDomain  string
+	Admins         []string
+	Auditors       []string
+	SessionKey     []byte   // the first key of LIMDM_SESSION_KEY: seals and signs
+	OldSessionKeys [][]byte // further keys during a rotation: open only (keys.go)
+	Keys           KeyProvider
+	ReleaseDir     string
+	StaleAfter     time.Duration
+	Syslog         string // udp://host:port or tcp://host:port: audit entries and device events as RFC 5424
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -130,9 +133,14 @@ func ConfigFromEnv() (Config, error) {
 	if len(missing) > 0 {
 		return c, fmt.Errorf("missing env: %s", strings.Join(missing, ", "))
 	}
-	c.SessionKey, err = hex.DecodeString(os.Getenv("LIMDM_SESSION_KEY"))
-	if err != nil || len(c.SessionKey) < 32 {
-		return c, errors.New("LIMDM_SESSION_KEY must be at least 32 bytes hex (openssl rand -hex 32)")
+	keys, err := parseSessionKeys(os.Getenv("LIMDM_SESSION_KEY"))
+	if err != nil {
+		return c, err
+	}
+	c.SessionKey, c.OldSessionKeys = keys[0], keys[1:]
+	c.Keys = KeyProviderFromEnv()
+	if err := c.Keys.validate(); err != nil {
+		return c, err
 	}
 	if c.OIDCIssuer == "" && !c.LocalLogin {
 		return c, errors.New("enable at least one login method: LIMDM_OIDC_ISSUER or LIMDM_LOCAL_LOGIN=true")
@@ -190,8 +198,9 @@ type Server struct {
 	cfg    Config
 	db     *pgxpool.Pool
 	ca     *deviceCA
-	netCA  *deviceCA          // issues EAP-TLS device certificates (devicecerts.go)
-	cmdKey ed25519.PrivateKey // signs commands (command.key next to the CA)
+	netCA  *deviceCA     // issues EAP-TLS device certificates (devicecerts.go)
+	cmdKey crypto.Signer // signs commands (command.key next to the CA, or in the HSM)
+	kr     keyring       // keys of running rotations (keys.go)
 	log    *slog.Logger
 	limit  limiter
 	rt     atomic.Pointer[runtimeState] // settings editable in the UI and the OIDC client built from them
@@ -245,33 +254,16 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := migrate(ctx, db); err != nil {
+	s, err := openCore(ctx, cfg, log, db)
+	if err != nil {
 		return nil, err
 	}
-	ca, err := loadOrCreateCA(cfg.CADir)
-	if err != nil {
-		return nil, fmt.Errorf("device CA: %w", err)
-	}
-
-	log.Info("device CA ready", "fingerprint", ca.Fingerprint())
-	cmdKey, err := loadOrCreateCommandKey(cfg.CADir)
-	if err != nil {
-		return nil, fmt.Errorf("command key: %w", err)
-	}
-	itemKey = cmdKey
+	log.Info("device CA ready", "fingerprint", s.tlsCA().Fingerprint())
 	if err := signExistingItems(ctx, db, cfg.CADir); err != nil {
 		return nil, fmt.Errorf("signing library items: %w", err)
 	}
-	if err := initAuditKey(ctx, db, cfg.CADir, cmdKey); err != nil {
-		return nil, fmt.Errorf("audit key: %w", err)
-	}
-	netCA, err := loadOrCreateNetworkCA(cfg.CADir)
-	if err != nil {
-		return nil, fmt.Errorf("network CA: %w", err)
-	}
-	s := &Server{cfg: cfg, db: db, ca: ca, netCA: netCA, cmdKey: cmdKey, log: log, geoSem: make(chan struct{}, 1)}
-	if itemSecrets, err = s.aead(infoItems); err != nil {
-		return nil, err
+	if err := s.resignItems(ctx); err != nil {
+		return nil, fmt.Errorf("signing library items with the new command key: %w", err)
 	}
 	if err := s.sealLoginSecrets(ctx); err != nil {
 		return nil, fmt.Errorf("sealing login client secrets: %w", err)
@@ -293,12 +285,56 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	return s, nil
 }
 
+// openCore loads the keys and the audit chain state: what the server and
+// limdm-server keys need.
+func openCore(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Pool) (*Server, error) {
+	s := &Server{cfg: cfg, db: db, log: log, geoSem: make(chan struct{}, 1)}
+	if err := s.loadKeys(); err != nil {
+		return nil, err
+	}
+	itemKey = s.cmdKey
+	if s.kr.cmdPrev != nil {
+		itemPrevKey = s.kr.cmdPrev.Public().(ed25519.PublicKey)
+	}
+	if err := initAuditKey(ctx, db, cfg.CADir, s.cmdKey, s.kr.cmdPrev); err != nil {
+		return nil, fmt.Errorf("audit key: %w", err)
+	}
+	var err error
+	if itemSecrets, err = s.aead(infoItems); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// OpenKeys opens the database and the keys for limdm-server keys.
+func OpenKeys(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
+	pc, err := pgxPoolConfig(cfg.DatabaseURL)
+	if err != nil {
+		return nil, err
+	}
+	db, err := newPool(ctx, pc)
+	if err != nil {
+		return nil, err
+	}
+	if err := migrate(ctx, db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	s, err := openCore(ctx, cfg, log, db)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	s.kr.cli = true
+	return s, nil
+}
+
 func (s *Server) Close() { s.db.Close() }
 
 // Background runs periodic jobs until ctx ends.
 func (s *Server) Background(ctx context.Context) {
 	for name, loop := range map[string]func(context.Context){"google sync": s.googleSyncLoop, "history": s.historyLoop,
-		"releases": s.releaseLoop, "catalog icons": s.iconLoop, "syslog": s.syslogLoop} {
+		"releases": s.releaseLoop, "catalog icons": s.iconLoop, "syslog": s.syslogLoop, "reseal": s.resealLoop} {
 		go s.background(ctx, name, loop)
 	}
 	go s.rediscoverLoop(ctx)
@@ -368,7 +404,7 @@ func (s *Server) AgentHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/ca", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-pem-file")
-		w.Write(s.ca.pem)
+		w.Write(s.tlsCA().pem)
 	})
 	mux.HandleFunc("POST /api/v1/enroll", s.enroll)
 	mux.HandleFunc("POST /api/v1/renew", s.deviceAuth(s.renew, true))
@@ -390,7 +426,7 @@ func (s *Server) AgentHandler() http.Handler {
 func (s *Server) AgentTLSConfig() (*tls.Config, error) {
 	u, _ := url.Parse(s.cfg.AgentURL)
 	names := append([]string{u.Hostname()}, s.cfg.AgentHosts...)
-	cert, err := s.ca.serverCert(names)
+	cert, err := s.tlsCA().serverCert(names)
 	if err != nil {
 		return nil, err
 	}
@@ -403,7 +439,7 @@ func (s *Server) AgentTLSConfig() (*tls.Config, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			if time.Until(cert.Leaf.NotAfter) < 30*24*time.Hour {
-				if next, err := s.ca.serverCert(names); err == nil {
+				if next, err := s.tlsCA().serverCert(names); err == nil {
 					cert = next
 				} else {
 					s.log.Error("renew agent TLS certificate", "err", err)
@@ -413,7 +449,7 @@ func (s *Server) AgentTLSConfig() (*tls.Config, error) {
 			return &c, nil
 		},
 		ClientAuth: tls.RequestClientCert,
-		ClientCAs:  s.ca.pool(),
+		ClientCAs:  s.devicePool(),
 	}, nil
 }
 
@@ -487,7 +523,7 @@ func (s *Server) verifyDevice(r *http.Request, allowExpired bool) (*x509.Certifi
 		return nil, errors.New("client certificate required")
 	}
 	leaf := r.TLS.PeerCertificates[0]
-	opts := x509.VerifyOptions{Roots: s.ca.pool(), KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}
+	opts := x509.VerifyOptions{Roots: s.devicePool(), KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}
 	if now := time.Now(); allowExpired && now.After(leaf.NotAfter) && now.Sub(leaf.NotAfter) < expiredRenewGrace {
 		opts.CurrentTime = leaf.NotAfter.Add(-time.Minute)
 	}
@@ -792,8 +828,12 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := api.CheckinResponse{ServerTime: time.Now().UTC(), CommandKey: hex.EncodeToString(s.cmdKey.Public().(ed25519.PublicKey)),
+	resp := api.CheckinResponse{ServerTime: time.Now().UTC(),
 		NeedStatus: statusHash != req.StatusHash, NeedPackages: pkgHash != req.PackagesHash, FallbackDNS: s.settings().FallbackDNS}
+	if err := s.keyCheckin(ctx, tx, id, r, req, &resp); err != nil {
+		s.failAPI(w, err)
+		return
+	}
 	res, err := resolveDevice(ctx, tx, id)
 	if err != nil {
 		s.failAPI(w, err)
@@ -930,9 +970,18 @@ func audit(ctx context.Context, tx pgx.Tx, actor, action, target, detail string)
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7363)`); err != nil {
 		return err
 	}
-	prev := make([]byte, 32)
-	if err := tx.QueryRow(ctx, `SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1`).Scan(&prev); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	var prev []byte
+	var keyID *string
+	if err := tx.QueryRow(ctx, `SELECT (SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1), (SELECT key_id FROM audit_key)`).Scan(&prev, &keyID); err != nil {
 		return err
+	}
+	if prev == nil {
+		prev = make([]byte, 32)
+	}
+	// another instance started with a new command key: entries keyed with
+	// the old one would break the chain
+	if auditKey != nil && keyID != nil && *keyID != auditKeyCur {
+		return errors.New("the audit key changed with a key rotation: restart this server instance")
 	}
 	at := time.Now().UTC().Truncate(time.Microsecond)
 	_, err := tx.Exec(ctx, `INSERT INTO audit_log(at, actor, action, target, detail, prev, hash) VALUES ($1,$2,$3,$4,$5,$6,$7)`,

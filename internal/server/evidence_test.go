@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -73,22 +74,22 @@ func evidenceServer(t *testing.T) (*Server, *pgxpool.Pool, func(method, path str
 func TestKeyedAuditChain(t *testing.T) {
 	s, db, ui := evidenceServer(t)
 	ctx := context.Background()
-	prevKey, prevFrom := auditKey, auditKeyedFrom
-	t.Cleanup(func() { auditKey, auditKeyedFrom = prevKey, prevFrom })
-	auditKey, auditKeyedFrom = nil, 0
+	prevKey, prevFrom, prevKeys, prevCur := auditKey, auditKeyedFrom, auditKeys, auditKeyCur
+	t.Cleanup(func() { auditKey, auditKeyedFrom, auditKeys, auditKeyCur = prevKey, prevFrom, prevKeys, prevCur })
+	auditKey, auditKeyedFrom, auditKeys = nil, 0, nil
 	for range 3 { // plain entries written before the upgrade
 		if err := s.auditAction(ctx, "admin@firma.de", "test.plain", "", "", nil); err != nil {
 			t.Fatal(err)
 		}
 	}
 	dir := t.TempDir()
-	if err := initAuditKey(ctx, db, dir, testCmdKey); err != nil {
+	if err := initAuditKey(ctx, db, dir, testCmdKey, nil); err != nil {
 		t.Fatal(err)
 	}
 	if auditKeyedFrom != 4 {
 		t.Fatalf("switch point %d, want 4", auditKeyedFrom)
 	}
-	if err := initAuditKey(ctx, db, dir, testCmdKey); err != nil { // a restart reads the recorded switch point
+	if err := initAuditKey(ctx, db, dir, testCmdKey, nil); err != nil { // a restart reads the recorded switch point
 		t.Fatal(err)
 	}
 	var switches int
@@ -127,7 +128,7 @@ func TestKeyedAuditChain(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("export: %d", code)
 	}
-	n, first, _, broken, err := VerifyAuditExport(strings.NewReader(export), AuditKey(testCmdKey), auditKeyedFrom)
+	n, first, _, broken, err := VerifyAuditExport(strings.NewReader(export), auditKeys)
 	if err != nil || broken != 0 || first != 1 || n < 150 {
 		t.Fatalf("export verification: n=%d first=%d broken=%d err=%v", n, first, broken, err)
 	}
@@ -148,6 +149,34 @@ func TestKeyedAuditChain(t *testing.T) {
 			t.Fatalf("forward: %v sent %d of %d", err, len(sent), total)
 		}
 	}
+
+	// a command key rotation starts a new segment; the whole chain still
+	// verifies, and an instance with the old key cannot write any more
+	oldCur := auditKeyCur
+	newCmd := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{8}, ed25519.SeedSize))
+	if err := initAuditKey(ctx, db, dir, newCmd, nil); err == nil {
+		t.Fatal("rotation without the previous key accepted")
+	}
+	if err := initAuditKey(ctx, db, dir, newCmd, testCmdKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := initAuditKey(ctx, db, dir, newCmd, nil); err != nil { // restart after finish
+		t.Fatal(err)
+	}
+	if len(auditKeys) != 2 || !bytes.Equal(auditKey, AuditKey(newCmd)) {
+		t.Fatalf("segments %d", len(auditKeys))
+	}
+	if err := s.auditAction(ctx, "admin@firma.de", "test.rotated", "", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if broken, err := s.verifyAuditFrom(ctx, false); err != nil || broken != 0 {
+		t.Fatalf("chain across the rotation: broken=%d err=%v", broken, err)
+	}
+	auditKeyCur = oldCur
+	if err := s.auditAction(ctx, "admin@firma.de", "test.stale", "", "", nil); err == nil {
+		t.Fatal("an instance with the old audit key wrote an entry")
+	}
+	auditKeyCur = auditKeyID(auditKey)
 
 	// a row changed with database rights breaks the keyed chain
 	if _, err := db.Exec(ctx, `ALTER TABLE audit_log DISABLE TRIGGER audit_log_no_change; UPDATE audit_log SET detail='forged' WHERE id=10;
