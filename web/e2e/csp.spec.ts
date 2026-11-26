@@ -6,7 +6,7 @@ import { statePath } from './global-setup'
 
 test.use({ storageState: statePath })
 
-const pages = ['/app/', '/app/inbox', '/app/devices', '/app/devices/x1', '/app/compliance', '/app/config', '/app/activity', '/app/reports', '/app/settings', '/app/dev/components', '/app/no-such-page']
+const pages = ['/app/', '/app/inbox', '/app/devices', '/app/devices/x1', '/app/compliance', '/app/config', '/app/config?tab=library', '/app/config?tab=software', '/app/config?tab=packages', '/app/config/blueprints/new', '/app/config/library/new?type=com.limdm.network', '/app/config/software/new', '/app/activity', '/app/reports', '/app/settings', '/app/dev/components', '/app/no-such-page']
 
 async function watch(page: Page) {
   const violations: string[] = []

@@ -68,6 +68,7 @@ export default async function globalSetup() {
     LIMDM_AGENT_URL: `https://127.0.0.1:${port + 1}`,
     LIMDM_AGENT_LISTEN: `127.0.0.1:${port + 1}`,
     LIMDM_CA_DIR: join(dir, 'ca'),
+    LIMDM_ARTIFACT_DIR: join(dir, 'artifacts'), // package uploads
     LIMDM_LOCAL_LOGIN: 'true',
     LIMDM_SESSION_KEY: readFileSync(keyFile, 'utf8'),
   }
