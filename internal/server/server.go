@@ -1092,7 +1092,8 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp.SignedData = itemKey != nil
-	if dataSigOK(api.UsersSigned(id, resp.Users), usersSig) {
+	usersOK := dataSigOK(api.UsersSigned(id, resp.Users), usersSig)
+	if usersOK {
 		resp.SignedUsers = &api.SignedUsers{Users: resp.Users, Signature: usersSig}
 	} else {
 		// changed outside the console: agents keep the list they have, older
@@ -1122,7 +1123,9 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if !slices.Equal(notified, disabled) {
+	// without a valid list nothing is known about the users: keep the record,
+	// or the notices fire again once the list is signed again
+	if usersOK && !slices.Equal(notified, disabled) {
 		if _, err := tx.Exec(ctx, `UPDATE devices SET users_disabled=$2 WHERE id=$1`, id, append([]string{}, disabled...)); err != nil {
 			s.failAPI(w, err)
 			return
