@@ -10,7 +10,7 @@ import { api, unwrap } from '../../api/client'
 import { useCan } from '../../api/me'
 import { Field } from '../../components/form'
 import { SavedViewsMenu } from '../../components/savedviews'
-import { ErrorState, LoadingState } from '../../components/states'
+import { EmptyState, ErrorState, LoadingState } from '../../components/states'
 import { Badge, Card, PageHeader } from '../../components/ui'
 import { useT, type MessageKey } from '../../i18n'
 import { dateTime, fmt } from '../../i18n/format'
@@ -160,8 +160,8 @@ function Table({ caption, head, rows, empty }: { caption: string; head: string[]
             ))
           ) : (
             <tr>
-              <td colSpan={head.length} className="py-6 text-center text-muted">
-                {empty}
+              <td colSpan={head.length}>
+                <EmptyState compact title={empty} />
               </td>
             </tr>
           )}

@@ -1,10 +1,10 @@
 // Evidence export: pick a file, download it through the API, show its
 // SHA-256 next to the matching export.done audit entry.
 import { useQueryClient } from '@tanstack/react-query'
-import { FileCheck2 } from 'lucide-react'
+import { FileCheck2, FileDown } from 'lucide-react'
 import { useState } from 'react'
 import { Field } from '../../components/form'
-import { errorText } from '../../components/states'
+import { EmptyState, errorText } from '../../components/states'
 import { toast } from '../../components/toast'
 import { Modal } from '../../components/ui'
 import { useT, type MessageKey } from '../../i18n'
@@ -104,7 +104,7 @@ export function ExportDialog({ open, onClose, initial = 'evidence.pdf', at: init
         <section>
           <h3 className="mb-1 text-meta font-semibold text-muted">{t('compliance.exp.recent')}</h3>
           {!audit.data?.items?.length ? (
-            <p className="text-body text-muted">{t('compliance.exp.none')}</p>
+            <EmptyState compact icon={FileDown} title={t('compliance.exp.none')} />
           ) : (
             <ul className="divide-y divide-line rounded-lg border border-line text-meta">
               {audit.data.items.map((e) => (

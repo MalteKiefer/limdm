@@ -16,6 +16,7 @@ import { ArrowDown, ArrowUp, ChevronsUpDown, Columns3, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useT } from '../i18n'
 import { cx } from '../lib/cx'
+import { EmptyState } from './states'
 import { ActionMenu } from './ui'
 
 declare module '@tanstack/react-table' {
@@ -108,7 +109,8 @@ export function DataGrid<T>({ data, columns, getRowId, label, sort, onSortChange
     if (onEndReached && last && last.index >= rows.length - 5 && !loadingMore) onEndReached()
   }, [last, rows.length, onEndReached, loadingMore])
 
-  if (!rows.length) return <div className="card">{empty ?? <p className="p-6 text-center text-muted">{t('grid.empty')}</p>}</div>
+  // a text becomes an EmptyState; pass an EmptyState with an action for more
+  if (!rows.length) return <div className="card">{empty == null || typeof empty === 'string' ? <EmptyState compact title={empty ?? t('grid.empty')} /> : empty}</div>
 
   const sortName = sort?.replace(/^-/, '')
   const desc = sort?.startsWith('-')

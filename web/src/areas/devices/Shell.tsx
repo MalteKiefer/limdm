@@ -3,11 +3,11 @@
 // origin, canvas renderer: no inline styles under the CSP), the transcript
 // for admins and auditors once it ended.
 import { Link, useParams } from '@tanstack/react-router'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Terminal as TerminalIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { getCsrfToken } from '../../api/client'
 import { Card, PageHeader } from '../../components/ui'
-import { ErrorState, LoadingState, errorText } from '../../components/states'
+import { EmptyState, ErrorState, LoadingState, errorText } from '../../components/states'
 import { toast } from '../../components/toast'
 import { useT, type MessageKey } from '../../i18n'
 import { dateTime, fmt } from '../../i18n/format'
@@ -85,7 +85,7 @@ export function ShellPage() {
               {x.truncated && ` (${t('devices.shell.truncated')})`}
             </dd>
           </dl>
-          {x.transcript ? <pre className="max-h-[60dvh] overflow-auto rounded-md bg-surface-2 p-3 font-mono text-meta whitespace-pre-wrap">{x.transcript}</pre> : <p className="text-body text-muted">{t('devices.shell.noOutput')}</p>}
+          {x.transcript ? <pre className="max-h-[60dvh] overflow-auto rounded-md bg-surface-2 p-3 font-mono text-meta whitespace-pre-wrap">{x.transcript}</pre> : <EmptyState compact icon={TerminalIcon} title={t('devices.shell.noOutput')} />}
         </Card>
       )}
     </div>

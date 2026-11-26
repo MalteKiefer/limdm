@@ -102,7 +102,7 @@ export function QueryBar({ value, onChange, keys, placeholder, label }: { value:
               <li key={text}>
                 <span className="inline-flex items-center gap-1 rounded-md border border-line bg-surface py-0.5 pr-0.5 pl-2 font-mono text-meta">
                   {text}
-                  <button type="button" className="grid size-5 place-items-center rounded hover:bg-surface-2" aria-label={t('query.remove', { token: text })} onClick={() => onChange(removeToken(value, tok))}>
+                  <button type="button" className="grid size-[24px] shrink-0 place-items-center rounded hover:bg-surface-2" aria-label={t('query.remove', { token: text })} onClick={() => onChange(removeToken(value, tok))}>
                     <X size={12} />
                   </button>
                 </span>

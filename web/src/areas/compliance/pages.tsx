@@ -269,7 +269,7 @@ function Body({ d, s, go }: { d: NonNullable<ReturnType<typeof useCompliance>['d
               activeId={s.sel}
               onRowClick={(c) => go({ sel: c.id, control: undefined })}
               maxHeight="560px"
-              empty={<p className="p-6 text-center text-muted">{t('compliance.noMatch')}</p>}
+              empty={t('compliance.noMatch')}
               card={(c) => (
                 <span className="flex items-center justify-between gap-2">
                   <span className="flex min-w-0 flex-col">
@@ -517,7 +517,7 @@ function Heatmap({ group, onGroup }: { group: 'blueprint' | 'tenant'; onGroup: (
       ) : !q.data ? (
         <Skeleton className="h-[240px]" />
       ) : !m.areas.length ? (
-        <p className="text-muted">{t('compliance.heat.none')}</p>
+        <EmptyState compact title={t('compliance.heat.none')} />
       ) : (
         <ChartFrame
           caption={t('compliance.heat.label', { group: groupLabel })}

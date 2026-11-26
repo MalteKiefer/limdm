@@ -1,11 +1,13 @@
 // Software, inventory and activity tabs of the device page.
 import { Link } from '@tanstack/react-router'
-import { Download, FileCode2, KeyRound, MoreHorizontal, Package, Plus, Terminal, Activity as ActivityIcon, Search } from 'lucide-react'
+import { Download, FileCode2, KeyRound, MoreHorizontal, Network as NetworkIcon, Package, Plus, Terminal, Activity as ActivityIcon, Search } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { api, unwrap } from '../../api/client'
 import { useCan } from '../../api/me'
 import { DataGrid, type GridColumn } from '../../components/datagrid'
+import { ScrollHint } from '../../components/layout'
 import { Field } from '../../components/form'
+import { Confirm } from '../../components/settingsform'
 import { EmptyState, ErrorState, LoadingState, errorText } from '../../components/states'
 import { Timeline, type TimelineItem } from '../../components/timeline'
 import { toast } from '../../components/toast'
@@ -14,7 +16,7 @@ import { useT, type MessageKey } from '../../i18n'
 import { ago, dateTime, fmt } from '../../i18n/format'
 import { useQueryClient } from '@tanstack/react-query'
 import { useRun, type Dialog } from './actions'
-import { usePackages, useTimeline, type DeviceDetail, type TimelineEntry } from './api'
+import { usePackages, useTimeline, type DeviceDetail, type Params, type TimelineEntry } from './api'
 import { accountActionable, filterByName, statusTone, usedPct } from './logic'
 
 type Col = { label: ReactNode; className?: string }
@@ -47,8 +49,8 @@ function Table({ caption, cols, rows, empty }: { caption: string; cols: Col[]; r
             ))
           ) : (
             <tr>
-              <td colSpan={cols.length} className="py-4 text-center text-muted">
-                {empty}
+              <td colSpan={cols.length}>
+                <EmptyState compact title={empty} />
               </td>
             </tr>
           )}
@@ -60,9 +62,9 @@ function Table({ caption, cols, rows, empty }: { caption: string; cols: Col[]; r
 
 function SubTabs({ subs, value, onChange, label }: { subs: { value: string; label: string; count?: number }[]; value: string; onChange: (v: string) => void; label: string }) {
   return (
-    <div className="overflow-x-auto">
+    <ScrollHint>
       <Segmented label={label} value={value} onChange={onChange} options={subs.map((s) => ({ value: s.value, label: s.count != null ? `${s.label} ${fmt(s.count)}` : s.label }))} />
-    </div>
+    </ScrollHint>
   )
 }
 
@@ -98,11 +100,28 @@ export function SoftwareTab({ d, sub, setSub, open }: { d: DeviceDetail; sub?: s
   )
 }
 
+/** A removal command asked for in the app's dialog first; render dialog once. */
 function useRemove(d: DeviceDetail) {
   const { run } = useRun({ id: d.id, hostname: d.hostname, detail: d })
   const t = useT()
-  return (kind: string, name: string, installation?: string) => {
-    if (confirm(t('devices.sw.removeConfirm', { name }))) run('software_remove', { kind, name, ...(installation ? { installation } : {}) })
+  const [ask, setAsk] = useState<{ text: string; type: string; params: Params }>()
+  return {
+    ask: (text: string, type: string, params: Params) => setAsk({ text, type, params }),
+    remove: (kind: string, name: string, installation?: string) => setAsk({ text: t('devices.sw.removeConfirm', { name }), type: 'software_remove', params: { kind, name, ...(installation ? { installation } : {}) } }),
+    dialog: (
+      <Confirm
+        open={!!ask}
+        onClose={() => setAsk(undefined)}
+        title={ask?.text ?? ''}
+        body={d.hostname}
+        confirm={t('devices.sw.remove')}
+        danger
+        onConfirm={() => {
+          if (ask) run(ask.type, ask.params)
+          setAsk(undefined)
+        }}
+      />
+    ),
   }
 }
 
@@ -111,7 +130,7 @@ function Packages({ d }: { d: DeviceDetail }) {
   const admin = useCan('admin')
   const pk = usePackages(d.id)
   const [q, setQ] = useState('')
-  const remove = useRemove(d)
+  const { remove, dialog } = useRemove(d)
   const rows = useMemo(() => filterByName(pk.data ?? [], q), [pk.data, q])
   const columns = useMemo<GridColumn<{ name: string; version: string; arch: string }>[]>(
     () => [
@@ -147,7 +166,8 @@ function Packages({ d }: { d: DeviceDetail }) {
           <Search size={14} aria-hidden /> {t('devices.sw.fleet')}
         </Link>
       </div>
-      {pk.isPending ? <LoadingState /> : <DataGrid label={t('devices.sw.packages')} data={rows} columns={columns} getRowId={(r) => `${r.name}:${r.arch}`} maxHeight="60dvh" empty={<p className="p-6 text-center text-muted">{t('devices.sw.noPackages')}</p>} />}
+      {pk.isPending ? <LoadingState /> : <DataGrid label={t('devices.sw.packages')} data={rows} columns={columns} getRowId={(r) => `${r.name}:${r.arch}`} maxHeight="60dvh" empty={t('devices.sw.noPackages')} />}
+      {dialog}
     </div>
   )
 }
@@ -203,7 +223,7 @@ function Apps({ d }: { d: DeviceDetail }) {
   const admin = useCan('admin') && !d.retired
   const qc = useQueryClient()
   const inv = d.inventory
-  const remove = useRemove(d)
+  const { remove, dialog } = useRemove(d)
   const rm = (kind: string, name: string, inst?: string) => (
     <button type="button" className="btn btn-ghost !h-7 text-meta" onClick={() => remove(kind, name, inst)}>
       {t('devices.sw.remove')}
@@ -216,6 +236,7 @@ function Apps({ d }: { d: DeviceDetail }) {
       .catch((e: unknown) => toast(errorText(e), 'error'))
   return (
     <div className="flex flex-col gap-[var(--gap)]">
+      {dialog}
       <Card title={t('devices.sw.remotes')} id="dv-rem" action={admin ? <Link className="btn" to="/config/library/$id" params={{ id: 'new' }} search={{ type: 'com.limdm.flatpak' }}>
               {t('devices.sw.addRemote')}
             </Link> : undefined}>
@@ -308,9 +329,11 @@ function Catalog({ d }: { d: DeviceDetail }) {
   const t = useT()
   const admin = useCan('admin') && !d.retired
   const { run, pending } = useRun({ id: d.id, hostname: d.hostname, detail: d })
+  const { ask, dialog } = useRemove(d)
   const apps = d.inventory.apps ?? []
   return (
     <div className="flex flex-col gap-3">
+      {dialog}
       {d.app_notes.map((n) => (
         <div key={n.app + n.at} role="status" className={'rounded-lg border px-4 py-2 text-body ' + (n.ok ? 'border-ok/30 bg-ok-soft' : 'border-bad/30 bg-bad-soft')}>
           <strong>{n.app}</strong>{' '}
@@ -340,7 +363,7 @@ function Catalog({ d }: { d: DeviceDetail }) {
                           {t(busy === 'install' ? 'devices.sw.installing' : 'devices.sw.removing')}
                         </span>
                       ) : a.installed ? (
-                        <button type="button" className="btn !h-7 text-meta" disabled={pending} onClick={() => confirm(t('devices.sw.removeAppConfirm')) && run('app_remove', { app: a.id })}>
+                        <button type="button" className="btn !h-7 text-meta" disabled={pending} onClick={() => ask(t('devices.sw.removeAppConfirm'), 'app_remove', { app: a.id })}>
                           {t('devices.sw.remove')}
                         </button>
                       ) : (
@@ -568,7 +591,7 @@ function Network({ d }: { d: DeviceDetail }) {
   const routes = inv.routes ?? []
   return (
     <div className="flex flex-col gap-[var(--gap)]">
-      {!(inv.interfaces ?? []).some((i) => i.ips?.length) && !(inv.dns ?? []).length && <p className="text-body text-muted">{t('devices.net.noInfo')}</p>}
+      {!(inv.interfaces ?? []).some((i) => i.ips?.length) && !(inv.dns ?? []).length && <EmptyState compact icon={NetworkIcon} title={t('devices.net.noInfo')} />}
       {d.external_ip && (
         <Card title={t('devices.net.public')} sub={t('devices.net.publicSub')} id="dv-pub">
           <KV

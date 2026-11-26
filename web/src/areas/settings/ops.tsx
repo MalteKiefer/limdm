@@ -1,7 +1,7 @@
 // Operations sections: server keys and their rotation, notification
 // channels with the compliance webhook, and backup (targets, schedules with
 // a live preview, recipients, history).
-import { Bell, CircleCheck, CirclePlay, DatabaseBackup, Pause, Pencil, Play, Plus, Send, ShieldCheck, Trash2, TriangleAlert } from 'lucide-react'
+import { Bell, CalendarClock, CircleCheck, CirclePlay, DatabaseBackup, HardDrive, Pause, Pencil, Play, Plus, Send, ShieldCheck, Trash2, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { FieldValues, Path, UseFormReturn } from 'react-hook-form'
 import { z } from '../../lib/zod'
@@ -446,7 +446,7 @@ export function Backup() {
       </SettingsForm>
 
       <FormSection title={t('settings.backup.targets')} description={t('settings.backup.targetsHelp')}>
-        {b.targets.length === 0 && <p className="text-muted">{t('settings.backup.noTarget')}</p>}
+        {b.targets.length === 0 && <EmptyState compact icon={HardDrive} title={t('settings.backup.noTarget')} />}
         <ul className="flex flex-col divide-y divide-line">
           {b.targets.map((x) => (
             <li key={x.name} className="flex flex-wrap items-center justify-between gap-2 py-2">
@@ -474,7 +474,7 @@ export function Backup() {
       </FormSection>
 
       <FormSection title={t('settings.backup.schedules')} description={t('settings.backup.schedulesHelp')}>
-        {b.schedules.length === 0 && <p className="text-muted">{t('settings.backup.noSchedule')}</p>}
+        {b.schedules.length === 0 && <EmptyState compact icon={CalendarClock} title={t('settings.backup.noSchedule')} />}
         <ul className="flex flex-col divide-y divide-line">
           {b.schedules.map((s) => (
             <li key={s.name} className="flex flex-wrap items-start justify-between gap-2 py-2">

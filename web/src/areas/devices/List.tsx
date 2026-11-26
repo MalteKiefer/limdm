@@ -480,7 +480,7 @@ function BulkApps({ busy, onClose, onRun }: { busy: boolean; onClose: () => void
           </select>
         )}
       </Field>
-      {apps.data && !apps.data.length && <p className="mt-3 text-body text-muted">{t('devices.bulk.noApps')}</p>}
+      {apps.data && !apps.data.length && <EmptyState compact icon={Package} title={t('devices.bulk.noApps')} action={<Link className="btn" to="/config" search={{ tab: 'software' }}>{t('devices.sw.manageCatalog')}</Link>} />}
     </Modal>
   )
 }

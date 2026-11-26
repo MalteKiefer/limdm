@@ -383,7 +383,7 @@ function NodeList({ nodes, onChange, ctx, path, depth }: { nodes: Node[]; onChan
   const t = useT()
   return (
     <div className="flex flex-col gap-2">
-      {!nodes.length && <p className="text-meta text-muted">{t('config.emptyMap')}</p>}
+      {!nodes.length && (depth ? <p className="text-meta text-muted">{t('config.emptyMap')}</p> : <EmptyState compact icon={ListTree} title={t('config.emptyMap')} />)}
       {nodes.map((n, i) => (
         <div key={i} className={cx('rounded-lg border p-3', n.kind === 'if' ? 'border-info/40 bg-info-soft/30' : 'border-line')}>
           <div className="mb-2 flex items-center gap-1">
@@ -445,7 +445,7 @@ function AssignEditor({ node, onChange, ctx }: { node: Node; onChange: (n: Node)
               </Link>
               {it && <span className="font-mono text-micro text-muted">{it.type.replace('com.limdm.', '')}</span>}
               {!ctx.readOnly && (
-                <button type="button" className="grid size-5 place-items-center rounded hover:bg-line" aria-label={t('config.removeItem', { name: it?.name ?? String(id) })} onClick={() => onChange({ ...node, items: ids.filter((x) => x !== id) })}>
+                <button type="button" className="grid size-[24px] shrink-0 place-items-center rounded hover:bg-line" aria-label={t('config.removeItem', { name: it?.name ?? String(id) })} onClick={() => onChange({ ...node, items: ids.filter((x) => x !== id) })}>
                   <X size={12} />
                 </button>
               )}

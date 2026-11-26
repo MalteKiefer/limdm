@@ -3,7 +3,7 @@
 // and the live feed. Every number links to the list behind it.
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { ArrowRight, CheckCircle2, CircleAlert, Circle, DatabaseBackup, Monitor, ShieldAlert, TriangleAlert, WifiOff, X, type LucideIcon } from 'lucide-react'
+import { ArrowRight, CheckCircle2, CircleAlert, Circle, DatabaseBackup, Monitor, ShieldAlert, ShieldCheck, TriangleAlert, WifiOff, X, type LucideIcon } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { api, unwrap, type Schemas } from '../../api/client'
 import { useLiveActivity } from '../../api/live'
@@ -355,7 +355,7 @@ function AgentKpi({ u }: { u?: Schemas['StatsUpdates'] }) {
 function Frameworks({ list }: { list: Schemas['StatsCompliance']['frameworks'] }) {
   const t = useT()
   const shown = list.filter((f) => f.pass + f.fail > 0)
-  if (!shown.length) return <p className="text-muted">{t('home.noChecks')}</p>
+  if (!shown.length) return <EmptyState compact icon={ShieldCheck} title={t('home.noChecks')} />
   return (
     <ul className="flex flex-col gap-4">
       {shown.map((f) => (

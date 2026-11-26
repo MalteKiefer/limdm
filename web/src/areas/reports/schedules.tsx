@@ -1,7 +1,8 @@
 // Scheduled reports: a saved report gets a cadence and recipients; the
 // server runs it as its owner and sends a link. Runs keep the last files.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarClock, Download, Play, Trash2 } from 'lucide-react'
+import { Bell, CalendarClock, Download, Play, Trash2 } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api, unwrap, type Schemas } from '../../api/client'
 import { useSavedViews } from '../../api/views'
@@ -136,7 +137,7 @@ export function Schedules() {
                   </label>
                 ))
               ) : (
-                <p className="text-meta text-muted">{t('reports.sched.noChannels')}</p>
+                <EmptyState compact icon={Bell} title={t('reports.sched.noChannels')} action={<Link className="btn" to="/settings" search={{ s: 'notifications' } as never}>{t('reports.sched.setupChannels')}</Link>} />
               )}
               {errFor('channels') && (
                 <p id="sched-ch-err" className="text-meta font-medium text-bad">

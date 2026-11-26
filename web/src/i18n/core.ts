@@ -123,6 +123,8 @@ export const de = {
   'sheet.close': 'Blatt schließen (Esc)',
   'sheet.prev': 'Vorheriger Eintrag (K)',
   'sheet.next': 'Nächster Eintrag (J)',
+  'scroll.back': 'Weitere Einträge links',
+  'scroll.more': 'Weitere Einträge rechts',
 
   'wizard.step': 'Schritt {n} von {total}',
   'wizard.steps': 'Schritte',
@@ -301,6 +303,8 @@ export const en: Record<keyof typeof de, Msg> = {
   'sheet.close': 'Close sheet (Esc)',
   'sheet.prev': 'Previous entry (K)',
   'sheet.next': 'Next entry (J)',
+  'scroll.back': 'More entries to the left',
+  'scroll.more': 'More entries to the right',
 
   'wizard.step': 'Step {n} of {total}',
   'wizard.steps': 'Steps',

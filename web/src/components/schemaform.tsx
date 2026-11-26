@@ -221,7 +221,7 @@ function Chips({ value, onChange, id, numeric, ...rest }: { value: (string | num
       {value.map((v) => (
         <span key={String(v)} className="inline-flex items-center gap-1 rounded bg-surface-2 py-0.5 pr-0.5 pl-2 font-mono text-meta">
           {v}
-          <button type="button" className="grid size-4 place-items-center rounded hover:bg-line" aria-label={tr('query.remove', { token: String(v) })} onClick={() => onChange(value.filter((x) => x !== v))}>
+          <button type="button" className="grid size-[24px] shrink-0 place-items-center rounded hover:bg-line" aria-label={tr('query.remove', { token: String(v) })} onClick={() => onChange(value.filter((x) => x !== v))}>
             <X size={11} />
           </button>
         </span>
