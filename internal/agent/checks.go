@@ -804,10 +804,8 @@ func (a *Agent) applyFirewall() error {
 			}
 		}
 		// allow rules first so enabling never cuts an active SSH session
-		for _, rule := range a.pol.Firewall.Allow {
-			if _, err := sh("ufw", "allow", rule); err != nil {
-				return err
-			}
+		if err := a.syncFirewallRules(); err != nil {
+			return err
 		}
 		if _, err := sh("ufw", "default", "deny", "incoming"); err != nil {
 			return err
@@ -823,14 +821,7 @@ func (a *Agent) applyFirewall() error {
 	if err := svc("enable-now", "firewalld"); err != nil {
 		return err
 	}
-	for _, rule := range a.pol.Firewall.Allow {
-		port := strings.Replace(rule, ":", "-", 1)
-		if _, err := sh("firewall-cmd", "--permanent", "--add-port="+port); err != nil {
-			return err
-		}
-	}
-	_, err := sh("firewall-cmd", "--reload")
-	return err
+	return a.syncFirewallRules()
 }
 
 func runMACEnabled(a *Agent) (string, string) {

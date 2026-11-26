@@ -208,8 +208,16 @@ Recurring root scripts, only on devices enrolled with `allow_scripts`.
 ### `com.limdm.firewall` (list)
 
 ```json
-{"enforce": true, "allow": ["22/tcp"]}
+{"enforce": true, "allow": ["22/tcp"], "rules": [{"port": "5432/tcp", "from": "10.0.0.0/8"}]}
 ```
+
+`allow` opens ports for everybody, `rules` opens a port only for a source network (CIDR)
+or address. ufw (Debian family) gets `ufw allow from … to any port … proto …`, firewalld a
+rich rule in the default zone. The agent keeps the rules in line with the declaration also
+while the firewall is active: new rules are added first, rules it added earlier and that
+are no longer declared are deleted. Rules added by hand or by agents before 0.16 are never
+deleted. Without a firewall declaration (or with `enforce` off) the rules are left as they
+are, so a dropped item cannot lock out SSH.
 
 ### `com.limdm.ssh` (list), `com.limdm.banner`
 

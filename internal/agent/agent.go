@@ -98,8 +98,9 @@ type State struct {
 	Held           []string             `json:"held,omitempty"`         // packages LiMDM put on apt hold
 	DNFExclude     string               `json:"dnf_exclude,omitempty"`  // excludepkgs= value LiMDM wrote to dnf.conf
 	PacmanIgnore   string               `json:"pacman_ignore,omitempty"`
-	SnapRefresh    string               `json:"snap_refresh,omitempty"`  // "hold" or "timer=..." LiMDM set in snapd
-	ManagedFiles   []string             `json:"managed_files,omitempty"` // paths written for com.limdm.files, removed when undeclared
+	SnapRefresh    string               `json:"snap_refresh,omitempty"`   // "hold" or "timer=..." LiMDM set in snapd
+	ManagedFiles   []string             `json:"managed_files,omitempty"`  // paths written for com.limdm.files, removed when undeclared
+	FirewallRules  []api.FirewallRule   `json:"firewall_rules,omitempty"` // allow rules LiMDM added
 }
 
 type Agent struct {
@@ -709,10 +710,14 @@ func (a *Agent) enforce() {
 		}
 	}
 	if p.Firewall.Enforce {
+		var err error
 		if st, _ := runFirewall(a); st != pass {
-			if err := a.applyFirewall(); err != nil {
-				a.problem(api.TypeFirewall, "firewall: %v", err)
-			}
+			err = a.applyFirewall()
+		} else {
+			err = a.syncFirewallRules() // active: keep its rules in line with the declaration
+		}
+		if err != nil {
+			a.problem(api.TypeFirewall, "firewall: %v", err)
 		}
 	}
 	if err := a.applyUsers(); err != nil {
