@@ -481,11 +481,22 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 			http.Error(w, msg, code)
 			return
 		}
+		if s.needsApproval(typ) { // bulk scripts: one four eyes request per device
+			for _, id := range ids {
+				if _, err := s.requestApproval(ctx, sess, "command", id, commandApproval{Type: typ, Payload: payload}, strings.TrimSpace(r.FormValue("reason"))); err != nil {
+					s.fail(w, err)
+					return
+				}
+			}
+			http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+			return
+		}
 		for _, id := range ids {
 			if err := s.queueCommand(ctx, sess.Email, id, typ, payload); err != nil {
 				s.fail(w, err)
 				return
 			}
+			s.notifyCommand(sess.Email, id, typ)
 		}
 	default:
 		http.Error(w, "unknown action", http.StatusBadRequest)

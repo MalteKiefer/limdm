@@ -70,7 +70,7 @@ func (s *Server) diagnosticsDownload(w http.ResponseWriter, r *http.Request, ses
 	ctx := r.Context()
 	id := r.PathValue("id")
 	cid, err := strconv.ParseInt(r.PathValue("cid"), 10, 64)
-	if err != nil {
+	if err != nil || !s.inScope(ctx, sess, id) {
 		http.NotFound(w, r)
 		return
 	}

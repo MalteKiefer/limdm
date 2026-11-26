@@ -80,7 +80,9 @@ for recovery keys the reason or ticket reference is required) and announced as
 their own request. An approved command or role change runs at once, in the name of the
 requester, with the approval number and the approver in its audit entry. An approved
 recovery key view opens for the requester once, within one hour. Requests nobody decides
-expire after 24 hours. Request, approval, rejection, expiry and use are audited.
+expire after 24 hours. Request, approval, rejection, expiry and use are audited. Bulk
+scripts create one request per device; commands from the admin API create a request too
+and answer `202` with its ID ([admin-api.md](admin-api.md#commands)).
 
 The setting can only be switched on with at least two active administrators (with one,
 nobody could approve), and while it is on the second to last admin cannot be demoted or

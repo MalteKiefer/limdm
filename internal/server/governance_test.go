@@ -202,6 +202,16 @@ func TestGovernance(t *testing.T) {
 	if n != 1 || by != "a@x.de" {
 		t.Fatalf("approved wipe: %d by %q", n, by)
 	}
+	// bulk scripts wait too: one request per device
+	if code, _ := ui("POST", "/devices/bulk", url.Values{"id": {"d1", "d2"}, "action": {"command:script"}, "payload": {"echo hi"}}, "a@x.de", "admin"); code != http.StatusSeeOther {
+		t.Fatalf("bulk script request: %d", code)
+	}
+	db.QueryRow(ctx, `SELECT count(*) FROM approvals WHERE status='pending' AND action='command' AND payload->>'type'='script'`).Scan(&n)
+	var scripts int
+	db.QueryRow(ctx, `SELECT count(*) FROM commands WHERE type='script'`).Scan(&scripts)
+	if n != 2 || scripts != 0 {
+		t.Fatalf("bulk script under four eyes: %d requests, %d commands", n, scripts)
+	}
 	// role changes wait too, and the last two admins stay admins
 	ui("POST", "/users/update", url.Values{"login": {"h@x.de"}, "role": {"auditor"}}, "a@x.de", "admin")
 	if s.currentRole(ctx, "h@x.de") != "helpdesk" {
