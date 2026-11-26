@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/maltekiefer/limdm/internal/api"
 )
@@ -93,7 +94,7 @@ type querier interface {
 // that already failed on this device is not offered again unless an admin
 // requests it. clearTarget reports a picked version that is already running.
 func (s *Server) dueUpdate(ctx context.Context, q querier, deviceID, running string) (rel *agentRelease, clearTarget bool, err error) {
-	pol, err := s.updatePolicy(ctx, q)
+	pol, rels, err := s.rollout(ctx, q)
 	if err != nil {
 		return nil, false, err
 	}
@@ -125,15 +126,6 @@ func (s *Server) dueUpdate(ctx context.Context, q querier, deviceID, running str
 	if !pol.Auto && !requested {
 		return nil, false, nil
 	}
-	rows, err := q.Query(ctx, `SELECT `+agentReleaseCols+` FROM agent_releases WHERE approved_at IS NOT NULL AND NOT blocked`)
-	if err != nil {
-		return nil, false, err
-	}
-	rels, err := pgx.CollectRows(rows, pgx.RowToStructByPos[agentRelease])
-	if err != nil {
-		return nil, false, err
-	}
-	slices.SortFunc(rels, func(a, b agentRelease) int { return api.CompareVersions(b.Version, a.Version) })
 	pilot := pol.PilotTag != "" && slices.ContainsFunc(tags, func(t string) bool { return strings.EqualFold(t, pol.PilotTag) })
 	for _, r := range rels {
 		due := requested || pilot ||
@@ -146,6 +138,46 @@ func (s *Server) dueUpdate(ctx context.Context, q querier, deviceID, running str
 	}
 	return nil, false, nil
 }
+
+// rolloutCache is the update policy and the approved releases, newest
+// first, as the poll of every device needs them (rollout).
+type rolloutCache struct {
+	at   time.Time
+	pol  UpdatePolicy
+	rels []agentRelease
+}
+
+// rollout loads the update policy and the approved, unblocked releases.
+// Reads through the pool (the minute poll of every device) share a copy for
+// up to 30 seconds; changes on this instance drop it at once (forgetRollout),
+// those of other instances arrive within that time. Reads inside a
+// transaction (the check in) always read fresh.
+func (s *Server) rollout(ctx context.Context, q querier) (UpdatePolicy, []agentRelease, error) {
+	_, pooled := q.(*pgxpool.Pool)
+	if c := s.rolloutC.Load(); pooled && c != nil && time.Since(c.at) < 30*time.Second {
+		return c.pol, c.rels, nil
+	}
+	pol, err := s.updatePolicy(ctx, q)
+	if err != nil {
+		return pol, nil, err
+	}
+	rows, err := q.Query(ctx, `SELECT `+agentReleaseCols+` FROM agent_releases WHERE approved_at IS NOT NULL AND NOT blocked`)
+	if err != nil {
+		return pol, nil, err
+	}
+	rels, err := pgx.CollectRows(rows, pgx.RowToStructByPos[agentRelease])
+	if err != nil {
+		return pol, nil, err
+	}
+	slices.SortFunc(rels, func(a, b agentRelease) int { return api.CompareVersions(b.Version, a.Version) })
+	if pooled {
+		s.rolloutC.Store(&rolloutCache{time.Now(), pol, rels})
+	}
+	return pol, rels, nil
+}
+
+// forgetRollout drops the cached rollout after a change of releases or policy.
+func (s *Server) forgetRollout() { s.rolloutC.Store(nil) }
 
 // offerUpdate hands the due version to the device in this check in.
 func (s *Server) offerUpdate(ctx context.Context, tx pgx.Tx, deviceID, running string) (*api.AgentUpdate, error) {
@@ -202,6 +234,7 @@ func (s *Server) recordUpdateResult(ctx context.Context, tx pgx.Tx, deviceID str
 	if n < rollbackLimit {
 		return nil
 	}
+	s.forgetRollout()
 	tag, err := tx.Exec(ctx, `UPDATE agent_releases SET blocked=true, blocked_reason=$2 WHERE version=$1 AND NOT blocked`,
 		res.To, fmt.Sprintf("%d devices failed or rolled back", n))
 	if err != nil || tag.RowsAffected() == 0 {
@@ -550,6 +583,7 @@ func (s *Server) agentsPolicy(w http.ResponseWriter, r *http.Request, sess sessi
 		return
 	}
 	doc, _ := json.Marshal(pol)
+	defer s.forgetRollout()
 	err = s.auditAction(r.Context(), sess.Email, "agent_updates.policy", "agent", string(doc), func(tx pgx.Tx) error {
 		_, err := tx.Exec(r.Context(), `INSERT INTO settings(key, value) VALUES ('agent_updates', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
 		return err
@@ -653,6 +687,7 @@ func (s *Server) agentsRelease(w http.ResponseWriter, r *http.Request, sess sess
 		http.NotFound(w, r)
 		return
 	}
+	defer s.forgetRollout()
 	err := s.auditAction(r.Context(), sess.Email, "agent_release."+op, version, "", func(tx pgx.Tx) error {
 		tag, err := tx.Exec(r.Context(), q, version, sess.Email)
 		if err == nil && tag.RowsAffected() == 0 {

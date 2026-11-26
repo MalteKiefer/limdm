@@ -61,7 +61,7 @@ PostgreSQL itself is made highly available with the usual tools (see
 | Remote shell | relayed between instances, see [below](#remote-shell) |
 | Background jobs | leader election per job, see [below](#background-jobs) |
 | Rate limits (sign in, enrollment, API tokens, SCIM, CRL, device endpoints), the cap on audited OIDC failures | **per instance**, in memory. With n instances an address gets up to n times the budget. Accepted: the lockout of local accounts (5 failures, 15 minutes) is stored in the database and counts across instances, API and SCIM tokens are 256 bit random values. Counters expire an hour after their last hit; beyond 200,000 throughput keys (devices, tokens) the least recently used are dropped, failure counters (sign in, enrollment, token, SCIM, CRL) never before their window ends |
-| Fleet overview cache, Flathub search cache | per instance, one minute and one hour |
+| Fleet overview cache, Flathub search cache, agent rollout (policy and approved releases for polls) | per instance, one minute, one hour and 30 seconds |
 | `/metrics` request counters | per instance; scrape every instance (`limdm_http_requests_total`), the fleet gauges are the same on all |
 
 ## Load balancer

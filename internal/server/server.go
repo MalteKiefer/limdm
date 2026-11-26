@@ -270,6 +270,7 @@ type Server struct {
 	// check ins running, and those with a body over 1 MiB (inventory, package
 	// list) among them (checkinSlot)
 	checkins, bigCheckins chan struct{}
+	rolloutC              atomic.Pointer[rolloutCache] // agentupdates.go
 }
 
 func pgxPoolConfig(databaseURL string, maxConns int) (*pgxpool.Config, error) {

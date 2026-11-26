@@ -1321,6 +1321,7 @@ func TestAgentUpdates(t *testing.T) {
 	// poll: nothing pending, then a queued command
 	pollOf := func(id string) bool {
 		t.Helper()
+		s.forgetRollout() // the test changes releases in the database directly
 		rec := httptest.NewRecorder()
 		s.poll(rec, httptest.NewRequest("POST", "/api/v1/poll", nil).WithContext(context.WithValue(ctx, deviceKey, id)))
 		var pr api.PollResponse
