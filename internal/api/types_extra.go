@@ -33,7 +33,7 @@ const (
 
 type Repository struct {
 	Name       string `json:"name"`
-	Family     string `json:"family"` // debian | fedora
+	Family     string `json:"family"` // debian | fedora | suse
 	URL        string `json:"url"`
 	Suites     string `json:"suites,omitempty"`     // apt
 	Components string `json:"components,omitempty"` // apt
@@ -46,15 +46,15 @@ type Repository struct {
 
 // Validate checks a package repository; unsigned ones are not allowed.
 func (r Repository) Validate() error {
-	if !nameRe.MatchString(r.Name) || (r.Family != "debian" && r.Family != "fedora") || !httpsURL(r.URL) {
-		return fmt.Errorf("repository %q: name, family (debian|fedora) and an https URL are required", r.Name)
+	if !nameRe.MatchString(r.Name) || (r.Family != "debian" && r.Family != "fedora" && r.Family != "suse") || !httpsURL(r.URL) {
+		return fmt.Errorf("repository %q: name, family (debian|fedora|suse) and an https URL are required", r.Name)
 	}
 	if !suiteRe.MatchString(r.Suites) || !suiteRe.MatchString(r.Components) || (r.Family == "debian" && r.Suites == "") {
 		return fmt.Errorf("repository %q: invalid suites or components", r.Name)
 	}
 	armored := strings.Contains(r.Key, "BEGIN PGP PUBLIC KEY BLOCK") && len(r.Key) <= 64<<10
 	if armored == (r.KeyFile != "") || (r.KeyFile != "" && !keyFileRe.MatchString(r.KeyFile)) {
-		return fmt.Errorf("repository %q: either an armored signing key or a key_file in /usr/share/keyrings, /etc/apt/keyrings or /etc/pki/rpm-gpg is required; unsigned repositories are not allowed", r.Name)
+		return fmt.Errorf("repository %q: either an armored signing key or a key_file in /usr/share/keyrings, /etc/apt/keyrings, /etc/pki/rpm-gpg or /usr/lib/rpm/gnupg/keys is required; unsigned repositories are not allowed", r.Name)
 	}
 	return nil
 }
@@ -183,7 +183,7 @@ var (
 	suiteRe    = regexp.MustCompile(`^[A-Za-z0-9._/ -]{0,200}$`)
 	sshValRe   = regexp.MustCompile(`^[A-Za-z0-9 ,@._:/*-]{1,200}$`)
 	repoFileRe = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9._-]{0,100}\.(list|sources|repo)|sources\.list)$`)
-	keyFileRe  = regexp.MustCompile(`^(/usr/share/keyrings|/etc/apt/keyrings|/etc/pki/rpm-gpg)/[A-Za-z0-9][A-Za-z0-9._-]{0,100}$`)
+	keyFileRe  = regexp.MustCompile(`^(/usr/share/keyrings|/etc/apt/keyrings|/etc/pki/rpm-gpg|/usr/lib/rpm/gnupg/keys)/[A-Za-z0-9][A-Za-z0-9._-]{0,100}$`)
 )
 
 // sshAllowed are sshd options that cannot weaken the compliance baseline.

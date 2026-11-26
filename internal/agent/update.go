@@ -152,6 +152,8 @@ func (a *Agent) installUpdate(ctx context.Context, u api.AgentUpdate) error {
 	case "alpine":
 		// apk sees an unsigned package; its SHA-256 from the signed sums was checked above
 		install = []string{"apk", "add", "--allow-untrusted", "--no-interactive", pkg}
+	case "suse": // the same for zypper, which refuses unsigned local rpms otherwise
+		install = []string{"zypper", "--non-interactive", "install", "--allow-unsigned-rpm", pkg}
 	default:
 		install = []string{"dnf", "install", "-y", "-q", pkg}
 	}

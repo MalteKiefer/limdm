@@ -989,9 +989,14 @@ func runPWQuality(a *Agent) (string, string) {
 }
 
 func fixPWQuality(a *Agent) error {
-	if pkg := map[string]string{"debian": "libpam-pwquality", "arch": "libpwquality", "alpine": "libpwquality"}[a.host.family]; pkg != "" && !a.host.isInstalled(pkg) {
+	if pkg := map[string]string{"debian": "libpam-pwquality", "arch": "libpwquality", "alpine": "libpwquality", "suse": "pam_pwquality"}[a.host.family]; pkg != "" && !a.host.isInstalled(pkg) {
 		if err := a.host.install(pkg); err != nil {
 			return err
+		}
+	}
+	if a.host.family == "suse" && !pamHasPWQuality() { // pam-config owns common-password there
+		if out, err := sh("pam-config", "--add", "--pwquality"); err != nil {
+			return fmt.Errorf("pam-config --add --pwquality: %s", lastLines(out, 2))
 		}
 	}
 	_, err := writeIfChanged("/etc/security/pwquality.conf.d/60-limdm.conf",
@@ -1171,7 +1176,7 @@ func runAuditd(a *Agent) (string, string) {
 
 func fixAuditd(a *Agent) error {
 	pkg := "auditd"
-	if a.host.family == "fedora" {
+	if a.host.family == "fedora" || a.host.family == "suse" {
 		pkg = "audit"
 	}
 	if !a.host.isInstalled(pkg) {

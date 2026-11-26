@@ -96,6 +96,9 @@ func (h *host) repoFiles(prefix string, r api.Repository) (keyName, key, srcName
 	if r.SignedMetadata {
 		check = "gpgcheck=0\nrepo_gpgcheck=1"
 	}
+	if h.family == "suse" {
+		check += "\nautorefresh=1\ntype=rpm-md"
+	}
 	return keyName, key, prefix + r.Name + ".repo", managedHeader + "[" + prefix + r.Name + "]\nname=" + r.Name + "\nbaseurl=" + r.URL +
 		"\nenabled=1\n" + check + "\ngpgkey=file://" + keyPath + "\n"
 }
@@ -104,6 +107,9 @@ func (h *host) repoFiles(prefix string, r api.Repository) (keyName, key, srcName
 func (h *host) repoDirs() (keyDir, srcDir string) {
 	if h.family == "debian" {
 		return "/etc/apt/keyrings", "/etc/apt/sources.list.d"
+	}
+	if h.family == "suse" {
+		return "/etc/pki/rpm-gpg", "/etc/zypp/repos.d"
 	}
 	return "/etc/pki/rpm-gpg", "/etc/yum.repos.d"
 }
@@ -132,11 +138,19 @@ func (a *Agent) applyRepositories(repos []api.Repository) error {
 		c1, err1 = syncManaged(keyDir, "RPM-GPG-KEY-limdm-", "", keys, append(keyKeep, "RPM-GPG-KEY-limdm-osquery")...)
 		c2, err2 = syncManaged(srcDir, "limdm-", ".repo", sources, append(srcKeep, "limdm-osquery.repo")...)
 	}
+	var err3 error
+	if c1 {
+		var paths []string
+		for kn := range keys {
+			paths = append(paths, filepath.Join(keyDir, kn))
+		}
+		err3 = a.host.trustKeys(paths...)
+	}
 	if c1 || c2 {
 		a.host.aptStale.Store(true) // refresh package lists with the new sources
 		a.event("package sources updated")
 	}
-	return errors.Join(err1, err2)
+	return errors.Join(err1, err2, err3)
 }
 
 // appRepoFiles lists the catalog apps' repository files in dir.
@@ -157,7 +171,8 @@ func (a *Agent) setAppRepos(src api.AppSource, remove bool) error {
 	keyDir, srcDir := a.host.repoDirs()
 	var errs []error
 	for _, r := range src.Repos {
-		if r.Family != a.host.family {
+		// the catalog has Debian and Fedora sources; an rpm-md repository works with zypper too
+		if r.Family != a.host.family && (r.Family != "fedora" || a.host.family != "suse") {
 			continue
 		}
 		kn, k, sn, s := a.host.repoFiles("limdm-app-", r)
@@ -165,8 +180,11 @@ func (a *Agent) setAppRepos(src api.AppSource, remove bool) error {
 			k, s = "", ""
 		}
 		if kn != "" {
-			_, err := writeOrRemove(filepath.Join(keyDir, kn), k, 0o644)
+			c, err := writeOrRemove(filepath.Join(keyDir, kn), k, 0o644)
 			errs = append(errs, err)
+			if c && !remove {
+				errs = append(errs, a.host.trustKeys(filepath.Join(keyDir, kn)))
+			}
 		}
 		c, err := writeOrRemove(filepath.Join(srcDir, sn), s, 0o644)
 		errs = append(errs, err)
@@ -184,6 +202,8 @@ func (a *Agent) applyCertificates(certs []api.Certificate) error {
 	switch a.host.family {
 	case "fedora":
 		dir, ext, update = "/etc/pki/ca-trust/source/anchors", ".pem", "update-ca-trust"
+	case "suse":
+		dir, ext, update = "/etc/pki/trust/anchors", ".pem", "update-ca-certificates"
 	case "arch":
 		dir, ext, update = "/etc/ca-certificates/trust-source/anchors", ".crt", "update-ca-trust"
 	}

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install the LiMDM agent with its mandatory dependency osquery.
 #
-#   sudo sh install-agent.sh ./limdm-agent_<version>_<arch>.deb|.rpm
+#   sudo sh install-agent.sh ./limdm-agent_<version>_<arch>.deb|.rpm (Debian, Ubuntu, Fedora, RHEL, openSUSE, SLES)
 #
 # Adds the official osquery repository, trusting only the embedded signing key
 # (fingerprint 1484 120A C4E9 F8A1 A577  AEEE 97A8 0C63 C9D8 B80B), then installs
@@ -94,8 +94,28 @@ gpgcheck=1
 gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery
 REPO
     dnf install -y -q osquery "$(readlink -f "$pkg")"
+elif command -v zypper >/dev/null 2>&1; then
+    # openSUSE Leap, Tumbleweed, SLES: the osquery rpm repository works with zypper;
+    # the key is imported into rpm first, so zypper does not ask whether to trust it
+    install -d -m 0755 /etc/pki/rpm-gpg
+    printf '%s\n' "$key" > /etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery
+    rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery
+    cat > /etc/zypp/repos.d/limdm-osquery.repo <<'REPO'
+# Managed by LiMDM. Local changes are overwritten.
+[limdm-osquery]
+name=osquery
+baseurl=https://pkg.osquerypackages.com/rpm/$basearch/
+enabled=1
+autorefresh=1
+type=rpm-md
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery
+REPO
+    zypper --non-interactive refresh limdm-osquery
+    # the agent package is not signed itself; its checksum comes from the release
+    zypper --non-interactive install --allow-unsigned-rpm osquery "$(readlink -f "$pkg")"
 else
-    echo "unsupported distribution: needs apt-get or dnf" >&2
+    echo "unsupported distribution: needs apt-get, dnf or zypper" >&2
     exit 1
 fi
 echo "installed. enroll with: limdm-agent enroll --server URL --fingerprint FP --token TOKEN"

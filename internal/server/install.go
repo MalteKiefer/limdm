@@ -9,7 +9,7 @@ import (
 	"github.com/maltekiefer/limdm/internal/api"
 )
 
-// /install.sh installs the newest agent release from GitHub (deb or rpm,
+// /install.sh installs the newest agent release from GitHub (deb or rpm for dnf and zypper,
 // checksum verified, osquery repository with pinned key) and enrolls the
 // device. It contains no secret: the token comes from LIMDM_TOKEN or from an
 // existing /etc/limdm/enroll.conf, so the same script serves mass deployment.
@@ -41,9 +41,10 @@ case "$(uname -m)" in
 esac
 if command -v apt-get >/dev/null 2>&1; then ext=deb
 elif command -v dnf >/dev/null 2>&1; then ext=rpm
+elif command -v zypper >/dev/null 2>&1; then ext=rpm # openSUSE, SLES
 elif command -v pacman >/dev/null 2>&1; then ext=pkg.tar.zst
 elif command -v apk >/dev/null 2>&1; then ext=apk
-else echo "needs apt-get, dnf, pacman or apk; other systems: install the tar.gz release manually" >&2; exit 1
+else echo "needs apt-get, dnf, zypper, pacman or apk; other systems: install the tar.gz release manually" >&2; exit 1
 fi
 
 install -d -m 0700 /etc/limdm
@@ -96,6 +97,24 @@ Signed-By: /etc/apt/keyrings/limdm-osquery.asc
 SRC
     apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o Dpkg::Options::=--force-confold osquery "$tmp/$pkg"
+elif command -v zypper >/dev/null 2>&1 && ! command -v dnf >/dev/null 2>&1; then
+    # SUSE: rpm trusts the key first, so zypper does not ask; the agent rpm is
+    # unsigned, its SHA-256 was checked against the release sums above
+    install -d -m 0755 /etc/pki/rpm-gpg
+    printf '%s\n' "$key" > /etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery
+    rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery
+    cat > /etc/zypp/repos.d/limdm-osquery.repo <<'REPO'
+# Managed by LiMDM. Local changes are overwritten.
+[limdm-osquery]
+name=osquery
+baseurl=https://pkg.osquerypackages.com/rpm/$basearch/
+enabled=1
+autorefresh=1
+type=rpm-md
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery
+REPO
+    zypper --non-interactive install --allow-unsigned-rpm osquery "$tmp/$pkg"
 else
     install -d -m 0755 /etc/pki/rpm-gpg
     printf '%s\n' "$key" > /etc/pki/rpm-gpg/RPM-GPG-KEY-limdm-osquery

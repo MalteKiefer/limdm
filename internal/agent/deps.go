@@ -18,6 +18,7 @@ type dependency struct {
 	cmd            string   // program the agent calls, or a file pattern (contains "/")
 	debian, fedora string   // package providing it
 	arch, alpine   string   // where the name differs from Fedora's
+	suse           string   // likewise
 	desktop        bool     // only on devices with a desktop
 	with           []string // only if one of these programs is installed
 }
@@ -27,19 +28,19 @@ var dependencies = []dependency{
 	{cmd: "findmnt", debian: "util-linux", fedora: "util-linux", alpine: "findmnt"},
 	{cmd: "lsblk", debian: "util-linux", fedora: "util-linux", alpine: "lsblk"},
 	{cmd: "runuser", debian: "util-linux", fedora: "util-linux", alpine: "runuser"},
-	{cmd: "ip", debian: "iproute2", fedora: "iproute", arch: "iproute2", alpine: "iproute2"},
-	{cmd: "sysctl", debian: "procps", fedora: "procps-ng", arch: "procps-ng", alpine: "procps"},
+	{cmd: "ip", debian: "iproute2", fedora: "iproute", arch: "iproute2", alpine: "iproute2", suse: "iproute2"},
+	{cmd: "sysctl", debian: "procps", fedora: "procps-ng", arch: "procps-ng", alpine: "procps", suse: "procps"},
 	{cmd: "modprobe", debian: "kmod", fedora: "kmod"},
-	{cmd: "gpg", debian: "gpg", fedora: "gnupg2", arch: "gnupg", alpine: "gnupg"},
+	{cmd: "gpg", debian: "gpg", fedora: "gnupg2", arch: "gnupg", alpine: "gnupg", suse: "gpg2"},
 	{cmd: "nft", debian: "nftables", fedora: "nftables"},
 	{cmd: "auditctl", debian: "auditd", fedora: "audit"},
-	{cmd: "notify-send", debian: "libnotify-bin", fedora: "libnotify", desktop: true},
+	{cmd: "notify-send", debian: "libnotify-bin", fedora: "libnotify", desktop: true, suse: "libnotify-tools"},
 	{cmd: "dconf", debian: "dconf-cli", fedora: "dconf", desktop: true},
 	// the GTK 4 desktop app (packaging/limdm-desktop-ui)
 	{cmd: "python3", debian: "python3", fedora: "python3", desktop: true, arch: "python", alpine: "python3"},
 	{cmd: "/usr/lib*/python3*/*-packages/gi/__init__.py", debian: "python3-gi", fedora: "python3-gobject", desktop: true, arch: "python-gobject", alpine: "py3-gobject3"},
-	{cmd: "/usr/lib*/*/girepository-1.0/Gtk-4.0.typelib", debian: "gir1.2-gtk-4.0", fedora: "gtk4", desktop: true, alpine: "gtk4.0"},
-	{cmd: "/usr/lib*/*/girepository-1.0/Adw-1.typelib", debian: "gir1.2-adw-1", fedora: "libadwaita", desktop: true},
+	{cmd: "/usr/lib*/*/girepository-1.0/Gtk-4.0.typelib", debian: "gir1.2-gtk-4.0", fedora: "gtk4", desktop: true, alpine: "gtk4.0", suse: "typelib-1_0-Gtk-4_0"},
+	{cmd: "/usr/lib*/*/girepository-1.0/Adw-1.typelib", debian: "gir1.2-adw-1", fedora: "libadwaita", desktop: true, suse: "typelib-1_0-Adw-1"},
 	// idle screen lock for compositors and window managers (screenlock.go)
 	{cmd: "swayidle", debian: "swayidle", fedora: "swayidle", desktop: true, with: waylandCompositors},
 	{cmd: "swaylock", debian: "swaylock", fedora: "swaylock", desktop: true, with: waylandCompositors},
@@ -119,6 +120,8 @@ func (d dependency) pkg(family string) string {
 		return d.arch
 	case family == "alpine" && d.alpine != "":
 		return d.alpine
+	case family == "suse" && d.suse != "":
+		return d.suse
 	}
 	return d.fedora
 }

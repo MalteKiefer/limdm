@@ -86,11 +86,13 @@ Package sources managed by LiMDM, and unmanaged sources to switch off.
  "disable": ["netbird.list"]}
 ```
 
-* `family`: `debian` (written as deb822 `.sources`) or `fedora` (`.repo`); each device only
+* `family`: `debian` (written as deb822 `.sources`), `fedora` (`.repo` in `/etc/yum.repos.d`)
+  or `suse` (`.repo` in `/etc/zypp/repos.d`, key imported into rpm); each device only
   uses entries of its family.
 * `url` must be https. Every source is signed: either an armored `key` (written to
   `/etc/apt/keyrings` or `/etc/pki/rpm-gpg`) or a `key_file` that already exists on the device
-  under `/usr/share/keyrings`, `/etc/apt/keyrings` or `/etc/pki/rpm-gpg`.
+  under `/usr/share/keyrings`, `/etc/apt/keyrings`, `/etc/pki/rpm-gpg` or `/usr/lib/rpm/gnupg/keys`
+  (SUSE distribution keys).
 * The name `osquery` is reserved for the agent's own source.
 * `disable` lists file names of unmanaged sources (`*.list`, `*.sources`, `*.repo`,
   `sources.list`). The agent keeps the original in `/var/lib/limdm/repo-backup`, switches

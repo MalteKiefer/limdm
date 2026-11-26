@@ -70,7 +70,7 @@ nfpms:
     package_name: limdm-agent
     homepage: https://github.com/MalteKiefer/limdm
     maintainer: Malte Kiefer <malte.kiefer@kiefer-networks.de>
-    description: LiMDM device agent, declarative device management for Debian, Ubuntu, Fedora, CentOS, Arch and Alpine
+    description: LiMDM device agent, declarative device management for Debian, Ubuntu, Fedora, CentOS, openSUSE, SLES, Arch and Alpine
     license: MIT
     formats: [deb, rpm, archlinux, apk]
     bindir: /usr/bin
@@ -146,9 +146,12 @@ nfpms:
         dependencies: [osquery, systemd, util-linux, cryptsetup-bin, iproute2, procps, kmod, gpg]
         recommends: [unattended-upgrades, ufw, libpam-pwquality, auditd, nftables]
         suggests: [zenity, kdialog, libnotify-bin, dconf-cli, flatpak, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1]
+      # one rpm for Fedora and SUSE: hard dependencies only on names both use;
+      # iproute, procps-ng and gnupg2 are named iproute2, procps and gpg2 on
+      # SUSE, so they are weak (dnf and zypper install recommends by default)
       rpm:
-        dependencies: [osquery, systemd, util-linux, cryptsetup, iproute, procps-ng, kmod, gnupg2]
-        recommends: [firewalld, audit, dnf-plugins-core, nftables]
+        dependencies: [osquery, systemd, util-linux, cryptsetup, kmod]
+        recommends: [iproute, procps-ng, gnupg2, firewalld, audit, dnf-plugins-core, nftables]
         suggests: [zenity, kdialog, libnotify, dconf, flatpak, python3-gobject, gtk4, libadwaita]
       # osquery is not packaged for Arch and Alpine; the agent uses its native inventory there
       archlinux:
