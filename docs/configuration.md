@@ -26,6 +26,7 @@ the environment.
 | `LIMDM_RELEASE_REPO` | `MalteKiefer/limdm` | GitHub repository for agent updates and `/install.sh`. |
 | `LIMDM_GEOIP_URL` | `https://ipwho.is/` | Location lookup for device public addresses, the IP is appended. Used only when **Settings, Security, Privacy** turns geolocation on (default off); `off` disables it for good ([security.md](security.md#privacy)). |
 | `LIMDM_SYSLOG` | | Forward audit entries and device events as RFC 5424 syslog, `udp://host:514` or `tcp://host:514` ([security.md](security.md#audit-log)). |
+| `LIMDM_MULTI_TENANT` | `false` | `true` shows the tenant pages and the tenant switcher to global administrators ([tenants.md](tenants.md)). Tenant isolation applies regardless. |
 
 The server refuses to start when OIDC and local login are both off, when OIDC is set without
 an administrator, or when the console would listen publicly without a certificate.
@@ -110,6 +111,10 @@ history), the compliance history page and the audit log with its CSV and JSON Li
 with fleet wide data that are not filtered (Directory, Agents, Software, Network
 certificates, version history) are refused to scoped accounts. API tokens can carry scope
 tags too ([admin-api.md](admin-api.md#tokens)); scoped tokens get no metrics.
+
+**Tenants.** With multi tenancy, accounts belong to one tenant or are global (super
+admins); accounts added while switched to a tenant belong to it. Users lists the accounts
+of the current tenant, in the global view all of them with their tenant ([tenants.md](tenants.md)).
 
 ## Profile
 

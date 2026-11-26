@@ -73,6 +73,7 @@ Host installation with deb, rpm, Arch or Alpine packages behind Caddy, OIDC and 
 | [Installation](docs/installation.md) | Docker Compose, deb/rpm with Caddy, PostgreSQL, first sign in, upgrades |
 | [Configuration](docs/configuration.md) | Environment variables, console settings, OIDC, branding, roles |
 | [Concepts](docs/concepts.md) | Declarations, library, blueprints, conditions, inheritance, directory |
+| [Tenants](docs/tenants.md) | Multi tenancy for MSPs and groups of companies, super admins, shared objects |
 | [Declarations](docs/declarations.md) | Reference of every library item type |
 | [Agent deployment](docs/agent.md) | Install script, mass deployment with `enroll.conf`, desktop helper, updates |
 | [Desktop login](docs/desktop-login.md) | SSO login and session mode, reconfirmation, offline grace |

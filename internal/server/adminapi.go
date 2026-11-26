@@ -1006,6 +1006,7 @@ type apiAuditEntry struct {
 	Detail string    `json:"detail"`
 	Prev   string    `json:"prev"`
 	Hash   string    `json:"hash"`
+	Tenant *int64    `json:"tenant_id,omitempty"`
 }
 
 // apiAudit reads the audit log newest first with the console's filters.
@@ -1037,7 +1038,7 @@ func (s *Server) apiAudit(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	}
 	items := make([]apiAuditEntry, len(list))
 	for i, a := range list {
-		items[i] = apiAuditEntry{a.ID, a.At, a.Actor, a.Action, a.Target, a.Detail, hex.EncodeToString(a.Prev), hex.EncodeToString(a.Hash)}
+		items[i] = apiAuditEntry{a.ID, a.At, a.Actor, a.Action, a.Target, a.Detail, hex.EncodeToString(a.Prev), hex.EncodeToString(a.Hash), a.Tenant}
 	}
 	page.Items = items
 	writeJSON(w, page)
