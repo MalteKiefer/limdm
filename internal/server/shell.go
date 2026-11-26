@@ -85,7 +85,7 @@ var errAwaitingApproval = errors.New("the action waits for approval")
 // shell when the setting asks for it: an approved request of this user for
 // this device is used up and the action runs; otherwise a request is filed
 // (once) and errAwaitingApproval returned. Other actions run.
-func (s *Server) requireApproval(ctx context.Context, sess session, action, target string) error {
+func (s *Server) requireApproval(ctx context.Context, sess session, action, target string) error { //nolint:unparam // the E3 hook takes the action name
 	if action != "remote_shell" || !s.settings().FourEyesShell {
 		return nil
 	}
