@@ -44,7 +44,7 @@ func applyDconf(d *api.Dconf) error {
 	settings, locks := dconfFiles(d)
 	c1, e1 := writeOrRemove(dconfCustom, settings, 0o644)
 	c2, e2 := writeOrRemove(dconfCustomLocks, locks, 0o644)
-	if err := errors.Join(e1, e2); err != nil || !(c1 || c2) {
+	if err := errors.Join(e1, e2); err != nil || !c1 && !c2 {
 		return err
 	}
 	if settings != "" && !hasCmd("dconf") {

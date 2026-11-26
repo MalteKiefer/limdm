@@ -60,10 +60,10 @@ func noProxyMatch(host, list string) bool {
 	ip := net.ParseIP(h)
 	for _, e := range strings.Split(strings.ToLower(list), ",") {
 		e = strings.TrimSpace(e)
-		switch {
-		case e == "":
+		switch e {
+		case "":
 			continue
-		case e == "*":
+		case "*":
 			return true
 		}
 		if _, n, err := net.ParseCIDR(e); err == nil {
@@ -175,7 +175,7 @@ func (a *Agent) applyProxy(p *api.Proxy) error {
 // removes it when want is empty and the value is still the one LiMDM wrote
 // (prev). It returns the value LiMDM now owns.
 func syncINIKey(path, section, key, want, prev string) (string, error) {
-	b, err := os.ReadFile(path) //nolint:gosec // constant path
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return prev, err
 	}

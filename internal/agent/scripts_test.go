@@ -35,7 +35,7 @@ func TestParseScriptCommand(t *testing.T) {
 		t.Fatal("plain body changed")
 	}
 	tb := &tailBuffer{max: 4}
-	tb.Write([]byte("abcdef")) //nolint:errcheck // never fails
+	tb.Write([]byte("abcdef"))
 	if string(tb.b) != "cdef" {
 		t.Fatal(string(tb.b))
 	}

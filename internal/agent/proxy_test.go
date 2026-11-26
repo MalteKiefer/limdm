@@ -55,7 +55,7 @@ func TestSyncINIKey(t *testing.T) {
 		t.Fatalf("remove: %v %q\n%s", err, owned, b)
 	}
 	// a proxy set by hand is never removed
-	os.WriteFile(p, []byte("[main]\nproxy=http://own:8080\n"), 0o644) //nolint:errcheck,gosec // test file
+	os.WriteFile(p, []byte("[main]\nproxy=http://own:8080\n"), 0o644)
 	if owned, _ = syncINIKey(p, "main", "proxy", "", "http://proxy:3128"); owned != "" {
 		t.Fatalf("owned %q", owned)
 	}

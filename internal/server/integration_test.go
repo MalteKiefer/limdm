@@ -330,6 +330,49 @@ func TestIntegration(t *testing.T) {
 	call(dev, "/api/v1/checkin", api.CheckinRequest{DeclarationsToken: cr.DeclarationsToken, StatusHash: "s1", PackagesHash: "p1",
 		Results: []api.CommandResult{{ID: cr.Commands[0].ID, OK: true, Output: "ok"}}, Events: []string{"remediated kernel.aslr"}}, nil)
 
+	// script results and diagnostics bundles are stored per device; bundles download for admins
+	ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"diagnostics"}}, adminSess)
+	if code, body := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"script"}, "payload": {"echo $A"}, "params": {"A=1"}}, adminSess); code != http.StatusSeeOther {
+		t.Fatalf("script with parameters: %d %s", code, body)
+	}
+	cr = api.CheckinResponse{}
+	call(dev, "/api/v1/checkin", api.CheckinRequest{DeclarationsToken: firstToken, StatusHash: "s1", PackagesHash: "p1"}, &cr)
+	var res []api.CommandResult
+	for _, c := range cr.Commands {
+		switch c.Type {
+		case "diagnostics":
+			res = append(res, api.CommandResult{ID: c.ID, OK: true, Output: "collected", Diagnostics: "journal line\x00 one"})
+		case "script":
+			if !strings.Contains(c.Payload, `"A":"1"`) {
+				t.Fatalf("script payload %q", c.Payload)
+			}
+			res = append(res, api.CommandResult{ID: c.ID, Output: "1", Script: &api.ScriptResult{ExitCode: 2, Stdout: "1\n", Start: time.Now(), End: time.Now()}})
+		}
+	}
+	if code := call(dev, "/api/v1/checkin", api.CheckinRequest{DeclarationsToken: cr.DeclarationsToken, StatusHash: "s1", PackagesHash: "p1", Results: res,
+		ScriptResults: []api.ScriptResult{{Name: "cleanup", ExitCode: 0, Start: time.Now(), End: time.Now()}}}, nil); code != 200 || len(res) != 2 {
+		t.Fatalf("results checkin: %d %d", code, len(res))
+	}
+	var nScripts, nDiag int
+	db.QueryRow(ctx, `SELECT count(*) FROM script_results WHERE device_id=$1`, er.DeviceID).Scan(&nScripts)
+	db.QueryRow(ctx, `SELECT count(*) FROM diagnostics WHERE device_id=$1`, er.DeviceID).Scan(&nDiag)
+	if nScripts != 2 || nDiag != 1 {
+		t.Fatalf("stored %d script results, %d bundles", nScripts, nDiag)
+	}
+	diagPath := "/devices/" + er.DeviceID + "/diagnostics/" + fmt.Sprint(res[0].ID)
+	if res[0].Diagnostics == "" {
+		diagPath = "/devices/" + er.DeviceID + "/diagnostics/" + fmt.Sprint(res[1].ID)
+	}
+	if code, body := ui("GET", diagPath, nil, adminSess); code != 200 || !strings.Contains(body, "journal line one") {
+		t.Fatalf("diagnostics download: %d %q", code, body)
+	}
+	if code, _ := ui("GET", diagPath, nil, auditor); code != http.StatusForbidden {
+		t.Fatalf("auditor downloaded diagnostics: %d", code)
+	}
+	if code, body := ui("GET", "/devices/"+er.DeviceID+"?tab=commands", nil, adminSess); code != 200 || !strings.Contains(body, "cleanup") {
+		t.Fatalf("commands tab: %d", code)
+	}
+
 	// every admin page renders
 	pages := []string{"/", "/devices", "/devices?status=non-compliant&q=laptop", "/compliance", "/compliance?state=failing&level=1&framework=iso&sort=fail&q=luks", "/blueprints", "/blueprints/" + bpID, "/blueprints/new", "/library", "/library/new?type=com.limdm.packages", "/library/" + itemID("Debian tools"), "/tokens", "/audit"}
 	for _, tab := range []string{"overview", "hardware", "network", "software", "software&sub=sources", "accounts", "accounts&sub=groups&system=1", "compliance", "declarations", "commands&type=reboot"} {

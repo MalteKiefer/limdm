@@ -71,7 +71,7 @@ func runScript(body string, params map[string]string, timeoutMinutes int) (api.S
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	argv := append(scriptInterpreter(body), f.Name())
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // admin script on a device that allows scripts
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	env := append(os.Environ(), "DEBIAN_FRONTEND=noninteractive", "LC_ALL=C")
 	keys := make([]string, 0, len(params))
 	for k := range params {
