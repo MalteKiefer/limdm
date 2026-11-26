@@ -471,6 +471,9 @@ func (s *Server) libraryEdit(w http.ResponseWriter, r *http.Request, sess sessio
 	} else {
 		it.Type, it.Payload = api.TypePackages, json.RawMessage(api.Types[api.TypePackages])
 	}
+	if it.ID > 0 && it.Type == api.TypeNetwork { // secrets stay on the server
+		it.Payload = api.MaskNetworkSecrets(it.Payload)
+	}
 	var pretty bytes.Buffer
 	if err := json.Indent(&pretty, it.Payload, "", "  "); err != nil {
 		pretty.WriteString(string(it.Payload))
@@ -508,6 +511,21 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		}
 		it.Payload = p
 	}
+	if it.Type == api.TypeNetwork { // masked secrets keep their stored value
+		var stored []byte
+		if id > 0 {
+			if err := s.db.QueryRow(r.Context(), `SELECT payload FROM library_items WHERE id=$1 AND type=$2`, id, it.Type).Scan(&stored); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				fail(err)
+				return
+			}
+		}
+		p, err := api.RestoreNetworkSecrets(it.Payload, stored)
+		if err != nil {
+			fail(err)
+			return
+		}
+		it.Payload = p
+	}
 	if err := it.Validate(); err != nil {
 		fail(err)
 		return
@@ -518,7 +536,11 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		return
 	}
 	sig := signItem(it.Name, it.Type, compact.Bytes())
-	err := s.auditAction(r.Context(), sess.Email, "library.save", it.Name, it.Type+" "+compact.String(), func(tx pgx.Tx) error {
+	detail := compact.String()
+	if it.Type == api.TypeNetwork {
+		detail = string(api.MaskNetworkSecrets(compact.Bytes())) // no secrets in the audit log
+	}
+	err := s.auditAction(r.Context(), sess.Email, "library.save", it.Name, it.Type+" "+detail, func(tx pgx.Tx) error {
 		if id > 0 {
 			tag, err := tx.Exec(r.Context(), `UPDATE library_items SET name=$2, type=$3, description=$4, payload=$5, signature=$6, updated_at=now() WHERE id=$1`,
 				id, it.Name, it.Type, it.Description, compact.String(), sig)
