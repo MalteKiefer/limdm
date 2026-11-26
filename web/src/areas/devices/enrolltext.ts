@@ -1,5 +1,4 @@
-// The install command and enroll.conf of the add device flow, as the
-// classic enrollment page prints them.
+// The install command and enroll.conf of the add device flow.
 
 export const installCommand = (publicURL: string, token?: string) => (token ? `curl -fsSL ${publicURL}/install.sh | sudo LIMDM_TOKEN=${token} sh` : `curl -fsSL ${publicURL}/install.sh | sudo sh`)
 

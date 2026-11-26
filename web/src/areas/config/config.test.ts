@@ -30,7 +30,7 @@ describe('blueprint map', () => {
 
 describe('catalog app form', () => {
   const base = { id: 'code', name: 'Code', summary: '', category: '', mode: 'available' as const, enabled: true, flatpak: 'com.visualstudio.code', remote: 'flathub', debian: 'code', fedora: '', prefer: 'package' as const, detect: 'code-insiders  code-oss', scope: [], repoName: '', debUrl: 'https://packages.microsoft.com/repos/code', debSuite: 'stable', debComponents: 'main', debKey: 'KEY', rpmUrl: '', rpmKey: '', rpmSigned: false }
-  it('maps sources like the classic form: packages first, vendor repo named after the app', () => {
+  it('maps sources: packages first, vendor repo named after the app', () => {
     const app = fromForm(base)
     expect(app.sources.map((s) => s.kind)).toEqual(['package', 'flatpak'])
     expect(app.sources[0].repos?.[0]).toMatchObject({ name: 'code', family: 'debian', suites: 'stable' })

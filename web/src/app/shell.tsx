@@ -3,7 +3,7 @@
 // the Outlet inside an error boundary, so a crashing page leaves the shell.
 import { Dialog } from '@base-ui/react/dialog'
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router'
-import { Bell, Bookmark, Building2, ChevronsUpDown, CircleHelp, ExternalLink, Languages, LogOut, Menu as MenuIcon, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Rows3, Rows4, Search, Sun, UserRound, Users } from 'lucide-react'
+import { Bell, Bookmark, Building2, ChevronsUpDown, CircleHelp, Languages, LogOut, Menu as MenuIcon, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Rows3, Rows4, Search, Sun, UserRound, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useInboxCount, useLiveState, startLive } from '../api/live'
 import { useMe } from '../api/me'
@@ -137,12 +137,6 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
             </li>
           ))}
         <li>
-          <a href="/classic" className={cx('flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] text-muted hover:bg-surface-2 hover:text-fg', collapsed && 'justify-center px-0')}>
-            <ExternalLink size={16} aria-hidden />
-            {collapsed ? <span className="sr-only">{t('nav.oldConsole')}</span> : t('nav.oldConsole')}
-          </a>
-        </li>
-        <li>
           <UserMenu collapsed={collapsed} />
         </li>
       </ul>
@@ -185,7 +179,6 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         'sep',
         { label: t('settings.profile.title'), icon: UserRound, onClick: () => void navigate({ to: '/profile' }) },
         { label: t('settings.help.title'), icon: CircleHelp, onClick: () => void navigate({ to: '/help' }) },
-        { label: t('nav.oldConsole'), icon: ExternalLink, onClick: () => location.assign('/classic') },
         { label: t('user.signOut'), icon: LogOut, onClick: () => void signOut() },
       ]}
     />

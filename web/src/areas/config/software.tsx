@@ -529,7 +529,7 @@ function toForm(a?: CatalogApp): Form {
   return f
 }
 
-/** The catalog app as the API takes it; the same mapping as the classic form. */
+/** The catalog app as the API takes it; packages first, vendor repository named after the app. */
 export function fromForm(f: Form, icon?: string, removeIcon?: boolean): CatalogAppInput {
   const words = (s: string) => s.split(/\s+/).filter(Boolean)
   const srcs: CatalogAppInput['sources'] = []

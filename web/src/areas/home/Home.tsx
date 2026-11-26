@@ -86,7 +86,7 @@ export function Home() {
       <Onboarding />
       {f.total === 0 ? (
         <div className="card">
-          <EmptyState icon={Monitor} title={t('home.noDevices')} action={<a className="btn btn-primary" href="/devices">{t('home.enroll')}</a>}>
+          <EmptyState icon={Monitor} title={t('home.noDevices')} action={<a className="btn btn-primary" href="/app/devices/enroll">{t('home.enroll')}</a>}>
             {t('home.noDevicesBody')}
           </EmptyState>
         </div>

@@ -64,7 +64,7 @@ export async function unwrap<T>(p: Promise<Result<T>>): Promise<T> {
   return r.data as T
 }
 
-/** Posts a classic console form (tenant switch, sign out) with the CSRF field. */
+/** Posts a server form (sign out) with the CSRF field. */
 export async function postForm(path: string, fields: Record<string, string> = {}) {
   const body = new URLSearchParams({ ...fields, csrf: csrfToken })
   const res = await fetch(path, { method: 'POST', body, credentials: 'same-origin', redirect: 'manual' })
