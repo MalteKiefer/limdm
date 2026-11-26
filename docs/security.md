@@ -77,7 +77,12 @@
   allowed. The lists also cover the admin API and `/metrics`, which share the console
   listener. Loopback is always allowed, saving a list that would lock out your own address
   is refused, and the agent API, `/healthz`, `/readyz`, SCIM and `/install.sh` are not
-  affected. Refused requests are logged with the parsed address.
+  affected. Refused requests are logged with the parsed address. SCIM has its own list,
+  **SCIM allowed networks** (empty: every network), for the identity provider's
+  provisioning addresses; outside it `/scim/` answers 403 before the token is checked. The
+  SCIM token can manage directory people and groups but never create a console
+  administrator: a role mapping to `admin` ignores groups known only from SCIM
+  ([configuration.md](configuration.md#role-groups)).
 * **Client address.** `X-Forwarded-For` is used only when the peer is loopback or in
   `LIMDM_TRUSTED_PROXIES`; then the last entry counts. Network lists, rate limits and audit
   entries use this address.

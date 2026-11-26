@@ -40,6 +40,12 @@ type Settings struct {
 	// Loopback is always allowed, so the host itself can repair a mistake.
 	ConsoleAllow []string `json:"console_allow,omitempty"`
 	ConsoleBlock []string `json:"console_block,omitempty"`
+	// SCIMAllow limits /scim/ to these networks (the identity provider's
+	// provisioning addresses); empty allows every network.
+	SCIMAllow []string `json:"scim_allow,omitempty"`
+	// NotifyPrivate lets global notification channels reach private
+	// networks (an internal SIEM or mail relay); tenant channels never can.
+	NotifyPrivate bool `json:"notify_private_networks,omitempty"`
 	// Password rules for passwords chosen in the console: local accounts on
 	// devices (create, reset) and local console accounts.
 	Rules PasswordPolicy `json:"password_policy"` // password rules
@@ -138,6 +144,7 @@ type runtimeState struct {
 	set      Settings
 	allow    []netip.Prefix // parsed ConsoleAllow
 	block    []netip.Prefix // parsed ConsoleBlock
+	scim     []netip.Prefix // parsed SCIMAllow
 	auth     *oidcAuth      // nil when OIDC is not configured
 	branding api.Branding   // derived from set once, sent to agents and shown in the console
 }
@@ -279,6 +286,10 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 	if err != nil {
 		return nil, fmt.Errorf("blocked networks: %w", err)
 	}
+	scim, err := parseNets(set.SCIMAllow)
+	if err != nil {
+		return nil, fmt.Errorf("SCIM networks: %w", err)
+	}
 	var auth *oidcAuth
 	if cur := s.rt.Load(); cur != nil && set.OIDCIssuer != "" && cur.set.OIDCIssuer == set.OIDCIssuer &&
 		cur.set.OIDCClientID == set.OIDCClientID && cur.set.OIDCClientSecret == set.OIDCClientSecret &&
@@ -300,7 +311,7 @@ func (s *Server) prepare(ctx context.Context, set Settings) (*runtimeState, erro
 	if auth == nil && !set.LocalLogin && (!s.rediscover.Load() || set.OIDCIssuer == "") {
 		return nil, errors.New("enable at least one login method: OIDC or local accounts")
 	}
-	return &runtimeState{set: set, auth: auth, branding: computeBranding(set), allow: allow, block: block}, nil
+	return &runtimeState{set: set, auth: auth, branding: computeBranding(set), allow: allow, block: block, scim: scim}, nil
 }
 
 // parseNets reads CIDRs or single addresses (one per entry).
@@ -329,6 +340,12 @@ func parseNets(list []string) ([]netip.Prefix, error) {
 		return nil, errors.New("at most 200 entries")
 	}
 	return res, nil
+}
+
+// netsContain reports whether the address ip is in one of nets.
+func netsContain(nets []netip.Prefix, ip string) bool {
+	a, err := netip.ParseAddr(ip)
+	return err == nil && slices.ContainsFunc(nets, func(p netip.Prefix) bool { return p.Contains(a.Unmap()) })
 }
 
 // consoleAllowed decides by the client address (clientIP).
@@ -452,6 +469,7 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		set.WebhookURL = strings.TrimSpace(r.FormValue("webhook_url"))
 	case "network":
 		set.ConsoleAllow, set.ConsoleBlock = strings.Fields(r.FormValue("console_allow")), strings.Fields(r.FormValue("console_block"))
+		set.SCIMAllow = strings.Fields(r.FormValue("scim_allow"))
 	case "branding":
 		set.CompanyName = strings.TrimSpace(r.FormValue("company_name"))
 	case "security":

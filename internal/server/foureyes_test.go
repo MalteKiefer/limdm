@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -125,5 +126,25 @@ func TestFourEyesDeclarations(t *testing.T) {
 	db.QueryRow(ctx, `SELECT created_by FROM api_tokens WHERE name='ci'`).Scan(&by)
 	if by != "admin@firma.de" {
 		t.Fatalf("token belongs to the requester, got %q", by)
+	}
+}
+
+func TestSCIMNetworkList(t *testing.T) {
+	nets, err := parseNets([]string{"10.0.0.0/8"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s.rt.Store(&runtimeState{scim: nets})
+	h := s.scimAuth(func(http.ResponseWriter, *http.Request) { t.Fatal("reached the handler") })
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/scim/v2/Users", nil)
+	r.RemoteAddr = "192.0.2.1:4000"
+	h(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("outside the SCIM networks: %d", w.Code)
+	}
+	if !netsContain(nets, "10.1.2.3") || !netsContain(nets, "::ffff:10.1.2.3") || netsContain(nets, "garbage") {
+		t.Fatal("netsContain")
 	}
 }

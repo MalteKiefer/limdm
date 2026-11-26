@@ -23,6 +23,7 @@
   <p class="muted">{{t "Addresses or CIDR ranges, separated by spaces or lines. The agent API is not affected; this host (loopback) is always allowed. Your address:"}} <span class="mono">{{.ClientIP}}</span></p>
   <label>{{t "Allowed networks"}}<textarea name="console_allow" rows="3" class="code" placeholder="10.0.0.0/8 2001:db8::/32">{{join .Set.ConsoleAllow "\n"}}</textarea><small class="field-hint">{{t "Empty: every network"}}</small></label>
   <label>{{t "Blocked networks"}}<textarea name="console_block" rows="3" class="code" placeholder="203.0.113.0/24">{{join .Set.ConsoleBlock "\n"}}</textarea><small class="field-hint">{{t "Refused even when allowed above"}}</small></label>
+  <label>{{t "SCIM allowed networks"}}<textarea name="scim_allow" rows="2" class="code" placeholder="198.51.100.0/24">{{join .Set.SCIMAllow "\n"}}</textarea><small class="field-hint">{{t "The provisioning addresses of your identity provider. SCIM ignores the lists above; empty: every network"}}</small></label>
   {{if $admin}}<div class="form-foot"><span class="muted">{{t "Saving is refused when your own address would be locked out."}}</span><button>{{t "Save"}}</button></div>{{end}}
 </form>
 {{else if eq .Tab "security"}}

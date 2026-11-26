@@ -99,6 +99,9 @@ Accounts of a tenant see only the Notifications tab with their own channels
   blocked networks are refused even when allowed. Loopback is always allowed, the agent API
   is not affected. Saving is refused when your own address would be locked out. Behind a
   proxy on another host set `LIMDM_TRUSTED_PROXIES`, otherwise the proxy's address is checked.
+  **SCIM allowed networks** limits `/scim/` to the provisioning addresses of the identity
+  provider (empty: every network). SCIM ignores the console lists, because the identity
+  provider calls it from its own networks; a refused request answers 403 and is logged.
 
 ### Security
 
@@ -268,7 +271,9 @@ Password checks in the profile count towards the same lockout as the sign in (5 
 
 * **SCIM 2.0** at `<LIMDM_PUBLIC_URL>/scim/v2` (filters: `attribute eq "value"` only, others
   are answered with 400 `invalidFilter`; no ETags) with a bearer token created on the page
-  (Okta, Microsoft Entra ID, authentik, JumpCloud).
+  (Okta, Microsoft Entra ID, authentik, JumpCloud). Limit it to the provider's addresses
+  with **Settings**, **General**, **SCIM allowed networks**. SCIM groups never make anyone a
+  console administrator ([role groups](#role-groups)).
 * **Google Workspace:** a service account with domain wide delegation for the scopes
   `admin.directory.user.readonly`, `admin.directory.group.readonly` and
   `admin.directory.group.member.readonly`, plus an admin email to impersonate. The service
