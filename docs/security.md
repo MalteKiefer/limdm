@@ -214,7 +214,8 @@ global only.
 **Settings**, **Security**, **Four eyes approval** makes a second administrator approve:
 wipe, lost mode, scripts, role changes of console users, every change to an administrator
 account (adding one, disabling or enabling one, resetting a local administrator's
-credentials), admin API tokens, and optionally recovery key views and remote shell sessions.
+credentials), admin API tokens, risk exceptions (the approving admin is recorded as their
+approver), and optionally recovery key views and remote shell sessions.
 It also covers the declarations that act like a script, so one administrator cannot reach
 root on devices without a second one:
 

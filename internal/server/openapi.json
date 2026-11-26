@@ -1392,7 +1392,7 @@
       "post": {
         "operationId": "addException",
         "summary": "Add a risk exception",
-        "description": "Admin tokens, not read only. With four eyes approval on, the approver must be another person. Audited as exception.add.",
+        "description": "Admin tokens, not read only. With four eyes approval off it is added directly and the approver must be another person; with it on the request goes to the inbox (202, Location of the approval), and the admin who approves it is recorded as approver. Audited as exception.add.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1439,6 +1439,32 @@
           },
           "503": {
             "$ref": "#/components/responses/Problem"
+          },
+          "202": {
+            "description": "Four eyes: stored as a request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approval_id": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "API path of the approval"
+              }
+            }
           }
         }
       }
@@ -2293,6 +2319,383 @@
             "$ref": "#/components/responses/Problem"
           },
           "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/compliance": {
+      "get": {
+        "operationId": "complianceOverview",
+        "summary": "Device states, every reported check with its counts and the framework controls",
+        "description": "Check titles are translated to the caller's language. Follows the device scope and tenant.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Compliance"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/compliance/checks/{id}": {
+      "get": {
+        "operationId": "complianceCheck",
+        "summary": "One check with the result of every device that reports it",
+        "description": "Failing devices first, at most 500 devices (truncated); the counts cover all.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComplianceCheckDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/compliance/heatmap": {
+      "get": {
+        "operationId": "complianceHeatmap",
+        "summary": "Passed and failed results per check area and blueprint or tenant",
+        "parameters": [
+          {
+            "name": "group",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "blueprint",
+                "tenant"
+              ],
+              "default": "blueprint"
+            },
+            "description": "tenant only in the global view of several tenants"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComplianceHeatmap"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/compliance/history": {
+      "get": {
+        "operationId": "complianceHistory",
+        "summary": "Compliance state at the end of a day, of every device or one device with its changes",
+        "parameters": [
+          {
+            "name": "at",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "day, default today"
+          },
+          {
+            "name": "device",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "device ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComplianceHistory"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/compliance/policies": {
+      "get": {
+        "operationId": "compliancePolicies",
+        "summary": "Compliance policies and custom checks of the library with the blueprints using them",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompliancePolicies"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/exports/{kind}": {
+      "get": {
+        "operationId": "export",
+        "summary": "Evidence and data exports",
+        "description": "Admins and auditors (scope audit). Streams the same file as the console export and writes two audit entries: export before, export.done after with the row count and the SHA-256 of the bytes sent. Audit exports take the filters of /api/v1/audit. evidence.json is a bundle signed with the command key (Ed25519; check it with limdm-server evidence verify FILE), evidence.pdf the report rendered from such a bundle with its SHA-256 and signature; both also write evidence.sign with the bundle's SHA-256.",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "compliance.csv",
+                "compliance-history.csv",
+                "exceptions.csv",
+                "inventory.csv",
+                "packages.csv",
+                "audit.csv",
+                "audit.jsonl",
+                "evidence.json",
+                "evidence.pdf"
+              ]
+            }
+          },
+          {
+            "name": "at",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "compliance-history.csv: day"
+          },
+          {
+            "name": "device",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "compliance-history.csv: device ID"
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 365,
+              "default": 90
+            },
+            "description": "evidence.json and evidence.pdf: history window"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedEvidence"
+                }
+              },
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/exception-requests": {
+      "post": {
+        "operationId": "requestException",
+        "summary": "Ask for a risk exception (four eyes)",
+        "description": "Admins and the helpdesk. Always stored as a request another admin approves in the inbox (action exception.add); the approving admin becomes the approver. Scoped accounts must name one of their tags.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExceptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Four eyes: stored as a request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approval_id": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "API path of the approval"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "415": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -3780,6 +4183,572 @@
                 }
               }
             ]
+          }
+        }
+      },
+      "CheckRefs": {
+        "type": "object",
+        "properties": {
+          "bsi": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cis": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cis_benchmark": {
+            "type": "string"
+          },
+          "iso": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ComplianceCheck": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "level": {
+            "type": "integer"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "refs": {
+            "$ref": "#/components/schemas/CheckRefs"
+          },
+          "pass": {
+            "type": "integer"
+          },
+          "fail": {
+            "type": "integer"
+          },
+          "na": {
+            "type": "integer"
+          },
+          "excepted": {
+            "type": "integer"
+          },
+          "failing_hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "level",
+          "refs",
+          "pass",
+          "fail",
+          "na",
+          "excepted",
+          "failing_hosts"
+        ]
+      },
+      "ComplianceControl": {
+        "type": "object",
+        "properties": {
+          "framework": {
+            "type": "string",
+            "enum": [
+              "bsi",
+              "cis",
+              "iso"
+            ]
+          },
+          "control": {
+            "type": "string"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pass": {
+            "type": "integer"
+          },
+          "fail": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "framework",
+          "control",
+          "checks",
+          "pass",
+          "fail"
+        ]
+      },
+      "Compliance": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer"
+          },
+          "compliant": {
+            "type": "integer"
+          },
+          "noncompliant": {
+            "type": "integer"
+          },
+          "stale": {
+            "type": "integer"
+          },
+          "pending": {
+            "type": "integer"
+          },
+          "stale_hours": {
+            "type": "integer"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComplianceCheck"
+            }
+          },
+          "controls": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComplianceControl"
+            }
+          }
+        },
+        "required": [
+          "total",
+          "compliant",
+          "noncompliant",
+          "stale",
+          "pending",
+          "stale_hours",
+          "checks",
+          "controls"
+        ]
+      },
+      "ComplianceCheckDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ComplianceCheck"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "devices": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "hostname": {
+                      "type": "string"
+                    },
+                    "blueprint": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "remediated": {
+                      "type": "boolean"
+                    },
+                    "last_seen": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "hostname",
+                    "blueprint",
+                    "status",
+                    "detail",
+                    "remediated",
+                    "last_seen"
+                  ]
+                }
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "devices",
+              "truncated"
+            ]
+          }
+        ]
+      },
+      "ComplianceHeatmap": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "type": "string",
+            "enum": [
+              "blueprint",
+              "tenant"
+            ]
+          },
+          "cells": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "column": {
+                  "type": "string"
+                },
+                "area": {
+                  "type": "string"
+                },
+                "pass": {
+                  "type": "integer"
+                },
+                "fail": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "column",
+                "area",
+                "pass",
+                "fail"
+              ]
+            }
+          }
+        },
+        "required": [
+          "group",
+          "cells"
+        ]
+      },
+      "ComplianceHistory": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date"
+          },
+          "device": {
+            "type": "string"
+          },
+          "devices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "hostname": {
+                  "type": "string"
+                },
+                "pass": {
+                  "type": "integer"
+                },
+                "fail": {
+                  "type": "integer"
+                },
+                "other": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "hostname",
+                "pass",
+                "fail",
+                "other"
+              ]
+            }
+          },
+          "state": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "check_id": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "since": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "catalog_version": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "check_id",
+                "status",
+                "detail",
+                "since",
+                "catalog_version"
+              ]
+            }
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "check_id": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "since": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "catalog_version": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "check_id",
+                "status",
+                "detail",
+                "since",
+                "catalog_version"
+              ]
+            }
+          }
+        },
+        "required": [
+          "at",
+          "device",
+          "devices",
+          "state",
+          "changes"
+        ]
+      },
+      "CompliancePolicies": {
+        "type": "object",
+        "properties": {
+          "policies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "blueprints": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "level": {
+                  "type": "integer"
+                },
+                "remediate": {
+                  "type": "boolean"
+                },
+                "exclude": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "advisory": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "grace_hours": {
+                  "type": "integer"
+                },
+                "notify": {
+                  "type": "boolean"
+                },
+                "lock_after_hours": {
+                  "type": "integer"
+                },
+                "unlock_when_compliant": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "blueprints",
+                "level",
+                "remediate",
+                "exclude"
+              ]
+            }
+          },
+          "custom_checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "item_id": {
+                  "type": "integer"
+                },
+                "item_name": {
+                  "type": "string"
+                },
+                "blueprints": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string"
+                },
+                "level": {
+                  "type": "integer"
+                },
+                "refs": {
+                  "$ref": "#/components/schemas/CheckRefs"
+                },
+                "test": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "item_id",
+                "item_name",
+                "blueprints",
+                "id",
+                "title",
+                "severity",
+                "level",
+                "refs",
+                "test"
+              ]
+            }
+          }
+        },
+        "required": [
+          "policies",
+          "custom_checks"
+        ]
+      },
+      "SignedEvidence": {
+        "type": "object",
+        "required": [
+          "payload",
+          "signature"
+        ],
+        "properties": {
+          "payload": {
+            "type": "object",
+            "description": "format limdm-evidence/1: generated_at, generated_by, tenant, window_days, score, device states, frameworks, catalog_versions, agent_versions, devices with their check results, exceptions, history, changes"
+          },
+          "signature": {
+            "type": "object",
+            "required": [
+              "alg",
+              "public_key",
+              "key_id",
+              "value"
+            ],
+            "properties": {
+              "alg": {
+                "type": "string",
+                "enum": [
+                  "ed25519"
+                ]
+              },
+              "public_key": {
+                "type": "string"
+              },
+              "key_id": {
+                "type": "string",
+                "description": "SHA-256 of the public key, hex"
+              },
+              "value": {
+                "type": "string",
+                "description": "hex Ed25519 signature of 'limdm-evidence/1\\n' followed by the compact payload"
+              }
+            }
+          }
+        }
+      },
+      "ExceptionRequest": {
+        "type": "object",
+        "required": [
+          "check_id",
+          "mode",
+          "reason",
+          "owner",
+          "expires"
+        ],
+        "properties": {
+          "check_id": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "exclude",
+              "advisory"
+            ]
+          },
+          "tag": {
+            "type": "string",
+            "description": "one device tag, empty for every device"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "expires": {
+            "type": "string",
+            "format": "date",
+            "description": "last day it applies, within three years"
           }
         }
       }

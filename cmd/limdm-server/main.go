@@ -52,12 +52,15 @@ func main() {
 		err = keysCmd(log, os.Args[2:])
 	case "backup":
 		err = backupCmd(log, os.Args[2:])
+	case "evidence":
+		err = evidenceCmd(os.Args[2:])
 	default:
 		err = errors.New(`usage: limdm-server [serve | keygen -out FILE | sign -key FILE|-key-env VAR|-pkcs11 LABEL SHA256SUMS
                      | local-admin [-env FILE] [-role admin|auditor] [-out FILE] add|reset|disable|enable|list [NAME]
                      | audit [-ca DIR] [-key HEX -keyed-from ID] verify FILE.jsonl | audit [-ca DIR] key
                      | keys [-env FILE] status | rotate KIND [-name NAME] | finish KIND [-force]
-                     | backup [-env FILE] create | list | verify | restore | restore-test ...]`)
+                     | backup [-env FILE] create | list | verify | restore | restore-test ...
+                     | evidence [-ca DIR | -key HEX] verify FILE]`)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -130,6 +133,42 @@ func serve(log *slog.Logger) error {
 // stdout or, with -out, to a new 0600 file so they do not end up in logs.
 // auditCmd verifies a JSON Lines audit export outside the server, or prints
 // the audit key for an auditor who verifies on another machine.
+// evidenceCmd verifies a signed evidence export (evidence.json) against the
+// command key of the CA directory, or a public key given in hex.
+func evidenceCmd(args []string) error {
+	fs := flag.NewFlagSet("evidence", flag.ExitOnError)
+	caDir := fs.String("ca", cmp.Or(os.Getenv("LIMDM_CA_DIR"), "/var/lib/limdm-server/ca"), "CA directory with command.key")
+	keyHex := fs.String("key", "", "Ed25519 public key (hex) of the command key instead of the CA directory")
+	fs.Parse(args)
+	if fs.Arg(0) != "verify" || fs.NArg() != 2 {
+		return errors.New("usage: limdm-server evidence [-ca DIR | -key HEX] verify FILE")
+	}
+	var keys []ed25519.PublicKey
+	if *keyHex != "" {
+		k, err := hex.DecodeString(*keyHex)
+		if err != nil || len(k) != ed25519.PublicKeySize {
+			return errors.New("-key must be 64 hex characters")
+		}
+		keys = []ed25519.PublicKey{k}
+	} else {
+		var err error
+		if keys, err = server.CommandPublicKeys(*caDir, server.KeyProviderFromEnv()); err != nil {
+			return fmt.Errorf("command key: %w", err)
+		}
+	}
+	data, err := os.ReadFile(fs.Arg(1))
+	if err != nil {
+		return err
+	}
+	info, err := server.VerifyEvidence(data, keys)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("OK: signed by the command key %s\ngenerated_at=%s generated_by=%s devices=%d exceptions=%d changes=%d\n",
+		info.KeyID, info.GeneratedAt.Format(time.RFC3339), info.GeneratedBy, info.Devices, info.Exceptions, info.Changes)
+	return nil
+}
+
 func auditCmd(args []string) error {
 	fs := flag.NewFlagSet("audit", flag.ExitOnError)
 	def := os.Getenv("LIMDM_CA_DIR")

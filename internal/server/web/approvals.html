@@ -8,7 +8,7 @@
   <div class="scroll"><table>
     <thead><tr><th>{{t "Request"}}</th><th>{{t "Target"}}</th><th>{{t "Requested by"}}</th><th>{{t "Reason"}}</th><th>{{t "Status"}}</th>{{if eq .Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
     <tbody>{{range .Approvals}}<tr>
-      <td>{{if eq .Action "command"}}{{t "Command"}}{{else if eq .Action "user.update"}}{{t "Role change"}}{{else if eq .Action "user.add"}}{{t "New administrator"}}{{else if eq .Action "user.reset"}}{{t "Administrator credentials reset"}}{{else if eq .Action "remote_shell"}}{{t "Remote shell"}}{{else if eq .Action "library.save"}}{{t "Library item"}}{{else if eq .Action "catalog.save"}}{{t "Catalog app"}}{{else if eq .Action "token.add"}}{{t "Admin API token"}}{{else}}{{t "Recovery key view"}}{{end}}<span class="sub mono">{{printf "%s" .Payload}}</span></td>
+      <td>{{if eq .Action "command"}}{{t "Command"}}{{else if eq .Action "user.update"}}{{t "Role change"}}{{else if eq .Action "user.add"}}{{t "New administrator"}}{{else if eq .Action "user.reset"}}{{t "Administrator credentials reset"}}{{else if eq .Action "remote_shell"}}{{t "Remote shell"}}{{else if eq .Action "library.save"}}{{t "Library item"}}{{else if eq .Action "catalog.save"}}{{t "Catalog app"}}{{else if eq .Action "token.add"}}{{t "Admin API token"}}{{else if eq .Action "exception.add"}}{{t "Risk exception"}}{{else}}{{t "Recovery key view"}}{{end}}<span class="sub mono">{{printf "%s" .Payload}}</span></td>
       <td class="mono">{{if or (eq .Action "command") (eq .Action "recovery.view") (eq .Action "remote_shell")}}<a href="/devices/{{.Target}}">{{.Target}}</a>{{else}}{{.Target}}{{end}}</td>
       <td>{{.RequestedBy}}<span class="sub">{{fmtTime .CreatedAt}}</span></td>
       <td>{{.Reason}}</td>

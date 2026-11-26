@@ -1337,7 +1337,7 @@ func (s *Server) tokenCreate(w http.ResponseWriter, r *http.Request, sess sessio
 // ---- compliance reporting ----
 
 type checkAgg struct {
-	ID, Title                string
+	ID, Title, Severity      string
 	Level                    int
 	Refs                     api.Refs
 	Pass, Fail, NA, Excepted int
@@ -1484,7 +1484,7 @@ func (s *Server) fleetCompliance(ctx context.Context, where string, args ...any)
 		for _, c := range res {
 			a := checks[c.ID]
 			if a == nil {
-				a = &checkAgg{ID: c.ID, Title: c.Title, Level: c.Level, Refs: c.Refs}
+				a = &checkAgg{ID: c.ID, Title: c.Title, Severity: c.Severity, Level: c.Level, Refs: c.Refs}
 				checks[c.ID] = a
 			}
 			switch c.Status {
@@ -1716,6 +1716,9 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 		q = `SELECT id::text, at::text, actor, action, target, detail, encode(prev,'hex'), encode(hash,'hex'), coalesce(tenant_id::text, '') FROM audit_log WHERE ` + where + ` ORDER BY id`
 	case "audit.jsonl":
 		s.auditExportJSONL(w, r, sess)
+		return
+	case "evidence.json", "evidence.pdf":
+		s.evidenceExport(w, r, sess, kind)
 		return
 	case "exceptions.csv":
 		header = []string{"id", "check_id", "mode", "tag", "reason", "owner", "approver", "expires_at", "created_by", "created_at", "state"}

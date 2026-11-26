@@ -325,6 +325,10 @@ func (s *Server) decideApproval(ctx context.Context, sess session, id int64, op 
 				if creds, err = applyTokenApproval(ctx, tx, a, sess.Email); err != nil {
 					return err
 				}
+			case "exception.add":
+				if err := applyExceptionApproval(ctx, tx, a, sess.Email); err != nil {
+					return err
+				}
 			case "artifact.upload": // the upload becomes installable (packages.go)
 				var c struct {
 					Tenant int64 `json:"tenant"`

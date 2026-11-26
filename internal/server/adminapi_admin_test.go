@@ -142,14 +142,22 @@ func TestAdminAPIManagement(t *testing.T) {
 		t.Fatalf("If-Match inside the transaction: %v", err)
 	}
 
-	// exceptions
+	// exceptions: with four eyes on the request goes to the inbox; the
+	// admin who approves it is recorded as approver
 	day := time.Now().AddDate(0, 1, 0).Format(time.DateOnly)
-	if resp, body = call(alice, "POST", "/api/v1/exceptions", `{"check_id":"disk.recovery","mode":"advisory","reason":"lab","owner":"cto","approver":"alice@firma.de","expires":"`+day+`"}`); resp.StatusCode == http.StatusCreated {
-		t.Fatalf("token creator named as their own approver: %s", body)
-	}
 	resp, body = call(alice, "POST", "/api/v1/exceptions", `{"check_id":"disk.recovery","mode":"advisory","reason":"lab","owner":"cto","approver":"ciso","expires":"`+day+`"}`)
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("exception: %d %s", resp.StatusCode, body)
+	if resp.StatusCode != http.StatusAccepted || !strings.HasPrefix(resp.Header.Get("Location"), "/api/v1/approvals/") {
+		t.Fatalf("exception request: %d %s", resp.StatusCode, body)
+	}
+	exAppr := strings.TrimPrefix(resp.Header.Get("Location"), "/api/v1/approvals/")
+	if resp, _ = call(alice, "POST", "/api/v1/approvals/"+exAppr+"/approve", ""); resp.StatusCode == http.StatusOK {
+		t.Fatal("requester approved their own exception")
+	}
+	if resp, body = call(bob, "POST", "/api/v1/approvals/"+exAppr+"/approve", ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("approve exception: %d %s", resp.StatusCode, body)
+	}
+	if resp, body = call(bob, "GET", "/api/v1/exceptions", ""); !strings.Contains(body, `"approver":"api:bob#`) || !strings.Contains(body, `"created_by":"api:alice#`) {
+		t.Fatalf("approved exception: %s", body)
 	}
 	if resp, body = call(bob, "GET", "/api/v1/exceptions", ""); !strings.Contains(body, `"state":"active"`) {
 		t.Fatalf("exceptions: %d %s", resp.StatusCode, body)

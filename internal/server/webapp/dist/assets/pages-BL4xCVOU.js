@@ -1,0 +1,1 @@
+import{h as e}from"./index-BnbS5u-z.js";import{G as t,it as n}from"./states-2KUKi8Of.js";var r=n();function i(){let n=t();return(0,r.jsx)(e,{title:n(`config.title`),sub:n(`config.sub`),oldPath:`/blueprints`})}function a(){let n=t();return(0,r.jsx)(e,{title:n(`config.title`),sub:n(`config.sub`),oldPath:`/blueprints`})}export{i as ConfigPage,a as LibraryItemPage};
