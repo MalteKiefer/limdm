@@ -4,7 +4,7 @@
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { ArrowRightLeft, KeyRound, Plus, RotateCcw, ShieldOff } from 'lucide-react'
 import { useState } from 'react'
-import { z } from 'zod'
+import { z } from '../../lib/zod'
 import { api, unwrap } from '../../api/client'
 import { useCan, useMe } from '../../api/me'
 import { switchTenant } from '../../app/tenants'

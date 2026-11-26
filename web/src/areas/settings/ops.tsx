@@ -4,7 +4,7 @@
 import { Bell, CircleCheck, CirclePlay, DatabaseBackup, Pause, Pencil, Play, Plus, Send, ShieldCheck, Trash2, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { FieldValues, Path, UseFormReturn } from 'react-hook-form'
-import { z } from 'zod'
+import { z } from '../../lib/zod'
 import { api, unwrap, type Schemas } from '../../api/client'
 import { useCan, useMe } from '../../api/me'
 import { DataGrid, type GridColumn } from '../../components/datagrid'

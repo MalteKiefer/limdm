@@ -4,7 +4,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { ExternalLink } from 'lucide-react'
 import { useState } from 'react'
-import { z } from 'zod'
+import { z } from '../../lib/zod'
 import { api, unwrap } from '../../api/client'
 import { useMe } from '../../api/me'
 import { Field, FormSection } from '../../components/form'

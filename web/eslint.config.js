@@ -18,6 +18,9 @@ export default tseslint.config(
       '@typescript-eslint/no-non-null-assertion': 'off',
       'no-new-func': 'error',
       'no-restricted-syntax': ['error', { selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']", message: 'no raw HTML: XSS and CSP' }],
+      // zod compiles with new Function unless jitless (src/lib/zod.ts sets it)
+      'no-restricted-imports': ['error', { paths: [{ name: 'zod', message: "import { z } from 'src/lib/zod' (jitless under the CSP)", allowTypeImports: true }] }],
     },
   },
+  { files: ['src/lib/zod.ts'], rules: { 'no-restricted-imports': 'off' } },
 )

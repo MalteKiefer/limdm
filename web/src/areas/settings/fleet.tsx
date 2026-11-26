@@ -3,7 +3,7 @@
 // updates (policy, releases, spread in the fleet).
 import { Ban, Check, Download, FolderTree, RefreshCw, Search, Wifi } from 'lucide-react'
 import { useDeferredValue, useState } from 'react'
-import { z } from 'zod'
+import { z } from '../../lib/zod'
 import { api, unwrap, type Schemas } from '../../api/client'
 import { useCan } from '../../api/me'
 import { StackBar } from '../../components/charts'

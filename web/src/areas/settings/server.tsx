@@ -4,7 +4,7 @@
 // PATCH /api/v1/settings/{section} with only its own fields.
 import { ExternalLink, ImageUp, Trash2 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { z } from 'zod'
+import { z } from '../../lib/zod'
 import { useCan } from '../../api/me'
 import { Field, FormSection } from '../../components/form'
 import { ErrorState, LoadingState } from '../../components/states'
