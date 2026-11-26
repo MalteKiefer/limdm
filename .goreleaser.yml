@@ -29,6 +29,17 @@ builds:
     flags: [-trimpath]
     mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags: [-s -w]
+  - id: cli
+    main: ./cmd/limdm
+    binary: limdm
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w
+      - -X github.com/maltekiefer/limdm/internal/agent.Version={{ .Version }}
   - id: server
     main: ./cmd/limdm-server
     binary: limdm-server
@@ -43,7 +54,7 @@ builds:
 
 archives:
   - id: agent
-    ids: [agent, desktop]
+    ids: [agent, desktop, cli]
     formats: [tar.gz]
     name_template: "limdm-agent_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files: [LICENSE, README.md, packaging/limdm-agent.service, scripts/install-agent.sh]
@@ -55,7 +66,7 @@ archives:
 
 nfpms:
   - id: agent
-    ids: [agent, desktop]
+    ids: [agent, desktop, cli]
     package_name: limdm-agent
     homepage: https://github.com/MalteKiefer/limdm
     maintainer: Malte Kiefer <malte.kiefer@kiefer-networks.de>

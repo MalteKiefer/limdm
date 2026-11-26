@@ -5,6 +5,10 @@
 *.test
 *.out
 coverage.*
+/limdm
+/limdm-agent
+/limdm-desktop
+/limdm-server
 
 # secrets and keys, never commit
 *.key

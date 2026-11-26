@@ -167,6 +167,31 @@ newer versions are offered, so blocking stops a rollout but does not downgrade d
 Hosting the packages in your own repository and updating with the package manager works as
 well.
 
+## Command line for users
+
+`limdm` does on a terminal what the LiMDM app does in its window. It runs as the signed in
+user, talks only to the agent socket and needs no root; over SSH it is refused unless the
+user also has an active local session (root is always allowed).
+
+| Command | |
+|---|---|
+| `limdm info` | everything about this device and the agent: manager, system, hardware, server, check in, declarations, updates, locks, compliance, recovery keys, company account |
+| `limdm checks` | every compliance check with its result |
+| `limdm profiles`, `limdm certificates` | declarations in force (secrets masked), CA certificates IT installed |
+| `limdm log [-n 50]` | agent log |
+| `limdm sync` | check in now |
+| `limdm software list` | catalog apps with mode and state |
+| `limdm software install APP`, `remove APP` | install or remove an app the catalog offers (ID or name) |
+| `limdm software request APP [--note TEXT]` | ask IT for an app in request mode |
+| `limdm software search QUERY` | search Flathub for apps outside the catalog |
+| `limdm software request-new FLATPAK_ID [--remote R] [--name N] [--note TEXT]`, `requests` | ask for an app outside the catalog, list own requests |
+| `limdm sso [status\|confirm]` | company account sign in state, confirm with a code |
+| `limdm recovery-key` | escrow the LUKS recovery key with the disk passphrase |
+
+`--json` prints `info`, `checks`, `profiles`, `certificates`, `log` and `software list` as JSON.
+The agent decides as for the app: only catalog apps install, and only in the modes the
+catalog allows.
+
 ## Useful commands on a device
 
 | Command | |

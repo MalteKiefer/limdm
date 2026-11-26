@@ -66,6 +66,32 @@ type DesktopStatus struct {
 	CheckList   []DesktopCheck `json:"check_list,omitempty"`
 	Escrowed    int            `json:"escrowed"`
 	Locked      bool           `json:"locked,omitempty"`
+
+	// for limdm info
+	System        DesktopSystem `json:"system"`
+	LostMode      bool          `json:"lost_mode,omitempty"`
+	OfflineLocked bool          `json:"offline_locked,omitempty"`
+	CheckinEvery  int           `json:"checkin_seconds,omitempty"`
+	OfflineLockH  int           `json:"offline_lock_hours,omitempty"`
+	Updates       string        `json:"updates,omitempty"` // mode and window
+	LastUpdateRun *time.Time    `json:"last_update_run,omitempty"`
+	Declarations  int           `json:"declarations"`
+	DeclToken     string        `json:"declarations_token,omitempty"`
+	ScriptsAllow  bool          `json:"scripts_allowed"`
+	DesktopLogin  string        `json:"desktop_login,omitempty"` // off | session | login
+	QueuedEvents  int           `json:"queued_events"`
+	QueuedResults int           `json:"queued_results"`
+}
+
+// DesktopSystem is the device as the last inventory saw it.
+type DesktopSystem struct {
+	OS        string `json:"os,omitempty"`
+	Kernel    string `json:"kernel,omitempty"`
+	Arch      string `json:"arch,omitempty"`
+	Vendor    string `json:"vendor,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Serial    string `json:"serial,omitempty"`
+	Inventory string `json:"inventory,omitempty"` // osquery or native
 }
 
 // DesktopRequest and DesktopResponse are the socket protocol (one JSON line each).
@@ -210,6 +236,24 @@ func (a *Agent) publishDesktop() {
 	if _, err := os.Stat("/etc/nologin"); err == nil {
 		info.Status.Locked = true
 	}
+	st := &info.Status
+	st.System, st.LostMode, st.OfflineLocked = a.lastSystem, inLostMode(), a.state.OfflineLocked
+	st.CheckinEvery, st.OfflineLockH = a.pol.CheckinSeconds, a.pol.OfflineLockHours
+	if u := a.pol.Updates; u.Mode != "" && u.Mode != "off" {
+		st.Updates = u.Mode + ", window " + u.Window
+	}
+	if !a.state.LastUpdateRun.IsZero() {
+		t := a.state.LastUpdateRun
+		st.LastUpdateRun = &t
+	}
+	st.Declarations, st.DeclToken, st.ScriptsAllow = len(a.state.Declarations), a.state.DeclToken, a.cfg.AllowScripts
+	st.DesktopLogin = "off"
+	if a.pol.Login.Enabled {
+		st.DesktopLogin = a.pol.Login.Mode
+	}
+	a.evMu.Lock()
+	st.QueuedEvents, st.QueuedResults = len(a.state.Events), len(a.state.Results)
+	a.evMu.Unlock()
 	if _, err := os.Stat(brandingLogo); err == nil {
 		info.Logo = brandingLogo
 	}
