@@ -53,12 +53,47 @@
     const close = t.closest('[data-close]');
     if (close) { close.closest('dialog')?.close(); return; }
 
-    const copy = t.closest('[data-copy]');
+    // [data-pwgen="min length"] fills the password and its repeat field with
+    // a generated password and shows it once with a copy button
+    const gen = t.closest('[data-pwgen]');
+    if (gen) {
+      const pw = genPassword(Number(gen.dataset.pwgen) || 12);
+      const scope = gen.closest('form');
+      for (const f of scope.querySelectorAll('input[name=password], input[name=password2]')) { f.value = pw; f.setCustomValidity(''); }
+      const out = gen.parentElement.querySelector('[data-pwgen-out]');
+      const cp = gen.parentElement.querySelector('[data-copy]');
+      out.textContent = pw; out.hidden = false;
+      cp.dataset.copy = pw; cp.hidden = false;
+      return;
+    }
+
+    // [data-copy] copies its value, [data-copy-from] the text of the element it names
+    const copy = t.closest('[data-copy], [data-copy-from]');
     if (copy && navigator.clipboard) {
-      await navigator.clipboard.writeText(copy.dataset.copy);
+      const src = copy.dataset.copyFrom && document.getElementById(copy.dataset.copyFrom);
+      await navigator.clipboard.writeText(src ? src.textContent.trim() : copy.dataset.copy);
+      const label = copy.textContent;
       copy.textContent = copy.dataset.copied || '✓';
+      setTimeout(() => { copy.textContent = label; }, 2000);
     }
   });
+
+  // genPassword returns a random password of at least 16 characters with an
+  // uppercase and a lowercase letter, a digit and a symbol, so it meets every
+  // combination of the password policy's character classes
+  const genPassword = (min) => {
+    const sets = ['ABCDEFGHJKLMNPQRSTUVWXYZ', 'abcdefghijkmnopqrstuvwxyz', '23456789', '-_.!#%+=?'];
+    const all = sets.join('');
+    const rnd = (n) => { // uniform in [0, n) without modulo bias
+      const lim = Math.floor(0x100000000 / n) * n, buf = new Uint32Array(1);
+      do crypto.getRandomValues(buf); while (buf[0] >= lim);
+      return buf[0] % n;
+    };
+    const chars = sets.map((s) => s[rnd(s.length)]);
+    while (chars.length < Math.max(min, 16)) chars.push(all[rnd(all.length)]);
+    for (let i = chars.length - 1; i > 0; i--) { const j = rnd(i + 1); [chars[i], chars[j]] = [chars[j], chars[i]]; }
+    return chars.join('');
+  };
 
   // ---- live filter: <input data-filter="table-id"> ----
   // Hides rows (tr[data-row]) without the text and groups (tbody) without
@@ -82,6 +117,15 @@
       body.hidden = rows > 0 && shown === 0;
     }
   };
+  // a repeat field ([data-match="name"]) must equal the field it names
+  document.addEventListener('input', (e) => {
+    const form = e.target.form;
+    const rep = form && form.querySelector('[data-match]');
+    if (rep && (e.target === rep || e.target.name === rep.dataset.match)) {
+      const orig = form.querySelector(`[name="${CSS.escape(rep.dataset.match)}"]`);
+      rep.setCustomValidity(rep.value && orig && rep.value !== orig.value ? rep.dataset.mismatch : '');
+    }
+  });
   document.addEventListener('input', (e) => {
     const input = e.target.closest('[data-filter]');
     if (!input) return;

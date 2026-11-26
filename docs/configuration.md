@@ -67,7 +67,7 @@ Other providers (Entra ID, Okta, authentik, Keycloak) work the same way with the
 | Role | May |
 |---|---|
 | `admin` | everything |
-| `helpdesk` | see devices, send commands except scripts, reveal disk recovery keys |
+| `helpdesk` | see devices; sync, install updates, reboot, shut down, lock and unlock, send a message; reset the password of and lock local accounts on a device; reveal disk recovery keys. Not: scripts, lost mode, wipe, retire, software, creating or deleting accounts, configuration |
 | `auditor` | read everything, change nothing |
 
 Users are OIDC identities (email) or local accounts (`local:<name>`, password and TOTP).

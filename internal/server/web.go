@@ -837,8 +837,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
-		"CommandTypes": commandTypesFor(sess.Role),
-		"Commands":     cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
+		"Commands": cmds, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
 		"Resolved": res, "Tags": strings.Join(tags, ", "), "TagList": tags, "Protective": protect, "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery, "Tampered": tampered, "Events": events, "EvPage": evPage, "EvPages": evPages, "EvTotal": evTotal, "EvFrom": min((evPage-1)*evSize+1, evTotal), "EvTo": min(evPage*evSize, evTotal),
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"},
 		"Sub": sub, "ShowSystem": r.URL.Query().Get("system") == "1", "NetworkInfo": len(data.Inv.DNS)+len(data.Inv.Routes) > 0 || hasIPs(data.Inv.Interfaces),
@@ -908,6 +907,9 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 	if !slices.Contains(api.CommandTypes, typ) || len(payload) > 64<<10 {
 		return "", http.StatusBadRequest, "invalid command"
 	}
+	if sess.Role != "admin" && !slices.Contains(helpdeskCommands, typ) {
+		return "", http.StatusForbidden, "this action requires the admin role"
+	}
 	switch {
 	case typ == "reboot" || typ == "shutdown":
 		// payload is the delay in minutes, 0 = now
@@ -921,10 +923,8 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		}
 		payload = strconv.Itoa(m)
 	case typ == "lost" || typ == "wipe" || typ == "found" || typ == "allow_uninstall":
-		// protective actions: admins only, lost and wipe confirmed by typing the host name
-		if sess.Role != "admin" {
-			return "", http.StatusForbidden, "this action requires the admin role"
-		}
+		// protective actions (admins only, see helpdeskCommands), lost and
+		// wipe confirmed by typing the host name
 		if typ == "lost" || typ == "wipe" {
 			var host string
 			if err := s.db.QueryRow(r.Context(), `SELECT hostname FROM devices WHERE id=$1`, id).Scan(&host); err != nil ||
@@ -949,15 +949,15 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		b, _ := json.Marshal(api.Message{Title: title, Text: text})
 		payload = string(b)
 	case strings.HasPrefix(typ, "user_"):
-		if sess.Role != "admin" {
-			return "", http.StatusForbidden, "this action requires the admin role"
-		}
 		u := api.UserCommand{Username: strings.TrimSpace(r.FormValue("username")), FullName: strings.TrimSpace(r.FormValue("full_name")),
 			Password: r.FormValue("password"), Admin: r.FormValue("admin") == "on" || r.FormValue("admin") == "1", KeepHome: r.FormValue("keep_home") == "on"}
 		if err := u.Validate(typ); err != nil {
 			return "", http.StatusBadRequest, err.Error()
 		}
 		if typ == "user_create" || typ == "user_password" {
+			if r.Form.Has("password2") && r.FormValue("password2") != u.Password { // the repeat field of the console form
+				return "", http.StatusBadRequest, passwordMismatch
+			}
 			if msg := s.settings().Rules.Check(u.Password, u.Username); msg != "" {
 				return "", http.StatusBadRequest, msg
 			}
@@ -965,9 +965,6 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		b, _ := json.Marshal(u) //nolint:gosec // signed command payload over mTLS, cleared from the database once applied
 		payload = string(b)
 	case typ == "software_remove":
-		if sess.Role != "admin" {
-			return "", http.StatusForbidden, "this action requires the admin role"
-		}
 		sr := api.SoftwareRemove{Kind: r.FormValue("kind"), Name: r.FormValue("name"), Installation: r.FormValue("installation")}
 		if err := sr.Validate(); err != nil {
 			return "", http.StatusBadRequest, err.Error()
@@ -975,9 +972,6 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		b, _ := json.Marshal(sr)
 		payload = string(b)
 	case typ == "app_install" || typ == "app_remove":
-		if sess.Role != "admin" {
-			return "", http.StatusForbidden, "this action requires the admin role"
-		}
 		var ok bool
 		app := r.FormValue("app")
 		if err := s.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM catalog_apps WHERE slug=$1)`, app).Scan(&ok); err != nil || !ok {
@@ -986,8 +980,6 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		payload = app
 	case typ != "script":
 		payload = ""
-	case sess.Role != "admin":
-		return "", http.StatusForbidden, "scripts require the admin role"
 	}
 	return payload, 0, ""
 }
@@ -1555,15 +1547,12 @@ func hasIPs(nics []api.NIC) bool {
 	return false
 }
 
-// commandTypesFor hides scripts and the protective actions from non admins.
-func commandTypesFor(role string) []string {
-	if role == "admin" {
-		return api.CommandTypes
-	}
-	return slices.DeleteFunc(slices.Clone(api.CommandTypes), func(t string) bool {
-		return t == "script" || t == "lost" || t == "found" || t == "wipe" || t == "allow_uninstall"
-	})
-}
+// helpdeskCommands are the device commands the helpdesk role may send, as
+// its role description promises: routine and reversible actions. Scripts,
+// lost mode, wipe, software and account creation, deletion and admin rights
+// stay with admins.
+var helpdeskCommands = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "message",
+	"user_password", "user_lock", "user_unlock"}
 
 // appNote is the outcome of an install or removal sent from the console.
 type appNote struct {

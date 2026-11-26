@@ -68,7 +68,10 @@ var passwordErrors = []string{
 	"The password needs a digit.",
 	"The password needs a special character.",
 	"The password must not contain the user name.",
+	passwordMismatch, // not from Check: the repeat field of a console form differs
 }
+
+const passwordMismatch = "The passwords do not match."
 
 // Check returns the first rule pw breaks, as a message for the console.
 func (p PasswordPolicy) Check(pw, user string) string {

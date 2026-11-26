@@ -580,3 +580,10 @@ td.row-actions .menu-list form { display: block; }
 td.row-actions .menu-list { text-align: left; }
 .inline:has(.field-hint) { align-items: flex-start; }
 legend .hint, summary .hint { display: block; margin-top: 2px; font-size: 12px; font-weight: 400; color: var(--text-3); }
+
+/* ---- W5: hints in menus, JS only controls, password generator ---- */
+.menu-hint { display: block; font-size: 12px; color: var(--text-3); font-weight: 400; margin-top: 1px; }
+.js-only { display: none; }
+.js .js-only { display: flex; }
+.pwgen { align-items: center; gap: 8px; flex-wrap: wrap; margin: -4px 0 12px; }
+.pwgen code { font-size: 13px; padding: 3px 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; user-select: all; overflow-wrap: anywhere; }

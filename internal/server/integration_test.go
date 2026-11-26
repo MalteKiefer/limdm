@@ -666,6 +666,22 @@ func TestIntegration(t *testing.T) {
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"script"}, "payload": {"id"}}, help); code != http.StatusForbidden {
 		t.Fatalf("helpdesk script must be refused: %d", code)
 	}
+	// the helpdesk role description: lock, message and local password resets yes, account removal and software no
+	for typ, want := range map[string]int{"lock": http.StatusSeeOther, "user_lock": http.StatusSeeOther, "user_delete": http.StatusForbidden,
+		"app_install": http.StatusForbidden, "allow_uninstall": http.StatusForbidden} {
+		if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {typ}, "username": {"jdoe"}, "app": {"x"}}, help); code != want {
+			t.Fatalf("helpdesk %s: %d, want %d", typ, code, want)
+		}
+	}
+	var cmdsBefore, cmdsAfter int
+	db.QueryRow(ctx, `SELECT count(*) FROM commands`).Scan(&cmdsBefore)
+	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"user_password"}, "username": {"jdoe"},
+		"password": {"Correct-horse-99x"}, "password2": {"other"}}, help); code != http.StatusSeeOther {
+		t.Fatalf("password mismatch must return to the form: %d", code)
+	}
+	if db.QueryRow(ctx, `SELECT count(*) FROM commands`).Scan(&cmdsAfter); cmdsAfter != cmdsBefore {
+		t.Fatal("a password reset with a different repeat field was queued")
+	}
 	if code, _ := ui("POST", "/tokens", url.Values{"uses": {"1"}, "days": {"1"}}, help); code != http.StatusForbidden {
 		t.Fatalf("helpdesk configuration must be refused: %d", code)
 	}
