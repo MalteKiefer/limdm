@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"net"
 	"path/filepath"
 	"testing"
@@ -61,6 +62,33 @@ func TestSoftwareInstallByName(t *testing.T) {
 	}
 	if last := (*reqs)[len(*reqs)-1]; last.Op != "app-request" || last.Note != "for a course" {
 		t.Fatalf("note lost: %+v", last)
+	}
+}
+
+func TestChecksSortedAndStrict(t *testing.T) {
+	list := []agent.DesktopCheck{
+		{ID: "b", Level: 1, Status: "pass"},
+		{ID: "z", Level: 2, Status: "fail"},
+		{ID: "c", Level: 1, Status: "na"},
+		{ID: "y", Level: 1, Status: "fail"},
+		{ID: "a", Level: 1, Status: "fail"},
+	}
+	sortChecks(list)
+	var got string
+	for _, c := range list {
+		got += c.ID
+	}
+	if got != "ayzcb" {
+		t.Fatalf("order %s", got)
+	}
+	fakeAgent(t, func(agent.DesktopRequest) agent.DesktopResponse {
+		return agent.DesktopResponse{Status: &agent.DesktopStatus{CheckList: list}}
+	})
+	if err := run("checks", nil); err != nil {
+		t.Fatalf("without --strict: %v", err)
+	}
+	if err := run("checks", []string{"--strict"}); !errors.Is(err, errChecksFailing) {
+		t.Fatalf("--strict: %v", err)
 	}
 }
 

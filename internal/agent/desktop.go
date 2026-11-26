@@ -48,6 +48,8 @@ type desktopInfo struct {
 
 // DesktopCheck is one compliance check as the desktop app lists it.
 type DesktopCheck struct {
+	ID     string `json:"id,omitempty"`
+	Level  int    `json:"level,omitempty"`
 	Title  string `json:"title"`
 	Status string `json:"status"` // pass | fail | na | excepted
 	Detail string `json:"detail,omitempty"`
@@ -233,7 +235,7 @@ func (a *Agent) publishDesktop() {
 		if c.Status == "fail" {
 			info.Status.Failing = append(info.Status.Failing, c.Title)
 		}
-		info.Status.CheckList = append(info.Status.CheckList, DesktopCheck{Title: c.Title, Status: c.Status, Detail: c.Detail})
+		info.Status.CheckList = append(info.Status.CheckList, DesktopCheck{ID: c.ID, Level: c.Level, Title: c.Title, Status: c.Status, Detail: c.Detail})
 	}
 	if _, err := os.Stat("/etc/nologin"); err == nil {
 		info.Status.Locked = true
