@@ -14,8 +14,10 @@
   possession of the key and the serial must still be the registered one. This exception
   applies to the renewal endpoint only; every other endpoint verifies the certificate
   against the device CA in the server, not only in the handshake.
-* **Agent updates** need an Ed25519 signature from an offline release key compiled into
-  the agent. Downgrades are refused.
+* **Agent updates** need an Ed25519 signature from the release key whose public half is
+  compiled into the agent; an agent built without it refuses self updates (fail closed).
+  The private key is a CI secret of the protected `release` environment, not an offline
+  key, and the release fails without it. Downgrades are refused.
 * **Signed commands.** Every command (lock, wipe, script, message …) is signed when it
   is created, with an Ed25519 key in `command.key` next to the CA key, never in the
   database. The signature covers device, command ID, type, creation time and payload. The

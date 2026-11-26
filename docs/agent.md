@@ -143,7 +143,7 @@ Agents are updated from the console, page **Agents**:
 
 1. The server checks `LIMDM_RELEASE_REPO` on GitHub every six hours (or on **Check for new
    versions**), downloads the agent packages and verifies them against the release's
-   `SHA256SUMS`. A release signed with the release key also carries `SHA256SUMS.sig`.
+   `SHA256SUMS` and `SHA256SUMS.sig`.
 2. An admin **approves** a version. Nothing is installed before that.
 3. Rollout: with **update agents automatically**, devices tagged with the pilot tag get an
    approved version at their next check in, all others after the delay (default 7 days).
@@ -151,7 +151,8 @@ Agents are updated from the console, page **Agents**:
    version that is not blocked, on that device only, regardless of policy and delay (also a
    downgrade). Picking a version counts as its approval for this device. **Outdated agents**
    on the Agents page updates single devices to the newest approved version.
-4. The agent checks the signature of the checksums (when it was built with a release key),
+4. The agent checks the signature of the checksums against the release key compiled into
+   it (an agent built without one refuses every self update and reports why),
    downloads the package for its distribution and architecture over mTLS, verifies the
    checksum, keeps a copy of the running binary and installs the package with apt or dnf in
    a separate systemd unit.
