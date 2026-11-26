@@ -296,7 +296,10 @@ func pgxPoolConfig(databaseURL string, maxConns int) (*pgxpool.Config, error) {
 	// explicit limits instead of the pgx default of max(4, CPUs); a pool_max_conns
 	// parameter in the URL still wins
 	if !strings.Contains(databaseURL, "pool_max_conns") {
-		pc.MaxConns = int32(max(maxConns, 4)) //nolint:gosec // bounded by ConfigFromEnv
+		if maxConns > 1000 {
+			maxConns = 1000 // more connections than any PostgreSQL serves
+		}
+		pc.MaxConns = int32(max(maxConns, 4))
 	}
 	pc.MinConns = 2
 	pc.MaxConnIdleTime = 5 * time.Minute
@@ -1347,12 +1350,12 @@ func (s *Server) failAPI(w http.ResponseWriter, err error) {
 
 func (s *Server) fail(w http.ResponseWriter, err error) {
 	if overloaded(err) {
-		s.log.Warn("request: database busy", "err", err, "request_id", requestID(w))
+		s.log.Warn("request: database busy", "err", err, "request_id", logSafe(requestID(w)))
 		w.Header().Set("Retry-After", "30")
 		http.Error(w, "server busy, try again in a moment", http.StatusServiceUnavailable)
 		return
 	}
-	s.log.Error("request failed", "err", err, "request_id", requestID(w))
+	s.log.Error("request failed", "err", err, "request_id", logSafe(requestID(w)))
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
 

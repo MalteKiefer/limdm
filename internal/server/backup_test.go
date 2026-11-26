@@ -182,9 +182,8 @@ func TestBackupRestore(t *testing.T) {
 	f.Close()
 
 	cfg2 := cfg
-	cfg2.DatabaseURL = strings.Replace(dsn, "/"+strings.TrimSuffix(target, "_restore")+"?", "/"+target+"?", 1)
-	if !strings.Contains(cfg2.DatabaseURL, target) {
-		cfg2.DatabaseURL = strings.Replace(dsn, "/"+strings.TrimSuffix(target, "_restore"), "/"+target, 1)
+	if cfg2.DatabaseURL, err = withDatabase(dsn, target); err != nil {
+		t.Fatal(err)
 	}
 	cfg2.CADir = filepath.Join(t.TempDir(), "ca")
 	swapped := *m

@@ -375,7 +375,7 @@ func (s *Server) checkLocal(ctx context.Context, name, password, code, ip, sourc
 	// transaction still commits; the process log has it)
 	failed := func() string {
 		if !localFailures.take() {
-			s.log.Warn("local login failure not audited: more than 30 per minute", "user", name)
+			s.log.Warn("local login failure not audited: more than 30 per minute", "user", logSafe(name))
 			return ""
 		}
 		return result

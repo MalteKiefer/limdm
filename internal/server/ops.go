@@ -44,6 +44,9 @@ func (s *Server) applyOps(rt *runtimeState) {
 // add up; fine for load limits, a counting semaphore if it must be exact.
 type slots struct{ c atomic.Pointer[chan struct{}] }
 
+// maxSlots caps a load limit, whatever the setting says.
+const maxSlots = 100000
+
 func newSlots(n int) *slots {
 	s := &slots{}
 	s.resize(n)
@@ -55,7 +58,7 @@ func (s *slots) resize(n int) {
 	if s == nil {
 		return
 	}
-	n = max(n, 1)
+	n = min(max(n, 1), maxSlots) // bounded: the size comes from a setting
 	if c := s.c.Load(); c != nil && cap(*c) == n {
 		return
 	}

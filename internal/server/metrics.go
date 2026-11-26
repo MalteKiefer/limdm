@@ -107,8 +107,8 @@ func (s *Server) countRequests(listener string, next http.Handler) http.Handler 
 		observeLatency(listener, took)
 		if s.ops().AccessLog {
 			// the path only: query strings can carry codes and filters
-			s.log.Info("request", "listener", listener, "method", r.Method, "path", truncate(r.URL.Path, 200), "status", max(rec.code, 200),
-				"ms", took.Milliseconds(), "remote", clientIP(r), "request_id", id)
+			s.log.Info("request", "listener", listener, "method", r.Method, "path", logSafe(truncate(r.URL.Path, 200)), "status", max(rec.code, 200),
+				"ms", took.Milliseconds(), "remote", logSafe(clientIP(r)), "request_id", logSafe(id))
 		}
 		method := r.Method
 		switch method {
