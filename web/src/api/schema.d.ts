@@ -372,7 +372,7 @@ export interface paths {
         put?: never;
         /**
          * Add a risk exception
-         * @description Admin tokens, not read only. With four eyes approval on, the approver must be another person. Audited as exception.add.
+         * @description Admin tokens, not read only. With four eyes approval off it is added directly and the approver must be another person; with it on the request goes to the inbox (202, Location of the approval), and the admin who approves it is recorded as approver. Audited as exception.add.
          */
         post: operations["addException"];
         delete?: never;
@@ -769,11 +769,31 @@ export interface paths {
         };
         /**
          * Evidence and data exports
-         * @description Admins and auditors (scope audit). Streams the same file as the console export and writes two audit entries: export before, export.done after with the row count and the SHA-256 of the bytes sent. Audit exports take the filters of /api/v1/audit.
+         * @description Admins and auditors (scope audit). Streams the same file as the console export and writes two audit entries: export before, export.done after with the row count and the SHA-256 of the bytes sent. Audit exports take the filters of /api/v1/audit. evidence.json is a bundle signed with the command key (Ed25519; check it with limdm-server evidence verify FILE), evidence.pdf the report rendered from such a bundle with its SHA-256 and signature; both also write evidence.sign with the bundle's SHA-256.
          */
         get: operations["export"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/exception-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask for a risk exception (four eyes)
+         * @description Admins and the helpdesk. Always stored as a request another admin approves in the inbox (action exception.add); the approving admin becomes the approver. Scoped accounts must name one of their tags.
+         */
+        post: operations["requestException"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1306,6 +1326,33 @@ export interface components {
                 refs: components["schemas"]["CheckRefs"];
                 test: string;
             }[];
+        };
+        SignedEvidence: {
+            /** @description format limdm-evidence/1: generated_at, generated_by, tenant, window_days, score, device states, frameworks, catalog_versions, agent_versions, devices with their check results, exceptions, history, changes */
+            payload: Record<string, never>;
+            signature: {
+                /** @enum {string} */
+                alg: "ed25519";
+                public_key: string;
+                /** @description SHA-256 of the public key, hex */
+                key_id: string;
+                /** @description hex Ed25519 signature of 'limdm-evidence/1\n' followed by the compact payload */
+                value: string;
+            };
+        };
+        ExceptionRequest: {
+            check_id: string;
+            /** @enum {string} */
+            mode: "exclude" | "advisory";
+            /** @description one device tag, empty for every device */
+            tag?: string;
+            reason: string;
+            owner: string;
+            /**
+             * Format: date
+             * @description last day it applies, within three years
+             */
+            expires: string;
         };
     };
     responses: {
@@ -2135,6 +2182,20 @@ export interface operations {
                     "application/json": components["schemas"]["Created"];
                 };
             };
+            /** @description Four eyes: stored as a request */
+            202: {
+                headers: {
+                    /** @description API path of the approval */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        approval_id?: number;
+                        status?: string;
+                    };
+                };
+            };
             400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
@@ -2819,10 +2880,12 @@ export interface operations {
                 at?: string;
                 /** @description compliance-history.csv: device ID */
                 device?: string;
+                /** @description evidence.json and evidence.pdf: history window */
+                days?: number;
             };
             header?: never;
             path: {
-                kind: "compliance.csv" | "compliance-history.csv" | "exceptions.csv" | "inventory.csv" | "packages.csv" | "audit.csv" | "audit.jsonl";
+                kind: "compliance.csv" | "compliance-history.csv" | "exceptions.csv" | "inventory.csv" | "packages.csv" | "audit.csv" | "audit.jsonl" | "evidence.json" | "evidence.pdf";
             };
             cookie?: never;
         };
@@ -2835,12 +2898,50 @@ export interface operations {
                 };
                 content: {
                     "text/csv": string;
+                    "application/json": components["schemas"]["SignedEvidence"];
+                    "application/pdf": string;
                 };
             };
             400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    requestException: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExceptionRequest"];
+            };
+        };
+        responses: {
+            /** @description Four eyes: stored as a request */
+            202: {
+                headers: {
+                    /** @description API path of the approval */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        approval_id?: number;
+                        status?: string;
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            415: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
         };
