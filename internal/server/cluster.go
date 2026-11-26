@@ -276,12 +276,12 @@ func (s *Server) keyFingerprints() map[string]string {
 	return fp
 }
 
-// storeKeyFingerprints records the keys of the CA directory after a
-// rotation step (keys.go), so instances restarting with it pass
+// storeKeyFingerprints records the keys st names after a rotation step
+// (keys.go), so instances restarting with the new keys.json pass
 // checkSharedKeys.
-func (s *Server) storeKeyFingerprints(ctx context.Context, tx pgx.Tx) error {
+func (s *Server) storeKeyFingerprints(ctx context.Context, tx pgx.Tx, st map[string]keyState) error {
 	disk := &Server{cfg: s.cfg}
-	if err := disk.loadKeys(); err != nil {
+	if err := disk.loadKeyStates(st); err != nil {
 		return err
 	}
 	doc, _ := json.Marshal(disk.keyFingerprints())

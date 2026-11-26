@@ -208,15 +208,47 @@ func readKeyStates(dir string) (map[string]keyState, error) {
 }
 
 func writeKeyStates(dir string, st map[string]keyState) error {
-	b, err := json.MarshalIndent(st, "", "  ")
+	tmp, err := stageKeyStates(dir, st)
 	if err != nil {
 		return err
 	}
+	return os.Rename(tmp, filepath.Join(dir, keysFile))
+}
+
+// stageKeyStates writes st next to keys.json and returns the file's path;
+// renaming it over keys.json applies it.
+func stageKeyStates(dir string, st map[string]keyState) (string, error) {
+	b, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return "", err
+	}
 	tmp := filepath.Join(dir, keysFile+".tmp")
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
+	return tmp, os.WriteFile(tmp, append(b, '\n'), 0o600)
+}
+
+// saveKeyStates applies a rotation step: the new keys.json is staged, the
+// fingerprints and the audit entry commit in one transaction, and only then
+// does the staged file replace keys.json. A failed transaction leaves both
+// as they were.
+func (s *Server) saveKeyStates(ctx context.Context, actor, action, kind, detail string, st map[string]keyState) error {
+	dir := s.cfg.CADir
+	tmp, err := stageKeyStates(dir, st)
+	if err != nil {
+		os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, filepath.Join(dir, keysFile))
+	if err := s.auditAction(ctx, actor, action, kind, detail, func(tx pgx.Tx) error {
+		return s.storeKeyFingerprints(ctx, tx, st)
+	}); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	// ponytail: a rename failing after the commit (same directory, so only on
+	// a broken file system) is reported, not rolled back
+	if err := os.Rename(tmp, filepath.Join(dir, keysFile)); err != nil {
+		return fmt.Errorf("the database records the new keys, but %s was not replaced: move %s over it by hand: %w", keysFile, tmp, err)
+	}
+	return nil
 }
 
 // ---- the keys of a running server ----
@@ -235,11 +267,17 @@ type keyring struct {
 
 // loadKeys loads the active keys and those of running rotations.
 func (s *Server) loadKeys() error {
-	dir, p := s.cfg.CADir, s.cfg.Keys
-	st, err := readKeyStates(dir)
+	st, err := readKeyStates(s.cfg.CADir)
 	if err != nil {
 		return err
 	}
+	return s.loadKeyStates(st)
+}
+
+// loadKeyStates loads the keys st names from the CA directory or the HSM.
+func (s *Server) loadKeyStates(st map[string]keyState) error {
+	var err error
+	dir, p := s.cfg.CADir, s.cfg.Keys
 	kr := keyring{states: st, cli: s.kr.cli}
 	if s.ca, err = loadRoot(p, dir, st[kindCA].Active, "LiMDM Device CA"); err != nil {
 		return fmt.Errorf("device CA: %w", err)
@@ -493,12 +531,11 @@ func (s *Server) RotateKey(ctx context.Context, actor, kind, name string) (strin
 		return "", err
 	}
 	st[kind] = keyState{Active: name, Previous: cur.Active, Since: time.Now().UTC()}
-	if err := s.auditAction(ctx, actor, "keys.rotate", kind, cur.Active+" -> "+name, func(tx pgx.Tx) error {
-		if err := writeKeyStates(dir, st); err != nil {
-			return err
+	if err := s.saveKeyStates(ctx, actor, "keys.rotate", kind, cur.Active+" -> "+name, st); err != nil {
+		if !p.hsm() { // a retry starts clean
+			os.Remove(filepath.Join(dir, name+".key"))
+			os.Remove(filepath.Join(dir, name+".crt"))
 		}
-		return s.storeKeyFingerprints(ctx, tx)
-	}); err != nil {
 		return "", err
 	}
 	s.keyNotice(notice{Type: "keys.rotate", Severity: "warning", Title: "Key rotation started: " + kind,
@@ -558,12 +595,7 @@ func (s *Server) FinishKey(ctx context.Context, actor, kind string, force bool) 
 	if done < total {
 		detail += " (forced)"
 	}
-	if err := s.auditAction(ctx, actor, "keys.finish", kind, detail, func(tx pgx.Tx) error {
-		if err := writeKeyStates(dir, st); err != nil {
-			return err
-		}
-		return s.storeKeyFingerprints(ctx, tx)
-	}); err != nil {
+	if err := s.saveKeyStates(ctx, actor, "keys.finish", kind, detail, st); err != nil {
 		return "", err
 	}
 	msg := restartNote

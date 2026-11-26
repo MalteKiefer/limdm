@@ -284,6 +284,33 @@ func TestKeyRotationFlow(t *testing.T) {
 		return resp
 	}
 
+	// a rotation whose transaction fails at commit leaves keys.json, the new
+	// key files and the stored fingerprints as they were
+	fpBefore := storedFP()
+	keysBefore, _ := os.ReadFile(filepath.Join(dir, keysFile))
+	if _, err := db.Exec(ctx, `CREATE FUNCTION fail_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'commit fails'; END $$;
+		CREATE CONSTRAINT TRIGGER fail_commit AFTER INSERT ON audit_log DEFERRABLE INITIALLY DEFERRED
+		FOR EACH ROW WHEN (NEW.action = 'keys.rotate') EXECUTE FUNCTION fail_commit()`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RotateKey(ctx, "admin@x", kindCA, "ca-failed"); err == nil {
+		t.Fatal("rotation with a failing commit succeeded")
+	}
+	if _, err := db.Exec(ctx, `DROP TRIGGER fail_commit ON audit_log; DROP FUNCTION fail_commit()`); err != nil {
+		t.Fatal(err)
+	}
+	if keysAfter, _ := os.ReadFile(filepath.Join(dir, keysFile)); !bytes.Equal(keysAfter, keysBefore) {
+		t.Fatalf("keys.json changed by a failed rotation: %s", keysAfter)
+	}
+	for _, f := range []string{keysFile + ".tmp", "ca-failed.key", "ca-failed.crt"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); !os.IsNotExist(err) {
+			t.Fatalf("%s left behind by a failed rotation", f)
+		}
+	}
+	if fp := storedFP(); fp["device_ca"] != fpBefore["device_ca"] || fp["device_ca_previous"] != "" {
+		t.Fatalf("stored fingerprints changed by a failed rotation: %v", fp)
+	}
+
 	// device CA
 	oldCA := s.ca
 	before := snapshot()
