@@ -62,6 +62,33 @@ new version runs.
 With several instances upgrade one at a time, unless the release notes ask for a full stop
 ([high-availability.md](high-availability.md#upgrades)).
 
+### Upgrading from 0.16 to 0.17
+
+1. **Full stop with several instances** ([high-availability.md](high-availability.md#upgrades)):
+   0.16 instances write package lists and device users in a way 0.17 does not read or
+   sign, and the first 0.17 start partitions `device_metrics` and moves the package lists.
+2. **OpenSSL 3 on devices.** The installers verify the release signature with OpenSSL 3
+   and the agent packages depend on `openssl (>= 3)`. Systems without it (Ubuntu 20.04,
+   Debian 11, RHEL, Alma and Rocky 8) are no longer supported: their agents fail the
+   package install of every new version (the update is reported as failed and the agent
+   stays on 0.16). Move these devices to a supported release first.
+3. **Managed files with symlinks in their path fail.** `com.limdm.files` and file uploads
+   are written without following symlinks, also on devices with `allow_scripts`. A path
+   through a symlink (`/lib`, `/bin` and `/sbin` on merged `/usr`, `/var/run`, `/home` on
+   Fedora Atomic) or a target that is itself a link (`/etc/resolv.conf`) is refused, and such
+   a file that becomes undeclared is left in place. Declare the real path (`/usr/lib/...`).
+4. **Password prompts of polkit on GNOME and KDE Plasma.** The SSO device flow does not run
+   for polkit there: the polkit helper runs outside the user's logind session (under
+   `user@.service` or socket activated), which the agent cannot tell from an SSH session.
+   pam_unix decides, so SSO only users without a local password cannot authenticate admin
+   prompts on these desktops ([desktop-login.md](desktop-login.md)).
+5. **Custom compliance checks** may read only the allowlisted osquery tables (no `augeas`;
+   osquery 4 or newer); see [compliance.md](compliance.md).
+6. **Restore** needs `-command-key` unless it runs on a server with the signing command
+   key ([backup.md](backup.md#restore)).
+7. **Outbound proxy.** Notifications and backup targets go through `http` or `https`
+   proxies only (SOCKS is no longer used), with the target resolved by the server.
+
 ### Upgrading from 0.15 to 0.16
 
 1. **Stop every instance before the first 0.16 instance starts.** At its first start 0.16

@@ -100,7 +100,10 @@ For the listed services the agent also refuses the device flow when
 (`/dev/pts/N`), or when the calling process runs in a remote logind session (`REMOTE=1` in
 `/run/systemd/sessions/<id>`) or below the SSH service. polkit may authenticate as
 another, admin user, so it runs the flow only inside a local logind session with a seat;
-a polkit helper outside any session falls back to `pam_unix`. Login services and screen
+a polkit helper outside any session falls back to `pam_unix`. **On GNOME and KDE Plasma this
+is always the case** (the shell and its polkit helper run under `user@.service`, newer polkit
+starts the helper by socket activation), so polkit prompts there use the local password and
+SSO only accounts cannot answer them. Login services and screen
 lockers may run outside a session: display managers and `login` authenticate before the
 session exists, and a locker only unlocks its own user.
 

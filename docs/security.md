@@ -382,6 +382,26 @@ removes them; the deletion is one of them (`device.delete`).
   package and service tests are evaluated by the agent itself. Expressions are RE2 (linear
   time). See [compliance.md](compliance.md#custom-checks-comlimdmcustomchecks).
 
+### Known limitations of the agent
+
+* **SSH sessions of a user who is also logged in locally.** The desktop socket refuses app
+  changes, key escrow, SSO confirmation and reboot deferral from processes in an SSH or
+  other remote session. A process the same user starts outside any session (`systemd-run
+  --user`, under `user@.service`), or a descriptor passed on by a process that already
+  exited, is not recognized as remote. The check keeps casual misuse out; it is no barrier
+  against the user's own account.
+* **Symlinks in managed file paths** are refused on every device (no symlink is followed
+  when root writes), including the usr-merge links `/lib`, `/bin`, `/sbin`; declare the real
+  path.
+* **polkit SSO on GNOME and KDE Plasma.** The SSO device flow for polkit runs only inside a
+  local logind session with a seat. On GNOME and Plasma the polkit helper runs outside the
+  user's session (under `user@.service` or socket activated), so the device flow does not
+  run there and pam_unix applies: SSO only accounts without a local password cannot answer
+  polkit prompts. Login, lock screen and display managers are not affected.
+* **OpenSSL 3.** Devices without OpenSSL 3 (Ubuntu 20.04, Debian 11, RHEL 8 and its
+  rebuilds) cannot install agents from 0.17 on, neither with the installers nor as an
+  update of the package.
+
 ## Remote shell
 
 The remote shell ([remote-shell.md](remote-shell.md)) is remote code execution by design;
