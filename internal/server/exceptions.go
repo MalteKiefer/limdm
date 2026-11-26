@@ -131,7 +131,7 @@ func (s *Server) addException(ctx context.Context, sess session, e riskException
 		return bad("reason: 1 to 1000 characters")
 	case e.Owner == "" || len(e.Owner) > 200 || e.Approver == "" || len(e.Approver) > 200:
 		return bad("risk owner and approver: 1 to 200 characters")
-	case s.settings().FourEyes && strings.EqualFold(e.Approver, sess.Email):
+	case s.settings().FourEyes && s.selfApprover(ctx, sess.Email, e.Approver):
 		return bad("four eyes approval is on: the approver must be another person")
 	case err != nil || !e.Expires.After(time.Now()) || e.Expires.After(time.Now().AddDate(3, 0, 1)):
 		return bad("expiry: a date within the next three years")
@@ -179,4 +179,11 @@ func (s *Server) revokeException(ctx context.Context, sess session, id int64) er
 		return nil
 	}
 	return err
+}
+
+// selfApprover reports whether the named approver is the person behind
+// actor (an API token counts as its creator).
+func (s *Server) selfApprover(ctx context.Context, actor, approver string) bool {
+	who, ok := rootActor(ctx, s.db, actor)
+	return !ok || strings.EqualFold(who, approver)
 }

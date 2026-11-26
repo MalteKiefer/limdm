@@ -144,6 +144,9 @@ func TestAdminAPIManagement(t *testing.T) {
 
 	// exceptions
 	day := time.Now().AddDate(0, 1, 0).Format(time.DateOnly)
+	if resp, body = call(alice, "POST", "/api/v1/exceptions", `{"check_id":"disk.recovery","mode":"advisory","reason":"lab","owner":"cto","approver":"alice@firma.de","expires":"`+day+`"}`); resp.StatusCode == http.StatusCreated {
+		t.Fatalf("token creator named as their own approver: %s", body)
+	}
 	resp, body = call(alice, "POST", "/api/v1/exceptions", `{"check_id":"disk.recovery","mode":"advisory","reason":"lab","owner":"cto","approver":"ciso","expires":"`+day+`"}`)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("exception: %d %s", resp.StatusCode, body)
