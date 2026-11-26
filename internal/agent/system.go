@@ -588,13 +588,3 @@ func parseApkInfo(out string, err error) ([]api.Package, error) {
 	}
 	return pkgs, nil
 }
-
-func countLines(s string) int {
-	n := 0
-	for _, l := range strings.Split(s, "\n") {
-		if strings.TrimSpace(l) != "" {
-			n++
-		}
-	}
-	return n
-}
