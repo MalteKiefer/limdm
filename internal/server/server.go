@@ -250,9 +250,11 @@ type Server struct {
 	shells     shellHub // remote shell sessions this instance holds
 	ha         cluster  // instance identity, notifications, relay (cluster.go)
 	brands     sync.Map // tenant id -> brandEntry (tenant.go)
-	downloads  chan struct{} // agent package downloads running (agentPackage); nil: no limit
+
+	// load limits of the agent API; nil: no limit
+	downloads chan struct{} // agent package downloads running (agentPackage)
 	// check ins running, and those with a body over 1 MiB (inventory, package
-	// list) among them (checkinSlot); nil: no limit
+	// list) among them (checkinSlot)
 	checkins, bigCheckins chan struct{}
 }
 
