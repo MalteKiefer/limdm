@@ -1,1 +1,0 @@
-import{h as e}from"./index-DvPT2U8H.js";import{G as t,it as n}from"./states-ChiKtiFY.js";var r=n();function i(){let n=t();return(0,r.jsx)(e,{title:n(`inbox.title`),sub:n(`inbox.sub`),oldPath:`/approvals`})}export{i as InboxPage};
