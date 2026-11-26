@@ -29,9 +29,13 @@
   with a rollover record signed by the pinned key, and the agent refuses any other key
   change ([keys.md](keys.md#command-key)).
 * **Keys and HSM.** Device CA, network CA and command key can live in a PKCS#11 HSM
-  (`LIMDM_KEY_PROVIDER=pkcs11`, separate build). Every key, including the session key, can
-  be rotated without enrolling devices again; inventory, runbooks and the compromise
-  procedure are in [keys.md](keys.md).
+  (`LIMDM_KEY_PROVIDER=pkcs11` with `LIMDM_PKCS11_MODULE`, `LIMDM_PKCS11_TOKEN`,
+  `LIMDM_PKCS11_PIN`; separate build with `-tags pkcs11`). The private keys then never
+  leave the HSM; release checksums can be signed there with `limdm-server sign -pkcs11
+  LABEL`. Every key, including the session key and the webhook signing secret, can be
+  rotated without enrolling devices again (`limdm-server keys status|rotate|finish`,
+  **Settings**, **Security**, **Keys**, global administrators only). Inventory, runbooks
+  and the compromise procedure are in [keys.md](keys.md).
 * **Network CA.** EAP-TLS device certificates come from a second root, `network-ca.crt` and
   `network-ca.key` next to the device CA, so mTLS certificates never authenticate to the
   network and network certificates never reach the agent API. Agents send only a CSR; the
@@ -48,33 +52,95 @@
 
 ## Console
 
-* **Network lists.** **Settings**, **Console access by network** limits the console to
-  allowed networks (addresses or CIDR ranges) and refuses blocked ones, even when allowed.
-  Loopback is always allowed, saving a list that would lock out your own address is
-  refused, and the agent API, health check, SCIM and the install script are not affected.
-  Behind a reverse proxy on the same host the address comes from X-Forwarded-For.
-
 * HTTPS only. Without its own certificate the console binds to loopback and runs behind a
   local TLS proxy such as Caddy.
-* OIDC with PKCE, nonce, `email_verified` and domain checks, optionally multi factor
-  authentication from the `amr` or `acr` claim ([configuration.md](configuration.md#console-settings)).
-  Roles and scopes are read from the database on every request, so removing someone takes
-  effect immediately.
+* **Network lists.** **Settings**, **General**, **Console access by network** limits the
+  console to allowed networks (addresses or CIDR ranges) and refuses blocked ones, even when
+  allowed. The lists also cover the admin API and `/metrics`, which share the console
+  listener. Loopback is always allowed, saving a list that would lock out your own address
+  is refused, and the agent API, `/healthz`, `/readyz`, SCIM and `/install.sh` are not
+  affected. Refused requests are logged with the parsed address.
+* **Client address.** `X-Forwarded-For` is used only when the peer is loopback or in
+  `LIMDM_TRUSTED_PROXIES`; then the last entry counts. Network lists, rate limits and audit
+  entries use this address.
+* **OIDC** with PKCE, nonce, `email_verified` and domain checks. **Settings**, **SSO**,
+  **Require multi factor authentication** refuses sign ins whose id token shows no second
+  factor: `amr` must contain `mfa` or `mca`, or two distinct methods of which one is a
+  second factor (RFC 8176: `otp`, `hwk`, `swk`, `sms`, `tel`, `sc`, `pop`, `fpt`, `face`,
+  `iris`, `retina`, `vbm`). With **Accepted acr values** set, LiMDM requests them and the
+  `acr` claim must be one of them instead. A refused sign in is audited as `login.denied`
+  ([configuration.md](configuration.md#console-settings)).
 * Local accounts: argon2id password and TOTP (RFC 6238, codes usable once), one time
-  recovery codes stored as SHA-256 hashes, lockout after 5 failures for 15 minutes, per IP
-  rate limit (client IPs from `X-Forwarded-For` are only trusted from a loopback proxy).
+  recovery codes stored as SHA-256 hashes, lockout after 5 failures for 15 minutes (stored
+  in the database, so it counts across instances).
 * Sessions: sealed cookies, 30 minutes idle and 8 hours absolute timeout, CSRF tokens on
-  every form, `SameSite=Lax`, `Secure`, `HttpOnly`; the sign in form uses a separate `SameSite=Strict` token.
-* Admin API and metrics: bearer tokens only, no cookies. Tokens carry a role, always expire,
-  are stored as SHA-256 hashes, are shown once and can be revoked; creation, revocation,
-  failed authentication and role denials are audited, and requests are rate limited per
-  token and failures per client address. See [admin-api.md](admin-api.md).
-* Headers: strict Content Security Policy (`default-src 'self'`, no inline script or
-  style), HSTS, `Referrer-Policy: same-origin`, no framing. The console works without
-  JavaScript except the visual blueprint editor.
-* Secrets in the database (OIDC client secret, Google service account key, notification
-  credentials, the desktop login client secret) are sealed with AES-256-GCM; recovery keys
-  too, bound to device and volume. Keys derive from `LIMDM_SESSION_KEY` with HKDF.
+  every form, `SameSite=Lax`, `Secure`, `HttpOnly`; the sign in form uses a separate
+  `SameSite=Strict` token. Signing out ends the sessions of the account everywhere.
+* Admin API and metrics: bearer tokens only, no cookies. Tokens carry a role (`admin`,
+  `helpdesk`, `auditor`, `metrics`), optional scope tags, always expire, are stored as
+  SHA-256 hashes, are shown once and can be revoked; creation, revocation, failed
+  authentication and role denials are audited. See [admin-api.md](admin-api.md).
+* Headers on console and agent API: `Content-Security-Policy: default-src 'self';
+  frame-ancestors 'none'; form-action 'self'; base-uri 'none'` (no inline script or style),
+  `Strict-Transport-Security: max-age=63072000; includeSubDomains`,
+  `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: same-origin`, `Cache-Control: no-store`. The console works without
+  JavaScript except the visual blueprint editor and the remote shell terminal.
+
+### Rate limits
+
+| What | Limit |
+|---|---|
+| Local sign in | 10 attempts per 5 minutes per client address |
+| Admin API | 600 requests per minute per token; 20 failed authentications per 5 minutes per address, then refused before the token is checked |
+| SCIM | 20 failed authentications per 5 minutes per address |
+| Enrollment | 20 failed attempts per 5 minutes per address (successful enrollments do not count, so a rollout behind one NAT is not blocked) |
+| Network CRL download | 20 failed authentications per 5 minutes per address |
+| Device: network certificate | 5 requests per 10 minutes per device |
+| Device: app catalog search | 30 requests per 10 minutes per device |
+
+IPv6 addresses count per /64. These counters live in memory per instance: with several
+instances an address gets up to that many times the budget
+([high-availability.md](high-availability.md)). The local account lockout is in the database.
+
+### Sealed values
+
+Secrets in the database are sealed with AES-256-GCM. Each purpose has its own key, derived
+with HKDF from `LIMDM_SESSION_KEY`, and every ciphertext is bound to its field or record, so
+sealed values cannot be swapped between fields or rows:
+
+| Value | Bound to |
+|---|---|
+| OIDC client secret | its settings field |
+| Google service account key | its settings field |
+| Webhook signing secret (settings row `webhook`) | its settings field |
+| Notification channel credentials (Slack, Discord and webhook URLs, SMTP password) | the channel |
+| Desktop login client secret in `com.limdm.login` items and their version history | the field (the item signature covers the sealed form) |
+| Disk recovery keys | device and volume |
+
+`LIMDM_SESSION_KEY` may list several comma separated keys, the new one first: values are
+opened with any of them and sealed again with the first in the background
+([keys.md](keys.md#session-key)).
+
+## Roles and device scopes
+
+Console roles are `admin`, `helpdesk` and `auditor` ([configuration.md](configuration.md#console-users-and-roles)).
+Role, scope and tenant are read from the database on every request, so a change or removal
+takes effect immediately.
+
+* **Admin:** everything, never scoped.
+* **Helpdesk:** reads and runs the device commands sync, update, reboot, shutdown, lock,
+  unlock, message, user password, user lock and unlock, and log collection; remote shells
+  only with the helpdesk switch of the remote shell setting. No wipe, lost mode, scripts,
+  audit log, exports or administration pages.
+* **Auditor:** reads, including the audit log and exports; changes nothing.
+
+Helpdesk and auditor accounts and API tokens can be limited to device tags or directory
+groups (of the device's primary user). Roles can also come from directory groups or the
+OIDC `groups` claim (**Settings**, **SSO**, **Console roles from groups**; explicit console
+users win). One condition (`scopeCond`) builds the device filter for every listing, device
+page, command, export, compliance history, recovery key, remote shell and admin API path;
+a device outside the scope is not found (deny by default).
 
 ## Tenant isolation
 
@@ -113,8 +179,12 @@ and answer `202` with its ID ([admin-api.md](admin-api.md#commands)).
 
 The setting can only be switched on with at least two active administrators (with one,
 nobody could approve), and while it is on the second to last admin cannot be demoted or
-disabled. With the setting off everything runs directly as before. Roles derived from
-directory groups follow the directory, not this approval.
+disabled. The recovery key and remote shell options require the main switch. With the
+setting off everything runs directly as before. Roles derived from directory groups follow
+the directory, not this approval. While it is on, the approver of a
+[risk exception](compliance.md#risk-exceptions) must be someone other than the admin who
+records it. With several tenants a request belongs to the requester's tenant (for a global
+administrator: the tenant of the device or user concerned) and is decided there.
 
 ## Database
 
@@ -128,8 +198,12 @@ job) and hash chained. Recorded:
 console actions, settings changes, sign ins (also failed ones: local, and OIDC as
 `login.failed` with the reason `state`, `code exchange`, `id token` or `claims` and the
 client address, never codes or tokens; at most 30 per minute, the process log has all),
-enrollments, certificate rotations, commands, tamper events, recovery key escrow and every
-recovery key view, policy actions, exports, remote shell sessions (start and end).
+refused MFA sign ins (`login.denied`), enrollments, certificate rotations, commands, tamper
+events, recovery key escrow and every recovery key view, policy actions, exports
+(`export`, `export.done` with SHA-256), four eyes requests and decisions (`approval.*`),
+risk exceptions, key rotations (`keys.rotate`), notification channel changes, remote shell
+sessions (start and end), audit verification, key segments and pruning (`audit.verify`,
+`audit.keyed`, `audit.key_rotate`, `audit.prune`).
 
 **Keyed chain.** Each entry stores `prev` (the hash of the entry before) and `hash`:
 
@@ -174,8 +248,13 @@ limdm-server audit key                                 # key=<hex> keyed_from=<i
 limdm-server audit -key <hex> -keyed-from <id> verify limdm-20261126-audit.jsonl
 ```
 
-An export of a date range starts in the middle of the chain: the first entry's `prev` is
-taken as given and every following entry must continue it. Whoever holds the key can
+`audit verify` prints `<n> entries, <first> to <last>: chain intact` or names the first
+broken entry and exits with an error. `-ca DIR` (default `LIMDM_CA_DIR`, else
+`/var/lib/limdm-server/ca`) reads every segment from `command.key`, `audit-keyed-from` and
+`audit-keys` (with an HSM through `LIMDM_KEY_PROVIDER`). `-key` covers one segment only: an
+export that spans a command key rotation is verified with the CA directory, or split at the
+segment start. An export of a date range starts in the middle of the chain: the first
+entry's `prev` is taken as given and every following entry must continue it. Whoever holds the key can
 compute valid hashes, so hand it only to the verifying auditor.
 
 **Commands** are linked through the chain alone: the enqueue entry (`command.<type>`, actor
@@ -233,8 +312,9 @@ The remote shell ([remote-shell.md](remote-shell.md)) is remote code execution b
 these controls keep it narrow:
 
 * **Two opt ins.** The device must be enrolled with `allow_remote_shell` (local file, not
-  changeable from the server) and the server setting must be on. Helpdesk and root need
-  their own switches; the start goes through the four eyes hook `requireApproval`.
+  changeable from the server) and **Settings**, **Security**, **Remote shell** must be on.
+  Helpdesk and root need their own switches. With the remote shell option of
+  [four eyes approval](#four-eyes-approval) a second admin approves each session first.
 * **Signed and fresh.** The `shell` command is signed like every command, and the agent
   runs it only with a pinned command key and when it is younger than 10 minutes. Someone
   who can write to the database cannot open a shell.
@@ -245,9 +325,13 @@ these controls keep it narrow:
   the role and setting at that moment, the exact `Origin` and the CSRF token, so another
   site cannot open it (cross site WebSocket hijacking). Access is checked again every
   minute while the session runs.
-* **Visible and bounded.** The signed in user is notified and can end the session; maximum
-  duration and idle timeout are enforced on server and device; the whole process group is
-  hung up at the end.
+* **Visible and bounded.** The signed in user is notified and can end the session
+  (`limdm support end`); maximum duration (default 60 minutes) and idle timeout (default 15
+  minutes) are enforced on server and device; the whole process group is hung up at the end.
+* **Several instances.** When console and device reach different server instances, the
+  session traffic is relayed through PostgreSQL notifications (channel `limdm_shell`).
+  Terminal input and output then pass through the database (TLS with `verify-full` to non
+  loopback hosts); whoever can listen on the database server can read them.
 * **Accountable.** `shell.start` and `shell.end` go to the hash chained audit log, the
   output is stored (1 MiB per session, 365 days) and only admins and auditors can read it.
   Transcripts can contain whatever the session displayed, including secrets; treat them as
@@ -281,8 +365,10 @@ Failed local and OIDC sign ins and rejected enrollments are logged with the clie
   with `network_info: false` get neither: the server stores no public address or location
   for them and deletes what was stored.
 * Outbound connections: the server talks to the configured OIDC provider, the Google
-  Directory API (if configured), the webhook URL (if configured), GitHub for agent releases
-  and the location service (only when geolocation is on). Devices talk to the
+  Directory API (if configured), the compliance webhook and notification channels (if
+  configured: Slack, Discord, webhook URLs, SMTP servers), the syslog target
+  (`LIMDM_SYSLOG`), GitHub for agent releases, Flathub for the app catalog and the location
+  service (only when geolocation is on). Devices talk to the
   LiMDM server, the identity provider during desktop login, their package repositories and
   the osquery repository. `/install.sh` downloads from GitHub.
 
