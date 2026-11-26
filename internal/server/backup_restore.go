@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -735,9 +736,8 @@ func (s *Server) restoreTest(ctx context.Context, actor string, open func() (io.
 				fmt.Fprintln(out, "drop scratch database:", err)
 			}
 		}()
-		scratch = strings.Replace(s.cfg.DatabaseURL, "/"+pc.ConnConfig.Database, "/"+created, 1)
-		if !strings.Contains(scratch, "/"+created) {
-			return errors.New("cannot derive the scratch database URL; pass -db")
+		if scratch, err = withDatabase(s.cfg.DatabaseURL, created); err != nil {
+			return err
 		}
 	}
 	dir, err := os.MkdirTemp("", "limdm-restore-test-*")
@@ -801,4 +801,20 @@ func checkRestored(ctx context.Context, cfg Config, log *slog.Logger, dbURL, caD
 		return "", err
 	}
 	return fmt.Sprintf("%d devices, %d audit entries, chain intact, sealed values open", devices, entries), nil
+}
+
+// withDatabase returns the URL dsn with the database name replaced. A
+// plain text replace also hits a user of the same name
+// (postgres://limdm@host/limdm), so the URL is parsed.
+func withDatabase(dsn, db string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil || u.Scheme != "postgres" && u.Scheme != "postgresql" {
+		return "", errors.New("cannot derive the scratch database URL; pass -db")
+	}
+	u.Path = "/" + db
+	if q := u.Query(); q.Has("dbname") {
+		q.Set("dbname", db)
+		u.RawQuery = q.Encode()
+	}
+	return u.String(), nil
 }

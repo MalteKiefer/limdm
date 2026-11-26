@@ -237,3 +237,13 @@ func TestBackupRestore(t *testing.T) {
 		t.Fatal("retired device pinned")
 	}
 }
+
+func TestWithDatabase(t *testing.T) {
+	got, err := withDatabase("postgres://limdm:pw@db.example.com:5432/limdm?sslmode=require", "limdm_restore_test")
+	if err != nil || got != "postgres://limdm:pw@db.example.com:5432/limdm_restore_test?sslmode=require" {
+		t.Fatalf("%q %v", got, err)
+	}
+	if _, err := withDatabase("host=db dbname=limdm", "x"); err == nil {
+		t.Fatal("key value DSN accepted")
+	}
+}
