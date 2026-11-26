@@ -117,6 +117,12 @@ type Updates struct {
 	SnapRefresh string `json:"snap_refresh,omitempty"`
 	// Reboot deferral, see RebootDefer.
 	RebootDefer
+	// Rules set mode, window and ring per update source; when present they
+	// replace Mode (EffectiveRules).
+	Rules []UpdateRule `json:"rules,omitempty"`
+	// SecurityMaxDays is how long security updates may stay pending before
+	// the check updates.security_age fails, 14 when unset.
+	SecurityMaxDays int `json:"security_max_days,omitempty"`
 }
 
 // RebootDefer lets desktop users postpone a scheduled reboot: up to
@@ -313,19 +319,29 @@ func (d Declaration) apply(p *Policy) error {
 		if err := strict(d.Payload, &p.Updates); err != nil {
 			return err
 		}
-		switch p.Updates.Mode {
-		case "off", "security", "all":
-		default:
-			bad("mode must be off, security or all")
-		}
 		u := p.Updates
-		if (u.Mode != "off" || u.SnapRefresh == "window") && !windowRe.MatchString(u.Window) {
+		switch {
+		case u.Mode == "off", u.Mode == "security", u.Mode == "all":
+		case u.Mode == "" && len(u.Rules) > 0: // the rules decide
+		default:
+			bad("mode must be off, security or all (or empty with rules)")
+		}
+		if (u.Mode == "security" || u.Mode == "all" || u.SnapRefresh == "window") && !windowRe.MatchString(u.Window) {
 			bad("window must be HH:MM-HH:MM")
 		}
-		for i, d := range u.Days {
-			if !slices.Contains(Weekdays, d) || slices.Contains(u.Days[:i], d) {
-				bad("days: %q is not one of mon, tue, wed, thu, fri, sat, sun (each once)", d)
+		if err := validDays(u.Days); err != nil {
+			bad("%v", err)
+		}
+		for i, r := range u.Rules {
+			if err := r.validate(sourcesOf(u.Rules[:i])); err != nil {
+				bad("%v", err)
 			}
+			if r.Mode != "off" && r.Window == "" && !windowRe.MatchString(u.Window) {
+				bad("rules: %s needs a window, its own or the declaration's", r.Source)
+			}
+		}
+		if u.SecurityMaxDays < 0 || u.SecurityMaxDays > 365 {
+			bad("security_max_days must be 0..365")
 		}
 		if len(u.Hold) > 200 {
 			bad("hold: at most 200 packages")
@@ -823,6 +839,8 @@ type Status struct {
 	// CatalogVersion is the version of the agent's check catalog and its
 	// framework mapping the Checks were made with.
 	CatalogVersion string `json:"catalog_version,omitempty"`
+	// Updates are the pending updates and the last run per update source.
+	Updates *UpdateStatus `json:"updates,omitempty"`
 }
 
 type Command struct {
@@ -840,7 +858,8 @@ type Command struct {
 
 // CommandTypes are the one off actions an admin can send.
 var CommandTypes = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "script", "lost", "found", "wipe", "allow_uninstall", "message", "app_install", "app_remove",
-	"user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete", "software_remove", "diagnostics"}
+	"user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete", "software_remove", "diagnostics",
+	"package_hold", "package_downgrade"}
 
 // PollResponse answers the agent's frequent poll (POST /api/v1/poll).
 type PollResponse struct {
@@ -1023,6 +1042,9 @@ type CheckinResponse struct {
 	// then refuses entries without a valid signature.
 	SignedData  bool         `json:"signed_data,omitempty"`
 	SignedUsers *SignedUsers `json:"signed_users,omitempty"`
+	// UpdateGate is the state of the device's update ring; nil when the
+	// device is in no ring.
+	UpdateGate *UpdateGate `json:"update_gate,omitempty"`
 }
 
 // ---- signed agent releases ----
