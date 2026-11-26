@@ -150,90 +150,57 @@ func enabledAdminsExcept(ctx context.Context, tx pgx.Tx, login string) (int, err
 }
 
 func (s *Server) userAdd(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	kind, role := r.FormValue("kind"), r.FormValue("role")
-	if !slices.Contains(roles, role) {
-		s.renderUsers(w, r, sess, "", "unknown role")
-		return
+	creds, approval, err := s.addUser(r.Context(), sess, userAddition{Kind: r.FormValue("kind"), Login: r.FormValue("login"), Role: r.FormValue("role")}, r.FormValue("reason"))
+	s.userDone(w, r, sess, creds, approval, err)
+}
+
+// userDone answers a console form of the users page: the error, the way
+// to the approval, or the page with new credentials.
+func (s *Server) userDone(w http.ResponseWriter, r *http.Request, sess session, creds string, approval int64, err error) {
+	switch {
+	case err != nil:
+		s.renderUsers(w, r, sess, "", err.Error())
+	case approval != 0:
+		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+	default:
+		s.renderUsers(w, r, sess, creds, "")
 	}
-	var tenantID *int64 // accounts added in a tenant belong to it; NULL is global
-	if sess.Tenant != 0 {
-		tenantID = &sess.Tenant
+}
+
+// addUser creates a console account in the tenant of sess and returns
+// local credentials, or the approval it waits for (four eyes for admins).
+// The console form and the admin API both call it.
+func (s *Server) addUser(ctx context.Context, sess session, add userAddition, reason string) (creds string, approval int64, err error) {
+	if !slices.Contains(roles, add.Role) {
+		return "", 0, &userError{http.StatusUnprocessableEntity, "unknown role"}
 	}
-	if role == "admin" && s.settings().FourEyes {
+	if sess.Tenant != 0 { // accounts added in a tenant belong to it; NULL is global
+		add.Tenant = &sess.Tenant
+	}
+	add.Login = strings.TrimSpace(add.Login)
+	if add.Kind != "oidc" {
+		add.Kind = "local"
+	}
+	if err := add.normalize(); err != nil {
+		return "", 0, &userError{http.StatusUnprocessableEntity, err.Error()}
+	}
+	if add.Role == "admin" && s.settings().FourEyes {
 		// a second admin decides; local credentials are shown to the approver,
 		// so the requester never holds a second admin account
-		add := userAddition{Kind: kind, Login: strings.TrimSpace(r.FormValue("login")), Role: role, Tenant: tenantID}
-		if err := add.normalize(); err != nil {
-			s.renderUsers(w, r, sess, "", err.Error())
-			return
-		}
-		if _, err := s.requestApproval(ctx, sess, "user.add", add.target(), add, strings.TrimSpace(r.FormValue("reason"))); err != nil {
-			s.renderUsers(w, r, sess, "", err.Error())
-			return
-		}
-		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
-		return
+		id, err := s.requestApproval(ctx, sess, "user.add", add.target(), add, strings.TrimSpace(reason))
+		return "", id, err
 	}
-	if kind == "oidc" {
-		addr, err := mail.ParseAddress(strings.TrimSpace(r.FormValue("login")))
-		if err != nil || addr.Name != "" {
-			s.renderUsers(w, r, sess, "", "enter a plain email address")
-			return
-		}
-		email := strings.ToLower(addr.Address)
-		err = s.auditAction(ctx, sess.Email, "user.add", email, "oidc "+role, func(tx pgx.Tx) error {
-			tag, err := tx.Exec(ctx, `INSERT INTO console_users(email, role, tenant_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, email, role, tenantID)
-			if err == nil && tag.RowsAffected() == 0 {
-				err = errors.New("user exists already")
-			}
-			return err
-		})
-		if err != nil {
-			s.renderUsers(w, r, sess, "", err.Error())
-			return
-		}
-		s.renderUsers(w, r, sess, "", "")
-		return
-	}
-	name := strings.ToLower(strings.TrimSpace(r.FormValue("login")))
-	if !localNameRe.MatchString(name) {
-		s.renderUsers(w, r, sess, "", "local name: 2..32 lowercase letters, digits, dot, dash, underscore")
-		return
-	}
-	var creds string
-	err := s.auditAction(ctx, sess.Email, "user.add", localPrefix+name, "local "+role, func(tx pgx.Tx) error {
+	err = s.auditAction(ctx, sess.Email, "user.add", add.target(), add.Kind+" "+add.Role, func(tx pgx.Tx) error {
 		var err error
-		if creds, err = localAdd(ctx, tx, name, role); err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, `UPDATE local_admins SET tenant_id=$2 WHERE name=$1`, name, tenantID)
+		creds, err = add.apply(ctx, tx)
 		return err
 	})
-	if err != nil {
-		s.renderUsers(w, r, sess, "", err.Error())
-		return
-	}
-	s.renderUsers(w, r, sess, creds, "")
+	return creds, 0, err
 }
 
 // userUpdate changes role or enabled state; self lockout and losing the last admin are refused.
 func (s *Server) userUpdate(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	login := r.FormValue("login")
 	c := userChange{Role: r.FormValue("role"), Disabled: r.FormValue("disabled") == "on"}
-	if !slices.Contains(roles, c.Role) {
-		s.renderUsers(w, r, sess, "", "unknown role")
-		return
-	}
-	if !s.userInTenant(ctx, sess, login) {
-		s.renderUsers(w, r, sess, "", "user not found")
-		return
-	}
-	if login == sess.Email && (c.Disabled || c.Role != sess.Role) {
-		s.renderUsers(w, r, sess, "", "you cannot demote or disable your own account")
-		return
-	}
 	var err error
 	if c.Tags, err = parseTags(r.FormValue("scope_tags")); err != nil {
 		s.renderUsers(w, r, sess, "", err.Error())
@@ -243,33 +210,40 @@ func (s *Server) userUpdate(w http.ResponseWriter, r *http.Request, sess session
 		s.renderUsers(w, r, sess, "", err.Error())
 		return
 	}
+	approval, err := s.updateUser(r.Context(), sess, r.FormValue("login"), c, r.FormValue("reason"))
+	s.userDone(w, r, sess, "", approval, err)
+}
+
+// updateUser stores the role, state and scope of an account, or asks for
+// approval when four eyes approval covers the change. The console form and
+// the admin API both call it.
+func (s *Server) updateUser(ctx context.Context, sess session, login string, c userChange, reason string) (int64, error) {
+	if !slices.Contains(roles, c.Role) {
+		return 0, &userError{http.StatusUnprocessableEntity, "unknown role"}
+	}
+	if !s.userInTenant(ctx, sess, login) {
+		return 0, &userError{http.StatusNotFound, "user not found"}
+	}
+	if login == sess.Email && (c.Disabled || c.Role != sess.Role) {
+		return 0, &userError{http.StatusUnprocessableEntity, "you cannot demote or disable your own account"}
+	}
 	if c.Role == "admin" {
 		c.Tags, c.Groups = []string{}, []string{} // admins are never scoped
 	}
 	cur := s.currentRole(ctx, login)
 	if cur == "" {
-		s.renderUsers(w, r, sess, "", "user not found")
-		return
+		return 0, &userError{http.StatusNotFound, "user not found"}
 	}
 	if (cur != c.Role || cur == "admin") && s.settings().FourEyes {
-		if _, err := s.requestApproval(ctx, sess, "user.update", login, c, strings.TrimSpace(r.FormValue("reason"))); err != nil {
-			s.renderUsers(w, r, sess, "", err.Error())
-			return
-		}
-		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
-		return
+		return s.requestApproval(ctx, sess, "user.update", login, c, strings.TrimSpace(reason))
 	}
-	err = s.auditAction(ctx, sess.Email, "user.update", login, c.String(), func(tx pgx.Tx) error {
+	err := s.auditAction(ctx, sess.Email, "user.update", login, c.String(), func(tx pgx.Tx) error {
 		return s.applyUserChange(ctx, tx, login, c)
 	})
-	if err != nil {
-		s.renderUsers(w, r, sess, "", err.Error())
-		return
-	}
-	if cur != c.Role {
+	if err == nil && cur != c.Role {
 		s.notifyRoleChange(sess.Email, login, cur, c.Role, "")
 	}
-	s.renderUsers(w, r, sess, "", "")
+	return 0, err
 }
 
 // userChange is the edit of a console account, applied directly or after
@@ -320,7 +294,7 @@ func (s *Server) applyUserChange(ctx context.Context, tx pgx.Tx, login string, c
 			return err
 		}
 		if n == 0 {
-			return errors.New("at least one active administrator must remain")
+			return &userError{http.StatusUnprocessableEntity, "at least one active administrator must remain"}
 		}
 		var isAdmin bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM console_users WHERE email=$1 AND role='admin' AND NOT disabled)
@@ -328,7 +302,7 @@ func (s *Server) applyUserChange(ctx context.Context, tx pgx.Tx, login string, c
 			return err
 		}
 		if isAdmin && n < 2 && s.settings().FourEyes {
-			return errors.New("four eyes approval is on: at least two active administrators must remain")
+			return &userError{http.StatusUnprocessableEntity, "four eyes approval is on: at least two active administrators must remain"}
 		}
 	}
 	if c.Tags == nil {
@@ -347,46 +321,42 @@ func (s *Server) applyUserChange(ctx context.Context, tx pgx.Tx, login string, c
 			session_gen=session_gen+1 WHERE email=$1`, login, c.Role, c.Disabled, c.Tags, c.Groups)
 	}
 	if err == nil && tag.RowsAffected() == 0 {
-		err = errors.New("user not found")
+		err = &userError{http.StatusNotFound, "user not found"}
 	}
 	return err
 }
 
 func (s *Server) userReset(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	name, ok := strings.CutPrefix(r.FormValue("login"), localPrefix)
+	creds, approval, err := s.resetUser(r.Context(), sess, r.FormValue("login"), r.FormValue("reason"))
+	s.userDone(w, r, sess, creds, approval, err)
+}
+
+// resetUser replaces password and TOTP of a local account and returns the
+// new credentials, or the approval it waits for (four eyes for admins: the
+// approver gets the credentials). The console form and the admin API both
+// call it.
+func (s *Server) resetUser(ctx context.Context, sess session, login, reason string) (creds string, approval int64, err error) {
+	name, ok := strings.CutPrefix(login, localPrefix)
 	if !ok {
-		s.renderUsers(w, r, sess, "", "only local accounts have credentials to reset")
-		return
+		return "", 0, &userError{http.StatusUnprocessableEntity, "only local accounts have credentials to reset"}
 	}
 	if localPrefix+name == sess.Email {
-		s.renderUsers(w, r, sess, "", "change your own credentials in your profile")
-		return
+		return "", 0, &userError{http.StatusUnprocessableEntity, "change your own credentials in your profile"}
 	}
 	if !s.userInTenant(ctx, sess, localPrefix+name) {
-		s.renderUsers(w, r, sess, "", "user not found")
-		return
+		return "", 0, &userError{http.StatusNotFound, "user not found"}
 	}
 	if s.currentRole(ctx, localPrefix+name) == "admin" && s.settings().FourEyes {
 		// the new credentials are shown to the approving admin, not the requester
-		if _, err := s.requestApproval(ctx, sess, "user.reset", localPrefix+name, map[string]string{"login": localPrefix + name}, strings.TrimSpace(r.FormValue("reason"))); err != nil {
-			s.renderUsers(w, r, sess, "", err.Error())
-			return
-		}
-		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
-		return
+		id, err := s.requestApproval(ctx, sess, "user.reset", localPrefix+name, map[string]string{"login": localPrefix + name}, strings.TrimSpace(reason))
+		return "", id, err
 	}
-	var creds string
-	err := s.auditAction(ctx, sess.Email, "user.reset", localPrefix+name, "new password and TOTP", func(tx pgx.Tx) error {
+	err = s.auditAction(ctx, sess.Email, "user.reset", localPrefix+name, "new password and TOTP", func(tx pgx.Tx) error {
 		var err error
 		creds, err = localReset(ctx, tx, name)
 		return err
 	})
-	if err != nil {
-		s.renderUsers(w, r, sess, "", err.Error())
-		return
-	}
-	s.renderUsers(w, r, sess, creds, "")
+	return creds, 0, err
 }
 
 // userAddition is a new console account waiting for four eyes approval.
@@ -426,7 +396,7 @@ func (a userAddition) apply(ctx context.Context, tx pgx.Tx) (string, error) {
 	if a.Kind == "oidc" {
 		tag, err := tx.Exec(ctx, `INSERT INTO console_users(email, role, tenant_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, a.Login, a.Role, a.Tenant)
 		if err == nil && tag.RowsAffected() == 0 {
-			err = errors.New("user exists already")
+			err = &userError{http.StatusConflict, "user exists already"}
 		}
 		return "", err
 	}

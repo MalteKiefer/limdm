@@ -523,7 +523,107 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		s.errorPage(w, r, sess, http.StatusForbidden, "settings are managed by global administrators")
 		return
 	}
-	ctx := r.Context()
+	section := r.FormValue("section")
+	in := s.settings()
+	switch section {
+	case "general":
+		in.LocalLogin = r.FormValue("local_login") == "on"
+		in.StaleHours, _ = strconv.Atoi(r.FormValue("stale_hours"))
+	case "sso":
+		in.OIDCIssuer, in.OIDCClientID, in.AllowedDomain = r.FormValue("oidc_issuer"), r.FormValue("oidc_client_id"), r.FormValue("allowed_domain")
+		in.RequireMFA = r.FormValue("require_mfa") == "on"
+		in.MFAACR = strings.Fields(r.FormValue("mfa_acr"))
+		groups, err := parseRoleGroups(r.FormValue("role_groups"))
+		if err != nil {
+			s.renderSettings(w, r, sess, in, "", err.Error())
+			return
+		}
+		in.RoleGroups = groups
+		if v := r.FormValue("oidc_client_secret"); v != "" {
+			in.OIDCClientSecret = v
+		}
+		if r.FormValue("clear_secret") == "on" {
+			in.OIDCClientSecret = ""
+		}
+	case "monitoring":
+		in.WebhookURL = r.FormValue("webhook_url")
+		in.NotifyPrivate = r.FormValue("notify_private") == "on"
+	case "network":
+		in.ConsoleAllow, in.ConsoleBlock = strings.Fields(r.FormValue("console_allow")), strings.Fields(r.FormValue("console_block"))
+		in.SCIMAllow = strings.Fields(r.FormValue("scim_allow"))
+	case "branding":
+		in.CompanyName = r.FormValue("company_name")
+		if f, _, err := r.FormFile("logo"); err == nil {
+			b, err := io.ReadAll(io.LimitReader(f, maxLogo+1))
+			f.Close()
+			if err != nil {
+				s.fail(w, err)
+				return
+			}
+			in.Logo = b
+		}
+		if r.FormValue("remove_logo") == "on" {
+			in.Logo = nil
+		}
+	case "security":
+		n, _ := strconv.Atoi(r.FormValue("min_length"))
+		in.Rules = PasswordPolicy{MinLength: n, Upper: r.FormValue("upper") == "on", Lower: r.FormValue("lower") == "on",
+			Digit: r.FormValue("digit") == "on", Symbol: r.FormValue("symbol") == "on", NoName: r.FormValue("no_name") == "on"}
+		in.FourEyes = r.FormValue("four_eyes") == "on"
+		in.FourEyesRecovery, in.FourEyesShell = r.FormValue("four_eyes_recovery") == "on", r.FormValue("four_eyes_shell") == "on"
+		in.Geolocation, in.FallbackDNS = r.FormValue("geolocation") == "on", r.FormValue("fallback_dns") == "on"
+	case "remote_shell":
+		in.RemoteShell = remoteShellForm(r)
+	case "operations":
+		dl, err1 := strconv.Atoi(r.FormValue("update_downloads"))
+		ci, err2 := strconv.Atoi(r.FormValue("max_checkins"))
+		if err1 != nil || err2 != nil {
+			s.renderSettings(w, r, sess, in, "", "parallel downloads and check ins: 1 to 10000")
+			return
+		}
+		in.Ops = OpsSettings{LogLevel: r.FormValue("log_level"), AccessLog: r.FormValue("access_log") == "on",
+			AuditAPIReads: r.FormValue("audit_api_reads"), UpdateDownloads: dl, MaxCheckins: ci,
+			AgentProxyFrom: strings.Fields(r.FormValue("agent_proxy_protocol")), Syslog: r.FormValue("syslog"),
+			SyslogCA: r.FormValue("syslog_ca")}
+	case "retention":
+		in.Retention = map[string]int{}
+		for _, k := range retentionKinds {
+			d, err := strconv.Atoi(r.FormValue("retention_" + k.Key))
+			if err != nil {
+				s.renderSettings(w, r, sess, in, "", "retention: whole days only")
+				return
+			}
+			in.Retention[k.Key] = d
+		}
+	}
+	set, err := s.saveSettings(r.Context(), sess, clientIP(r), section, in)
+	var ue *userError
+	switch {
+	case errors.As(err, &ue) && ue.Status == http.StatusBadRequest:
+		s.errorPage(w, r, sess, ue.Status, ue.Msg)
+	case ue != nil:
+		s.renderSettings(w, r, sess, set, "", ue.Msg)
+	case err != nil:
+		s.fail(w, err)
+	default:
+		s.renderSettings(w, r, sess, set, "Settings saved and active.", "")
+	}
+}
+
+// settingsSections are the sections saveSettings accepts.
+var settingsSections = []string{"general", "sso", "monitoring", "network", "branding", "security", "remote_shell", "operations", "retention"}
+
+// saveSettings stores the fields of one settings section taken from in and
+// makes them active. The console form and the admin API both call it, so
+// validation, lockout guards and the audit entry are the same. It returns
+// the settings it tried to store; a rejected change is a *userError.
+func (s *Server) saveSettings(ctx context.Context, sess session, ip, section string, in Settings) (Settings, error) {
+	if !backupAdmin(sess) {
+		return in, &userError{http.StatusForbidden, "settings are managed by global administrators"}
+	}
+	if !slices.Contains(settingsSections, section) {
+		return in, &userError{http.StatusBadRequest, "unknown settings section"}
+	}
 	// held from reading the current settings to storing them: two tabs saved
 	// at once must not overwrite each other, nor leave runtime and database apart
 	s.saveMu.Lock()
@@ -532,138 +632,90 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 	// is loaded first, so this save does not undo it
 	unlock, err := clusterLock(ctx, s.db, lockSettings, 30*time.Second)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return in, err
 	}
 	defer unlock()
 	var at time.Time
 	if err := s.db.QueryRow(ctx, `SELECT updated_at FROM settings WHERE key='server'`).Scan(&at); err == nil && at.UnixMicro() != s.ha.settingsAt.Load() {
 		if err := s.loadSettings(ctx); err != nil {
-			s.fail(w, err)
-			return
+			return in, err
 		}
+	}
+	reject := func(set Settings, msg string) (Settings, error) {
+		return set, &userError{http.StatusUnprocessableEntity, msg}
 	}
 	cur := s.settings()
 	set := cur
-	switch r.FormValue("section") {
+	switch section {
 	case "general":
-		set.LocalLogin = r.FormValue("local_login") == "on"
-		set.StaleHours, _ = strconv.Atoi(r.FormValue("stale_hours"))
+		set.LocalLogin, set.StaleHours = in.LocalLogin, in.StaleHours
 	case "sso":
-		set.OIDCIssuer = strings.TrimRight(strings.TrimSpace(r.FormValue("oidc_issuer")), "/")
-		set.OIDCClientID = strings.TrimSpace(r.FormValue("oidc_client_id"))
-		set.AllowedDomain = strings.ToLower(strings.TrimSpace(r.FormValue("allowed_domain")))
-		set.RequireMFA = r.FormValue("require_mfa") == "on"
-		set.MFAACR = strings.Fields(r.FormValue("mfa_acr"))
-		groups, err := parseRoleGroups(r.FormValue("role_groups"))
+		set.OIDCIssuer = strings.TrimRight(strings.TrimSpace(in.OIDCIssuer), "/")
+		set.OIDCClientID = strings.TrimSpace(in.OIDCClientID)
+		set.AllowedDomain = strings.ToLower(strings.TrimSpace(in.AllowedDomain))
+		set.RequireMFA, set.MFAACR = in.RequireMFA, in.MFAACR
+		groups, err := parseRoleGroups(roleGroupsText(in.RoleGroups)) // the API sends a list: same rules as the form
 		if err != nil {
-			s.renderSettings(w, r, sess, set, "", err.Error())
-			return
+			return reject(in, err.Error())
 		}
-		set.RoleGroups = groups
+		set.RoleGroups, set.OIDCClientSecret = groups, in.OIDCClientSecret
 	case "monitoring":
-		set.WebhookURL = strings.TrimSpace(r.FormValue("webhook_url"))
-		set.NotifyPrivate = r.FormValue("notify_private") == "on"
+		set.WebhookURL, set.NotifyPrivate = strings.TrimSpace(in.WebhookURL), in.NotifyPrivate
 	case "network":
-		set.ConsoleAllow, set.ConsoleBlock = strings.Fields(r.FormValue("console_allow")), strings.Fields(r.FormValue("console_block"))
-		set.SCIMAllow = strings.Fields(r.FormValue("scim_allow"))
+		set.ConsoleAllow, set.ConsoleBlock, set.SCIMAllow = in.ConsoleAllow, in.ConsoleBlock, in.SCIMAllow
 	case "branding":
-		set.CompanyName = strings.TrimSpace(r.FormValue("company_name"))
+		set.CompanyName, set.Logo = strings.TrimSpace(in.CompanyName), in.Logo
 	case "security":
-		n, _ := strconv.Atoi(r.FormValue("min_length"))
-		set.Rules = PasswordPolicy{MinLength: n, Upper: r.FormValue("upper") == "on", Lower: r.FormValue("lower") == "on",
-			Digit: r.FormValue("digit") == "on", Symbol: r.FormValue("symbol") == "on", NoName: r.FormValue("no_name") == "on"}
-		set.FourEyes = r.FormValue("four_eyes") == "on"
-		set.FourEyesRecovery = set.FourEyes && r.FormValue("four_eyes_recovery") == "on"
-		set.FourEyesShell = set.FourEyes && r.FormValue("four_eyes_shell") == "on"
+		set.Rules = in.Rules
+		set.FourEyes = in.FourEyes
+		set.FourEyesRecovery = set.FourEyes && in.FourEyesRecovery
+		set.FourEyesShell = set.FourEyes && in.FourEyesShell
+		set.Geolocation, set.FallbackDNS = in.Geolocation, in.FallbackDNS
 		if set.FourEyes && !cur.FourEyes {
 			n, err := s.activeAdmins(ctx)
 			if err != nil {
-				s.fail(w, err)
-				return
+				return in, err
 			}
 			if n < 2 {
-				s.renderSettings(w, r, sess, set, "", "Four eyes approval needs at least two active administrators: with one, nobody could approve a request.")
-				return
+				return reject(set, "Four eyes approval needs at least two active administrators: with one, nobody could approve a request.")
 			}
 		}
-		set.Geolocation, set.FallbackDNS = r.FormValue("geolocation") == "on", r.FormValue("fallback_dns") == "on"
 	case "remote_shell":
-		set.RemoteShell = remoteShellForm(r)
+		set.RemoteShell = in.RemoteShell
 	case "operations":
-		dl, err1 := strconv.Atoi(r.FormValue("update_downloads"))
-		ci, err2 := strconv.Atoi(r.FormValue("max_checkins"))
-		if err1 != nil || err2 != nil {
-			s.renderSettings(w, r, sess, set, "", "parallel downloads and check ins: 1 to 10000")
-			return
-		}
-		set.Ops = OpsSettings{LogLevel: r.FormValue("log_level"), AccessLog: r.FormValue("access_log") == "on",
-			AuditAPIReads: r.FormValue("audit_api_reads"), UpdateDownloads: dl, MaxCheckins: ci,
-			AgentProxyFrom: strings.Fields(r.FormValue("agent_proxy_protocol")), Syslog: strings.TrimSpace(r.FormValue("syslog")),
-			SyslogCA: strings.TrimSpace(r.FormValue("syslog_ca"))}
+		set.Ops = in.Ops
+		set.Ops.Syslog, set.Ops.SyslogCA = strings.TrimSpace(set.Ops.Syslog), strings.TrimSpace(set.Ops.SyslogCA)
 	case "retention":
 		set.Retention = map[string]int{}
 		for _, k := range retentionKinds {
-			d, err := strconv.Atoi(r.FormValue("retention_" + k.Key))
-			if err != nil {
-				s.renderSettings(w, r, sess, set, "", "retention: whole days only")
-				return
-			}
-			set.Retention[k.Key] = d
+			set.Retention[k.Key] = in.retentionDays(k.Key)
 		}
 		set.AuditRetentionDays = 0 // replaced by Retention["audit"]
-	default:
-		s.errorPage(w, r, sess, http.StatusBadRequest, "unknown settings section")
-		return
-	}
-	if f, _, err := r.FormFile("logo"); err == nil {
-		b, err := io.ReadAll(io.LimitReader(f, maxLogo+1))
-		f.Close()
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		set.Logo = b
-	}
-	if r.FormValue("remove_logo") == "on" {
-		set.Logo = nil
-	}
-	if v := r.FormValue("oidc_client_secret"); v != "" {
-		set.OIDCClientSecret = v
-	}
-	if r.FormValue("clear_secret") == "on" {
-		set.OIDCClientSecret = ""
 	}
 	// never lock the admin who saves out of the console
-	if rt, err := (&Server{}).netsOnly(set); err == nil && !consoleAllowed(rt, clientIP(r)) {
-		s.renderSettings(w, r, sess, set, "", "Your own address would be refused; add it to the allowed networks first.")
-		return
+	if rt, err := (&Server{}).netsOnly(set); err == nil && !consoleAllowed(rt, ip) {
+		return reject(set, "Your own address would be refused; add it to the allowed networks first.")
 	}
 	// never lock everybody out
 	if !set.LocalLogin {
 		var oidcAdmins int
 		if err := s.db.QueryRow(ctx, `SELECT count(*) FROM console_users WHERE role='admin' AND NOT disabled`).Scan(&oidcAdmins); err != nil {
-			s.fail(w, err)
-			return
+			return set, err
 		}
 		if set.OIDCIssuer == "" || oidcAdmins == 0 {
-			s.renderSettings(w, r, sess, set, "", "Local login can only be disabled when OIDC is configured and at least one OIDC administrator exists.")
-			return
+			return reject(set, "Local login can only be disabled when OIDC is configured and at least one OIDC administrator exists.")
 		}
 		if strings.HasPrefix(sess.Email, localPrefix) {
-			s.renderSettings(w, r, sess, set, "", "You are signed in with a local account; sign in with OIDC before disabling local login.")
-			return
+			return reject(set, "You are signed in with a local account; sign in with OIDC before disabling local login.")
 		}
 	}
 	rt, err := s.prepare(ctx, set)
 	if err != nil {
-		s.renderSettings(w, r, sess, set, "", err.Error())
-		return
+		return reject(set, err.Error())
 	}
 	enc, err := s.sealField("settings.oidc_client_secret", set.OIDCClientSecret)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return set, err
 	}
 	doc, _ := json.Marshal(storedSettings{Settings: set, SecretEnc: enc})
 	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d allow=%q block=%q rules=%+v four_eyes=%v four_eyes_recovery=%v four_eyes_shell=%v require_mfa=%v acr=%q audit_retention_days=%d role_groups=%+v geolocation=%v fallback_dns=%v",
@@ -677,13 +729,12 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 			RETURNING updated_at`, string(doc)).Scan(&at)
 	})
 	if err != nil {
-		s.fail(w, err)
-		return
+		return set, err
 	}
 	s.rt.Store(rt) // only what is stored and audited becomes active
 	s.applyOps(rt)
 	s.ha.settingsAt.Store(at.UnixMicro())
-	s.renderSettings(w, r, sess, set, "Settings saved and active.", "")
+	return rt.set, nil
 }
 
 // netsOnly parses the network lists of settings for the self lockout check.
