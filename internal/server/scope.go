@@ -240,7 +240,7 @@ func (s *Server) inScope(ctx context.Context, sess session, id string) bool {
 func (s *Server) unscoped(h handler) handler {
 	return func(w http.ResponseWriter, r *http.Request, sess session) {
 		if sess.scoped() {
-			http.Error(w, "not available for accounts limited to a device scope", http.StatusForbidden)
+			s.errorPage(w, r, sess, http.StatusForbidden, "not available for accounts limited to a device scope")
 			return
 		}
 		h(w, r, sess)

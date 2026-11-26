@@ -52,6 +52,10 @@ var payloadShapes = map[string]any{
 		Bootloader
 		Password string `json:"password,omitempty"` // plain, hashed by the console on save (PrepareBootloader)
 	}{},
+	TypeNetwork: networkPayload{}, TypePrinters: Printers{}, TypeCustomChecks: customChecksPayload{}, TypeDconf: Dconf{},
+	TypeLocalUsers: struct {
+		Users []LocalUser `json:"users"`
+	}{},
 }
 
 // PayloadFields lists the JSON fields of a declaration type, in struct order.

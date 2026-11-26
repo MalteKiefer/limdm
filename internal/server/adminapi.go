@@ -283,17 +283,17 @@ func (s *Server) apiTokenCreate(w http.ResponseWriter, r *http.Request, sess ses
 	role := r.FormValue("role")
 	days, err := strconv.Atoi(r.FormValue("days"))
 	if name == "" || len(name) > 100 || strings.ContainsFunc(name, unicode.IsControl) || !slices.Contains(apiRoles, role) || err != nil || days < 1 || days > 365 {
-		http.Error(w, "name up to 100 characters, a role, and 1..365 days", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "name up to 100 characters, a role, and 1..365 days")
 		return
 	}
 	readOnly := r.FormValue("read_only") == "on" || role == "auditor" || role == "metrics"
 	scope, err := parseTags(r.FormValue("scope_tags"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, err.Error())
 		return
 	}
 	if len(scope) > 0 && role != "helpdesk" && role != "auditor" {
-		http.Error(w, "a device scope applies to helpdesk and auditor tokens only", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "a device scope applies to helpdesk and auditor tokens only")
 		return
 	}
 	token := "lma_" + randToken(32)

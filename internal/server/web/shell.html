@@ -1,7 +1,7 @@
 {{define "title"}}{{t "Remote shell"}} · {{.Hostname}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>{{t "Remote shell"}}</h1><div class="meta"><span>{{.Hostname}}</span></div></div>
+  <div><h1>{{t "Remote shell"}} {{template "doclink" "remote-shell.md"}}</h1><div class="meta"><span>{{.Hostname}}</span></div></div>
   <div class="actions"><a class="button secondary" href="/devices/{{.DeviceID}}?tab=commands">{{t "Back to device"}}</a></div>
 </div>
 {{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}

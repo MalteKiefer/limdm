@@ -132,11 +132,11 @@ func (s *Server) deviceDelete(w http.ResponseWriter, r *http.Request, sess sessi
 		return
 	}
 	if !retired {
-		http.Error(w, "retire the device before deleting it", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "retire the device before deleting it")
 		return
 	}
 	if !strings.EqualFold(strings.TrimSpace(r.FormValue("confirm")), host) {
-		http.Error(w, "type the host name to confirm", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "type the host name to confirm")
 		return
 	}
 	err := s.retentionTx(ctx, func(tx pgx.Tx) error {

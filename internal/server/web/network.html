@@ -1,7 +1,7 @@
 {{define "title"}}{{t "Network certificates · LiMDM"}}{{end}}
 {{define "netcert-state"}}{{if eq .State "revoked"}}<span class="pill bad">{{t "revoked"}}</span>{{else if eq .State "expired"}}<span class="pill">{{t "expired"}}</span>{{else}}<span class="pill ok">{{t "valid"}}</span>{{end}}{{end}}
 {{define "content"}}
-<div class="page-head"><div><h1>{{t "Network certificates"}}</h1><div class="meta"><span>{{t "EAP-TLS device certificates for WLAN and wired 802.1X"}}</span></div></div></div>
+<div class="page-head"><div><h1>{{t "Network certificates"}} {{template "doclink" "network.md#device-certificates-for-eap-tls"}}</h1><div class="meta"><span>{{t "EAP-TLS device certificates for WLAN and wired 802.1X"}}</span></div></div></div>
 {{if .Token}}<div class="notice ok" role="status"><strong>{{t "CRL token"}}</strong> {{t "It is shown only once."}}<pre>{{.Token}}</pre></div>{{end}}
 <div class="grid side-right">
   <section class="tablecard">

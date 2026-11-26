@@ -1,6 +1,6 @@
 {{define "title"}}{{t "Approvals · LiMDM"}}{{end}}
 {{define "content"}}
-<div class="page-head"><div><h1>{{t "Approvals"}}</h1><div class="meta"><span>{{t "Four eyes approval: a second administrator decides wipe, lost mode, scripts, role changes and recovery key views"}}</span></div></div></div>
+<div class="page-head"><div><h1>{{t "Approvals"}} {{template "doclink" "security.md#four-eyes-approval"}}</h1><div class="meta"><span>{{t "Four eyes approval: a second administrator decides wipe, lost mode, scripts, role changes and recovery key views"}}</span></div></div></div>
 {{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
 {{if not .FourEyes}}<div class="notice" role="status">{{t "Four eyes approval is off (Settings, Security). Actions run directly."}}</div>{{end}}
 <section class="tablecard">

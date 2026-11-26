@@ -2,7 +2,7 @@
 {{define "content"}}
 <div class="page-head">
   <div><div class="eyebrow">{{if eq .Kind "library"}}<a href="/library">{{t "Library"}}</a>{{else}}<a href="/blueprints">{{t "Blueprints"}}</a>{{end}}</div>
-  <h1>{{.Name}}</h1><div class="meta"><span>{{t "Version history"}}</span>{{if not .Exists}}<span class="pill bad">{{t "deleted"}}</span>{{end}}</div></div>
+  <h1>{{.Name}} {{template "doclink" "concepts.md#versions-and-preview"}}</h1><div class="meta"><span>{{t "Version history"}}</span>{{if not .Exists}}<span class="pill bad">{{t "deleted"}}</span>{{end}}</div></div>
   {{if .Exists}}<div class="actions"><a class="button secondary" href="/{{.Kind}}/{{.ID}}">{{t "Open editor"}}</a></div>{{end}}
 </div>
 <div class="grid side-right">

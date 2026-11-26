@@ -291,7 +291,7 @@ func (s *Server) shellStart(w http.ResponseWriter, r *http.Request, sess session
 	ctx, id := r.Context(), r.PathValue("id")
 	set := s.settings().RemoteShell
 	if !set.allows(sess.Role) {
-		http.Error(w, "remote shell is not enabled for your role", http.StatusForbidden)
+		s.errorPage(w, r, sess, http.StatusForbidden, "remote shell is not enabled for your role")
 		return
 	}
 	back := func(code string) {
@@ -431,7 +431,7 @@ func (s *Server) shellView(w http.ResponseWriter, r *http.Request, sess session)
 	l := s.shells.get(sid)
 	live := l != nil && sr.By == sess.Email
 	if !live && sess.Role != "admin" && sess.Role != "auditor" {
-		http.Error(w, "transcripts are available to admins and auditors", http.StatusForbidden)
+		s.errorPage(w, r, sess, http.StatusForbidden, "transcripts are available to admins and auditors")
 		return
 	}
 	var text string
@@ -456,7 +456,7 @@ func (s *Server) shellEnd(w http.ResponseWriter, r *http.Request, sess session) 
 		return
 	}
 	if l.owner != sess.Email && sess.Role != "admin" {
-		http.Error(w, "only the user who started the session or an admin can end it", http.StatusForbidden)
+		s.errorPage(w, r, sess, http.StatusForbidden, "only the user who started the session or an admin can end it")
 		return
 	}
 	l.end("ended in the console by " + sess.Email)

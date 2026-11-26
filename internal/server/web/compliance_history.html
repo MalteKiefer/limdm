@@ -1,7 +1,7 @@
 {{define "title"}}{{t "Compliance history · LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><div class="eyebrow"><a href="/compliance">{{t "Compliance"}}</a></div><h1>{{t "Compliance history"}}</h1>
+  <div><div class="eyebrow"><a href="/compliance">{{t "Compliance"}}</a></div><h1>{{t "Compliance history"}} {{template "doclink" "compliance.md#evidence"}}</h1>
   <div class="meta"><span>{{t "State at the end of"}} {{.At}}</span><span>{{t "Changes are kept 365 days, the last state before stays known"}}</span></div></div>
   {{if ne .Sess.Role "helpdesk"}}<div class="actions"><a class="button" href="{{.CSV}}">{{t "Report as CSV"}}</a></div>{{end}}
 </div>

@@ -107,7 +107,7 @@ func (s *Server) recoveryView(w http.ResponseWriter, r *http.Request, sess sessi
 	id, uuid := r.PathValue("id"), r.FormValue("uuid")
 	reason := strings.TrimSpace(r.FormValue("reason"))
 	if len(reason) > 500 || strings.ContainsAny(reason, "\x00\r\n") {
-		http.Error(w, "reason: up to 500 characters on one line", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "reason: up to 500 characters on one line")
 		return
 	}
 	if !s.inScope(ctx, sess, id) {

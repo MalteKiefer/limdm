@@ -458,7 +458,7 @@ func (s *Server) libraryRollback(w http.ResponseWriter, r *http.Request, sess se
 		err = s.storeItem(ctx, sess.Email, "library.rollback", fmt.Sprintf("rollback to version %d", n), &v.Item, true)
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		s.errorPage(w, r, sess, http.StatusConflict, err.Error())
 		return
 	}
 	http.Redirect(w, r, fmt.Sprintf("/library/%d/history", id), http.StatusSeeOther)
@@ -485,7 +485,7 @@ func (s *Server) blueprintRollback(w http.ResponseWriter, r *http.Request, sess 
 		err = s.storeBlueprint(ctx, sess.Email, "blueprint.rollback", fmt.Sprintf("rollback to version %d", n), &v.BP, true)
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		s.errorPage(w, r, sess, http.StatusConflict, err.Error())
 		return
 	}
 	http.Redirect(w, r, fmt.Sprintf("/blueprints/%d/history", id), http.StatusSeeOther)

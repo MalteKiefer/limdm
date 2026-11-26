@@ -64,7 +64,7 @@ var fileNameUnsafe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 // records who read it.
 func (s *Server) diagnosticsDownload(w http.ResponseWriter, r *http.Request, sess session) {
 	if sess.Role != "admin" && sess.Role != "helpdesk" {
-		http.Error(w, "diagnostics are available to admins and the helpdesk", http.StatusForbidden)
+		s.errorPage(w, r, sess, http.StatusForbidden, "diagnostics are available to admins and the helpdesk")
 		return
 	}
 	ctx := r.Context()

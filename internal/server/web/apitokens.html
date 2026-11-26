@@ -1,6 +1,6 @@
 {{define "title"}}{{t "API tokens · LiMDM"}}{{end}}
 {{define "content"}}
-<div class="page-head"><div><h1>{{t "API tokens"}}</h1><div class="meta"><span>{{t "Bearer tokens for the admin REST API and the metrics endpoint"}}</span></div></div>
+<div class="page-head"><div><h1>{{t "API tokens"}} {{template "doclink" "admin-api.md"}}</h1><div class="meta"><span>{{t "Bearer tokens for the admin REST API and the metrics endpoint"}}</span></div></div>
   <div class="actions"><a class="button secondary" href="/api/v1/openapi.json">{{t "OpenAPI document"}}</a></div></div>
 {{if .Created}}
 <div class="notice ok" role="status">

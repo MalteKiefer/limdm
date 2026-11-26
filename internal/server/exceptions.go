@@ -99,7 +99,7 @@ func (s *Server) exceptionAdd(w http.ResponseWriter, r *http.Request, sess sessi
 		Approver: strings.TrimSpace(r.FormValue("approver")), CreatedBy: sess.Email}
 	tags, err := parseTags(r.FormValue("tag"))
 	if err != nil || len(tags) > 1 {
-		http.Error(w, "tag: one tag or empty for every device", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "tag: one tag or empty for every device")
 		return
 	}
 	if len(tags) == 1 {
@@ -109,17 +109,17 @@ func (s *Server) exceptionAdd(w http.ResponseWriter, r *http.Request, sess sessi
 	e.Expires = expires.AddDate(0, 0, 1) // valid through the given day
 	switch {
 	case !identOK(e.CheckID):
-		http.Error(w, "check ID: letters, digits, dot, dash, underscore", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "check ID: letters, digits, dot, dash, underscore")
 	case e.Mode != "exclude" && e.Mode != "advisory":
-		http.Error(w, "mode: exclude or advisory", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "mode: exclude or advisory")
 	case e.Reason == "" || len(e.Reason) > 1000:
-		http.Error(w, "reason: 1 to 1000 characters", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "reason: 1 to 1000 characters")
 	case e.Owner == "" || len(e.Owner) > 200 || e.Approver == "" || len(e.Approver) > 200:
-		http.Error(w, "risk owner and approver: 1 to 200 characters", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "risk owner and approver: 1 to 200 characters")
 	case s.settings().FourEyes && strings.EqualFold(e.Approver, sess.Email):
-		http.Error(w, "four eyes approval is on: the approver must be another person", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "four eyes approval is on: the approver must be another person")
 	case err != nil || !e.Expires.After(time.Now()) || e.Expires.After(time.Now().AddDate(3, 0, 1)):
-		http.Error(w, "expiry: a date within the next three years", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "expiry: a date within the next three years")
 	default:
 		err := s.auditAction(r.Context(), sess.Email, "exception.add", e.CheckID, fmt.Sprintf("mode=%s tag=%q owner=%q approver=%q expires=%s reason=%q",
 			e.Mode, e.Tag, e.Owner, e.Approver, e.Expires.Format(time.DateOnly), e.Reason), func(tx pgx.Tx) error {

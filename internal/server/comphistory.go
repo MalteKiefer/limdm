@@ -101,7 +101,7 @@ func (s *Server) complianceHistory(w http.ResponseWriter, r *http.Request, sess 
 	q := r.URL.Query()
 	cutoff, device, ok := historyParams(q)
 	if !ok {
-		http.Error(w, "at must be a date (YYYY-MM-DD)", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "at must be a date (YYYY-MM-DD)")
 		return
 	}
 	if device != "" && !s.inScope(ctx, sess, device) {

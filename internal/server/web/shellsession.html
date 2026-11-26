@@ -1,7 +1,7 @@
 {{define "title"}}{{t "Remote shell"}} · {{.S.Hostname}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>{{t "Remote shell"}}</h1><div class="meta"><span>{{.S.Hostname}}</span><span class="mono">{{.S.User}}</span><span>{{.S.By}}</span><span>{{fmtTime .S.Created}}</span></div></div>
+  <div><h1>{{t "Remote shell"}} {{template "doclink" "remote-shell.md#audit-and-transcripts"}}</h1><div class="meta"><span>{{.S.Hostname}}</span><span class="mono">{{.S.User}}</span><span>{{.S.By}}</span><span>{{fmtTime .S.Created}}</span></div></div>
   <div class="actions">
     {{if .CanEnd}}<form method="post" action="/shell/{{.S.ID}}/end">{{template "csrf" .CSRF}}<button class="danger">{{t "End session"}}</button></form>{{end}}
     <a class="button secondary" href="/devices/{{.S.Device}}/shell">{{t "All sessions"}}</a>
