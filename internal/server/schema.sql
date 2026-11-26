@@ -931,3 +931,7 @@ CREATE TABLE IF NOT EXISTS blueprint_pilots (
     PRIMARY KEY (pilot_id, device_id)
 );
 CREATE INDEX IF NOT EXISTS blueprint_pilots_blueprint ON blueprint_pilots(blueprint_id);
+
+-- R3-E
+-- custom device attributes for file and firewall templates ({{.Attributes.name}})
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS attributes JSONB NOT NULL DEFAULT '{}';

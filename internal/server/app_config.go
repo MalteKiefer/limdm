@@ -28,6 +28,8 @@ func (s *Server) appConfigRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/config/library", s.need("read", s.apiConfigLibrary))
 	m.HandleFunc("POST /api/v1/config/library/preview", s.need("admin", unscopedAPI(s.apiConfigItemPreview)))
 	m.HandleFunc("GET /api/v1/config/library/template", s.need("admin", unscopedAPI(s.apiConfigItemTemplate)))
+	m.HandleFunc("POST /api/v1/config/library/render", s.need("admin", s.apiConfigItemRender))
+	m.HandleFunc("GET /api/v1/config/scripts/results", s.need("read", s.apiConfigScriptResults))
 	m.HandleFunc("GET /api/v1/config/{kind}/{id}/versions", s.need("read", unscopedAPI(s.apiConfigVersions)))
 	m.HandleFunc("POST /api/v1/config/{kind}/{id}/rollback", s.need("admin", unscopedAPI(s.apiConfigRollback)))
 	m.HandleFunc("POST /api/v1/config/blueprints/{id}/pilot", s.need("admin", unscopedAPI(s.apiConfigPilotStart)))
