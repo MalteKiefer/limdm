@@ -1,6 +1,6 @@
 // Software, inventory and activity tabs of the device page.
 import { Link } from '@tanstack/react-router'
-import { Download, FileCode2, KeyRound, MoreHorizontal, Network as NetworkIcon, Package, Plus, Terminal, Activity as ActivityIcon, Search } from 'lucide-react'
+import { Download, FileCode2, KeyRound, MoreHorizontal, Network as NetworkIcon, Package, Plus, ScrollText, ShieldCheck, Terminal, Activity as ActivityIcon, Search } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { api, unwrap } from '../../api/client'
 import { useCan } from '../../api/me'
@@ -17,7 +17,7 @@ import { ago, dateTime, fmt } from '../../i18n/format'
 import { useQueryClient } from '@tanstack/react-query'
 import { useRun, type Dialog } from './actions'
 import { usePackages, useTimeline, type DeviceDetail, type Params, type TimelineEntry } from './api'
-import { accountActionable, filterByName, statusTone, usedPct } from './logic'
+import { accountActionable, checkTone, filterByName, statusTone, usedPct } from './logic'
 
 type Col = { label: ReactNode; className?: string }
 
@@ -810,18 +810,21 @@ function Accounts({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
 
 // ---- activity ----
 
-const kinds = ['', 'event', 'command', 'script', 'shell', 'diagnostics'] as const
+const kinds = ['', 'event', 'command', 'script', 'shell', 'diagnostics', 'compliance', 'audit'] as const
 const kindIcon: Record<string, ReactNode> = {
   event: <ActivityIcon size={7} />,
   command: <Package size={7} />,
   script: <FileCode2 size={7} />,
   shell: <Terminal size={7} />,
   diagnostics: <Download size={7} />,
+  compliance: <ShieldCheck size={7} />,
+  audit: <ScrollText size={7} />,
 }
 
 export function ActivityTab({ d }: { d: DeviceDetail }) {
   const t = useT()
   const helpdesk = useCan('commands')
+  const audit = useCan('audit')
   const [kind, setKind] = useState<(typeof kinds)[number]>('')
   const tl = useTimeline(d.id, kind)
   const { run, pending } = useRun({ id: d.id, hostname: d.hostname, detail: d })
@@ -829,7 +832,9 @@ export function ActivityTab({ d }: { d: DeviceDetail }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
-        <Segmented label={t('devices.act.filter')} value={kind || 'all'} onChange={(v) => setKind(v === 'all' ? '' : (v as typeof kind))} options={kinds.map((k) => ({ value: k || 'all', label: t(`devices.act.kind.${k || 'all'}` as MessageKey) }))} />
+        <ScrollHint className="max-w-full">
+          <Segmented label={t('devices.act.filter')} value={kind || 'all'} onChange={(v) => setKind(v === 'all' ? '' : (v as typeof kind))} options={kinds.filter((k) => audit || k !== 'audit').map((k) => ({ value: k || 'all', label: t(`devices.act.kind.${k || 'all'}` as MessageKey) }))} />
+        </ScrollHint>
         <span className="flex-1" />
         {helpdesk && !d.retired && (
           <button type="button" className="btn" disabled={pending} onClick={() => run('diagnostics')}>
@@ -905,6 +910,22 @@ function Entry({ e, d }: { e: TimelineEntry; d: DeviceDetail }) {
           <a href={`/api/v1/devices/${encodeURIComponent(d.id)}/diagnostics/${e.id}`} className="text-meta" download>
             {t('devices.act.download')}
           </a>
+        </div>
+      )
+    case 'compliance': {
+      const c = (d.check_results as { id: string; title?: string }[]).find((x) => x.id === e.title)
+      return (
+        <div>
+          <span className="font-medium">{t('devices.act.check', { name: c?.title || e.title })}</span> <Badge tone={checkTone(e.status)}>{t(`devices.check.${e.status}` as MessageKey)}</Badge>
+          {e.detail && <span className="block text-meta text-muted">{e.detail}</span>}
+        </div>
+      )
+    }
+    case 'audit':
+      return (
+        <div>
+          <span className="font-medium">{e.extra || e.title}</span> <span className="font-mono text-micro text-muted">{e.title}</span>
+          {e.detail && <span className="block text-meta text-muted">{e.detail}</span>}
         </div>
       )
     default:

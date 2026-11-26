@@ -13,6 +13,7 @@ import {
   MapPinOff,
   MessageSquare,
   Pencil,
+  Plus,
   Power,
   PowerOff,
   RefreshCw,
@@ -43,7 +44,7 @@ import {
   type DeviceDetail,
   type Params,
 } from './api'
-import { badParamLine, formatUsers, mayCommand, parseTags, parseUsers } from './logic'
+import { badParamLine, mayCommand, parseTags, suggestUsername, userError, type DesktopUser } from './logic'
 
 export type Dialog =
   | { kind: 'confirm'; type: string; params?: Params; title: MessageKey; body: MessageKey; danger?: boolean }
@@ -383,19 +384,19 @@ function EditDialog({ target, onClose }: { target: Target; onClose: () => void }
   const [bp, setBp] = useState(String(assigned?.id ?? 0))
   const [primary, setPrimary] = useState(d?.primary_user ?? '')
   const [tags, setTags] = useState((d?.tags ?? []).join(', '))
-  const [users, setUsers] = useState(formatUsers(d?.desktop_users ?? []))
+  const [users, setUsers] = useState<DesktopUser[]>(d?.desktop_users ?? [])
   const people = usePeople(primary, primary.length >= 2)
-  const pu = parseUsers(users)
+  const usersBad = users.some((_, i) => userError(users, i))
   const pt = parseTags(tags)
   const [err, setErr] = useState<string>()
   const list = d?.blueprints.length ? d.blueprints : (bps.data ?? []).map((b) => ({ id: b.id, name: b.name }))
   const submit = () =>
     patch.mutate(
-      { id: target.id, body: { blueprint_id: Number(bp) > 0 ? Number(bp) : null, primary_user: primary.trim(), tags: pt.tags, users: pu.users } },
+      { id: target.id, body: { blueprint_id: Number(bp) > 0 ? Number(bp) : null, primary_user: primary.trim(), tags: pt.tags, users } },
       { onSuccess: () => (toast(t('devices.edit.saved')), onClose()), onError: (e) => setErr(fieldError(e)) },
     )
   return (
-    <Modal open wide onClose={onClose} title={t('devices.cmd.edit')} description={target.hostname} footer={<Foot form="dlg-edit" onClose={onClose} label={t('common.save')} busy={patch.isPending} disabled={!!pu.error || !!pt.error} />}>
+    <Modal open wide onClose={onClose} title={t('devices.cmd.edit')} description={target.hostname} footer={<Foot form="dlg-edit" onClose={onClose} label={t('common.save')} busy={patch.isPending} disabled={usersBad || !!pt.error} />}>
       <form id="dlg-edit" className="flex flex-col gap-4" onSubmit={(e) => (e.preventDefault(), submit())}>
         {err && (
           <p role="alert" className="text-body font-medium text-bad">
@@ -426,9 +427,89 @@ function EditDialog({ target, onClose }: { target: Target; onClose: () => void }
           )}
         </Field>
         <Text label={t('devices.edit.tags')} help={t('devices.edit.tagsHelp')} value={tags} onChange={setTags} error={pt.error ? t('devices.edit.tagBad', { tag: pt.error }) : undefined} />
-        <Text label={t('devices.edit.users')} help={t('devices.edit.usersHelp')} value={users} onChange={setUsers} area={4} mono error={pu.error ? t('devices.edit.userBad', { line: pu.error }) : undefined} />
+        <DesktopUsers users={users} onChange={setUsers} accounts={(d?.inventory.accounts ?? []).filter((a) => !a.system && a.name !== 'root').map((a) => a.name)} />
       </form>
     </Modal>
+  )
+}
+
+/**
+ * The desktop users of a device as rows: the person is picked from the
+ * directory, the user name from the device's accounts or proposed from the
+ * mail address; both stay editable for accounts the agent still has to create.
+ */
+function DesktopUsers({ users, onChange, accounts }: { users: DesktopUser[]; onChange: (u: DesktopUser[]) => void; accounts: string[] }) {
+  const t = useT()
+  const [focus, setFocus] = useState(-1)
+  const q = users[focus]?.email ?? ''
+  const people = usePeople(q, q.length >= 2)
+  const set = (i: number, u: Partial<DesktopUser>) => onChange(users.map((x, j) => (j === i ? { ...x, ...u } : x)))
+  const errKey = { name: 'devices.edit.userNameBad', email: 'devices.edit.userEmailBad', dup: 'devices.edit.userDup' } as const
+  return (
+    <fieldset className="flex flex-col gap-2">
+      <legend className="text-body font-medium">{t('devices.edit.users')}</legend>
+      <p id="dev-users-help" className="text-meta text-muted">
+        {t('devices.edit.usersHelp')}
+      </p>
+      <datalist id="dev-users-people">
+        {(people.data ?? []).map((p) => (
+          <option key={p} value={p} />
+        ))}
+      </datalist>
+      <datalist id="dev-users-accounts">
+        {accounts.map((a) => (
+          <option key={a} value={a} />
+        ))}
+      </datalist>
+      {users.map((u, i) => {
+        const err = userError(users, i)
+        const errId = `dev-user-${i}-err`
+        return (
+          <div key={i} className="grid grid-cols-[1fr_auto] items-start gap-2 rounded-lg border border-line p-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto_auto]">
+            <input
+              className="field max-sm:col-span-2"
+              type="email"
+              list="dev-users-people"
+              aria-label={t('devices.edit.userPerson', { n: i + 1 })}
+              aria-invalid={err === 'email' || undefined}
+              aria-describedby={err ? errId : 'dev-users-help'}
+              placeholder="jane.doe@example.com"
+              autoComplete="off"
+              value={u.email}
+              onFocus={() => setFocus(i)}
+              onChange={(e) => set(i, { email: e.target.value.trim().toLowerCase() })}
+              onBlur={() => !u.username && u.email.includes('@') && set(i, { username: suggestUsername(u.email) })}
+            />
+            <input
+              className="field font-mono"
+              list="dev-users-accounts"
+              aria-label={t('devices.edit.userName', { n: i + 1 })}
+              aria-invalid={err === 'name' || err === 'dup' || undefined}
+              aria-describedby={err ? errId : 'dev-users-help'}
+              placeholder={t('devices.edit.username')}
+              autoComplete="off"
+              spellCheck={false}
+              value={u.username}
+              onChange={(e) => set(i, { username: e.target.value.trim() })}
+            />
+            <label className="flex h-[34px] items-center gap-1.5 text-body">
+              <input type="checkbox" checked={u.admin} onChange={(e) => set(i, { admin: e.target.checked })} /> {t('devices.edit.admin')}
+            </label>
+            <button type="button" className="btn btn-ghost h-[34px] px-2" aria-label={t('devices.edit.userRemove', { n: i + 1 })} onClick={() => onChange(users.filter((_, j) => j !== i))}>
+              <Trash2 size={15} aria-hidden />
+            </button>
+            {err && (
+              <p id={errId} className="col-span-full text-meta font-medium text-bad">
+                {t(errKey[err], { n: i + 1 })}
+              </p>
+            )}
+          </div>
+        )
+      })}
+      <button type="button" className="btn self-start" onClick={() => (onChange([...users, { username: '', email: '', admin: false }]), setFocus(users.length))}>
+        <Plus size={14} aria-hidden /> {t('devices.edit.userAdd')}
+      </button>
+    </fieldset>
   )
 }
 

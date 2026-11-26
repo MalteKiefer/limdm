@@ -163,7 +163,7 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `POST /api/v1/tenants` | admin, global token | `{"name"}` | `201` `{"id"}`; `409` name taken; audited as `tenant.add` |
 | `GET /api/v1/devices/{id}/detail` | read | | `200` everything the device page shows: inventory, check results, declaration states, resolved chain, protective actions, recovery key metadata, network certificates, catalog state and app requests, 7 day metrics, and switches for the actions (shell, four eyes) |
 | `GET /api/v1/devices/{id}/packages` | read | | `200` `{"items": [{"name", "version", "arch"}]}` |
-| `GET /api/v1/devices/{id}/timeline` | read | `kind`, `limit`, `cursor` | `200` page of events, commands, script results, shell sessions (helpdesk: its own) and diagnostics bundles (admin, helpdesk), newest first |
+| `GET /api/v1/devices/{id}/timeline` | read | `kind`, `limit`, `cursor` | `200` page of events, commands, script results, shell sessions (helpdesk: its own), diagnostics bundles (admin, helpdesk), compliance check changes and audit entries about the device (audit permission; reading them is audited like `/api/v1/audit`), newest first |
 | `GET /api/v1/devices/{id}/diagnostics/{cid}` | helpdesk | | `200` text attachment; audited as `device.diagnostics.download` |
 | `POST /api/v1/devices/{id}/retire` | admin | | `200` device; audited as `device.retire` |
 | `DELETE /api/v1/devices/{id}` | admin | `confirm` (the host name) | `204`; `409` unless retired; audited as `device.delete` |

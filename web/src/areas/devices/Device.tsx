@@ -2,7 +2,7 @@
 // six tabs (overview, compliance, configuration, software, inventory,
 // activity), each with a URL (?tab=, ?sub=).
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
-import { ArrowLeft, Bot, CircleAlert, Cpu, Download, HardDrive, Monitor, MoreHorizontal, RefreshCw, Server, ShieldCheck, ShieldAlert, Terminal, Trash2 } from 'lucide-react'
+import { Activity, ArrowLeft, Bot, BrickWall, CheckCircle2, ChevronDown, ChevronUp, CircleAlert, Cpu, Download, HardDrive, Layers, Monitor, MoreHorizontal, RefreshCw, Server, ShieldCheck, ShieldAlert, Terminal, Trash2, Wifi } from 'lucide-react'
 import { useCallback, useState, type ReactNode } from 'react'
 import { useCan } from '../../api/me'
 import { axisX, axisY, baseOption, ChartFrame, EChart, type Colors } from '../../components/charts'
@@ -14,7 +14,7 @@ import { ago, dateShort, dateTime, fmt1 } from '../../i18n/format'
 import { cx } from '../../lib/cx'
 import { DeviceDialog, useDeviceMenu, useRun, type Dialog, type Target } from './actions'
 import { useDetail, type DeviceDetail } from './api'
-import { protectiveAlarm, usedPct } from './logic'
+import { checkTone, connectionState, firewallHealth, orderNotices, protectiveAlarm, updatesHealth, usedPct } from './logic'
 import { ActivityTab, InventoryTab, SoftwareTab } from './tabs'
 
 const tabs = ['overview', 'compliance', 'config', 'software', 'inventory', 'activity'] as const
@@ -152,10 +152,6 @@ function Header({ d, target, menu, open }: { d: DeviceDetail; target: Target; me
             </span>
           ) : null}
         </Fact>
-        <Fact label={t('devices.fact.network')}>
-          <span className="font-mono">{d.external_ip}</span>
-          {d.place && <span className="block text-meta text-muted">{d.place}</span>}
-        </Fact>
         <Fact label={t('devices.fact.tags')}>
           {d.tags.length
             ? d.tags.map((tag) => (
@@ -166,7 +162,6 @@ function Header({ d, target, menu, open }: { d: DeviceDetail; target: Target; me
             : null}
         </Fact>
         <Fact label={t('devices.fact.signedIn')}>{(inv.logged_in_users ?? []).join(', ')}</Fact>
-        <Fact label={t('devices.fact.inventory')}>{inv.source}</Fact>
       </dl>
     </header>
   )
@@ -181,68 +176,88 @@ const protectiveKey: Record<string, MessageKey> = {
   allow_uninstall: 'devices.prot.uninstall',
 }
 
+type Notice = { level: 'security' | 'compliance' | 'info'; key: string; node: ReactNode }
+
+/**
+ * Protective notices in one place, security first, then compliance, then
+ * information. The most important one shows; the rest fold behind a button.
+ */
 function Notices({ d }: { d: DeviceDetail }) {
   const t = useT()
   const audit = useCan('audit')
-  const box = (tone: 'bad' | 'warn' | 'ok', key: string, children: ReactNode) => (
-    <div key={key} role="status" className={cx('flex flex-wrap items-center gap-2 rounded-lg border px-4 py-2.5 text-body', tone === 'bad' ? 'border-bad/30 bg-bad-soft' : tone === 'warn' ? 'border-warn/30 bg-warn-soft' : 'border-ok/30 bg-ok-soft')}>
-      {children}
-    </div>
-  )
-  const out: ReactNode[] = []
-  for (const p of d.protective) {
-    out.push(
-      box(
-        protectiveAlarm(p.type) ? 'bad' : 'ok',
-        `p-${p.type}`,
-        <>
-          <strong>{t(protectiveKey[p.type] ?? 'devices.prot.uninstall')}</strong>
-          <span>{t('devices.prot.by', { by: p.by, at: dateTime(p.at) })}</span>
-          <Badge tone={p.status === 'ok' ? 'ok' : p.status === 'failed' ? 'bad' : 'warn'}>{t(p.status === 'ok' ? 'devices.prot.done' : p.status === 'failed' ? 'devices.prot.failed' : 'devices.prot.waiting')}</Badge>
-        </>,
+  const [all, setAll] = useState(false)
+  const out: Notice[] = []
+  const box = (tone: 'bad' | 'warn' | 'ok', key: string, children: ReactNode) =>
+    out.push({
+      level: tone === 'bad' ? 'security' : tone === 'warn' ? 'compliance' : 'info',
+      key,
+      node: (
+        <div key={key} className={cx('flex flex-wrap items-center gap-2 rounded-lg border px-4 py-2.5 text-body', tone === 'bad' ? 'border-bad/30 bg-bad-soft' : tone === 'warn' ? 'border-warn/30 bg-warn-soft' : 'border-ok/30 bg-ok-soft')}>
+          {children}
+        </div>
       ),
+    })
+  for (const p of d.protective)
+    box(
+      protectiveAlarm(p.type) ? 'bad' : 'ok',
+      `p-${p.type}`,
+      <>
+        <strong>{t(protectiveKey[p.type] ?? 'devices.prot.uninstall')}</strong>
+        <span>{t('devices.prot.by', { by: p.by, at: dateTime(p.at) })}</span>
+        <Badge tone={p.status === 'ok' ? 'ok' : p.status === 'failed' ? 'bad' : 'warn'}>{t(p.status === 'ok' ? 'devices.prot.done' : p.status === 'failed' ? 'devices.prot.failed' : 'devices.prot.waiting')}</Badge>
+      </>,
     )
-  }
   if (d.tampered_at)
-    out.push(
-      box(
-        'bad',
-        'tamper',
-        <>
-          <ShieldAlert size={15} aria-hidden />
-          <strong>{t('devices.notice.tamper')}</strong> {dateTime(d.tampered_at)}.{' '}
-          {audit ? <Link to="/activity" search={{ action: 'agent.tamper', target: d.id } as never}>
-              {t('devices.notice.tamperAudit')}
-            </Link> : t('devices.notice.tamperAudit')}
-        </>,
-      ),
+    box(
+      'bad',
+      'tamper',
+      <>
+        <ShieldAlert size={15} aria-hidden />
+        <strong>{t('devices.notice.tamper')}</strong> {dateTime(d.tampered_at)}.{' '}
+        {audit ? (
+          <Link to="/activity" search={{ action: 'agent.tamper', target: d.id } as never}>
+            {t('devices.notice.tamperAudit')}
+          </Link>
+        ) : (
+          t('devices.notice.tamperAudit')
+        )}
+      </>,
     )
   if (d.auto_locked)
-    out.push(
-      box(
-        'bad',
-        'locked',
-        <>
-          <strong>{t('devices.notice.autoLocked')}</strong> {t('devices.notice.autoLockedBody')}
-        </>,
-      ),
+    box(
+      'bad',
+      'locked',
+      <>
+        <strong>{t('devices.notice.autoLocked')}</strong> {t('devices.notice.autoLockedBody')}
+      </>,
     )
   if (d.failing_since)
-    out.push(
-      box(
-        'warn',
-        'grace',
-        <>
-          <CircleAlert size={15} aria-hidden />
-          <span>
-            {t('devices.notice.failingSince', { at: dateTime(d.failing_since) })}
-            {d.grace_until && ' ' + t(d.status === 'in grace' ? 'devices.notice.graceEnds' : 'devices.notice.graceEnded', { at: dateTime(d.grace_until) })}{' '}
-            {d.lock_at ? (!d.auto_locked && t('devices.notice.lockAt', { at: dateTime(d.lock_at) })) : t('devices.notice.noLock')} {d.notify_on_grace && t('devices.notice.notify')}
-          </span>
-        </>,
-      ),
+    box(
+      'warn',
+      'grace',
+      <>
+        <CircleAlert size={15} aria-hidden />
+        <span>
+          {t('devices.notice.failingSince', { at: dateTime(d.failing_since) })}
+          {d.grace_until && ' ' + t(d.status === 'in grace' ? 'devices.notice.graceEnds' : 'devices.notice.graceEnded', { at: dateTime(d.grace_until) })}{' '}
+          {d.lock_at ? !d.auto_locked && t('devices.notice.lockAt', { at: dateTime(d.lock_at) }) : t('devices.notice.noLock')} {d.notify_on_grace && t('devices.notice.notify')}
+        </span>
+      </>,
     )
-  return out.length ? <div className="flex flex-col gap-2">{out}</div> : null
+  if (!out.length) return null
+  const list = orderNotices(out)
+  const shown = all ? list : list.slice(0, 1)
+  return (
+    <section aria-label={t('devices.notices')} role="status" className="flex flex-col gap-2">
+      {shown.map((n) => n.node)}
+      {list.length > 1 && (
+        <button type="button" className="btn btn-ghost self-start text-meta" aria-expanded={all} onClick={() => setAll(!all)}>
+          {all ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
+          {all ? t('devices.notice.less') : t('devices.notice.more', { count: list.length - 1 })}
+        </button>
+      )}
+    </section>
+  )
 }
 
 function Health({ icon: I, label, value, tone, note }: { icon: typeof Cpu; label: string; value: ReactNode; tone: 'ok' | 'warn' | 'bad' | 'off'; note: ReactNode }) {
@@ -274,6 +289,9 @@ function Overview({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
   const certDays = Math.round((new Date(d.cert_expires).getTime() - now) / 86_400_000)
   const newest = d.agent_versions[0]
   const canRec = useCan('commands')
+  const upd = updatesHealth(checks)
+  const fw = firewallHealth(checks, d.declarations)
+  const conn = connectionState(d.last_seen, d.status)
   return (
     <div className="flex flex-col gap-[var(--gap)]">
       <div className="grid gap-[var(--gap)] sm:grid-cols-2 xl:grid-cols-4">
@@ -293,10 +311,19 @@ function Overview({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
           note={newest && newest !== d.agent_version ? t('devices.health.newer', { version: newest }) : t('devices.health.current')}
         />
         <Health icon={ShieldCheck} label={t('devices.health.cert')} value={dateShort(d.cert_expires)} tone={certDays < 14 ? 'warn' : 'ok'} note={t('devices.health.certDays', { count: certDays })} />
+        <Health icon={Download} label={t('devices.health.updates')} value={t(`devices.health.upd.${upd.state}`)} tone={upd.tone} note={upd.detail ?? ''} />
+        <Health icon={BrickWall} label={t('devices.health.firewall')} value={t(`devices.health.fw.${fw.state}`)} tone={fw.tone} note={t(fw.managed ? 'devices.health.fw.managed' : 'devices.health.fw.unmanaged')} />
+        <Health
+          icon={Wifi}
+          label={t('devices.health.connection')}
+          value={t(`devices.health.conn.${conn.state}`)}
+          tone={conn.tone}
+          note={[d.last_seen && t('devices.seen', { ago: ago(d.last_seen) }), d.external_ip, d.place].filter(Boolean).join(' · ')}
+        />
       </div>
       <div className="grid gap-[var(--gap)] xl:grid-cols-3">
         <Card className="xl:col-span-2" title={t('devices.load.title')} sub={t('devices.load.sub')} id="dv-load">
-          {d.metrics.length < 2 ? <p className="text-body text-muted">{t('devices.load.none')}</p> : <LoadChart d={d} />}
+          {d.metrics.length < 2 ? <EmptyState compact icon={Activity} title={t('devices.load.none')}>{t('devices.load.noneBody')}</EmptyState> : <LoadChart d={d} />}
         </Card>
         <Card title={t('devices.open.title')} id="dv-open">
           {root && (
@@ -323,16 +350,16 @@ function Overview({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
               ))}
             </ul>
           ) : (
-            <p className="text-body text-muted">{t('devices.open.none')}</p>
+            <EmptyState compact icon={CheckCircle2} title={t('devices.open.none')} />
           )}
         </Card>
       </div>
       <Card title={t('devices.sys.title')} id="dv-sys">
         <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Fact label={t('devices.sys.os')}>
-            {inv.os_name} {inv.os_codename && <span className="text-muted">({inv.os_codename})</span>}
+          {/* the operating system name is in the page header */}
+          <Fact label={t('devices.sys.version')}>
+            {inv.os_version} {inv.os_codename && <span className="text-muted">({inv.os_codename})</span>}
           </Fact>
-          <Fact label={t('devices.sys.version')}>{inv.os_version}</Fact>
           <Fact label={t('devices.sys.kernel')}>
             <span className="font-mono">{inv.kernel}</span>
           </Fact>
@@ -355,6 +382,7 @@ function Overview({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
           </Fact>
           <Fact label={t('devices.sys.enrolled')}>{d.enrolled_at ? dateTime(d.enrolled_at) : ''}</Fact>
           <Fact label={t('devices.sys.cert')}>{t('devices.sys.certVal', { at: dateTime(d.cert_expires) })}</Fact>
+          <Fact label={t('devices.fact.inventory')}>{inv.source}</Fact>
         </dl>
       </Card>
     </div>
@@ -403,7 +431,6 @@ function Refs({ list }: { list?: string[] }) {
   )
 }
 
-const checkTone = (s: string) => (s === 'pass' ? 'ok' : s === 'fail' ? 'bad' : s === 'excepted' ? 'warn' : 'off')
 
 function Compliance({ d }: { d: DeviceDetail }) {
   const t = useT()
@@ -474,6 +501,12 @@ const declTone = (s: string) => (s === 'active' ? 'ok' : s === 'pending' ? 'warn
 function Config({ d }: { d: DeviceDetail }) {
   const t = useT()
   const certs = d.inventory.certificates ?? []
+  const applied = d.blueprints.find((b) => b.applies)
+  const bpLink = applied && (
+    <Link className="btn" to="/config/blueprints/$id" params={{ id: String(applied.id) }}>
+      {t('devices.cfg.openBlueprint', { name: applied.name })}
+    </Link>
+  )
   return (
     <div className="flex flex-col gap-[var(--gap)]">
       <Card
@@ -505,7 +538,7 @@ function Config({ d }: { d: DeviceDetail }) {
             ))}
           </ol>
         ) : (
-          <p className="text-body text-muted">{t('devices.cfg.noItems')}</p>
+          <EmptyState compact icon={Layers} title={t('devices.cfg.noItems')} action={bpLink} />
         )}
       </Card>
       <Card title={t('devices.cfg.decls')} id="dv-decl">
@@ -535,7 +568,7 @@ function Config({ d }: { d: DeviceDetail }) {
             </table>
           </div>
         ) : (
-          <p className="text-body text-muted">{t('devices.cfg.noDecls')}</p>
+          <EmptyState compact icon={Layers} title={t('devices.cfg.noDecls')} action={bpLink} />
         )}
       </Card>
       {certs.length > 0 && (
