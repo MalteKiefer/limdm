@@ -7,14 +7,23 @@ import { useState } from 'react'
 import { z } from 'zod'
 import { api, unwrap } from '../../api/client'
 import { useMe } from '../../api/me'
-import { FormSection } from '../../components/form'
+import { Field, FormSection } from '../../components/form'
 import { ErrorState, LoadingState } from '../../components/states'
 import { toast } from '../../components/toast'
 import { Badge, Card, PageHeader, Segmented, StatusPill, type DeviceStatus } from '../../components/ui'
 import { currentLocale, useT, type MessageKey } from '../../i18n'
-import { setPrefs, usePrefs, type Density, type Theme } from '../../lib/prefs'
+import { dateTime } from '../../i18n/format'
+import { setPrefs, usePrefs, type DateFormat, type Density, type Theme } from '../../lib/prefs'
 import { useAction, useProfile } from './api'
 import { Facts, OnceSecret, SettingsForm, TextField } from '../../components/settingsform'
+
+const sample = new Date(2026, 11, 31, 14, 30)
+
+/** Keeps the app's choice and sets the classic console's cookie, so both show the same notation. */
+function pickDateFormat(f: DateFormat | null) {
+  setPrefs({ dateFormat: f })
+  if (f) void fetch(`/datefmt/${f}`, { credentials: 'same-origin', redirect: 'manual' }).catch(() => undefined)
+}
 
 export function ProfilePage() {
   const t = useT()
@@ -40,6 +49,18 @@ export function ProfilePage() {
         <FormSection title={t('settings.profile.appearance')} description={t('settings.profile.appearanceHelp')}>
           <Segmented<'de' | 'en'> label={t('settings.profile.language')} value={currentLocale()} onChange={(v) => setPrefs({ locale: v })} options={[{ value: 'de', label: 'Deutsch' }, { value: 'en', label: 'English' }]} />
           <Segmented<Theme> label={t('settings.profile.theme')} value={p.theme} onChange={(v) => setPrefs({ theme: v })} options={[{ value: 'system', label: t('settings.profile.system') }, { value: 'light', label: t('settings.profile.light') }, { value: 'dark', label: t('settings.profile.dark') }]} />
+          <Field label={t('settings.profile.dateFormat')}>
+            {({ id }) => (
+              <select id={id} className="field w-fit" value={p.dateFormat ?? ''} onChange={(e) => pickDateFormat((e.target.value || null) as DateFormat | null)}>
+                <option value="">{t('settings.profile.dateLanguage')}</option>
+                {(['iso', 'de', 'uk', 'us'] as const).map((f) => (
+                  <option key={f} value={f}>
+                    {dateTime(sample, f)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
           <Segmented<Density> label={t('settings.profile.density')} value={p.density} onChange={(v) => setPrefs({ density: v })} options={[{ value: 'comfortable', label: t('settings.profile.comfortable') }, { value: 'compact', label: t('settings.profile.compact') }]} />
         </FormSection>
         {q.isPending && <LoadingState rows={3} />}

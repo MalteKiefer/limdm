@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { setPrefs } from '../lib/prefs'
 import { catalogs } from './catalog'
-import { ago } from './format'
+import { ago, dateTime } from './format'
 import { translate } from '.'
 
 describe('i18n', () => {
@@ -19,5 +19,16 @@ describe('i18n', () => {
     expect(ago(Date.now() - 3 * 3600_000)).toBe('vor 3 Std.')
     setPrefs({ locale: 'en' })
     expect(ago(Date.now() - 10_000)).toBe('just now')
+  })
+})
+
+describe('dateTime notations', () => {
+  it('formats every profile choice', () => {
+    const d = new Date(2026, 0, 5, 14, 7)
+    expect(dateTime(d, 'iso')).toBe('2026-01-05 14:07')
+    expect(dateTime(d, 'de')).toBe('05.01.2026 14:07')
+    expect(dateTime(d, 'uk')).toBe('05/01/2026 14:07')
+    expect(dateTime(d, 'us')).toBe('01/05/2026 2:07 PM')
+    expect(dateTime(new Date(2026, 0, 5, 0, 7), 'us')).toBe('01/05/2026 12:07 AM')
   })
 })
