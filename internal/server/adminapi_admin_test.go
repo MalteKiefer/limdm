@@ -28,8 +28,14 @@ func TestAdminAPIManagement(t *testing.T) {
 	root := session{Email: "admin@firma.de", Role: "admin", Super: true}
 	mkToken := func(name, role string, scopes ...string) string {
 		t.Helper()
-		tok, _, err := s.createAPIToken(ctx, root, tokenSpec{Name: name, Role: role, Days: 30, Scopes: scopes})
+		// stored directly: four eyes would hold an admin token for approval
+		tx, err := db.Begin(ctx)
 		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(ctx)
+		tok, _, _, err := insertToken(ctx, tx, tokenApproval{Name: name, Role: role, Days: 30, Scopes: scopes}, root.Email)
+		if err != nil || tx.Commit(ctx) != nil {
 			t.Fatal(err)
 		}
 		return tok
@@ -57,6 +63,13 @@ func TestAdminAPIManagement(t *testing.T) {
 		return answer{resp.StatusCode, resp.Header}, string(b)
 	}
 	alice, bob := mkToken("alice", "admin"), mkToken("bob", "admin")
+	if _, _, err := s.createAPIToken(ctx, root, tokenSpec{Name: "carol", Role: "admin", Days: 30}); err == nil {
+		t.Fatal("admin token created without approval")
+	}
+	if resp, body := call(alice, "POST", "/api/v1/tokens", `{"name":"dave","role":"admin","days":30}`); resp.StatusCode != http.StatusAccepted ||
+		!strings.HasPrefix(resp.Header.Get("Location"), "/api/v1/approvals/") {
+		t.Fatalf("admin token via API: %d %s", resp.StatusCode, body)
+	}
 
 	// four eyes: a wipe through the API waits for approval at an API URL
 	resp, body := call(alice, "POST", "/api/v1/devices/d1/commands", `{"type":"wipe","params":{"confirm":"pc1","reason":"stolen"}}`)
@@ -126,8 +139,17 @@ func TestAdminAPIManagement(t *testing.T) {
 		ID    int64
 		Token string
 	}
-	if resp.StatusCode != http.StatusCreated || json.Unmarshal([]byte(body), &created) != nil || !strings.HasPrefix(created.Token, "lma_") {
+	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("token: %d %s", resp.StatusCode, body)
+	}
+	// four eyes: the approver gets the admin token once
+	var decided struct{ Credentials string }
+	if resp, body = call(bob, "POST", resp.Header.Get("Location")+"/approve", ""); resp.StatusCode != 200 || json.Unmarshal([]byte(body), &decided) != nil {
+		t.Fatalf("approve token: %d %s", resp.StatusCode, body)
+	}
+	_, created.Token, _ = strings.Cut(decided.Credentials, ": ")
+	if err := db.QueryRow(ctx, `SELECT id FROM api_tokens WHERE name='reader'`).Scan(&created.ID); err != nil || !strings.HasPrefix(created.Token, "lma_") {
+		t.Fatalf("approved token: %q %v", decided.Credentials, err)
 	}
 	if resp, _ = call(created.Token, "GET", "/api/v1/blueprints", ""); resp.StatusCode != 200 {
 		t.Fatalf("scoped read: %d", resp.StatusCode)

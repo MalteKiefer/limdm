@@ -281,6 +281,7 @@ func (s *Server) apiTokenAdd(w http.ResponseWriter, r *http.Request, c apiCaller
 	tok, id, err := s.createAPIToken(r.Context(), c.sess(), t)
 	var pending approvalPending
 	if errors.As(err, &pending) {
+		w.Header().Set("Location", "/api/v1/approvals/"+strconv.FormatInt(int64(pending), 10))
 		writeJSONStatus(w, http.StatusAccepted, map[string]any{"approval_id": int64(pending), "status": "pending"})
 		return
 	}
