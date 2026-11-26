@@ -2,9 +2,17 @@
 {{define "content"}}
 <div class="page-head">
   <div><div class="eyebrow"><a href="/library">{{t "Library"}}</a></div><h1>{{if .It.Name}}{{.It.Name}}{{else}}{{t "New"}} {{typeLabel .It.Type}}{{end}}</h1>
-  <div class="meta"><span class="mono">{{.It.Type}}</span>{{if .UsedBy}}<span>{{t "used by"}} {{join .UsedBy ", "}}</span>{{end}}</div></div>
+  <div class="meta"><span class="mono">{{.It.Type}}</span>{{if .UsedBy}}<span>{{t "used by"}} {{join .UsedBy ", "}}</span>{{end}}{{if .It.ID}}<a href="/library/{{.It.ID}}/history">{{t "Version history"}}</a>{{end}}</div></div>
 </div>
 {{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+{{with .Preview}}<section class="card" aria-live="polite">
+  <h2>{{t "Review the change"}}</h2>
+  <p>{{if .Devices}}<strong>{{len .Devices}}</strong> {{t "devices get this change at their next check in"}}{{else}}{{t "No device gets this change now."}}{{end}}{{if .Blueprints}} · {{t "Blueprints"}}: {{range $i, $b := .Blueprints}}{{if $i}}, {{end}}<a href="/devices?blueprint={{$b}}">{{$b}}</a>{{end}}{{end}}</p>
+  {{if .Devices}}<p class="muted">{{range $i, $d := .Devices}}{{if lt $i 30}}{{if $i}}, {{end}}<a href="/devices/{{$d.ID}}">{{$d.Hostname}}</a>{{end}}{{end}}{{if gt (len .Devices) 30}} {{t "and"}} {{sub (len .Devices) 30}} {{t "more"}}{{end}}</p>{{end}}
+  <pre class="diff">{{range .Diff}}<span class="d-{{.Op}}">{{if eq .Op "add"}}+ {{else if eq .Op "del"}}- {{else}}  {{end}}{{.Text}}</span>
+{{end}}</pre>
+  <p class="muted">{{t "Not saved yet. Check the change, then save it below."}}</p>
+</section>{{end}}
 <div class="grid side-right">
   <script type="application/json" id="item-examples">{{.Examples}}</script>
   <form class="card" method="post" action="/library" enctype="multipart/form-data">
@@ -17,7 +25,7 @@
     <label>{{t "Settings"}} <span class="hint">{{t "JSON, validated strictly before saving"}}</span>
       <textarea name="payload" rows="16" class="code" spellcheck="false">{{.Payload}}</textarea></label>
     <label class="cert-only">{{t "Add certificate file"}}<input type="file" name="pem_file" accept=".pem,.crt,.cer,application/x-pem-file"><small class="field-hint">{{t "PEM or CRT, also bundles; added to the list above when saving"}}</small></label>
-    {{if eq .Sess.Role "admin"}}<div class="form-foot"><span class="muted">{{t "Devices pick up changes at their next check in."}}</span><button>{{t "Save item"}}</button></div>{{end}}
+    {{if eq .Sess.Role "admin"}}<div class="form-foot"><span class="muted">{{t "Devices pick up changes at their next check in."}}</span>{{if .Preview}}<button name="preview" value="1" class="secondary">{{t "Review again"}}</button><button>{{t "Save item"}}</button>{{else}}<button name="preview" value="1">{{t "Review changes"}}</button>{{end}}</div>{{end}}
   </form>
   <div>
     <section class="card"><h2>{{t "Example"}}</h2><pre class="fp" id="item-example">{{.Example}}</pre>

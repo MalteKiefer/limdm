@@ -1,0 +1,25 @@
+{{define "title"}}{{.Name}} {{t "· History · LiMDM"}}{{end}}
+{{define "content"}}
+<div class="page-head">
+  <div><div class="eyebrow">{{if eq .Kind "library"}}<a href="/library">{{t "Library"}}</a>{{else}}<a href="/blueprints">{{t "Blueprints"}}</a>{{end}}</div>
+  <h1>{{.Name}}</h1><div class="meta"><span>{{t "Version history"}}</span>{{if not .Exists}}<span class="pill bad">{{t "deleted"}}</span>{{end}}</div></div>
+  {{if .Exists}}<div class="actions"><a class="button secondary" href="/{{.Kind}}/{{.ID}}">{{t "Open editor"}}</a></div>{{end}}
+</div>
+<div class="grid side-right">
+  <section class="card">
+    <h2>{{if .A}}{{t "Version"}} {{.A.Version}} → {{.B.Version}}{{else}}{{t "Version"}} {{.B.Version}}{{end}}</h2>
+    <pre class="diff">{{range .Diff}}<span class="d-{{.Op}}">{{if eq .Op "add"}}+ {{else if eq .Op "del"}}- {{else}}  {{end}}{{.Text}}</span>
+{{end}}</pre>
+  </section>
+  <section class="tablecard">
+    <div class="scroll"><table>
+      <thead><tr><th class="num">#</th><th>{{t "Time"}}</th><th>{{t "By"}}</th><th>{{t "Change"}}</th><th></th></tr></thead>
+      <tbody>{{range .Versions}}<tr>
+        <td class="num"><a href="/{{$.Kind}}/{{$.ID}}/history?b={{.Version}}">{{.Version}}</a></td><td>{{fmtTime .At}}</td><td>{{.By}}</td>
+        <td>{{if .Deleted}}<span class="pill bad">{{t "deleted"}}</span>{{else}}{{.Note}}{{end}}</td>
+        <td>{{if and (eq $.Sess.Role "admin") (not .Deleted) (or (ne .Version (index $.Versions 0).Version) (not $.Exists))}}
+          <form method="post" action="/{{$.Kind}}/{{$.ID}}/rollback">{{template "csrf" $.CSRF}}<input type="hidden" name="version" value="{{.Version}}"><button class="secondary" data-confirm="{{t "Save this version again as the newest version?"}}">{{if $.Exists}}{{t "Roll back"}}{{else}}{{t "Restore"}}{{end}}</button></form>{{end}}</td></tr>{{end}}</tbody>
+    </table></div>
+  </section>
+</div>
+{{end}}

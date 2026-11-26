@@ -580,3 +580,9 @@ td.row-actions .menu-list form { display: block; }
 td.row-actions .menu-list { text-align: left; }
 .inline:has(.field-hint) { align-items: flex-start; }
 legend .hint, summary .hint { display: block; margin-top: 2px; font-size: 12px; font-weight: 400; color: var(--text-3); }
+/* W3: version diff and save preview */
+pre.diff { white-space: pre-wrap; word-break: break-word; margin: 0; }
+pre.diff span { display: block; }
+pre.diff .d-add { background: var(--ok-soft); color: var(--ok); }
+pre.diff .d-del { background: var(--bad-soft); color: var(--bad); }
+pre.diff .d-same { color: var(--text-3); }

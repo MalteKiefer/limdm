@@ -24,4 +24,7 @@
   </table></div>
 </section>
 {{else}}<div class="empty card">{{t "The library is empty. Create the first item."}}</div>{{end}}
+{{if .Deleted}}<section class="tablecard"><div class="card-head"><h2>{{t "Deleted"}}</h2><span class="muted">{{t "The last version stays in the history and can be restored."}}</span></div>
+  <div class="scroll"><table><thead><tr><th>{{t "Name"}}</th><th>{{t "Deleted"}}</th><th>{{t "By"}}</th></tr></thead>
+  <tbody>{{range .Deleted}}<tr><td><a href="/library/{{.ID}}/history">{{.Name}}</a></td><td>{{fmtTime .At}}</td><td>{{.By}}</td></tr>{{end}}</tbody></table></div></section>{{end}}
 {{end}}
