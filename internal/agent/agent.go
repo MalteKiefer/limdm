@@ -80,6 +80,7 @@ type State struct {
 	RebootAt      time.Time            `json:"reboot_at,omitzero"` // when it happens, deferrals included (guarded by evMu)
 	RebootDefers  int                  `json:"reboot_defers,omitempty"`
 	ScriptRuns    map[string]time.Time `json:"script_runs,omitempty"` // last run of recurring scripts
+	ScriptSums    map[string]string    `json:"script_sums,omitempty"` // body, parameters and timeout of the last run (run_on_change)
 	Results       []api.CommandResult  `json:"results"`               // not yet reported
 	Events        []string             `json:"events"`
 
@@ -111,7 +112,8 @@ type State struct {
 	ScriptResults       []api.ScriptResult        `json:"script_results,omitempty"`    // recurring script runs not yet reported
 	ManagedFiles        []string                  `json:"managed_files,omitempty"`     // paths written for com.limdm.files, removed when undeclared
 	ManagedFileSums     map[string]string         `json:"managed_file_sums,omitempty"` // path -> SHA-256 of the content written; removal only when it still matches
-	FirewallRules       []api.FirewallRule        `json:"firewall_rules,omitempty"`    // allow rules LiMDM added
+	FirewallRules       []fwRule                  `json:"firewall_rules,omitempty"`    // rules LiMDM added
+	FirewallEgress      string                    `json:"firewall_egress,omitempty"`   // ufw outgoing default LiMDM set: deny or allow
 	LocalUsers          map[string]localUserState `json:"local_users,omitempty"`       // accounts com.limdm.localusers manages
 }
 

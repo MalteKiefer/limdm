@@ -824,8 +824,19 @@ func fixFirewall(a *Agent) error {
 }
 
 func (a *Agent) applyFirewall() error {
-	if a.host.family == "alpine" {
-		return errors.New("firewall management is not supported on Alpine yet; use nftables or awall")
+	if a.pol.Firewall.Template {
+		return errUnrendered
+	}
+	if a.host.family == "alpine" { // nftables with LiMDM's own table (firewall_nft.go)
+		if !hasCmd("nft") {
+			if err := a.host.install("nftables"); err != nil {
+				return err
+			}
+		}
+		if err := a.syncNftables(); err != nil {
+			return err
+		}
+		return svc("enable-now", "nftables")
 	}
 	if a.host.family == "debian" {
 		// A hand written nftables ruleset (VPN clients such as NetBird add their own
