@@ -146,8 +146,14 @@ SHA-256 fingerprint of what is installed.
 ```
 
 DNS uses systemd-resolved; NTP uses systemd-timesyncd or chrony. Proxy values are written
-to `/etc/profile.d`, `/etc/environment.d` and the apt or dnf configuration; they are checked
-against strict patterns because they end up in shell files.
+to `/etc/profile.d`, `/etc/environment.d`, apt (`/etc/apt/apt.conf.d/60limdm-proxy`), dnf5
+(`/etc/dnf/libdnf5.conf.d`) and dnf4 (`proxy=` in `/etc/dnf/dnf.conf`, RHEL 9 family). They
+also reach the agent itself: a systemd drop in for `limdm-agent.service` (followed by
+`systemctl daemon-reload`) sets them for the next start, and the running agent applies them
+at once to its own connections and to every tool it runs (pacman, apk, flatpak, dnf, apt).
+Removing the declaration removes all of this; a `proxy=` in `dnf.conf` that was changed by
+hand stays. The values are checked against strict patterns because they end up in shell
+files.
 
 ### `com.limdm.scripts` (list)
 

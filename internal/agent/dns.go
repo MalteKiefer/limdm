@@ -51,7 +51,7 @@ var (
 	// dohClient trusts the system roots: the resolvers' certificates carry
 	// their IP addresses.
 	dohClient = &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
-		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}, Proxy: http.ProxyFromEnvironment}}
+		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}, Proxy: agentProxy}}
 )
 
 // dohAnswer is the JSON format of both Cloudflare and Google.

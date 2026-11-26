@@ -92,6 +92,7 @@ type State struct {
 	UpdateResult   *api.UpdateResult    `json:"update_result,omitempty"`  // agent update outcome not yet reported
 	OfflineLocked  bool                 `json:"offline_locked,omitempty"`
 	FallbackDNS    bool                 `json:"fallback_dns,omitempty"` // server allows the DNS over HTTPS fallback
+	DNFProxy       string               `json:"dnf_proxy,omitempty"`    // proxy= value LiMDM wrote to dnf.conf (dnf4)
 }
 
 type Agent struct {
@@ -116,6 +117,7 @@ type Agent struct {
 	failedUpdate                string    // release version whose update already failed, reported once
 	osqueryTried                time.Time // last osquery install attempt
 	syncNow                     bool
+	proxySet                    bool // a proxy declaration set the environment of this process
 	// for the desktop tray
 	lastCheckin  *time.Time
 	lastError    string
@@ -155,7 +157,7 @@ func pinnedTLS(caPEM []byte, withIdentity bool) (*tls.Config, error) {
 
 func newClient(tc *tls.Config) *http.Client {
 	return &http.Client{Timeout: 2 * time.Minute, Transport: &http.Transport{
-		TLSClientConfig: tc, Proxy: http.ProxyFromEnvironment, ForceAttemptHTTP2: true, DialContext: fallbackDial()}}
+		TLSClientConfig: tc, Proxy: agentProxy, ForceAttemptHTTP2: true, DialContext: fallbackDial()}}
 }
 
 func newCSR() (keyPEM []byte, csrPEM string, err error) {
