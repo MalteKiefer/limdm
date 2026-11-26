@@ -484,6 +484,12 @@ agent update that is due (a version picked for the device, an admin request, or 
 version the rollout policy releases for it). Agent updates can carry security fixes, so they
 do not wait for the next regular check in. A version being installed or one that already
 failed on the device does not trigger check ins. After failed polls the agent waits longer,
-up to 5 minutes, and returns to one minute with the first answer. Restart and shutdown
+up to 5 minutes plus up to half of that as random delay, and returns to one minute with the
+first answer. Failed check ins back off the same way: the interval doubles per failure up to
+15 minutes, with up to 50 % random delay, so a fleet does not return in the same seconds
+after a server outage. When the server answers 503 or 429 (overloaded, too many parallel
+package downloads) the agent honors `Retry-After` (at most 30 minutes, plus jitter) for check
+ins, polls and update downloads; a deferred update download is not reported as a failed
+update and is offered again later. Restart and shutdown
 delays count from when the command was sent in the console; a command that arrives late
 still gives users at least one minute of warning.
