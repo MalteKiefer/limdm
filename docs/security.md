@@ -379,8 +379,9 @@ removes them; the deletion is one of them (`device.delete`).
   with `sshd -t`.
 * The desktop socket authorizes by peer credentials and active local session. A process of
   the same user in an SSH session (remote logind session or below the SSH service) may
-  read status, catalog and logs, but is refused every change: app install, removal and
-  requests, recovery key escrow, SSO confirmation and reboot deferral. A process started
+  read status and catalog, gets no journal or agent log lines, and is refused every change:
+  app install, removal and requests, recovery key escrow, SSO confirmation, reboot deferral
+  and ending a remote support session. A process started
   through the user's systemd manager belongs to no session and is not told apart.
 * The SSO device flow starts only at the device: never from `su` or `sudo`, never with
   `PAM_RHOST`, a pseudo terminal or a remote parent session
@@ -396,7 +397,8 @@ removes them; the deletion is one of them (`device.delete`).
 ### Known limitations of the agent
 
 * **SSH sessions of a user who is also logged in locally.** The desktop socket refuses app
-  changes, key escrow, SSO confirmation and reboot deferral from processes in an SSH or
+  changes, key escrow, SSO confirmation, reboot deferral, ending remote support and journal
+  lines from processes in an SSH or
   other remote session. A process the same user starts outside any session (`systemd-run
   --user`, under `user@.service`), or a descriptor passed on by a process that already
   exited, is not recognized as remote. The check keeps casual misuse out; it is no barrier

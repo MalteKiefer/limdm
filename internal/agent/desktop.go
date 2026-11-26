@@ -106,6 +106,8 @@ type DesktopRequest struct {
 	Note       string `json:"note,omitempty"`
 	UUID       string `json:"uuid,omitempty"`
 	Passphrase string `json:"passphrase,omitempty"`
+
+	remote bool // set by the socket handler: the peer runs in a remote (SSH) session
 }
 
 type DesktopVolume struct {
@@ -305,8 +307,10 @@ func (a *Agent) serveDesktop(ctx context.Context) {
 }
 
 // desktopChangingOps change state on the device or at the server; a peer in
-// a remote session (SSH) is refused them.
-var desktopChangingOps = []string{"app-install", "app-remove", "app-request", "app-request-new", "escrow", "sso-confirm", "reboot-defer"}
+// a remote session (SSH) is refused them. shell-end is among them: a remote
+// support session is ended by the person at the device, not by anyone who
+// can log in over SSH as that user.
+var desktopChangingOps = []string{"app-install", "app-remove", "app-request", "app-request-new", "escrow", "sso-confirm", "reboot-defer", "shell-end"}
 
 func (d *desktopServer) handle(c *net.UnixConn) {
 	defer c.Close()
@@ -326,8 +330,10 @@ func (d *desktopServer) handle(c *net.UnixConn) {
 		return
 	}
 	// the active local session is checked per uid; a process of the same
-	// user in an SSH session may read but not change anything
-	if slices.Contains(desktopChangingOps, req.Op) && remoteProcess(pid) {
+	// user in an SSH session may read status but not change anything and
+	// gets no journal lines
+	req.remote = remoteProcess(pid)
+	if slices.Contains(desktopChangingOps, req.Op) && req.remote {
 		json.NewEncoder(c).Encode(DesktopResponse{Error: "not allowed from a remote session, use the device itself"})
 		return
 	}
@@ -355,8 +361,11 @@ func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 	case "info":
 		st := info.Status
 		st.RemoteShell = d.a.shellInfo() // live, not from the last cycle
-		return DesktopResponse{Company: info.Company, Logo: info.Logo, Need: need, Status: &st, Log: agentLog(),
-			LogLines: agentJournal(200), Profiles: info.Profiles, Certs: info.Certs}
+		resp := DesktopResponse{Company: info.Company, Logo: info.Logo, Need: need, Status: &st, Profiles: info.Profiles, Certs: info.Certs}
+		if !req.remote { // the journal names users, hosts and errors: only at the device itself
+			resp.Log, resp.LogLines = agentLog(), agentJournal(200)
+		}
+		return resp
 	case "catalog":
 		apps := slices.Clone(info.Apps)
 		for i := range apps { // installs and removals run between cycles

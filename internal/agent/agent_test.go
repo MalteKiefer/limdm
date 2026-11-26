@@ -512,6 +512,12 @@ func TestDesktopInfoAndSync(t *testing.T) {
 	if info.Status == nil || info.Status.Version != "1.0" || len(info.Status.Failing) != 1 {
 		t.Fatalf("info: %+v", info)
 	}
+	if r := d.serve(1000, DesktopRequest{Op: "info", remote: true}); r.Status == nil || r.Log != nil || r.LogLines != nil {
+		t.Fatalf("info from a remote session must carry status but no journal: %+v", r)
+	}
+	if !slices.Contains(desktopChangingOps, "shell-end") {
+		t.Fatal("shell-end must be refused from remote sessions")
+	}
 	if r := d.serve(1000, DesktopRequest{Op: "sync"}); !r.OK || len(a.kick) != 1 {
 		t.Fatalf("sync: %+v", r)
 	}
