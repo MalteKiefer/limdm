@@ -832,6 +832,9 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = a.showMessage(c.Payload)
 	case "software_remove":
 		out, err = a.removeSoftware(c.Payload)
+	case "diagnostics":
+		r.Diagnostics = a.collectDiagnostics()
+		out = fmt.Sprintf("diagnostics collected (%d bytes)", len(r.Diagnostics))
 	case "user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete":
 		out, err = a.userCommand(c.Type, c.Payload)
 	case "app_install", "app_remove":

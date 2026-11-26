@@ -418,3 +418,11 @@ CREATE TABLE IF NOT EXISTS script_results (
     received_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS script_results_device ON script_results(device_id, id);
+-- Log bundles of the diagnostics command (newest 10 per device), downloaded by admins and helpdesk.
+CREATE TABLE IF NOT EXISTS diagnostics (
+    command_id BIGINT PRIMARY KEY,
+    device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    content    TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS diagnostics_device ON diagnostics(device_id, command_id);

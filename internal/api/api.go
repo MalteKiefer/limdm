@@ -833,7 +833,7 @@ type Command struct {
 
 // CommandTypes are the one off actions an admin can send.
 var CommandTypes = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "script", "lost", "found", "wipe", "allow_uninstall", "message", "app_install", "app_remove",
-	"user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete", "software_remove"}
+	"user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete", "software_remove", "diagnostics"}
 
 // PollResponse answers the agent's frequent poll (POST /api/v1/poll).
 type PollResponse struct {
@@ -931,6 +931,8 @@ type CommandResult struct {
 	OK     bool          `json:"ok"`
 	Output string        `json:"output"`
 	Script *ScriptResult `json:"script,omitempty"` // script command: structured result
+	// Diagnostics is the bounded, redacted log bundle of a diagnostics command.
+	Diagnostics string `json:"diagnostics,omitempty"`
 }
 
 type CheckinRequest struct {

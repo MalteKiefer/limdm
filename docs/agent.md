@@ -309,6 +309,13 @@ Other commands:
   an event.
 * **Send message**: a notification and a dialog in every graphical session; the command
   fails when no dialog could be shown.
+* **Collect logs** (admins and helpdesk, **Commands** tab, **Diagnostics**): the agent
+  sends the last 2000 lines of its own journal (agent and watchdog) and the warnings and
+  errors of the current boot (last 1000 lines), at most 512 KiB. Before sending it masks
+  private keys, `key=value` pairs with secret names (password, token, secret, api key …),
+  authorization headers, credentials in URLs and recovery keys. The server keeps the
+  newest 10 bundles per device; admins and the helpdesk download them as text, and every
+  download is in the audit log as `device.diagnostics.download`.
 
 After unlocking, users unlock their screen with their usual password. Lost mode locks the
 passwords the same way and ends the sessions. The device page shows the latest lock,

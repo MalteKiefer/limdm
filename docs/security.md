@@ -93,6 +93,11 @@ Failed local and OIDC sign ins and rejected enrollments are logged with the clie
 
 ## Privacy
 
+* **Diagnostics.** Log bundles (the **Collect logs** command) are redacted on the device
+  before they leave it, capped at 512 KiB, kept for the newest 10 per device and only
+  downloadable by admins and the helpdesk; each download is audited. Redaction is pattern
+  based: review a bundle before passing it on outside IT.
+
 * By default the agent reports everything, including IP addresses, DNS, routes and logged
   in users. `com.limdm.privacy` switches items off per blueprint.
 * The server records the public address of every check in (the agent port is never behind

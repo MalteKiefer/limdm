@@ -733,6 +733,10 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := storeDiagnostics(ctx, tx, id, req.Results); err != nil {
+		s.failAPI(w, err)
+		return
+	}
 	if err := storeScriptResults(ctx, tx, id, req); err != nil {
 		s.failAPI(w, err)
 		return
