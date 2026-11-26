@@ -3540,6 +3540,143 @@
           }
         }
       }
+    },
+    "/api/v1/config/blueprints/{id}/pilot": {
+      "post": {
+        "operationId": "configPilotStart",
+        "summary": "Start a pilot rollout",
+        "description": "Saves the changed map as a copy of the blueprint (<name>.pilot, same parent) and sets it on the chosen devices, which must use this blueprint. Promote or abort ends it.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "tree",
+                  "devices"
+                ],
+                "properties": {
+                  "tree": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Node"
+                    }
+                  },
+                  "devices": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigPilot"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/config/blueprints/{id}/pilot/{op}": {
+      "post": {
+        "operationId": "configPilotEnd",
+        "summary": "Promote or abort a pilot rollout",
+        "description": "promote saves the pilot map into the blueprint (a new version), abort drops it; both put the devices back on what they had set and delete the copy.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "op",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "promote",
+                "abort"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSaved"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5114,6 +5251,13 @@
                 "items": {
                   "type": "integer"
                 }
+              },
+              "pilot": {
+                "$ref": "#/components/schemas/ConfigPilot"
+              },
+              "pilot_of": {
+                "type": "integer",
+                "description": "this blueprint is the pilot copy of that one"
               }
             },
             "required": [
@@ -5956,6 +6100,34 @@
           "global",
           "type"
         ]
+      },
+      "ConfigPilot": {
+        "type": "object",
+        "required": [
+          "id",
+          "devices",
+          "by",
+          "at"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "the pilot copy"
+          },
+          "devices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "by": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     }
   }

@@ -1095,6 +1095,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/config/blueprints/{id}/pilot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a pilot rollout
+         * @description Saves the changed map as a copy of the blueprint (<name>.pilot, same parent) and sets it on the chosen devices, which must use this blueprint. Promote or abort ends it.
+         */
+        post: operations["configPilotStart"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/blueprints/{id}/pilot/{op}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Promote or abort a pilot rollout
+         * @description promote saves the pilot map into the blueprint (a new version), abort drops it; both put the devices back on what they had set and delete the copy.
+         */
+        post: operations["configPilotEnd"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1539,6 +1579,9 @@ export interface components {
             read_only: boolean;
             deletable: boolean;
             inherited: number[];
+            pilot?: components["schemas"]["ConfigPilot"];
+            /** @description this blueprint is the pilot copy of that one */
+            pilot_of?: number;
         };
         ConfigBlueprints: {
             items: components["schemas"]["ConfigBlueprint"][];
@@ -1746,6 +1789,14 @@ export interface components {
             four_eyes: boolean;
             global: boolean;
             type: string;
+        };
+        ConfigPilot: {
+            /** @description the pilot copy */
+            id: number;
+            devices: string[];
+            by: string;
+            /** Format: date-time */
+            at: string;
         };
     };
     responses: {
@@ -3850,6 +3901,71 @@ export interface operations {
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    configPilotStart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    tree: components["schemas"]["Node"][];
+                    devices: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigPilot"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    configPilotEnd: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                op: "promote" | "abort";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigSaved"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];

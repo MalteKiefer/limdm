@@ -29,6 +29,8 @@ func (s *Server) appConfigRoutes(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/config/library/preview", s.need("admin", unscopedAPI(s.apiConfigItemPreview)))
 	m.HandleFunc("GET /api/v1/config/{kind}/{id}/versions", s.need("read", unscopedAPI(s.apiConfigVersions)))
 	m.HandleFunc("POST /api/v1/config/{kind}/{id}/rollback", s.need("admin", unscopedAPI(s.apiConfigRollback)))
+	m.HandleFunc("POST /api/v1/config/blueprints/{id}/pilot", s.need("admin", unscopedAPI(s.apiConfigPilotStart)))
+	m.HandleFunc("POST /api/v1/config/blueprints/{id}/pilot/{op}", s.need("admin", unscopedAPI(s.apiConfigPilotEnd)))
 	s.appConfigSoftwareRoutes(m)
 }
 
@@ -44,15 +46,16 @@ type apiBlueprintSource struct {
 
 type apiBlueprintRow struct {
 	apiBlueprint
-	Parent     string               `json:"parent"`
-	Devices    int                  `json:"devices"`
-	Status     map[string]int       `json:"status"` // devices by compliance status
-	Items      int                  `json:"items"`  // distinct library items in the map
-	Sources    []apiBlueprintSource `json:"sources"`
-	ReadOnly   bool                 `json:"read_only"` // a shared blueprint of the default tenant seen by a tenant
-	Deletable  bool                 `json:"deletable"`
-	Inherited  []int64              `json:"inherited"` // ancestors, root first
-	SharedFrom string               `json:"shared_from,omitempty"`
+	Parent    string               `json:"parent"`
+	Devices   int                  `json:"devices"`
+	Status    map[string]int       `json:"status"` // devices by compliance status
+	Items     int                  `json:"items"`  // distinct library items in the map
+	Sources   []apiBlueprintSource `json:"sources"`
+	ReadOnly  bool                 `json:"read_only"` // a shared blueprint of the default tenant seen by a tenant
+	Deletable bool                 `json:"deletable"`
+	Inherited []int64              `json:"inherited"`          // ancestors, root first
+	Pilot     *apiPilot            `json:"pilot,omitempty"`    // a running pilot of a change
+	PilotOf   int64                `json:"pilot_of,omitempty"` // this is the pilot copy of that blueprint
 }
 
 type apiDeleted struct {
@@ -135,6 +138,15 @@ func (s *Server) apiConfigBlueprints(w http.ResponseWriter, r *http.Request, c a
 		}
 		status[d.Blueprints][d.Status]++
 	}
+	pilots, err := s.pilots(ctx)
+	if err != nil {
+		s.apiFail(w, err)
+		return
+	}
+	pilotOf := map[int64]int64{}
+	for bp, p := range pilots {
+		pilotOf[p.ID] = bp
+	}
 	names, parents := map[int64]string{}, map[int64]*int64{}
 	for _, b := range bps {
 		names[b.ID], parents[b.ID] = b.Name, b.Parent
@@ -147,6 +159,11 @@ func (s *Server) apiConfigBlueprints(w http.ResponseWriter, r *http.Request, c a
 			row.Status = map[string]int{}
 		}
 		row.Deletable = !row.ReadOnly && b.Name != "default"
+		if p, ok := pilots[b.ID]; ok {
+			row.Pilot = &p
+		}
+		row.PilotOf = pilotOf[b.ID]
+		row.Deletable = row.Deletable && row.Pilot == nil && row.PilotOf == 0
 		if b.Parent != nil {
 			row.Parent = names[*b.Parent]
 		}

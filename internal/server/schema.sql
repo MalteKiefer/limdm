@@ -880,3 +880,16 @@ CREATE INDEX IF NOT EXISTS saved_views_owner ON saved_views(owner, list);
 CREATE INDEX IF NOT EXISTS saved_views_shared ON saved_views(tenant_id, list) WHERE shared;
 -- the console app counts failed commands of the last day (appstats.go)
 CREATE INDEX IF NOT EXISTS commands_updated ON commands(updated_at);
+-- ws/ui-config
+-- pilot rollout of a blueprint change (app_config_pilot.go): the devices
+-- moved to the pilot copy and the blueprint they had set before
+CREATE TABLE IF NOT EXISTS blueprint_pilots (
+    pilot_id          BIGINT NOT NULL REFERENCES blueprints(id) ON DELETE CASCADE,
+    blueprint_id      BIGINT NOT NULL REFERENCES blueprints(id) ON DELETE CASCADE,
+    device_id         TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    prev_blueprint_id BIGINT,
+    created_by        TEXT NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (pilot_id, device_id)
+);
+CREATE INDEX IF NOT EXISTS blueprint_pilots_blueprint ON blueprint_pilots(blueprint_id);

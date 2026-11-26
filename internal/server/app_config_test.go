@@ -154,6 +154,30 @@ func TestAppConfigAPI(t *testing.T) {
 	code, body = call(admin, "POST", "/api/v1/config/blueprints/"+itoa(dev)+"/rollback", `{"version":1}`)
 	want(code, body, 200, `"saved"`)
 
+	// pilot rollout: a device moves to the pilot copy and back on promote
+	if _, err := db.Exec(ctx, `UPDATE devices SET blueprint_id=$1 WHERE id='d1'`, dev); err != nil {
+		t.Fatal(err)
+	}
+	is(422)(call(admin, "POST", "/api/v1/config/blueprints/"+itoa(dev)+"/pilot", `{"tree":[],"devices":["nope"]}`))
+	code, body = call(admin, "POST", "/api/v1/config/blueprints/"+itoa(dev)+"/pilot", `{"tree":[],"devices":["d1"]}`)
+	want(code, body, 201, `"devices":["d1"]`)
+	is(409)(call(admin, "POST", "/api/v1/config/blueprints/"+itoa(dev)+"/pilot", `{"tree":[],"devices":["d1"]}`))
+	var onPilot string
+	_ = db.QueryRow(ctx, `SELECT b.name FROM devices d JOIN blueprints b ON b.id=d.blueprint_id WHERE d.id='d1'`).Scan(&onPilot)
+	if onPilot != "dev.pilot" {
+		t.Fatalf("device on %q", onPilot)
+	}
+	code, body = call(auditor, "GET", "/api/v1/config/blueprints", "")
+	want(code, body, 200, `"pilot_of":`+itoa(dev))
+	code, body = call(admin, "POST", "/api/v1/config/blueprints/"+itoa(dev)+"/pilot/promote", "")
+	want(code, body, 200, `"promote"`)
+	var tree string
+	_ = db.QueryRow(ctx, `SELECT b.tree::text FROM devices d JOIN blueprints b ON b.id=d.blueprint_id WHERE d.id='d1'`).Scan(&tree)
+	if tree != "[]" {
+		t.Fatalf("after promote: %s", tree)
+	}
+	is(404)(call(admin, "POST", "/api/v1/config/blueprints/"+itoa(dev)+"/pilot/abort", ""))
+
 	// four eyes: a root effective item waits for another admin
 	s.rt.Store(&runtimeState{set: Settings{StaleHours: 24, FourEyes: true, OIDCIssuer: "https://idp.test", OIDCClientID: "x"}, auth: &oidcAuth{}})
 	code, body = call(admin, "POST", "/api/v1/config/library/preview", `{"name":"k","type":"com.limdm.kernelmodules","payload":{"block":["usb-storage"]}}`)
