@@ -32,8 +32,8 @@ an administrator, or when the console would listen publicly without a certificat
 
 ## Console settings
 
-**Settings** (admins edit, auditors read) has the tabs General, SSO, Monitoring, Branding
-and Integrations; each tab saves only its own fields:
+**Settings** (admins edit, auditors read) has the tabs General, Security, SSO, Notifications
+and Branding; each form saves only its own fields:
 
 * **Single sign on (OIDC).** Issuer, client ID, client secret (stored AES-256-GCM encrypted)
   and allowed domain. Changes are checked against the provider's discovery document before
@@ -58,7 +58,9 @@ and Integrations; each tab saves only its own fields:
 * **Four eyes approval (Security tab).** See [security.md](security.md#four-eyes-approval).
 * **Audit log retention (Security tab).** 0 keeps everything (default); otherwise 365 to
   36500 days ([security.md](security.md#audit-log)).
-* **Stale threshold** and **compliance webhook** ([compliance.md](compliance.md#webhook)).
+* **Stale threshold** (General).
+* **Notifications.** Notification channels ([notifications.md](notifications.md)) and the
+  compliance webhook ([compliance.md](compliance.md#webhook)) on one tab.
 * **Remote shell** (tab Security): on or off, helpdesk allowed, root allowed, maximum
   duration and idle timeout ([remote-shell.md](remote-shell.md)).
 * **Branding.** Company name (up to 80 characters) and a PNG logo (16 to 1024 pixels, up to
@@ -88,7 +90,7 @@ Other providers (Entra ID, Okta, authentik, Keycloak) work the same way with the
 | Role | May |
 |---|---|
 | `admin` | everything |
-| `helpdesk` | see devices, send commands except scripts, reveal disk recovery keys |
+| `helpdesk` | see devices; sync, install updates, reboot, shut down, lock and unlock, send a message; reset the password of and lock local accounts on a device; reveal disk recovery keys. Not: scripts, lost mode, wipe, retire, software, creating or deleting accounts, configuration |
 | `auditor` | read everything, change nothing |
 
 Users are OIDC identities (email) or local accounts (`local:<name>`, password and TOTP).

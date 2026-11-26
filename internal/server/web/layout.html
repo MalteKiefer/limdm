@@ -10,8 +10,8 @@
 <body>
 {{if .Sess.Email}}
 <div class="shell">
-  <aside class="side">
-    <div class="brand">{{if .Brand.Logo}}<img src="/branding/logo.png?v={{.Brand.V}}" alt="">{{else}}<img src="/static/logo.svg" alt="">{{end}} {{if .Brand.Name}}{{.Brand.Name}}{{else}}{{t "LiMDM"}}{{end}}</div>
+  <aside class="side" id="side">
+    <div class="brand"><button type="button" class="nav-toggle" aria-expanded="false" aria-controls="side" data-nav-toggle aria-label="{{t "Menu"}}"><span aria-hidden="true">☰</span></button>{{if .Brand.Logo}}<img src="/branding/logo.png?v={{.Brand.V}}" alt="">{{else}}<img src="/static/logo.svg" alt="">{{end}} {{if .Brand.Name}}{{.Brand.Name}}{{else}}{{t "LiMDM"}}{{end}}</div>
     <nav class="nav" aria-label="{{t "Main"}}">
       <a href="/" {{if eq .Page "overview"}}class="on" aria-current="page"{{end}}>{{t "Overview"}}</a>
       <a href="/devices" {{if or (eq .Page "devices") (eq .Page "device")}}class="on" aria-current="page"{{end}}>{{t "Devices"}}</a>
@@ -33,6 +33,7 @@
       <a href="/settings/api" {{if eq .Page "apitokens"}}class="on" aria-current="page"{{end}}>{{t "API tokens"}}</a>
       {{if eq .Sess.Role "admin"}}<a href="/network" {{if eq .Page "network"}}class="on" aria-current="page"{{end}}>{{t "Network certificates"}}</a>{{end}}
       {{end}}
+      <a class="nav-help{{if eq .Page "help"}} on{{end}}" href="/help" {{if eq .Page "help"}}aria-current="page"{{end}}>{{t "Help"}}</a>
     </nav>
     <div class="who">
       <a class="who-user {{if eq .Page "profile"}}on{{end}}" href="/profile" title="{{t "Profile"}}">
@@ -61,6 +62,14 @@
 </html>
 {{/* shared partials */}}
 {{define "csrf"}}<input type="hidden" name="csrf" value="{{.}}">{{end}}
-{{define "cmd"}}<form method="post" action="/devices/{{.ID}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="{{.Type}}">{{if .Now}}<input type="hidden" name="minutes" value="0">{{end}}<button role="menuitem" class="menu-item{{with .Class}} {{.}}{{end}}">{{t .Label}}</button></form>{{end}}
+{{define "cmd"}}<form method="post" action="/devices/{{.ID}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="{{.Type}}">{{if .Now}}<input type="hidden" name="minutes" value="0">{{end}}<button role="menuitem" class="menu-item{{with .Class}} {{.}}{{end}}"{{with .Confirm}} data-confirm="{{t .}}"{{end}}>{{t .Label}}{{with .Hint}}<span class="menu-hint">{{t .}}</span>{{end}}</button></form>{{end}}
 {{define "rmsw"}}<form method="post" action="/devices/{{.ID}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="software_remove"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="name" value="{{.Name}}">{{with .Inst}}<input type="hidden" name="installation" value="{{.}}">{{end}}<input type="hidden" name="back_sub" value="{{.Sub}}"><button class="secondary small" data-confirm="{{t "Remove this software from the device?"}}">{{t "Remove"}}</button></form>{{end}}
 {{define "ucmd"}}<form method="post" action="/devices/{{.ID}}/command">{{template "csrf" .CSRF}}<input type="hidden" name="type" value="{{.Type}}"><input type="hidden" name="username" value="{{.User}}">{{if .Admin}}<input type="hidden" name="admin" value="1">{{end}}<button role="menuitem" class="menu-item{{with .Class}} {{.}}{{end}}"{{with .Confirm}} data-confirm="{{t .}}"{{end}}>{{t .Label}}</button></form>{{end}}
+{{/* password with repeat field and a generator (args: Min, Label, optional Hint after "At least N") */}}
+{{define "pwfields"}}<label>{{t .Label}}<input name="password" type="password" minlength="{{.Min}}" required autocomplete="new-password"><small class="field-hint">{{t "At least"}} {{.Min}} {{with .Hint}}{{t .}}{{else}}{{t "characters, per the password policy"}}{{end}}</small></label>
+<label>{{t "Repeat password"}}<input name="password2" type="password" minlength="{{.Min}}" required autocomplete="new-password" data-match="password" data-mismatch="{{t "The passwords do not match."}}"></label>
+<div class="pwgen js-only"><button type="button" class="secondary small" data-pwgen="{{.Min}}">{{t "Generate password"}}</button><code data-pwgen-out hidden></code><button type="button" class="secondary small" data-copy="" data-copied="{{t "Copied"}}" hidden>{{t "Copy"}}</button></div>{{end}}
+{{/* an error notice: translated text, the technical message folded away */}}
+{{define "err"}}{{with .}}{{$m := errmsg .}}<div class="notice error" role="alert">{{$m.Text}}{{with $m.Detail}}<details class="err-detail"><summary>{{t "Technical detail"}}</summary><code>{{.}}</code></details>{{end}}</div>{{end}}{{end}}
+{{define "doclink"}}<a class="doclink" href="{{docs .}}" rel="noopener" target="_blank" title="{{t "Open the documentation"}}" aria-label="{{t "Open the documentation"}}">?</a>{{end}}
+{{define "lvl"}}<a class="lvl" href="/help#l1-and-l2" title="{{if eq . 2}}{{t "Level 2: strict checks (CIS Level 2) that can limit how a device is used"}}{{else}}{{t "Level 1: baseline for every device"}}{{end}}">{{t "L"}}{{.}}</a>{{end}}

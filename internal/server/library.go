@@ -463,19 +463,19 @@ func (s *Server) libraryEdit(w http.ResponseWriter, r *http.Request, sess sessio
 			}
 		}
 		if err != nil {
-			http.NotFound(w, r)
+			s.notFound(w, r, sess)
 			return
 		}
 	} else if q := r.URL.Query(); q.Get("from") != "" && q.Get("remote") != "" {
 		var err error
 		if it, err = s.flatpakTemplate(r.Context(), q.Get("from"), q.Get("remote"), q.Get("inst"), q.Get("mode")); err != nil {
-			http.NotFound(w, r)
+			s.notFound(w, r, sess)
 			return
 		}
 	} else if q.Get("from") != "" {
 		var err error
 		if it, err = s.sourceTemplate(r.Context(), q.Get("from"), q.Get("file"), q.Get("mode")); err != nil {
-			http.NotFound(w, r)
+			s.notFound(w, r, sess)
 			return
 		}
 	} else if ex, ok := api.Types[it.Type]; ok {
@@ -652,11 +652,11 @@ func (s *Server) storeItem(ctx context.Context, actor, action, note string, it *
 func (s *Server) libraryDelete(w http.ResponseWriter, r *http.Request, sess session) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
 	if err := s.deleteLibraryItem(r.Context(), sess.Email, id); err != nil {
-		s.failUser(w, err)
+		s.failUser(w, r, sess, err)
 		return
 	}
 	http.Redirect(w, r, "/library", http.StatusSeeOther)
@@ -731,7 +731,12 @@ func (s *Server) blueprints(w http.ResponseWriter, r *http.Request, sess session
 		s.fail(w, err)
 		return
 	}
-	s.render(w, r, sess, "blueprints", map[string]any{"Blueprints": bps, "Names": names, "Deleted": deleted})
+	assign, err := s.blueprintAssignments(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.render(w, r, sess, "blueprints", map[string]any{"Blueprints": bps, "Names": names, "Deleted": deleted, "Assign": assign})
 }
 
 func (s *Server) blueprintEdit(w http.ResponseWriter, r *http.Request, sess session) {
@@ -742,7 +747,7 @@ func (s *Server) blueprintEdit(w http.ResponseWriter, r *http.Request, sess sess
 			bp, err = scanBlueprint(s.db.QueryRow(r.Context(), `SELECT `+blueprintCols+` FROM blueprints WHERE id=$1`, id))
 		}
 		if err != nil {
-			http.NotFound(w, r)
+			s.notFound(w, r, sess)
 			return
 		}
 	} else {
@@ -936,11 +941,11 @@ func (s *Server) checkNoCycle(ctx context.Context, id, parent int64) error {
 func (s *Server) blueprintDelete(w http.ResponseWriter, r *http.Request, sess session) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
 	if err := s.deleteBlueprint(r.Context(), sess.Email, id); err != nil {
-		s.failUser(w, err)
+		s.failUser(w, r, sess, err)
 		return
 	}
 	http.Redirect(w, r, "/blueprints", http.StatusSeeOther)

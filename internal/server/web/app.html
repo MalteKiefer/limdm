@@ -1,7 +1,7 @@
 {{define "title"}}{{if .New}}{{t "Add app"}}{{else}}{{.App.Name}}{{end}} · LiMDM{{end}}
 {{define "content"}}
 <div class="page-head"><div><div class="eyebrow"><a href="/software">{{t "Software"}}</a></div><h1>{{if .New}}{{t "Add app"}}{{else}}{{.App.Name}}{{end}}</h1></div></div>
-{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+{{template "err" .Error}}
 {{if and .New (eq .Sess.Role "admin")}}
 <section class="card flathub-search" data-csrf="{{.CSRF}}">
   <h2>{{t "Search Flathub"}}</h2>

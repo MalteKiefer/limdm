@@ -131,21 +131,21 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	if err != nil || s.unseal(c.Value, &f) != nil || time.Now().After(f.Exp) ||
 		!hmac.Equal([]byte(r.URL.Query().Get("state")), []byte(f.State)) {
 		s.auditLoginFailure(ctx, r, "state")
-		http.Error(w, "login expired, start again", http.StatusBadRequest)
+		s.errorPage(w, r, session{}, http.StatusBadRequest, "login expired, start again")
 		return
 	}
 	s.setCookie(w, flowCookie, "", -1)
 	tok, err := auth.oauth.Exchange(ctx, r.URL.Query().Get("code"), oauth2.VerifierOption(f.Verifier))
 	if err != nil {
 		s.auditLoginFailure(ctx, r, "code exchange")
-		http.Error(w, "login failed", http.StatusUnauthorized)
+		s.errorPage(w, r, session{}, http.StatusUnauthorized, "login failed")
 		return
 	}
 	raw, _ := tok.Extra("id_token").(string)
 	idt, err := auth.verifier.Verify(ctx, raw)
 	if err != nil || idt.Nonce != f.Nonce {
 		s.auditLoginFailure(ctx, r, "id token")
-		http.Error(w, "login failed", http.StatusUnauthorized)
+		s.errorPage(w, r, session{}, http.StatusUnauthorized, "login failed")
 		return
 	}
 	var claims struct {
@@ -159,7 +159,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := idt.Claims(&claims); err != nil {
 		s.auditLoginFailure(ctx, r, "claims")
-		http.Error(w, "login failed", http.StatusUnauthorized)
+		s.errorPage(w, r, session{}, http.StatusUnauthorized, "login failed")
 		return
 	}
 	email := strings.ToLower(claims.Email)
@@ -174,7 +174,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 				s.log.Error("audit login.denied", "err", err)
 			}
 			s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "no mfa")
-			http.Error(w, "access denied: sign in with multi factor authentication", http.StatusForbidden)
+			s.errorPage(w, r, session{}, http.StatusForbidden, "access denied: sign in with multi factor authentication")
 			return
 		}
 	}
@@ -183,7 +183,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 			s.log.Error("audit login.denied", "err", err)
 		}
 		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "not a console user")
-		http.Error(w, "access denied", http.StatusForbidden)
+		s.errorPage(w, r, session{}, http.StatusForbidden, "access denied")
 		return
 	}
 	now := time.Now()

@@ -1,10 +1,10 @@
 {{define "title"}}{{t "Settings · LiMDM"}}{{end}}
 {{define "content"}}
-<div class="page-head"><div><h1>{{t "Settings"}}</h1><div class="meta"><span>{{t "Database, listeners and keys stay in the server environment"}}</span></div></div></div>
+<div class="page-head"><div><h1>{{t "Settings"}} {{template "doclink" "configuration.md"}}</h1><div class="meta"><span>{{t "Database, listeners and keys stay in the server environment"}}</span></div></div></div>
 <nav class="tabs" aria-label="{{t "Settings"}}">
   {{range .Tabs}}<a href="/settings?tab={{.Key}}" {{if eq $.Tab .Key}}class="on" aria-current="page"{{end}}>{{t .Label}}</a>{{end}}
 </nav>
-{{if .Error}}<div class="notice error" role="alert">{{t .Error}}</div>{{end}}
+{{template "err" .Error}}
 {{if .Msg}}<div class="notice ok" role="status">{{t .Msg}}</div>{{end}}
 {{$admin := eq .Sess.Role "admin"}}
 <div class="narrow">
@@ -76,15 +76,8 @@
   <label>{{t "Console roles from groups"}}<textarea name="role_groups" rows="3" class="code" placeholder="it-admins; admin&#10;support; helpdesk; berlin,munich">{{.RoleGroupsText}}</textarea><small class="field-hint">{{t "One per line: group; role; device tags. Directory groups (Google, SCIM) or the OIDC groups claim; explicit console users win."}}</small></label>
   {{if $admin}}<div class="form-foot"><span class="muted">{{t "OIDC changes are checked against the provider before they take effect."}}</span><button>{{t "Save"}}</button></div>{{end}}
 </form>
-{{else if eq .Tab "monitoring"}}
-<form class="card" method="post" action="/settings">
-  {{template "csrf" .CSRF}}<input type="hidden" name="section" value="monitoring">
-  <h2>{{t "Compliance webhook"}}</h2>
-  <label>{{t "URL"}}<input name="webhook_url" value="{{.Set.WebhookURL}}" placeholder="{{t "https://hooks.example.com/limdm"}}" spellcheck="false"><small class="field-hint">{{t "Https URL receiving JSON when a device becomes non-compliant"}}</small></label>
-  {{if $admin}}<dl class="kv"><dt>{{t "Signing key"}}</dt><dd><span class="fp">{{.WebhookSecret}}</span><span class="sub">X-LiMDM-Signature: sha256=HMAC-SHA256(key, body)</span></dd></dl>{{end}}
-  {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
-</form>
-{{else if eq .Tab "integrations"}}
+{{else if eq .Tab "notifications"}}
+<p class="muted">{{t "Two ways to hear about events: notification channels send the events you choose to Slack, Discord, email or a signed webhook; the compliance webhook posts every device that becomes non-compliant to one URL."}}</p>
 <section class="tablecard">
   <div class="card-head stacked"><h2>{{t "Notification channels"}}</h2><p class="muted">{{t "Events go to every enabled channel that subscribed to them; three attempts, each logged."}}</p></div>
   {{if .Channels}}<div class="scroll"><table class="channels">
@@ -95,7 +88,7 @@
       <td>{{if .Events}}<div class="event-tags">{{range .Events}}<span class="tag">{{t .}}</span>{{end}}</div>{{else}}<span class="muted">{{t "all events"}}</span>{{end}}</td>
       <td class="delivery">{{if .LastOK}}{{if derefBool .LastOK}}<span class="pill ok">{{t "delivered"}}</span>{{else}}<span class="pill bad">{{t "failed"}}</span>{{end}} <span class="muted nowrap">{{fmtTime (derefTime .LastAt)}}</span>{{if not (derefBool .LastOK)}}<span class="sub">{{.LastError}}</span>{{end}}{{else}}<span class="muted">{{t "never"}}</span>{{end}}</td>
       {{if $admin}}<td class="row-actions">
-        <details class="menu"><summary class="button secondary small icon-only" aria-label="{{t "Actions"}}">⋯</summary><div class="menu-list" role="menu">
+        <details class="menu"><summary class="button secondary small icon-only" aria-label="{{t "Actions for"}} {{.Name}}">⋯</summary><div class="menu-list" role="menu">
           <form method="post" action="/settings/notifications/{{.ID}}/test">{{template "csrf" $.CSRF}}<input type="hidden" name="section" value="integrations"><button role="menuitem" class="menu-item">{{t "Send test"}}</button></form>
           <form method="post" action="/settings/notifications/{{.ID}}/{{if .Enabled}}disable{{else}}enable{{end}}">{{template "csrf" $.CSRF}}<input type="hidden" name="section" value="integrations"><button role="menuitem" class="menu-item">{{if .Enabled}}{{t "Switch off"}}{{else}}{{t "Switch on"}}{{end}}</button></form>
           <form method="post" action="/settings/notifications/{{.ID}}/delete">{{template "csrf" $.CSRF}}<input type="hidden" name="section" value="integrations"><button role="menuitem" class="menu-item danger" data-confirm="{{t "Delete this notification channel?"}}">{{t "Delete"}}</button></form>
@@ -138,6 +131,13 @@
   <div class="form-foot"><span></span><button>{{t "Add channel"}}</button></div>
 </form>
 {{end}}
+<form class="card" method="post" action="/settings">
+  {{template "csrf" .CSRF}}<input type="hidden" name="section" value="monitoring">
+  <div class="card-head stacked"><h2>{{t "Compliance webhook"}}</h2><p class="muted">{{t "One URL that receives signed JSON when a device becomes non-compliant, independent of the channels above."}}</p></div>
+  <label>{{t "URL"}}<input name="webhook_url" value="{{.Set.WebhookURL}}" placeholder="{{t "https://hooks.example.com/limdm"}}" spellcheck="false"><small class="field-hint">{{t "Https URL receiving JSON when a device becomes non-compliant"}}</small></label>
+  {{if $admin}}<dl class="kv"><dt>{{t "Signing key"}}</dt><dd><span class="fp">{{.WebhookSecret}}</span><span class="sub">X-LiMDM-Signature: sha256=HMAC-SHA256(key, body)</span></dd></dl>{{end}}
+  {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
+</form>
 {{else if eq .Tab "branding"}}
 <form class="card" method="post" action="/settings" enctype="multipart/form-data">
   {{template "csrf" .CSRF}}<input type="hidden" name="section" value="branding">
@@ -147,11 +147,6 @@
   {{if .Set.Logo}}<div class="logo-preview"><img src="/branding/logo.png?v={{.Brand.V}}" alt=""><label class="check"><input type="checkbox" name="remove_logo"> {{t "Remove logo"}}</label></div>{{end}}
   {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
 </form>
-{{else}}
-<section class="card">
-  <h2>{{t "Integrations"}}</h2>
-  <p class="muted">{{t "Connections to ticket, chat and SIEM systems will be configured here. Until then use the compliance webhook (Monitoring) and the CSV exports."}}</p>
-</section>
 {{end}}
 </div>
 {{end}}

@@ -52,6 +52,14 @@ var pages = func() map[string]map[string]*template.Template {
 
 func parsePages(lang, layout string) map[string]*template.Template {
 	T := func(s string) string { return translate(lang, s) }
+	actionLabel := func(a string) string {
+		return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot",
+			"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script",
+			"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour", "message": "Message",
+			"app_install": "Install app", "app_remove": "Remove app",
+			"user_create": "Create user", "user_admin": "Change admin rights", "user_lock": "Lock user", "user_unlock": "Unlock user",
+			"user_password": "Reset password", "user_delete": "Delete user", "software_remove": "Remove software", "diagnostics": "Collect logs", "shell": "Remote shell"}[a])
+	}
 	funcs := template.FuncMap{
 		"dict": func(kv ...any) map[string]any { // arguments for shared partials
 			m := make(map[string]any, len(kv)/2)
@@ -61,6 +69,7 @@ func parsePages(lang, layout string) map[string]*template.Template {
 			return m
 		},
 		"t":       T,
+		"errmsg":  func(msg string) friendlyMsg { return friendlyError(lang, msg) },
 		"lang":    func() string { return lang },
 		"version": func() string { return Version },
 		"ago": func(t *time.Time) string {
@@ -97,17 +106,16 @@ func parsePages(lang, layout string) map[string]*template.Template {
 			}
 			return t
 		},
-		"actionLabel": func(a string) string {
-			return T(map[string]string{"sync": "Sync now", "update": "Install all updates", "reboot": "Reboot",
-				"shutdown": "Shut down", "lock": "Lock device", "unlock": "Unlock device", "script": "Run script",
-				"lost": "Lost mode", "found": "End lost mode", "wipe": "Wipe device", "allow_uninstall": "Allow uninstall for 1 hour", "message": "Message",
-				"app_install": "Install app", "app_remove": "Remove app",
-				"user_create": "Create user", "user_admin": "Change admin rights", "user_lock": "Lock user", "user_unlock": "Unlock user",
-				"user_password": "Reset password", "user_delete": "Delete user", "software_remove": "Remove software", "diagnostics": "Collect logs", "shell": "Remote shell"}[a])
-		},
-		"join":      strings.Join,
-		"hasPrefix": strings.HasPrefix,
-		"fmtTime":   func(t time.Time) string { return t.Local().Format(layout) },
+		"actionLabel": actionLabel,
+		"auditLabel":  func(a string) string { return auditLabel(lang, a, actionLabel) },
+		"statusHelp":  func(st string) string { return T(statusHelp[st]) },
+		"checkDetail": func(d string) string { return checkDetail(lang, d) },
+		"itemMeta":    func() map[string]typeMeta { return itemMeta(lang) },
+		"typeDesc":    func(t string) string { return T(typeInfo[t].Desc) },
+		"docs":        func(p string) string { return docsURL + p },
+		"join":        strings.Join,
+		"hasPrefix":   strings.HasPrefix,
+		"fmtTime":     func(t time.Time) string { return t.Local().Format(layout) },
 		"gib": func(mb uint64) string {
 			if mb == 0 {
 				return T("n/a")
@@ -147,7 +155,7 @@ func (s *Server) helpdeskPage(h handler) http.HandlerFunc { return s.pageFor(h, 
 func (s *Server) adminOrAuditor(h handler) handler {
 	return func(w http.ResponseWriter, r *http.Request, sess session) {
 		if sess.Role == "helpdesk" {
-			http.Error(w, "not available for the helpdesk role", http.StatusForbidden)
+			s.errorPage(w, r, sess, http.StatusForbidden, "not available for the helpdesk role")
 			return
 		}
 		h(w, r, sess)
@@ -164,11 +172,11 @@ func (s *Server) pageFor(h handler, postRole string) http.HandlerFunc {
 		if r.Method == http.MethodPost {
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 			if sess.Role != "admin" && postRole != "self" && (postRole != "helpdesk" || sess.Role != "helpdesk") {
-				http.Error(w, "your role cannot change this", http.StatusForbidden)
+				s.errorPage(w, r, sess, http.StatusForbidden, "your role cannot change this")
 				return
 			}
 			if !s.csrfOK(r, sess) {
-				http.Error(w, "csrf check failed", http.StatusForbidden)
+				s.errorPage(w, r, sess, http.StatusForbidden, "csrf check failed")
 				return
 			}
 		}
@@ -213,6 +221,8 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	s.networkRoutes(mux)
 	s.shellRoutes(mux)
 	mux.HandleFunc("GET /{$}", s.page(s.overview))
+	mux.HandleFunc("GET /help", s.page(s.helpPage))
+	mux.HandleFunc("POST /onboarding/dismiss", s.page(s.onboardingDismiss))
 	mux.HandleFunc("GET /devices", s.page(s.devices))
 	mux.HandleFunc("GET /devices/{id}", s.page(s.device))
 	mux.HandleFunc("POST /devices/bulk", s.helpdeskPage(s.devicesBulk))
@@ -368,7 +378,7 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
 	dq, err := parseDeviceQuery(r.URL.Query(), s.staleAfter())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, err.Error())
 		return
 	}
 	cond, sargs := scopeCond(sess, 0)
@@ -420,30 +430,30 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request, sess session) {
 func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess session) {
 	ctx := r.Context()
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "bad form")
 		return
 	}
 	ids := slices.Compact(slices.Sorted(slices.Values(r.Form["id"])))
 	if len(ids) == 0 || len(ids) > 1000 {
-		http.Error(w, "select 1 to 1000 devices", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "select 1 to 1000 devices")
 		return
 	}
 	var known int
 	cond, sargs := scopeCond(sess, 1)
 	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM devices d WHERE d.id = ANY($1) AND NOT d.retired AND `+cond, append([]any{ids}, sargs...)...).Scan(&known); err != nil || known != len(ids) {
-		http.Error(w, "unknown or retired device selected", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "unknown or retired device selected")
 		return
 	}
 	op, typ, _ := strings.Cut(r.FormValue("action"), ":")
 	switch op {
 	case "tag-add", "tag-remove":
 		if sess.Role != "admin" {
-			http.Error(w, "this action requires the admin role", http.StatusForbidden)
+			s.errorPage(w, r, sess, http.StatusForbidden, "this action requires the admin role")
 			return
 		}
 		tags, err := parseTags(r.FormValue("tag"))
 		if err != nil || len(tags) != 1 {
-			http.Error(w, "one tag: up to 32 letters, digits, dot, dash, underscore", http.StatusBadRequest)
+			s.errorPage(w, r, sess, http.StatusBadRequest, "one tag: up to 32 letters, digits, dot, dash, underscore")
 			return
 		}
 		sql := `UPDATE devices SET tags = array_append(tags, $2) WHERE id = $1 AND NOT $2 = ANY(tags)`
@@ -461,7 +471,7 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 		}
 	case "agent-update":
 		if sess.Role != "admin" {
-			http.Error(w, "this action requires the admin role", http.StatusForbidden)
+			s.errorPage(w, r, sess, http.StatusForbidden, "this action requires the admin role")
 			return
 		}
 		for _, id := range ids {
@@ -475,12 +485,12 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 		}
 	case "command":
 		if typ == "lost" || typ == "wipe" {
-			http.Error(w, "lost mode and wipe are sent to one device at a time", http.StatusBadRequest)
+			s.errorPage(w, r, sess, http.StatusBadRequest, "lost mode and wipe are sent to one device at a time")
 			return
 		}
 		payload, code, msg := s.commandPayload(r, sess, ids[0], typ)
 		if code != 0 {
-			http.Error(w, msg, code)
+			s.errorPage(w, r, sess, code, msg)
 			return
 		}
 		if s.needsApproval(typ) { // bulk scripts: one four eyes request per device
@@ -501,7 +511,7 @@ func (s *Server) devicesBulk(w http.ResponseWriter, r *http.Request, sess sessio
 			s.notifyCommand(sess.Email, id, typ)
 		}
 	default:
-		http.Error(w, "unknown action", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "unknown action")
 		return
 	}
 	// back to the list with its filters; only the query is taken over
@@ -576,7 +586,12 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, sess session) 
 		s.fail(w, err)
 		return
 	}
-	s.render(w, r, sess, "overview", map[string]any{"Trend": trend, "Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
+	steps, err := s.onboarding(ctx, r, sess)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.render(w, r, sess, "overview", map[string]any{"Steps": steps, "Trend": trend, "Active": active, "Counts": counts, "OSes": oses, "Failing": failing, "Donut": donut,
 		"Recent": recent, "StaleHours": s.settings().StaleHours})
 }
 
@@ -638,7 +653,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 		Scan(&d.ID, &d.Hostname, &d.AgentVersion, &d.Failing, &d.Checks, &d.LastSeen, &d.Retired, &inv, &checks, &decl, &users, &pkgs, &enrolled, &certExp, &d.GraceUntil, &d.AutoLocked, &since,
 			&d.UpdateState, &d.UpdateVersion, &d.UpdateRequested, &d.ExternalIP, &d.Geo)
 	if err != nil {
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
 	s.status(&d)
@@ -896,13 +911,24 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 			return
 		}
 	}
-	s.render(w, r, sess, "device", map[string]any{"NetCerts": netCerts, "EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames, "AppBusy": appBusy, "AppNotes": appNotes, "CatalogFlatpaks": catalogFlatpaks,
+	bpSrc, err := s.blueprintSource(ctx, id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	// what happens after the grace period: the compliance item of this device
+	comp, _ := api.Compose(want)
+	var lockAt *time.Time
+	if since != nil && comp.Compliance.LockAfterHours > 0 {
+		t := since.Add(time.Duration(comp.Compliance.LockAfterHours) * time.Hour)
+		lockAt = &t
+	}
+	s.render(w, r, sess, "device", map[string]any{"NetCerts": netCerts, "BPSource": bpSrc, "LockAt": lockAt, "Notify": comp.Compliance.Notify, "EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames, "AppBusy": appBusy, "AppNotes": appNotes, "CatalogFlatpaks": catalogFlatpaks,
 		"PwError": pwError(r), "PwMin": s.settings().Rules.Min(),
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
 		"PkgPage": pageNo, "PkgPages": pages, "PkgFrom": min((pageNo-1)*pageSize+1, matched), "PkgTo": min(pageNo*pageSize, matched),
-		"CommandTypes": commandTypesFor(sess.Role),
-		"Commands":     cmds, "Scripts": scripts, "Diagnostics": diags, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
+		"Commands": cmds, "Scripts": scripts, "Diagnostics": diags, "Blueprints": bps, "Enrolled": enrolled, "CertExp": certExp, "Tab": tab, "PreType": r.URL.Query().Get("type"),
 		"Resolved": res, "Tags": strings.Join(tags, ", "), "TagList": tags, "Protective": protect, "Primary": primary, "People": people, "Since": since, "Charts": charts, "Recovery": recovery, "Tampered": tampered, "Events": events, "EvPage": evPage, "EvPages": evPages, "EvTotal": evTotal, "EvFrom": min((evPage-1)*evSize+1, evTotal), "EvTo": min(evPage*evSize, evTotal),
 		"Failing": failingChecks, "Tabs": []string{"overview", "hardware", "network", "software", "accounts", "compliance", "declarations", "commands"},
 		"Sub": sub, "ShowSystem": r.URL.Query().Get("system") == "1", "NetworkInfo": len(data.Inv.DNS)+len(data.Inv.Routes) > 0 || hasIPs(data.Inv.Interfaces),
@@ -929,7 +955,7 @@ func (s *Server) deviceCommand(w http.ResponseWriter, r *http.Request, sess sess
 		return
 	}
 	if code != 0 {
-		http.Error(w, msg, code)
+		s.errorPage(w, r, sess, code, msg)
 		return
 	}
 	if s.needsApproval(typ) {
@@ -1001,6 +1027,9 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 	if !slices.Contains(api.CommandTypes, typ) || len(payload) > 64<<10 {
 		return "", http.StatusBadRequest, "invalid command"
 	}
+	if sess.Role != "admin" && !slices.Contains(helpdeskCommands, typ) {
+		return "", http.StatusForbidden, "this action requires the admin role"
+	}
 	switch {
 	case typ == "reboot" || typ == "shutdown":
 		// payload is the delay in minutes, 0 = now
@@ -1014,10 +1043,8 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		}
 		payload = strconv.Itoa(m)
 	case typ == "lost" || typ == "wipe" || typ == "found" || typ == "allow_uninstall":
-		// protective actions: admins only, lost and wipe confirmed by typing the host name
-		if sess.Role != "admin" {
-			return "", http.StatusForbidden, "this action requires the admin role"
-		}
+		// protective actions (admins only, see helpdeskCommands), lost and
+		// wipe confirmed by typing the host name
 		if typ == "lost" || typ == "wipe" {
 			var host string
 			if err := s.db.QueryRow(r.Context(), `SELECT hostname FROM devices WHERE id=$1`, id).Scan(&host); err != nil ||
@@ -1042,15 +1069,15 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		b, _ := json.Marshal(api.Message{Title: title, Text: text})
 		payload = string(b)
 	case strings.HasPrefix(typ, "user_"):
-		if sess.Role != "admin" {
-			return "", http.StatusForbidden, "this action requires the admin role"
-		}
 		u := api.UserCommand{Username: strings.TrimSpace(r.FormValue("username")), FullName: strings.TrimSpace(r.FormValue("full_name")),
 			Password: r.FormValue("password"), Admin: r.FormValue("admin") == "on" || r.FormValue("admin") == "1", KeepHome: r.FormValue("keep_home") == "on"}
 		if err := u.Validate(typ); err != nil {
 			return "", http.StatusBadRequest, err.Error()
 		}
 		if typ == "user_create" || typ == "user_password" {
+			if r.Form.Has("password2") && r.FormValue("password2") != u.Password { // the repeat field of the console form
+				return "", http.StatusBadRequest, passwordMismatch
+			}
 			if msg := s.settings().Rules.Check(u.Password, u.Username); msg != "" {
 				return "", http.StatusBadRequest, msg
 			}
@@ -1058,9 +1085,6 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		b, _ := json.Marshal(u) //nolint:gosec // signed command payload over mTLS, cleared from the database once applied
 		payload = string(b)
 	case typ == "software_remove":
-		if sess.Role != "admin" {
-			return "", http.StatusForbidden, "this action requires the admin role"
-		}
 		sr := api.SoftwareRemove{Kind: r.FormValue("kind"), Name: r.FormValue("name"), Installation: r.FormValue("installation")}
 		if err := sr.Validate(); err != nil {
 			return "", http.StatusBadRequest, err.Error()
@@ -1068,9 +1092,6 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		b, _ := json.Marshal(sr)
 		payload = string(b)
 	case typ == "app_install" || typ == "app_remove":
-		if sess.Role != "admin" {
-			return "", http.StatusForbidden, "this action requires the admin role"
-		}
 		var ok bool
 		app := r.FormValue("app")
 		if err := s.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM catalog_apps WHERE slug=$1)`, app).Scan(&ok); err != nil || !ok {
@@ -1079,8 +1100,6 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		payload = app
 	case typ != "script":
 		payload = ""
-	case sess.Role != "admin":
-		return "", http.StatusForbidden, "scripts require the admin role"
 	default:
 		var err error
 		if payload, err = scriptCommandPayload(r); err != nil {
@@ -1134,7 +1153,7 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 	id := r.PathValue("id")
 	users, err := parseUsers(r.FormValue("users"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, err.Error())
 		return
 	}
 	var bpID *int64
@@ -1143,14 +1162,14 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 	}
 	tags, err := parseTags(r.FormValue("tags"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, err.Error())
 		return
 	}
 	var primary *int64
 	if email := strings.ToLower(strings.TrimSpace(r.FormValue("primary_user"))); email != "" {
 		var uid int64
 		if err := s.db.QueryRow(r.Context(), `SELECT id FROM dir_users WHERE email=$1`, email).Scan(&uid); err != nil {
-			http.Error(w, "primary user not found in the directory", http.StatusBadRequest)
+			s.errorPage(w, r, sess, http.StatusBadRequest, "primary user not found in the directory")
 			return
 		}
 		primary = &uid
@@ -1188,7 +1207,7 @@ func (s *Server) deviceRetire(w http.ResponseWriter, r *http.Request, sess sessi
 func (s *Server) tokenRevoke(w http.ResponseWriter, r *http.Request, sess session) {
 	id, err := hex.DecodeString(r.PathValue("id"))
 	if err != nil || len(id) != sha256.Size {
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
 	err = s.auditActionFn(r.Context(), func(tx pgx.Tx) (string, string, string, string, error) {
@@ -1197,7 +1216,7 @@ func (s *Server) tokenRevoke(w http.ResponseWriter, r *http.Request, sess sessio
 		return sess.Email, "token.revoke", r.PathValue("id")[:12], note, err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
 	if err != nil {
@@ -1241,7 +1260,7 @@ func (s *Server) tokenCreate(w http.ResponseWriter, r *http.Request, sess sessio
 	uses, err1 := strconv.Atoi(r.FormValue("uses"))
 	days, err2 := strconv.Atoi(r.FormValue("days"))
 	if err1 != nil || err2 != nil || uses < 1 || uses > 10000 || days < 1 || days > 90 {
-		http.Error(w, "uses 1..10000, days 1..90", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "uses 1..10000, days 1..90")
 		return
 	}
 	var bpID *int64
@@ -1621,7 +1640,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 	case "compliance-history.csv":
 		at, device, ok := historyParams(r.URL.Query())
 		if !ok {
-			http.Error(w, "at must be a date (YYYY-MM-DD)", http.StatusBadRequest)
+			s.errorPage(w, r, sess, http.StatusBadRequest, "at must be a date (YYYY-MM-DD)")
 			return
 		}
 		hcond, hargs := scopeCond(sess, 4)
@@ -1655,7 +1674,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 			CASE WHEN revoked_at IS NOT NULL THEN 'revoked' WHEN expires_at <= now() THEN 'expired' ELSE 'active' END
 			FROM risk_exceptions x ORDER BY id`
 	default:
-		http.NotFound(w, r)
+		s.notFound(w, r, sess)
 		return
 	}
 	s.streamExport(w, r, sess, kind, "text/csv; charset=utf-8", func(tx pgx.Tx, out io.Writer) (int, error) {
@@ -1740,15 +1759,13 @@ func hasIPs(nics []api.NIC) bool {
 	return false
 }
 
-// commandTypesFor hides scripts and the protective actions from non admins.
-func commandTypesFor(role string) []string {
-	if role == "admin" {
-		return api.CommandTypes
-	}
-	return slices.DeleteFunc(slices.Clone(api.CommandTypes), func(t string) bool {
-		return t == "script" || t == "lost" || t == "found" || t == "wipe" || t == "allow_uninstall"
-	})
-}
+// helpdeskCommands are the device commands the helpdesk role may send, as
+// its role description promises: routine and reversible actions. Scripts,
+// lost mode, wipe, software and account creation, deletion and admin rights
+// stay with admins. Diagnostics (redacted logs) are for the helpdesk too;
+// the remote shell is no command here, its own setting decides (shell.go).
+var helpdeskCommands = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "message",
+	"user_password", "user_lock", "user_unlock", "diagnostics"}
 
 // appNote is the outcome of an install or removal sent from the console.
 type appNote struct {

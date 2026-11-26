@@ -1,7 +1,7 @@
 {{define "title"}}{{t "Library · LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>{{t "Library"}}</h1><div class="meta"><span>{{t "Reusable configuration items, assigned to devices through blueprints"}}</span></div></div>
+  <div><h1>{{t "Library"}} {{template "doclink" "declarations.md"}}</h1><div class="meta"><span>{{t "Reusable configuration items, assigned to devices through blueprints"}}</span></div></div>
   {{if eq .Sess.Role "admin"}}
   <form class="actions" method="get" action="/library/new">
     <select name="type" aria-label="{{t "Item type"}}">{{range .AllTypes}}<option value="{{.}}">{{typeLabel .}}</option>{{end}}</select>
@@ -23,7 +23,7 @@
     </tbody>{{end}}
   </table></div>
 </section>
-{{else}}<div class="empty card">{{t "The library is empty. Create the first item."}}</div>{{end}}
+{{else}}<div class="empty card">{{t "The library is empty. Create the first item."}}{{if eq .Sess.Role "admin"}}<div class="empty-action"><a class="button" href="/library/new">{{t "New item"}}</a></div>{{end}}</div>{{end}}
 {{if .Deleted}}<section class="tablecard"><div class="card-head"><h2>{{t "Deleted"}}</h2><span class="muted">{{t "The last version stays in the history and can be restored."}}</span></div>
   <div class="scroll"><table><thead><tr><th>{{t "Name"}}</th><th>{{t "Deleted"}}</th><th>{{t "By"}}</th></tr></thead>
   <tbody>{{range .Deleted}}<tr><td><a href="/library/{{.ID}}/history">{{.Name}}</a></td><td>{{fmtTime .At}}</td><td>{{.By}}</td></tr>{{end}}</tbody></table></div></section>{{end}}

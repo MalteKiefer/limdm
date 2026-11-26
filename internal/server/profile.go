@@ -274,7 +274,7 @@ func (s *Server) profileTOTP(w http.ResponseWriter, r *http.Request, sess sessio
 		}
 		s.renderProfile(w, r, sess, profileView{Tab: "authenticator"}, "", "")
 	default:
-		http.Error(w, "bad request", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "bad request")
 	}
 }
 

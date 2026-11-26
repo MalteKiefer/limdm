@@ -34,10 +34,11 @@ func errStatus(err error) (int, string) {
 	return 0, ""
 }
 
-// failUser answers a console request with the error's status, or 500.
-func (s *Server) failUser(w http.ResponseWriter, err error) {
+// failUser answers a console request with the error page for the error's
+// status, or 500.
+func (s *Server) failUser(w http.ResponseWriter, r *http.Request, sess session, err error) {
 	if code, msg := errStatus(err); code != 0 {
-		http.Error(w, msg, code)
+		s.errorPage(w, r, sess, code, msg)
 		return
 	}
 	s.fail(w, err)

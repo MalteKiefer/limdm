@@ -149,7 +149,7 @@ func (s *Server) groupAssign(w http.ResponseWriter, r *http.Request, sess sessio
 	ctx := r.Context()
 	gid, err := strconv.ParseInt(r.FormValue("group_id"), 10, 64)
 	if err != nil {
-		http.Error(w, "invalid group", http.StatusBadRequest)
+		s.errorPage(w, r, sess, http.StatusBadRequest, "invalid group")
 		return
 	}
 	bp, _ := strconv.ParseInt(r.FormValue("blueprint_id"), 10, 64)

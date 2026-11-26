@@ -1051,7 +1051,7 @@ func (s *Server) consoleFilter(next http.Handler) http.Handler {
 				ip = a.String() // parsed, never the raw header text
 			}
 			s.log.Warn("console request refused by network list", "ip", ip)
-			http.Error(w, "access from this network is not allowed", http.StatusForbidden)
+			s.errorPage(w, r, session{}, http.StatusForbidden, "access from this network is not allowed")
 			return
 		}
 		next.ServeHTTP(w, r)

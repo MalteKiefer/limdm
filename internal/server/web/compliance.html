@@ -1,7 +1,7 @@
 {{define "title"}}{{t "Compliance · LiMDM"}}{{end}}
 {{define "content"}}
 <div class="page-head">
-  <div><h1>{{t "Compliance"}}</h1><div class="meta"><span>{{.Total}} {{t "active devices"}}</span><span>{{t "BSI IT-Grundschutz · CIS · ISO/IEC 27001:2022"}}</span></div></div>
+  <div><h1>{{t "Compliance"}} {{template "doclink" "compliance.md"}}</h1><div class="meta"><span>{{.Total}} {{t "active devices"}}</span><span>{{t "BSI IT-Grundschutz · CIS · ISO/IEC 27001:2022"}}</span></div></div>
   <div class="actions"><a class="button secondary" href="/compliance/history">{{t "History"}}</a><a class="button secondary" href="/export/inventory.csv">{{t "Inventory CSV"}}</a><a class="button secondary" href="/export/audit.csv">{{t "Audit CSV"}}</a><a class="button" href="/export/compliance.csv">{{t "Evidence CSV"}}</a></div>
 </div>
 <div class="stats">
@@ -23,7 +23,7 @@
   <div class="card-head"><h2>{{t "Checks"}}</h2><span class="muted">{{.Shown}} {{t "of"}} {{.All}}</span></div>
   <div class="scroll"><table>
     <thead><tr><th>{{t "Check"}}</th><th>{{t "Level"}}</th><th class="num">{{t "Pass"}}</th><th class="num">{{t "Fail"}}</th><th class="num">{{t "Exception"}}</th><th class="num">{{t "n/a"}}</th><th>{{t "Failing devices"}}</th></tr></thead>
-    <tbody>{{range .Checks}}<tr><td>{{.Title}}<span class="sub mono">{{.ID}}</span></td><td>{{t "L"}}{{.Level}}</td><td class="num">{{.Pass}}</td>
+    <tbody>{{range .Checks}}<tr><td>{{t .Title}}<span class="sub mono">{{.ID}}</span></td><td>{{template "lvl" .Level}}</td><td class="num">{{.Pass}}</td>
       <td class="num">{{if .Fail}}<a class="pill fail" href="/devices?failing={{.ID}}">{{.Fail}}</a>{{else}}<span class="muted">0</span>{{end}}</td><td class="num">{{.Excepted}}</td><td class="num">{{.NA}}</td>
       <td class="muted">{{join .FailingHosts ", "}}{{if gt .Fail (len .FailingHosts)}} <span class="muted">{{t "and"}} {{sub .Fail (len .FailingHosts)}} {{t "more"}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="7" class="empty">{{t "No reports yet."}}</td></tr>{{end}}</tbody>
   </table></div>
