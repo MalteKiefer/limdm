@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -52,6 +53,9 @@ type session struct {
 	IAT   time.Time `json:"i"`
 	Last  time.Time `json:"l"`
 	Gen   int64     `json:"g"` // session generation of the account at sign in
+	// device scope, loaded from the account on every request (scope.go)
+	Tags   []string `json:"-"`
+	Groups []string `json:"-"`
 }
 
 type flow struct {
@@ -109,6 +113,9 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if d := s.settings().AllowedDomain; d != "" {
 		opts = append(opts, oauth2.SetAuthURLParam("hd", d)) // Google account chooser hint, enforced below
 	}
+	if set := s.settings(); set.RequireMFA && len(set.MFAACR) > 0 {
+		opts = append(opts, oauth2.SetAuthURLParam("acr_values", strings.Join(set.MFAACR, " "))) // a request; the callback checks the result
+	}
 	http.Redirect(w, r, auth.oauth.AuthCodeURL(f.State, opts...), http.StatusFound)
 }
 
@@ -145,6 +152,10 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		Email         string `json:"email"`
 		EmailVerified bool   `json:"email_verified"`
 		HD            string `json:"hd"`
+		// optional; read leniently so a provider's own shape cannot break sign in
+		AMR    json.RawMessage `json:"amr"`
+		ACR    json.RawMessage `json:"acr"`
+		Groups json.RawMessage `json:"groups"`
 	}
 	if err := idt.Claims(&claims); err != nil {
 		s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "claims")
@@ -152,7 +163,21 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email := strings.ToLower(claims.Email)
-	role := s.roleFor(ctx, email, claims.EmailVerified, claims.HD)
+	role := s.roleFor(ctx, email, claims.EmailVerified, claims.HD, claimGroups(claims.Groups))
+	if role != "" && s.settings().RequireMFA {
+		var amr []string
+		var acr string
+		_ = json.Unmarshal(claims.AMR, &amr)
+		_ = json.Unmarshal(claims.ACR, &acr)
+		if !mfaSatisfied(s.settings().MFAACR, amr, acr) {
+			if err := s.auditAction(ctx, email, "login.denied", "", fmt.Sprintf("multi factor authentication required: amr=%q acr=%q", amr, acr), nil); err != nil {
+				s.log.Error("audit login.denied", "err", err)
+			}
+			s.log.Warn("oidc login failed", "remote", clientIP(r), "reason", "no mfa")
+			http.Error(w, "access denied: sign in with multi factor authentication", http.StatusForbidden)
+			return
+		}
+	}
 	if role == "" {
 		if err := s.auditAction(ctx, email, "login.denied", "", "not an admin or auditor", nil); err != nil {
 			s.log.Error("audit login.denied", "err", err)
@@ -174,14 +199,34 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-func (s *Server) roleFor(ctx context.Context, email string, verified bool, hd string) string {
+func (s *Server) roleFor(ctx context.Context, email string, verified bool, hd string, groups []string) string {
 	if !verified || email == "" {
 		return ""
 	}
 	if set := s.settings(); !api.DomainAllowed(set.OIDCIssuer, email, hd, set.AllowedDomain) {
 		return ""
 	}
+	if err := s.syncGroupUser(ctx, email, groups); err != nil {
+		s.log.Error("role from directory group", "err", err)
+	}
 	return s.oidcRole(ctx, email)
+}
+
+// secondFactors are RFC 8176 amr values for a possession or inherence factor.
+var secondFactors = []string{"otp", "hwk", "swk", "sms", "tel", "sc", "pop", "fpt", "face", "iris", "retina", "vbm"}
+
+// mfaSatisfied checks the id token: with accepted acr values configured the
+// acr must be one of them; otherwise amr must name mfa (or mca), or two
+// distinct methods one of which is a second factor.
+func mfaSatisfied(acrAllowed, amr []string, acr string) bool {
+	if len(acrAllowed) > 0 {
+		return acr != "" && slices.Contains(acrAllowed, acr)
+	}
+	if slices.Contains(amr, "mfa") || slices.Contains(amr, "mca") {
+		return true
+	}
+	distinct := slices.Compact(slices.Sorted(slices.Values(amr)))
+	return len(distinct) >= 2 && slices.ContainsFunc(distinct, func(m string) bool { return slices.Contains(secondFactors, m) })
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
@@ -219,6 +264,10 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) (session, bool)
 		return sess, false
 	}
 	sess.Role = role
+	if err := s.loadScope(r.Context(), &sess); err != nil { // fail closed
+		s.log.Error("load scope", "err", err)
+		return sess, false
+	}
 	sess.Last = now
 	s.setCookie(w, sessionCookie, s.seal(sess), maxSession-now.Sub(sess.IAT))
 	return sess, true

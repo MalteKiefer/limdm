@@ -41,6 +41,35 @@ var notifyEvents = []struct{ Type, Label string }{
 	{"agent.update_failed", "Agent update failed and rolled back"},
 	{"catalog.request", "App requested by a user"},
 	{"directory.user_disabled", "Device user disabled in the directory"},
+	{"recovery.view", "Recovery key viewed"},
+	{"command.wipe_lost", "Wipe or lost mode sent"},
+	{"command.script", "Script sent to a device"},
+	{"user.role_change", "Console user role changed"},
+	{"approval.request", "Four eyes approval requested"},
+	{"audit.broken", "Audit log verification failed"},
+}
+
+// notifyCommand announces privileged commands once they are queued.
+func (s *Server) notifyCommand(actor, deviceID, typ string) {
+	switch typ {
+	case "wipe", "lost":
+		s.notifyDevice(deviceID, []notice{{Type: "command.wipe_lost", Severity: "critical", Title: actionTitle[typ] + " sent",
+			Text: actionTitle[typ] + " was sent by " + actor + "."}})
+	case "script":
+		s.notifyDevice(deviceID, []notice{{Type: "command.script", Severity: "warning", Title: "Script sent",
+			Text: "A script was sent by " + actor + "; the audit log has its text."}})
+	}
+}
+
+var actionTitle = map[string]string{"wipe": "Wipe", "lost": "Lost mode"}
+
+// notifyRoleChange announces a changed console role.
+func (s *Server) notifyRoleChange(actor, login, from, to, approver string) {
+	text := fmt.Sprintf("%s changed the role of %s from %s to %s.", actor, login, from, to)
+	if approver != "" {
+		text += " Approved by " + approver + "."
+	}
+	s.notify(notice{Type: "user.role_change", Severity: "warning", Title: "Console role changed: " + login, Text: text, URL: s.cfg.PublicURL + "/users"})
 }
 
 // notice is one event as channels show it.

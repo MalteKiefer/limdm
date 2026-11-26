@@ -4,6 +4,25 @@
   <div><h1>{{t "Recovery key"}}</h1><div class="meta"><span>{{.Host}}</span><span class="mono">{{.Path}}</span><span class="mono">{{.UUID}}</span></div></div>
   <div class="actions"><a class="button secondary" href="/devices/{{.ID}}?tab=hardware">{{t "Back to device"}}</a></div>
 </div>
+{{if eq .State "reason"}}
+<form class="card" method="post" action="/devices/{{.ID}}/recovery" data-dialog-content>
+  {{template "csrf" .CSRF}}<input type="hidden" name="uuid" value="{{.UUID}}">
+  <h2>{{t "Request access to the recovery key"}}</h2>
+  <p class="muted">{{t "Four eyes approval is on: another administrator approves the view first. The reason is stored in the audit log."}}</p>
+  <label>{{t "Reason or ticket reference"}}<input name="reason" required maxlength="500" autocomplete="off"></label>
+  <div class="form-foot"><span></span><button>{{t "Request approval"}}</button></div>
+</form>
+{{else if eq .State "pending"}}
+<section class="card" data-dialog-content>
+  <h2>{{t "Waiting for approval"}}</h2>
+  <p class="muted">{{t "Your request is pending. Once another administrator approves it under Approvals, open the key again within one hour."}}</p>
+</section>
+{{else if eq .State "requested"}}
+<section class="card" data-dialog-content>
+  <h2>{{t "Approval requested"}}</h2>
+  <p class="muted">{{t "Another administrator decides under Approvals within 24 hours. Once approved, open the key again within one hour."}}</p>
+</section>
+{{else}}
 <section class="card" data-dialog-content>
   <h2>{{t "Recovery key"}} <span class="muted mono">{{.Path}}</span></h2>
   <p class="recovery-key mono">{{.Key}}</p>
@@ -11,4 +30,5 @@
   <p class="muted">{{t "Enter this key at the disk unlock prompt instead of the passphrase. This view was recorded in the audit log."}}</p>
   {{if .Rotate}}<div class="notice" role="status">{{t "The device replaces this key at its next check in; afterwards it no longer works."}}</div>{{end}}
 </section>
+{{end}}
 {{end}}

@@ -6,15 +6,19 @@
 <div class="grid side-right">
   <section class="tablecard">
     <div class="card-head"><h2>{{t "Accounts"}}</h2><span class="muted">{{t "admin: everything · helpdesk: devices and commands except scripts · auditor: read only"}}</span></div>
+    <p class="muted">{{t "Scope: helpdesk and auditor accounts with device tags or directory groups (comma separated) see only those devices; empty means every device."}}{{if .FourEyes}} {{t "Four eyes approval is on: role changes wait for a second administrator."}}{{end}}</p>
     <div class="scroll"><table>
       <thead><tr><th>{{t "Login"}}</th><th>{{t "Type"}}</th><th>{{t "Role"}}</th><th>{{t "Last sign in"}}</th>{{if eq .Sess.Role "admin"}}<th></th>{{end}}</tr></thead>
       <tbody>{{$s := .}}{{range .Users}}{{$login := .Login}}{{if .Local}}{{$login = printf "local:%s" .Login}}{{end}}<tr>
-        <td class="mono">{{.Login}}{{if .Disabled}} <span class="pill">{{t "disabled"}}</span>{{end}}</td>
+        <td class="mono">{{.Login}}{{if .Disabled}} <span class="pill">{{t "disabled"}}</span>{{end}}{{if .FromGroup}} <span class="pill">{{t "from directory group"}}</span>{{end}}
+          {{if or .Tags .Groups}}<span class="sub">{{t "Scope"}}: {{join .Tags ", "}}{{if and .Tags .Groups}} · {{end}}{{join .Groups ", "}}</span>{{end}}</td>
         <td>{{if .Local}}{{t "local (password + TOTP)"}}{{else}}{{t "OIDC"}}{{end}}</td>
         <td>{{if eq $login $s.Sess.Email}}{{t .Role}} <a class="muted" href="/profile">({{t "you"}})</a>{{else if eq $s.Sess.Role "admin"}}
           <form class="inline-form" method="post" action="/users/update"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="login" value="{{$login}}">
             <select name="role" aria-label="{{t "Role"}}">{{$r := .Role}}{{range $s.Roles}}<option value="{{.}}" {{if eq . $r}}selected{{end}}>{{t .}}</option>{{end}}</select>
             <label class="check"><input type="checkbox" name="disabled" {{if .Disabled}}checked{{end}}> {{t "Disabled"}}</label>
+            <input name="scope_tags" value="{{join .Tags ", "}}" placeholder="{{t "Scope tags"}}" aria-label="{{t "Scope tags"}}" size="12" spellcheck="false">
+            <input name="scope_groups" value="{{join .Groups ", "}}" placeholder="{{t "Scope groups"}}" aria-label="{{t "Scope groups"}}" size="12" spellcheck="false">
             <button class="secondary small">{{t "Save"}}</button></form>
           {{else}}{{t .Role}}{{end}}</td>
         <td>{{ago .LastLogin}}</td>

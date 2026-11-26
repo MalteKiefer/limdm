@@ -38,6 +38,11 @@
     <label class="check"><input type="checkbox" name="symbol" {{if .Set.Rules.Symbol}}checked{{end}}><span>{{t "Special character"}}<code>! ? # …</code></span></label>
   </fieldset>
   <label class="check"><input type="checkbox" name="no_name" {{if .Set.Rules.NoName}}checked{{end}}> {{t "Must not contain the user name"}}</label>
+  <div class="card-head stacked"><h2>{{t "Four eyes approval"}}</h2><p class="muted">{{t "Wipe, lost mode, scripts and role changes of console users wait until a second administrator approves them under Approvals. The requester can never approve their own request; requests expire after 24 hours. Needs at least two active administrators."}}</p></div>
+  <label class="check"><input type="checkbox" name="four_eyes" {{if .Set.FourEyes}}checked{{end}}> {{t "Require a second administrator's approval"}}</label>
+  <label class="check"><input type="checkbox" name="four_eyes_recovery" {{if .Set.FourEyesRecovery}}checked{{end}}> {{t "Also for recovery key views (the viewer gives a reason or ticket reference)"}}</label>
+  <div class="card-head stacked"><h2>{{t "Audit log retention"}}</h2><p class="muted">{{t "Entries older than this are deleted once a day after the hash chain was verified; a signed checkpoint keeps the rest verifiable. 0 keeps everything."}}</p></div>
+  <label>{{t "Keep audit entries (days)"}}<input name="audit_retention_days" type="number" min="0" max="36500" value="{{.Set.AuditRetentionDays}}"><small class="field-hint">{{t "0 or 365 to 36500"}}</small></label>
   {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
 </form>
 {{else if eq .Tab "sso"}}
@@ -50,6 +55,9 @@
   <label>{{t "Client secret"}}<input name="oidc_client_secret" type="password" autocomplete="new-password"><small class="field-hint">{{if .HasSecret}}{{t "Stored encrypted; leave empty to keep"}}{{else}}{{t "Not set"}}{{end}}</small></label>
   {{if .HasSecret}}<label class="check"><input type="checkbox" name="clear_secret"> {{t "Remove the stored secret"}}</label>{{end}}
   <label>{{t "Allowed domain"}}<input name="allowed_domain" value="{{.Set.AllowedDomain}}" placeholder="{{t "example.com"}}"><small class="field-hint">{{t "Google hd claim or email domain, optional"}}</small></label>
+  <label class="check"><input type="checkbox" name="require_mfa" {{if .Set.RequireMFA}}checked{{end}}> {{t "Require multi factor authentication (amr claim of the id token)"}}</label>
+  <label>{{t "Accepted acr values"}}<input name="mfa_acr" value="{{join .Set.MFAACR " "}}" spellcheck="false"><small class="field-hint">{{t "Optional, separated by spaces; when set, the acr claim must be one of them instead of the amr check"}}</small></label>
+  <label>{{t "Console roles from groups"}}<textarea name="role_groups" rows="3" class="code" placeholder="it-admins; admin&#10;support; helpdesk; berlin,munich">{{.RoleGroupsText}}</textarea><small class="field-hint">{{t "One per line: group; role; device tags. Directory groups (Google, SCIM) or the OIDC groups claim; explicit console users win."}}</small></label>
   {{if $admin}}<div class="form-foot"><span class="muted">{{t "OIDC changes are checked against the provider before they take effect."}}</span><button>{{t "Save"}}</button></div>{{end}}
 </form>
 {{else if eq .Tab "monitoring"}}

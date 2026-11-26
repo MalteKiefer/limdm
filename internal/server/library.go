@@ -283,8 +283,10 @@ func resolveDevice(ctx context.Context, q pgx.Tx, deviceID string) (resolved, er
 	if res.Items, err = libraryItems(ctx, q, ids); err != nil {
 		return res, err
 	}
-	res.Decls, err = api.Merge(res.Items)
-	return res, err
+	if res.Decls, err = api.Merge(res.Items); err != nil {
+		return res, err
+	}
+	return res, applyExceptions(ctx, q, deviceID, res.Decls) // risk exceptions (exceptions.go)
 }
 
 // libraryItems loads items and returns them in the order of ids.
