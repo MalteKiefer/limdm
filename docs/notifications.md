@@ -20,6 +20,7 @@ is in the channel's last delivery and kept for 30 days. **Send test** checks a c
 | `user.role_change` | the role of a console user changed (and who approved it) |
 | `approval.request` | a four eyes approval was requested |
 | `audit.broken` | the daily verification found the audit hash chain broken |
+| `network.crl_token` | an admin rotated the bearer token for network CRL downloads |
 
 ## Channels
 

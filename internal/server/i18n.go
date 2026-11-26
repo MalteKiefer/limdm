@@ -879,5 +879,6 @@ var deCatalog = map[string]string{
 	// E2
 	"Printers": "Drucker", "TPM": "TPM", "bound to the TPM": "an das TPM gebunden",
 	// integration v0.16.0
+	"Network CRL token rotated": "Token der Netzwerk Sperrliste erneuert",
 	"Helpdesk and auditor tokens with device tags see and act on those devices only; they get no metrics. Commands that need four eyes approval return 202 with the approval ID.": "Helpdesk und Auditor Tokens mit Geräte Tags sehen und steuern nur diese Geräte; sie erhalten keine Metrics. Befehle, die eine Vier Augen Freigabe brauchen, liefern 202 mit der Freigabe ID.",
 }

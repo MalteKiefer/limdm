@@ -253,6 +253,8 @@ func (s *Server) networkCRLToken(w http.ResponseWriter, r *http.Request, sess se
 		s.fail(w, err)
 		return
 	}
+	s.notify(notice{Type: "network.crl_token", Severity: "warning", Title: "Network CRL token rotated",
+		Text: sess.Email + " rotated the bearer token for network CRL downloads; RADIUS servers need the new token.", URL: s.cfg.PublicURL + "/network"})
 	s.renderNetwork(w, r, sess, tok)
 }
 
