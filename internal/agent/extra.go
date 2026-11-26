@@ -16,10 +16,15 @@ import (
 // prefix*suffix: missing ones are written, stale ones removed. keep lists names
 // owned by other parts of the agent (e.g. the osquery repository).
 func syncManaged(dir, prefix, suffix string, desired map[string]string, keep ...string) (bool, error) {
+	return syncManagedMode(dir, prefix, suffix, 0o644, desired, keep...) // public config and keys
+}
+
+// syncManagedMode is syncManaged with the file mode of the written files.
+func syncManagedMode(dir, prefix, suffix string, mode os.FileMode, desired map[string]string, keep ...string) (bool, error) {
 	changed := false
 	var errs []error
 	for name, content := range desired {
-		c, err := writeIfChanged(filepath.Join(dir, name), content, 0o644) // public config and keys
+		c, err := writeIfChanged(filepath.Join(dir, name), content, mode)
 		changed = changed || c
 		errs = append(errs, err)
 	}
@@ -70,6 +75,7 @@ func (a *Agent) applyExtra() {
 	run(api.TypePolkit, applyPolkit(x.Polkit))
 	run(api.TypeSudo, applySudo(x.Sudo))
 	run(api.TypeBootloader, a.applyBootloader(x.Bootloader))
+	run(api.TypeNetwork, a.applyNetwork(x.Network))
 	a.ensureDependencies()
 	a.notifyEscrow()
 }
@@ -178,15 +184,21 @@ func (a *Agent) setAppRepos(src api.AppSource, remove bool) error {
 	return errors.Join(errs...)
 }
 
+// caAnchors is where this family keeps local CA certificates and the
+// command that rebuilds the trust store.
+func (h *host) caAnchors() (dir, ext, update string) {
+	switch h.family {
+	case "fedora":
+		return "/etc/pki/ca-trust/source/anchors", ".pem", "update-ca-trust"
+	case "arch":
+		return "/etc/ca-certificates/trust-source/anchors", ".crt", "update-ca-trust"
+	}
+	return "/usr/local/share/ca-certificates", ".crt", "update-ca-certificates" // Debian family, Alpine
+}
+
 func (a *Agent) applyCertificates(certs []api.Certificate) error {
 	desired := map[string]string{}
-	dir, ext, update := "/usr/local/share/ca-certificates", ".crt", "update-ca-certificates" // Debian family, Alpine
-	switch a.host.family {
-	case "fedora":
-		dir, ext, update = "/etc/pki/ca-trust/source/anchors", ".pem", "update-ca-trust"
-	case "arch":
-		dir, ext, update = "/etc/ca-certificates/trust-source/anchors", ".crt", "update-ca-trust"
-	}
+	dir, ext, update := a.host.caAnchors()
 	for _, c := range certs {
 		desired["limdm-"+c.Name+ext] = strings.TrimSpace(c.PEM) + "\n"
 	}
