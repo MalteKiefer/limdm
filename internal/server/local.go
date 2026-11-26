@@ -391,7 +391,9 @@ func (s *Server) checkLocal(ctx context.Context, name, password, code, ip, sourc
 		if qerr != nil {
 			return "", "", "", "", qerr
 		}
-		if qerr := tx.QueryRow(ctx, `SELECT failures, locked_until FROM local_login_failures WHERE name=$1 AND source=$2`, name, source).
+		// failures count within a day: typos weeks apart never add up to a lockout
+		if qerr := tx.QueryRow(ctx, `SELECT CASE WHEN updated_at > now() - interval '1 day' THEN failures ELSE 0 END, locked_until
+			FROM local_login_failures WHERE name=$1 AND source=$2`, name, source).
 			Scan(&failures, &lockedUntil); qerr != nil && !errors.Is(qerr, pgx.ErrNoRows) {
 			return "", "", "", "", qerr
 		}
@@ -427,6 +429,10 @@ func (s *Server) checkLocal(ctx context.Context, name, password, code, ip, sourc
 		if failures >= maxFailures {
 			t := time.Now().Add(lockoutDuration)
 			lock, failures, detail = &t, 0, "wrong password or code, account locked for this source"
+		}
+		// rows of sources gone quiet go, or rotating addresses grow the table
+		if _, uerr := tx.Exec(ctx, `DELETE FROM local_login_failures WHERE updated_at < now() - interval '1 day' AND (locked_until IS NULL OR locked_until < now())`); uerr != nil {
+			return "", "", "", "", uerr
 		}
 		if _, uerr := tx.Exec(ctx, `INSERT INTO local_login_failures(name, source, failures, locked_until) VALUES ($1,$2,$3,$4)
 			ON CONFLICT (name, source) DO UPDATE SET failures=EXCLUDED.failures, locked_until=EXCLUDED.locked_until, updated_at=now()`,

@@ -1296,6 +1296,16 @@ func TestRecoveryCodeLogin(t *testing.T) {
 	if role, err := s.checkLocal(ctx, "alice", pw, now, "192.0.2.5", "192.0.2.5"); err != nil || role != "admin" {
 		t.Fatalf("another source must still sign in: %v", err)
 	}
+	// failures from long ago do not add up to a lockout, and stale rows go
+	db.Exec(ctx, `INSERT INTO local_login_failures(name, source, failures, updated_at) VALUES ('alice', 'old', $1, now() - interval '2 days'),
+		('alice', 'gone', 1, now() - interval '2 days')`, maxFailures-1)
+	s.checkLocal(ctx, "alice", "wrong", "000000", "198.51.100.1", "old")
+	var fails, gone int
+	var until *time.Time
+	db.QueryRow(ctx, `SELECT failures, locked_until, (SELECT count(*) FROM local_login_failures WHERE source='gone') FROM local_login_failures WHERE name='alice' AND source='old'`).Scan(&fails, &until, &gone)
+	if fails != 1 || until != nil || gone != 0 {
+		t.Fatalf("old failures counted: %d %v, stale rows %d", fails, until, gone)
+	}
 	var lockEntries int
 	db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action='login.local.failed' AND detail LIKE '%locked for this source'`).Scan(&lockEntries)
 	if lockEntries == 0 {

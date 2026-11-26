@@ -325,8 +325,8 @@ Every user opens the profile by clicking their name in the sidebar:
     shown once and stored as SHA-256 hashes; the profile shows how many are left.
     Generating new codes invalidates the old ones.
 
-Password checks in the profile count towards the same lockout as the sign in (5 failures,
-15 minutes). OIDC accounts are managed by the identity provider.
+Password checks in the profile count towards the same lockout as the sign in (5 failures within
+a day from one client network lock it there for 15 minutes). OIDC accounts are managed by the identity provider.
 
 ## Directory
 
