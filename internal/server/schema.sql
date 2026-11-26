@@ -402,3 +402,11 @@ END $$;
 DROP TRIGGER IF EXISTS dir_users_tombstone ON dir_users;
 CREATE TRIGGER dir_users_tombstone AFTER INSERT OR UPDATE OF email OR DELETE ON dir_users
     FOR EACH ROW EXECUTE FUNCTION dir_users_tombstone();
+-- W4
+-- limdm_version_key turns a package version into numbers for comparing:
+-- the epoch is dropped and every run of digits is one element, so
+-- '1:3.0.13-1~deb12u1' becomes {3,0,13,1,12,1}
+CREATE OR REPLACE FUNCTION limdm_version_key(v text) RETURNS numeric[] LANGUAGE sql IMMUTABLE AS $$
+    SELECT coalesce(array_agg(m.x[1]::numeric ORDER BY m.n), '{}')
+    FROM regexp_matches(regexp_replace(coalesce(v, ''), '^[0-9]+:', ''), '[0-9]+', 'g') WITH ORDINALITY AS m(x, n)
+$$;

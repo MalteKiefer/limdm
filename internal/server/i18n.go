@@ -719,4 +719,9 @@ var deCatalog = map[string]string{
 	"The repository signs its metadata, not each package": "Das Repository signiert seine Metadaten, nicht jedes Paket",
 	"The user is warned on the device":                    "Der Nutzer wird am Gerät gewarnt",
 	"Update agents automatically":                         "Agenten automatisch aktualisieren",
+	// W4
+	"Device pages":                   "Geräteseiten",
+	"Filter by installed package":    "Nach installiertem Paket filtern",
+	"Package, e.g. openssl < 3.0.13": "Paket, z. B. openssl < 3.0.13",
+	"Packages CSV":                   "Pakete CSV",
 }

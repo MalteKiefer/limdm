@@ -266,6 +266,15 @@ count from another page: every device count in the console (catalog installs, Fl
 remotes on devices, blueprints, agent versions, failing checks) opens the list filtered to
 those devices, ready for a bulk action. Tags are also blueprint conditions.
 
+Filters combine: a tag, a failing check, the search text and a status all apply at the same
+time, and each active filter shows as a chip you can remove on its own. The **Package** field
+finds devices by installed package from their inventory: `openssl` matches any version,
+`openssl < 3.0.13` compares versions (operators `<`, `<=`, `=`, `!=`, `>=`, `>`). Versions
+compare by their runs of digits, the epoch is ignored, so `3.0.2-0ubuntu1.15` is lower than
+`3.0.13` and `3.0.13-1~deb12u1` is higher; letters and the Debian `~` ordering are not
+evaluated. The list shows 200 devices per page. **Inventory CSV** exports the hardware
+inventory, **Packages CSV** one row per installed package and device.
+
 The action menu on a device page groups actions in submenus that open on hover or keyboard
 focus.
 
