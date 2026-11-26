@@ -230,7 +230,7 @@ database and copy `ca/` from there.
 
 | After the backup | After the restore |
 |---|---|
-| a device renewed its certificate | **automatic**: during the restore window (default 7 days, `-window`) a certificate the device CA issued after the backup is accepted once and pinned as the device's certificate (`device.cert_repin` audit entry). Retired and unknown devices stay out. After the window such devices must enroll again |
+| a device renewed its certificate | **automatic**: during the restore window (default 7 days, `-window`) a certificate the device CA issued after the backup that is valid longer than the pinned one is accepted and pinned as the device's certificate (an older certificate of the device cannot take the pin back) (`device.cert_repin` audit entry). Retired and unknown devices stay out. After the window such devices must enroll again |
 | a device enrolled | **by hand**: it is unknown to the restored database; enroll it again |
 | a device was retired or deleted | **automatic with `-replay`**: retired again |
 | an enrollment token or API token was revoked | **automatic with `-replay`**: revoked again |
