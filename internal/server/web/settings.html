@@ -125,7 +125,8 @@
     <label><input type="radio" name="kind" value="webhook"><strong>{{t "Webhook"}}</strong><span>{{t "Signed JSON to any HTTPS endpoint"}}</span></label>
   </fieldset>
   <label>{{t "Name"}}<input name="name" required maxlength="80" placeholder="{{t "IT on call"}}"></label>
-  <label class="kind-url">{{t "Webhook URL"}}<input name="url" type="url" spellcheck="false" placeholder="https://…"><small class="field-hint">{{t "Stored encrypted. Only https targets; loopback, link local and metadata addresses are refused."}}</small></label>
+  <label class="kind-url">{{t "Webhook URL"}}<input name="url" type="url" spellcheck="false" placeholder="https://…"><small class="field-hint">{{t "Stored encrypted. Only https targets; loopback, link local, metadata and private network addresses are refused (for global channels private networks can be allowed below)."}}</small></label>
+  {{if .TenantWebhookSecret}}<dl class="kv"><dt>{{t "Signing key of this tenant"}}</dt><dd><span class="fp">{{.TenantWebhookSecret}}</span><span class="sub">X-LiMDM-Signature: sha256=HMAC-SHA256(key, timestamp + "." + "{{.TenantID}}" + "." + body), X-LiMDM-Tenant: {{.TenantID}}</span></dd></dl>{{end}}
   <div class="kind-email">
     <div class="form-row">
       <label class="grow">{{t "SMTP server"}}<input name="smtp_host" spellcheck="false" placeholder="smtp.example.com"></label>
@@ -153,6 +154,7 @@
   <div class="card-head stacked"><h2>{{t "Compliance webhook"}}</h2><p class="muted">{{t "One URL that receives signed JSON when a device becomes non-compliant, independent of the channels above."}}</p></div>
   <label>{{t "URL"}}<input name="webhook_url" value="{{.Set.WebhookURL}}" placeholder="{{t "https://hooks.example.com/limdm"}}" spellcheck="false"><small class="field-hint">{{t "Https URL receiving JSON when a device becomes non-compliant"}}</small></label>
   {{if $admin}}<dl class="kv"><dt>{{t "Signing key"}}</dt><dd><span class="fp">{{.WebhookSecret}}</span><span class="sub">X-LiMDM-Signature: sha256=HMAC-SHA256(key, timestamp + "." + body)</span></dd></dl>{{end}}
+  <label class="check"><input type="checkbox" name="notify_private"{{if .Set.NotifyPrivate}} checked{{end}}> {{t "Global channels and this webhook may reach private networks (an internal SIEM or mail relay). Tenant channels never can."}}</label>
   {{if $admin}}<div class="form-foot"><span></span><button>{{t "Save"}}</button></div>{{end}}
 </form>{{end}}
 {{else if eq .Tab "branding"}}

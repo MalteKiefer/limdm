@@ -412,6 +412,10 @@ Failed local and OIDC sign ins and rejected enrollments are logged with the clie
   lookup regardless of the setting; the address is still shown. Devices
   with `network_info: false` get neither: the server stores no public address or location
   for them and deletes what was stored.
+* Notification channels and the compliance webhook never reach loopback, link local or
+  metadata addresses; private networks only from global channels with the setting for it,
+  never from tenant channels ([notifications.md](notifications.md#delivery)). Tenant
+  channels sign with their own secret.
 * Outbound connections: the server talks to the configured OIDC provider, the Google
   Directory API (if configured), the compliance webhook and notification channels (if
   configured: Slack, Discord, webhook URLs, SMTP servers), the syslog target

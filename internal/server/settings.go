@@ -404,6 +404,10 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 			return
 		}
 		data["Channels"], data["NotifyEvents"] = views, notifyEvents
+		if t := ctxTenant(r.Context()); t != 0 && sess.Role == "admin" { // signed webhook channels of this tenant
+			data["TenantWebhookSecret"] = hex.EncodeToString(s.tenantWebhookKey(t))
+			data["TenantID"] = t
+		}
 	}
 	if tab == "security" && keysAllowed(sess) {
 		if keys, err := s.KeysStatus(r.Context()); err != nil {
@@ -415,7 +419,7 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 	s.render(w, r, sess, "settings", map[string]any{"Set": set, "ClientIP": clientIP(r), "HasSecret": set.OIDCClientSecret != "", "Msg": msg, "Error": errMsg,
 		"Tab": tab, "Tabs": tabs, "Channels": data["Channels"], "NotifyEvents": data["NotifyEvents"], "Keys": data["Keys"], "TenantOnly": sess.TenantOnly(),
 		"Redirect": s.cfg.PublicURL + "/auth/callback", "PublicURL": s.cfg.PublicURL, "WebhookSecret": map[bool]string{false: hex.EncodeToString(s.whKey)}[sess.TenantOnly()],
-		"RoleGroupsText": roleGroupsText(set.RoleGroups)})
+		"RoleGroupsText": roleGroupsText(set.RoleGroups), "TenantWebhookSecret": data["TenantWebhookSecret"], "TenantID": data["TenantID"]})
 }
 
 // settingsTabs are the sections of the settings page; each tab saves only
@@ -467,6 +471,7 @@ func (s *Server) settingsSave(w http.ResponseWriter, r *http.Request, sess sessi
 		set.RoleGroups = groups
 	case "monitoring":
 		set.WebhookURL = strings.TrimSpace(r.FormValue("webhook_url"))
+		set.NotifyPrivate = r.FormValue("notify_private") == "on"
 	case "network":
 		set.ConsoleAllow, set.ConsoleBlock = strings.Fields(r.FormValue("console_allow")), strings.Fields(r.FormValue("console_block"))
 		set.SCIMAllow = strings.Fields(r.FormValue("scim_allow"))
