@@ -1,1 +1,0 @@
-import{p as e}from"./index-DTlivX8L.js";import{W as t,it as n}from"./states-Bpp-z2kD.js";var r=n();function i(){let n=t();return(0,r.jsx)(e,{title:n(`reports.title`),sub:n(`reports.sub`),oldPath:`/compliance`})}export{i as ReportsPage};

@@ -1,1 +1,0 @@
-import{h as e}from"./index-BnbS5u-z.js";import{G as t,it as n}from"./states-2KUKi8Of.js";var r=n();function i(){let n=t();return(0,r.jsx)(e,{title:n(`activity.title`),sub:n(`activity.sub`),oldPath:`/audit`})}export{i as ActivityPage};

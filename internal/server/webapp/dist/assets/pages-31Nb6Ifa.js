@@ -1,1 +1,0 @@
-import{y as e}from"./index-DW0wLCB9.js";import{U as t,rt as n}from"./states-DY-7trRr.js";var r=n();function i(){let n=t();return(0,r.jsx)(e,{title:n(`settings.title`),sub:n(`settings.sub`),oldPath:`/settings`})}export{i as SettingsPage};
