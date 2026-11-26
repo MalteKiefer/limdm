@@ -17,7 +17,7 @@ A session needs all of these:
    |---|---|---|
    | Allow remote shells (admins) | off | admins may start sessions |
    | The helpdesk role may start sessions | off | |
-   | Sessions may run as root | off | otherwise `root` and every other account with UID 0 are refused |
+   | Sessions may run as root | off | otherwise `root`, every other account with UID 0 and every account with admin rights (member of `sudo`, `wheel` or `admin`, or named in a sudoers rule directly or through a `%group`, `NOPASSWD` rules included) are refused, by the server from the inventory and by the agent |
    | Maximum duration (minutes) | 60 | 5 to 480 |
    | Idle timeout (minutes) | 15 | 1 to 120 and not longer than the maximum; no keyboard input from the console |
 
@@ -57,7 +57,7 @@ browser ──WebSocket (console listener, session cookie)──▶ server ◀�
    with the session ID, the account, the requesting console user and the limits.
 2. The agent verifies the signature like every command and additionally requires a pinned
    command key, `allow_remote_shell`, a command younger than 10 minutes, a valid payload
-   and an existing account (UID 0 only when the server setting allows root). One session
+   and an existing account (UID 0 and accounts with admin rights only when the server setting allows root). One session
    runs at a time.
 3. The agent opens `POST /api/v1/shell/<session>` on the agent API with its client
    certificate. No port is opened on the device. The request body carries the terminal

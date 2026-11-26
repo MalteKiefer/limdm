@@ -304,10 +304,14 @@ func (a *Agent) serveDesktop(ctx context.Context) {
 	}
 }
 
+// desktopChangingOps change state on the device or at the server; a peer in
+// a remote session (SSH) is refused them.
+var desktopChangingOps = []string{"app-install", "app-remove", "app-request", "app-request-new", "escrow", "sso-confirm", "reboot-defer"}
+
 func (d *desktopServer) handle(c *net.UnixConn) {
 	defer c.Close()
 	c.SetDeadline(time.Now().Add(2 * time.Minute)) // cryptsetup with argon2 takes a few seconds
-	uid, err := peerUID(c)
+	uid, pid, err := peerCred(c)
 	if err != nil || !activeLocalUser(uid) {
 		json.NewEncoder(c).Encode(DesktopResponse{Error: "not allowed"})
 		return
@@ -319,6 +323,12 @@ func (d *desktopServer) handle(c *net.UnixConn) {
 	var req DesktopRequest
 	if err := json.Unmarshal(line, &req); err != nil {
 		json.NewEncoder(c).Encode(DesktopResponse{Error: "bad request"})
+		return
+	}
+	// the active local session is checked per uid; a process of the same
+	// user in an SSH session may read but not change anything
+	if slices.Contains(desktopChangingOps, req.Op) && remoteProcess(pid) {
+		json.NewEncoder(c).Encode(DesktopResponse{Error: "not allowed from a remote session, use the device itself"})
 		return
 	}
 	resp := d.serve(uid, req)

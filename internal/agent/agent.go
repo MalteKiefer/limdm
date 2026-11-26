@@ -106,11 +106,12 @@ type State struct {
 	Held                []string                  `json:"held,omitempty"`         // packages LiMDM put on apt hold
 	DNFExclude          string                    `json:"dnf_exclude,omitempty"`  // excludepkgs= value LiMDM wrote to dnf.conf
 	PacmanIgnore        string                    `json:"pacman_ignore,omitempty"`
-	SnapRefresh         string                    `json:"snap_refresh,omitempty"`   // "hold" or "timer=..." LiMDM set in snapd
-	ScriptResults       []api.ScriptResult        `json:"script_results,omitempty"` // recurring script runs not yet reported
-	ManagedFiles        []string                  `json:"managed_files,omitempty"`  // paths written for com.limdm.files, removed when undeclared
-	FirewallRules       []api.FirewallRule        `json:"firewall_rules,omitempty"` // allow rules LiMDM added
-	LocalUsers          map[string]localUserState `json:"local_users,omitempty"`    // accounts com.limdm.localusers manages
+	SnapRefresh         string                    `json:"snap_refresh,omitempty"`      // "hold" or "timer=..." LiMDM set in snapd
+	ScriptResults       []api.ScriptResult        `json:"script_results,omitempty"`    // recurring script runs not yet reported
+	ManagedFiles        []string                  `json:"managed_files,omitempty"`     // paths written for com.limdm.files, removed when undeclared
+	ManagedFileSums     map[string]string         `json:"managed_file_sums,omitempty"` // path -> SHA-256 of the content written; removal only when it still matches
+	FirewallRules       []api.FirewallRule        `json:"firewall_rules,omitempty"`    // allow rules LiMDM added
+	LocalUsers          map[string]localUserState `json:"local_users,omitempty"`       // accounts com.limdm.localusers manages
 }
 
 type Agent struct {

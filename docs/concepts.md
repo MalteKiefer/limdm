@@ -196,7 +196,7 @@ One off actions from the device page or the device list:
 | `reboot`, `shutdown` | now or after a delay of up to 1440 minutes (default 1) | admin, helpdesk |
 | `lock`, `unlock` | blocks new logins and locks running sessions, and releases it again | admin, helpdesk |
 | `message` | notification and dialog in every graphical session | admin, helpdesk |
-| `user_password`, `user_lock`, `user_unlock` | reset the password of, lock or unlock a local account | admin, helpdesk |
+| `user_password`, `user_lock`, `user_unlock` | reset the password of, lock or unlock a local account; never an account with uid 0; for the helpdesk never an account with admin rights | admin, helpdesk |
 | `diagnostics` | collect redacted agent logs | admin, helpdesk |
 | `user_create`, `user_admin`, `user_delete` | create a local account, change its admin right, delete it | admin |
 | `app_install`, `app_remove`, `software_remove` | install or remove catalog apps, remove software found on the device | admin |

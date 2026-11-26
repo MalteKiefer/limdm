@@ -328,19 +328,25 @@ func afterComm(stat string) string {
 	return ""
 }
 
-// verifiedCompositor: the process runs a known compositor or X server binary
-// that root owns in a system directory (a renamed user program fails both),
-// on a virtual console.
-func verifiedCompositor(pid string) bool {
+// trustedExe: the process runs one of the named binaries, owned by root
+// and not writable by others, in a system directory (a renamed or copied
+// user program fails).
+func trustedExe(pid string, names map[string]bool) bool {
 	exe, err := os.Readlink("/proc/" + pid + "/exe")
-	if err != nil || !graphicalExe[filepath.Base(exe)] {
+	if err != nil || !names[filepath.Base(exe)] {
 		return false
 	}
 	if dir := filepath.Dir(exe); !slices.Contains([]string{"/usr/bin", "/usr/local/bin", "/usr/libexec", "/usr/lib/xorg", "/bin"}, dir) {
 		return false
 	}
 	var st syscall.Stat_t
-	if syscall.Stat(exe, &st) != nil || st.Uid != 0 || st.Mode&0o022 != 0 {
+	return syscall.Stat(exe, &st) == nil && st.Uid == 0 && st.Mode&0o022 == 0
+}
+
+// verifiedCompositor: the process runs a known compositor or X server binary
+// (trustedExe) on a virtual console.
+func verifiedCompositor(pid string) bool {
+	if !trustedExe(pid, graphicalExe) {
 		return false
 	}
 	// started at the device: a compositor run headless over SSH has a
@@ -354,29 +360,44 @@ var graphicalExe = map[string]bool{"sway": true, "Hyprland": true, "Xorg": true,
 	"weston": true, "labwc": true, "river": true, "wayfire": true, "niri": true, "cage": true, "gnome-shell": true,
 	"kwin_wayland": true, "dwl": true, "Xwayland": true}
 
+// logindLocks: desktops whose shell locks itself on loginctl lock-sessions,
+// by logind's Desktop property, which the display manager sets at login and
+// the user cannot change. LockedHint is not used: the session owner sets it.
+func logindLocks(desktop string) bool {
+	d := strings.ToLower(desktop)
+	for _, n := range []string{"gnome", "ubuntu", "plasma", "kde", "cinnamon", "mate"} {
+		if strings.Contains(d, n) {
+			return true
+		}
+	}
+	return false
+}
+
 // lockSessions locks every graphical session: through logind first (the
-// desktop's own locker), then, where after a few seconds neither logind
-// reports the session locked nor a locker process runs (compositors and
-// window managers without a logind aware locker, LXQt, LXDE …), with
-// swaylock or i3lock started in the session. Returns the sessions locked
-// that way.
+// desktop's own locker), then, unless the session's desktop locks itself on
+// logind's request, with swaylock or i3lock started in the session
+// (compositors and window managers without a logind aware locker, LXQt,
+// LXDE …). A locker that seems to run already is not trusted: its name,
+// environment and display are the user's to choose. Starting a second
+// locker on a locked session fails harmlessly (swaylock finds the session
+// lock taken, i3lock cannot grab the keyboard). Returns the sessions
+// locked that way.
 func (a *Agent) lockSessions() int {
 	sessions := graphicalSessions()
 	if len(sessions) == 0 {
 		return 0
 	}
+	desktops := map[string]string{}
 	if hasCmd("loginctl") {
 		_, _ = sh("loginctl", "lock-sessions")
-		time.Sleep(3 * time.Second) // lockers set LockedHint once they show
+		time.Sleep(3 * time.Second) // give lockers time to show
+		for _, l := range loginSessions() {
+			desktops[l.ID] = l.Desktop
+		}
 	}
-	locked := map[string]bool{}
-	for _, l := range loginSessions() {
-		locked[l.ID] = l.Locked
-	}
-	procs := userProcs()
 	n := 0
 	for _, s := range sessions {
-		if locked[s.id] || lockerRunning(procs[s.uid]) {
+		if logindLocks(desktops[s.id]) {
 			continue
 		}
 		var argv []string

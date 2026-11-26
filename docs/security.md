@@ -357,10 +357,19 @@ removes them; the deletion is one of them (`device.delete`).
 * Generated configuration (sudoers, polkit rules, proxy, GRUB) only contains values
   checked against strict patterns; sudoers are additionally checked with `visudo`, sshd
   with `sshd -t`.
-* The desktop socket authorizes by peer credentials and active local session.
+* The desktop socket authorizes by peer credentials and active local session. A process of
+  the same user in an SSH session (remote logind session or below the SSH service) may
+  read status, catalog and logs, but is refused every change: app install, removal and
+  requests, recovery key escrow, SSO confirmation and reboot deferral. A process started
+  through the user's systemd manager belongs to no session and is not told apart.
+* The SSO device flow starts only at the device: never from `su` or `sudo`, never with
+  `PAM_RHOST`, a pseudo terminal or a remote parent session
+  ([desktop-login.md](desktop-login.md)).
 * Secrets on the device (`device.pem`, login configuration, state) are root only, 0600.
 * **Custom compliance checks** run no shell. A query check starts `osqueryi` with one read
-  only `SELECT` (validated on server and agent, no extensions, 30 seconds); file, sysctl,
+  only `SELECT` over an allowlist of local tables (validated on server and agent, enforced
+  again with `--enable_tables` and `--disable_tables`, no extensions, 30 seconds; only row
+  counts and a bounded compared value go back to the server); file, sysctl,
   package and service tests are evaluated by the agent itself. Expressions are RE2 (linear
   time). See [compliance.md](compliance.md#custom-checks-comlimdmcustomchecks).
 
@@ -371,7 +380,9 @@ these controls keep it narrow:
 
 * **Two opt ins.** The device must be enrolled with `allow_remote_shell` (local file, not
   changeable from the server) and **Settings**, **Security**, **Remote shell** must be on.
-  Helpdesk and root need their own switches. With the remote shell option of
+  Helpdesk and root need their own switches. Without the root switch the agent also
+  refuses accounts with admin rights (uid 0, `sudo`, `wheel` or `admin` group, sudoers
+  rules including `NOPASSWD`). With the remote shell option of
   [four eyes approval](#four-eyes-approval) a second admin approves each session first.
 * **Signed and fresh.** The `shell` command is signed like every command, and the agent
   runs it only with a pinned command key and when it is younger than 10 minutes. Someone
@@ -409,8 +420,16 @@ Failed local and OIDC sign ins and rejected enrollments are logged with the clie
 
 * **Diagnostics.** Log bundles (the **Collect logs** command) are redacted on the device
   before they leave it, capped at 512 KiB, kept for the newest 10 per device and only
-  downloadable by admins and the helpdesk; each download is audited. Redaction is pattern
-  based: review a bundle before passing it on outside IT.
+  downloadable by admins and the helpdesk; each download is audited. Redaction masks
+  private keys, `key=value` pairs with secret names (password, token, secret, API key,
+  preshared key, cookie and others), `Authorization` and `Proxy-Authorization` values,
+  bearer, basic and token credentials, user info and token query parameters in URLs
+  (`key`, `sig`, `code`, `access_token`, signed URL parameters), JWTs, GitHub, GitLab,
+  Slack, AWS and `sk-` keys, recovery keys, and the user fields of failed logins (pam_unix
+  `user=`, `ruser=`, `logname=`, sshd `invalid user`, `Failed password for`, `login`
+  `FOR '...'`, sudo `password for [...]`), because users often type their password into
+  the user name field. Redaction is pattern based: review a bundle before passing it on
+  outside IT.
 
 * By default the agent reports everything, including IP addresses, DNS, routes and logged
   in users. `com.limdm.privacy` switches items off per blueprint.

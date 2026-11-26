@@ -83,11 +83,26 @@ another tool removes the line, the agent adds it again. Removing the declaration
 
 The device flow runs only for services at the device: display managers (GDM, SDDM,
 LightDM, LXDM, greetd, cosmic-greeter and others), screen lockers (GNOME, KDE, Xfce,
-Cinnamon, MATE, swaylock, hyprlock, i3lock and others), the text console (`login`), `sudo`,
-`su` and polkit. `sshd` and every other remote service never start a device flow: for them
+Cinnamon, MATE, swaylock, hyprlock, i3lock and others), the text console (`login`) and
+polkit. `sshd` and every other remote service never start a device flow: for them
 `pam_unix` decides with the local password alone. A managed user whose local password is
 locked (confirmation due, SSO only mode, offline lock) therefore cannot sign in over SSH,
 and a network client cannot find out which accounts are managed.
+
+`su`, `su -l`, `sudo` and `sudo -i` never start a device flow either. Any local or SSH user
+could otherwise run `su alice`, show alice's code and ask her to confirm it (device code
+phishing); with the local password option the typed password would become hers. For these
+services `pam_unix` decides; a managed user with a locked local password confirms at the
+login screen or the screen locker first.
+
+For the listed services the agent also refuses the device flow when
+`PAM_RHOST` is set (any value, `localhost` included), when `PAM_TTY` is a pseudo terminal
+(`/dev/pts/N`), or when the calling process runs in a remote logind session (`REMOTE=1` in
+`/run/systemd/sessions/<id>`) or below the SSH service. polkit may authenticate as
+another, admin user, so it runs the flow only inside a local logind session with a seat;
+a polkit helper outside any session falls back to `pam_unix`. Login services and screen
+lockers may run outside a session: display managers and `login` authenticate before the
+session exists, and a locker only unlocks its own user.
 
 ## Local password after SSO
 

@@ -302,6 +302,7 @@ func (s *Server) shellPage(w http.ResponseWriter, r *http.Request, sess session)
 // shellErrors are shown after a refused start; only the key travels in the URL.
 var shellErrors = map[string]string{
 	"user": "Invalid user name.", "root": "Root sessions are not allowed in the settings.", "approval": "The session waits for approval.",
+	"admin": privilegedShellAccount,
 }
 
 func (s *Server) shellStart(w http.ResponseWriter, r *http.Request, sess session) {
@@ -328,6 +329,10 @@ func (s *Server) shellStart(w http.ResponseWriter, r *http.Request, sess session
 	}
 	if cmd.Validate() != nil {
 		back("user")
+		return
+	}
+	if !set.AllowRoot && cmd.User != "" && s.accountPrivileged(ctx, id, cmd.User) { // the agent checks again
+		back("admin")
 		return
 	}
 	user := cmd.User

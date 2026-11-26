@@ -406,14 +406,44 @@ func TestCommandsRunOnce(t *testing.T) {
 }
 
 func TestPAMServiceFilter(t *testing.T) {
+	sessionsDir = t.TempDir()
+	defer func() { sessionsDir = "/run/systemd/sessions" }()
+	os.WriteFile(sessionsDir+"/2", []byte("UID=1000\nTYPE=wayland\nSEAT=seat0\nREMOTE=0\nSERVICE=gdm-password\n"), 0o644)
+	os.WriteFile(sessionsDir+"/7", []byte("UID=1001\nTYPE=tty\nREMOTE=1\nREMOTE_HOST=203.0.113.7\nSERVICE=sshd\n"), 0o644)
+	os.WriteFile(sessionsDir+"/8", []byte("UID=1001\nTYPE=tty\nREMOTE=0\nSERVICE=systemd-user\n"), 0o644)
+	const (
+		local  = "0::/user.slice/user-1000.slice/session-2.scope\n"
+		ssh    = "0::/user.slice/user-1001.slice/session-7.scope\n"
+		noSeat = "0::/user.slice/user-1001.slice/session-8.scope\n"
+		getty  = "0::/system.slice/system-getty.slice/getty@tty1.service\n"
+		usrMgr = "0::/user.slice/user-1001.slice/user@1001.service/app.slice/x.service\n"
+		sshd   = "0::/system.slice/ssh.service\n"
+	)
 	for _, c := range []struct {
-		service, rhost string
-		want           bool
-	}{{"gdm-password", "", true}, {"login", "", true}, {"sudo", "", true}, {"sshd", "", false},
-		{"login", "203.0.113.7", false}, {"sshd", "203.0.113.7", false}, {"cron", "", false}, {"", "", false}} {
-		if localService(c.service, c.rhost) != c.want {
-			t.Errorf("%s from %q: want %v", c.service, c.rhost, c.want)
+		service, rhost, tty, cgroup string
+		want                        bool
+	}{
+		{"gdm-password", "", ":0", "0::/system.slice/gdm.service\n", true},
+		{"login", "", "/dev/tty1", getty, true},
+		{"swaylock", "", "", local, true},
+		{"polkit-1", "", "", local, true},
+		// su and sudo never start a flow, wherever they run (F5)
+		{"su", "", "/dev/pts/3", local, false}, {"su-l", "", "", local, false}, {"sudo", "", "", local, false}, {"sudo-i", "", "", local, false},
+		{"sshd", "", "", local, false}, {"cron", "", "", local, false}, {"", "", "", local, false},
+		// any remote host, pseudo terminal or remote parent session refuses
+		{"login", "203.0.113.7", "", getty, false}, {"login", "localhost", "", getty, false},
+		{"login", "", "/dev/pts/0", getty, false},
+		{"polkit-1", "", "", ssh, false}, {"swaylock", "", "", ssh, false}, {"i3lock", "", "", sshd, false},
+		// polkit can authenticate as another user: only in a local seat session
+		{"polkit-1", "", "", usrMgr, false}, {"polkit-1", "", "", noSeat, false},
+		{"swaylock", "", "", usrMgr, true},
+	} {
+		if localService(c.service, c.rhost, c.tty, c.cgroup) != c.want {
+			t.Errorf("%s from %q tty %q cgroup %q: want %v", c.service, c.rhost, c.tty, c.cgroup, c.want)
 		}
+	}
+	if !remoteCgroup(ssh) || !remoteCgroup(sshd) || remoteCgroup(local) || remoteCgroup(usrMgr) {
+		t.Error("remoteCgroup")
 	}
 }
 
@@ -774,6 +804,22 @@ State=active`
 	}
 	if s := parseSessions(props); !s[1].Locked || s[1].Type != "wayland" || s[1].Audit != "4" {
 		t.Fatalf("parsed: %+v", s[1])
+	}
+	if s := parseSessions("Id=9\nDesktop=GNOME\n"); len(s) != 1 || s[0].Desktop != "GNOME" {
+		t.Fatalf("desktop: %+v", s)
+	}
+}
+
+func TestRemoteLockTrust(t *testing.T) {
+	// only desktops whose shell honours logind's lock request skip the
+	// agent's locker; LockedHint and process names are not trusted (F11)
+	for d, want := range map[string]bool{"GNOME": true, "ubuntu:GNOME": true, "KDE": true, "plasma": true, "sway": false, "i3": false, "": false, "Hyprland": false} {
+		if logindLocks(d) != want {
+			t.Errorf("logindLocks(%q) = %v", d, !want)
+		}
+	}
+	if trustedExe("self", map[string]bool{"i3lock": true}) {
+		t.Error("the test binary is no trusted locker")
 	}
 }
 

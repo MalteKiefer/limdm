@@ -31,10 +31,16 @@ func (a *Agent) userCommand(typ, payload string) (string, error) {
 	if _, managed := readUsers()[u.Username]; managed && a.policy().Login.Enabled && typ != "user_lock" && typ != "user_unlock" {
 		return "", errors.New(u.Username + " is managed through the device's desktop user list; change it there")
 	}
-	_, lookupErr := user.Lookup(u.Username)
+	lu, lookupErr := user.Lookup(u.Username)
 	exists := lookupErr == nil
 	if typ != "user_create" && !exists {
 		return "", errors.New("no local account " + u.Username)
+	}
+	// an account with uid 0 is root under another name; commands of the
+	// helpdesk role (NoAdmin, signed by the server) never touch accounts
+	// that can reach root
+	if why := privileged(u.Username); typ != "user_create" && why != "" && (u.NoAdmin || lu.Uid == "0") {
+		return "", errors.New("refused: " + why + "; accounts with admin rights are changed by an admin")
 	}
 	switch typ {
 	case "user_create":
@@ -135,18 +141,63 @@ func setPassword(name, password string) error {
 	return err
 }
 
-// sudoersMentions lists sudoers files that name the user directly.
-func sudoersMentions(name string) []string {
+// sudoersMentions lists sudoers files that name the user or, as %group,
+// one of the given groups.
+func sudoersMentions(name string, groups ...string) []string {
 	var files []string
 	for _, f := range append([]string{"/etc/sudoers"}, sudoersFiles()...) {
-		for _, l := range strings.Split(readFile(f), "\n") {
-			if t := strings.TrimSpace(l); !strings.HasPrefix(t, "#") && slices.Contains(strings.Fields(t), name) {
-				files = append(files, f)
-				break
-			}
+		if sudoersNames(readFile(f), name, groups...) {
+			files = append(files, f)
 		}
 	}
 	return files
+}
+
+// sudoersNames reports whether a sudoers text names the user (in a user
+// list, alias or Defaults:user) or %group of one of the groups.
+func sudoersNames(text, name string, groups ...string) bool {
+	for _, l := range strings.Split(text, "\n") {
+		t := strings.TrimSpace(l)
+		if strings.HasPrefix(t, "#") {
+			continue
+		}
+		for _, w := range strings.FieldsFunc(t, func(r rune) bool { return strings.ContainsRune(" \t,:=!()\\", r) }) {
+			if w == name || (strings.HasPrefix(w, "%") && slices.Contains(groups, w[1:])) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// privileged says why an account can reach root: uid 0, membership in an
+// admin group or a sudoers rule for the account or one of its groups (which
+// covers NOPASSWD rules). Empty means none of these.
+func privileged(name string) string {
+	u, err := user.Lookup(name)
+	if err != nil {
+		return ""
+	}
+	if u.Uid == "0" {
+		return name + " has uid 0"
+	}
+	var groups []string
+	if ids, err := u.GroupIds(); err == nil {
+		for _, id := range ids {
+			if g, err := user.LookupGroupId(id); err == nil {
+				groups = append(groups, g.Name)
+			}
+		}
+	}
+	for _, g := range adminGroups {
+		if slices.Contains(groups, g) || slices.Contains(groupMembers(g), name) {
+			return name + " is a member of " + g
+		}
+	}
+	if files := sudoersMentions(name, groups...); len(files) > 0 {
+		return name + " has sudo rules in " + strings.Join(files, ", ")
+	}
+	return ""
 }
 
 func sudoersFiles() []string {

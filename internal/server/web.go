@@ -1091,6 +1091,12 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		if err := u.Validate(typ); err != nil {
 			return "", http.StatusBadRequest, err.Error()
 		}
+		if sess.Role != "admin" { // signed with the command; the agent refuses admin accounts
+			u.NoAdmin = true
+			if s.accountPrivileged(r.Context(), id, u.Username) {
+				return "", http.StatusForbidden, helpdeskAdminAccount
+			}
+		}
 		if typ == "user_create" || typ == "user_password" {
 			if r.Form.Has("password2") && r.FormValue("password2") != u.Password { // the repeat field of the console form
 				return "", http.StatusBadRequest, passwordMismatch

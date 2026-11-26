@@ -721,6 +721,18 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("helpdesk %s: %d, want %d", typ, code, want)
 		}
 	}
+	// helpdesk commands carry no_admin, and accounts the inventory lists with admin rights are refused
+	db.QueryRow(ctx, `SELECT payload FROM commands WHERE type='user_lock' ORDER BY id DESC LIMIT 1`).Scan(&pl)
+	if !strings.Contains(pl, `"no_admin":true`) {
+		t.Fatalf("helpdesk user_lock payload without no_admin: %s", pl)
+	}
+	db.Exec(ctx, `UPDATE devices SET inventory = jsonb_set(coalesce(inventory, '{}'::jsonb), '{accounts}',
+		'[{"name":"opsadm","uid":1001,"admin":true},{"name":"toor","uid":0,"admin":false}]') WHERE id=$1`, er.DeviceID)
+	for _, name := range []string{"opsadm", "toor"} {
+		if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"user_unlock"}, "username": {name}}, help); code != http.StatusForbidden {
+			t.Fatalf("helpdesk user_unlock of admin account %s: %d", name, code)
+		}
+	}
 	// the device page (retired by now) says where the blueprint comes from and hides admin dialogs
 	if code, body := ui("GET", "/devices/"+er.DeviceID, nil, help); code != 200 || strings.Contains(body, "dlg-wipe") || !strings.Contains(body, "/help#blueprint-source") {
 		t.Fatalf("helpdesk device page: %d", code)

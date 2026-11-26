@@ -80,15 +80,42 @@ var (
 	customIDRe = regexp.MustCompile(`^custom\.[a-z0-9][a-z0-9_.-]{0,55}$`)
 	columnRe   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
 	severities = []string{"low", "medium", "high", "critical"}
-	sqlWordRe  = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
-	// A single statement starting with SELECT or WITH can only write through
-	// WITH ... INSERT/UPDATE/DELETE/REPLACE; the rest are functions and
-	// osquery tables with side effects (network requests, file carving).
+	// Statements a read only query must not contain. Bare words only: a
+	// keyword cannot be quoted, a quoted "update" is a name.
 	sqlForbidden = map[string]bool{
 		"insert": true, "update": true, "delete": true, "replace": true, "attach": true, "detach": true, "pragma": true,
-		"load_extension": true, "writefile": true, "curl": true, "curl_certificate": true, "carves": true,
+		"vacuum": true, "create": true, "drop": true, "alter": true,
+	}
+	// Functions and tables refused in any spelling, quoted or not (file
+	// access, extensions, network requests, carving).
+	sqlForbiddenNames = map[string]bool{
+		"load_extension": true, "writefile": true, "readfile": true, "fts3_tokenizer": true, "carve": true,
+		"curl": true, "curl_certificate": true, "carves": true,
 	}
 )
+
+// OsqueryTables are the only tables a custom check may read: local system
+// state for compliance. Tables that reach the network (curl, cloud metadata,
+// prometheus_metrics), carve files, expose process environments or talk to
+// container daemons are not on the list.
+var OsqueryTables = []string{
+	"apparmor_profiles", "apt_sources", "augeas", "authorized_keys", "block_devices", "cpu_info",
+	"crontab", "deb_packages", "disk_encryption", "dns_resolvers", "etc_hosts", "etc_protocols",
+	"etc_services", "file", "groups", "hash", "interface_addresses", "interface_details", "iptables",
+	"kernel_info", "kernel_modules", "last", "listening_ports", "logged_in_users", "md_devices",
+	"memory_info", "mounts", "npm_packages", "os_version", "osquery_info", "pci_devices",
+	"platform_info", "portage_packages", "process_open_sockets", "processes", "python_packages",
+	"routes", "rpm_packages", "secureboot", "selinux_settings", "shadow", "ssh_configs",
+	"startup_items", "sudoers", "suid_bin", "system_controls", "system_info", "systemd_units",
+	"time", "tpm_info", "uptime", "usb_devices", "user_groups", "user_ssh_keys", "users", "yum_sources",
+}
+
+// OsqueryDeniedTables are also disabled in osqueryi (--disable_tables), a
+// second barrier next to the allowlist.
+var OsqueryDeniedTables = []string{
+	"curl", "curl_certificate", "carves", "ec2_instance_metadata", "ec2_instance_tags",
+	"azure_instance_metadata", "azure_instance_tags", "ycloud_instance_metadata", "prometheus_metrics",
+}
 
 func init() {
 	Types[TypeCustomChecks] = `{"checks": [` +
@@ -96,75 +123,6 @@ func init() {
 		`{"id": "custom.shadow_mode", "title": "/etc/shadow is not readable by others", "severity": "high", "level": 1, "file": {"path": "/etc/shadow", "state": "present", "max_mode": "0640", "owner": "root"}}, ` +
 		`{"id": "custom.no_uid0", "title": "Only root has UID 0", "severity": "critical", "level": 1, "query": {"sql": "SELECT username FROM users WHERE uid = 0 AND username <> 'root'", "expect": "no_rows"}}]}`
 	listTypes[TypeCustomChecks] = true
-}
-
-// ValidateOsquerySQL accepts a single read only SELECT (or WITH ... SELECT)
-// statement. It runs on the server when an item is saved and on the agent
-// before osqueryi sees the query.
-func ValidateOsquerySQL(q string) error {
-	if strings.TrimSpace(q) == "" || len(q) > 4096 {
-		return errors.New("query: 1 to 4096 characters")
-	}
-	for _, r := range q {
-		if r < 0x20 && r != '\n' && r != '\t' && r != '\r' {
-			return errors.New("query: control characters are not allowed")
-		}
-	}
-	code, err := sqlCode(q)
-	if err != nil {
-		return err
-	}
-	code = strings.TrimRight(strings.TrimSpace(code), ";")
-	switch {
-	case strings.ContainsAny(code, ";"):
-		return errors.New("query: exactly one statement")
-	case strings.Contains(code, "--") || strings.Contains(code, "/*"):
-		return errors.New("query: comments are not allowed")
-	}
-	words := sqlWordRe.FindAllStringIndex(code, -1)
-	if len(words) == 0 || !slices.Contains([]string{"select", "with"}, strings.ToLower(code[words[0][0]:words[0][1]])) {
-		return errors.New("query: must start with SELECT or WITH")
-	}
-	for _, at := range words {
-		w := strings.ToLower(code[at[0]:at[1]])
-		if w == "replace" && strings.HasPrefix(strings.TrimLeft(code[at[1]:], " \t\r\n"), "(") {
-			continue // the string function replace(), not the statement
-		}
-		if sqlForbidden[w] {
-			return fmt.Errorf("query: %q is not allowed (read only queries)", w)
-		}
-	}
-	return nil
-}
-
-// sqlCode blanks string literals and quoted identifiers, so keywords and
-// semicolons inside them are not mistaken for code.
-func sqlCode(q string) (string, error) {
-	var b strings.Builder
-	for i := 0; i < len(q); i++ {
-		c := q[i]
-		closer := map[byte]byte{'\'': '\'', '"': '"', '`': '`', '[': ']'}[c]
-		if closer == 0 {
-			b.WriteByte(c)
-			continue
-		}
-		j := i + 1
-		for ; j < len(q); j++ {
-			if q[j] == closer {
-				if closer != ']' && j+1 < len(q) && q[j+1] == closer { // doubled quote escapes itself
-					j++
-					continue
-				}
-				break
-			}
-		}
-		if j >= len(q) {
-			return "", errors.New("query: unterminated quote")
-		}
-		b.WriteString(" x ")
-		i = j
-	}
-	return b.String(), nil
 }
 
 // Validate checks one custom check with the same rules on server and agent.

@@ -79,8 +79,10 @@ func shellAccount(name string, allowRoot bool) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("no local account %q", name)
 	}
-	if u.Uid == "0" && !allowRoot { // also catches other names for uid 0
-		return "", errors.New("root shells are not allowed")
+	// without AllowRoot no account that reaches root: uid 0 under any name,
+	// admin groups and sudo rules (NOPASSWD included)
+	if why := privileged(u.Username); why != "" && !allowRoot {
+		return "", errors.New("root shells are not allowed: " + why)
 	}
 	return name, nil
 }
