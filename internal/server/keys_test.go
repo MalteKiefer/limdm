@@ -221,16 +221,46 @@ func TestKeyRotationFlow(t *testing.T) {
 	})
 	dir := t.TempDir()
 	oldSession := bytes.Repeat([]byte{4}, 32)
+	cfg := Config{CADir: dir, SessionKey: oldSession}
+	openErr := func(cfg Config) (*Server, error) {
+		s, err := openCore(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), db)
+		if err != nil {
+			return nil, err
+		}
+		s.kr.cli = true
+		return s, nil
+	}
 	open := func(cfg Config) *Server {
 		t.Helper()
-		s, err := openCore(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), db)
+		s, err := openErr(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
-		s.kr.cli = true
 		return s
 	}
-	cfg := Config{CADir: dir, SessionKey: oldSession}
+	// snapshot copies the CA directory, as another instance would hold it
+	snapshot := func() Config {
+		t.Helper()
+		c := cfg
+		c.CADir = t.TempDir()
+		if err := os.CopyFS(c.CADir, os.DirFS(dir)); err != nil {
+			t.Fatal(err)
+		}
+		files, _ := filepath.Glob(filepath.Join(c.CADir, "*"))
+		for _, f := range files { // CopyFS does not keep the 0600 of keys
+			if err := os.Chmod(f, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return c
+	}
+	storedFP := func() map[string]string {
+		var m map[string]string
+		if err := db.QueryRow(ctx, `SELECT value FROM settings WHERE key='key_fingerprints'`).Scan(&m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
 	s := open(cfg)
 	db.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname) VALUES ('d1','s',now(),'pc1')`)
 	checkin := func(s *Server, ca *deviceCA, req api.CheckinRequest) api.CheckinResponse {
@@ -255,8 +285,15 @@ func TestKeyRotationFlow(t *testing.T) {
 
 	// device CA
 	oldCA := s.ca
+	before := snapshot()
 	if _, err := s.RotateKey(ctx, "admin@x", kindCA, ""); err != nil {
 		t.Fatal(err)
+	}
+	overlap := snapshot()
+	// during the overlap an instance with the directory from before the
+	// rotation still starts: the old CA stays valid until finish
+	if _, err := openErr(before); err != nil {
+		t.Fatalf("instance on the retiring CA during the overlap: %v", err)
 	}
 	if _, err := s.RotateKey(ctx, "admin@x", kindCA, ""); err == nil {
 		t.Fatal("second rotation while one runs")
@@ -286,6 +323,17 @@ func TestKeyRotationFlow(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, prevName+".key")); !os.IsNotExist(err) {
 		t.Fatal("retired CA key not deleted")
+	}
+	// after finish the stored fingerprints are the new keys: the updated
+	// directory starts, stale ones are refused
+	s = open(cfg)
+	if fp := storedFP(); fp["device_ca"] != s.ca.Fingerprint() || fp["device_ca_previous"] != "" || fp["device_ca"] == oldCA.Fingerprint() {
+		t.Fatalf("stored fingerprints after finish: %v", fp)
+	}
+	for name, c := range map[string]Config{"before the rotation": before, "during the overlap": overlap} {
+		if _, err := openErr(c); err == nil || !strings.Contains(err.Error(), "same CA directory") {
+			t.Fatalf("stale directory from %s: %v", name, err)
+		}
 	}
 
 	// command key: the audit chain gets a new segment at the restart

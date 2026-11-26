@@ -446,6 +446,12 @@ func (s *Server) RotateKey(ctx context.Context, actor, kind, name string) (strin
 	if kind == kindSession {
 		return s.rotateSession(ctx, actor)
 	}
+	// not while an instance starts and checks its keys (checkSharedKeys)
+	unlock, err := clusterLock(ctx, s.db, lockStartup, 30*time.Second)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
 	dir, p := s.cfg.CADir, s.cfg.Keys
 	st, err := readKeyStates(dir)
 	if err != nil {
@@ -487,8 +493,11 @@ func (s *Server) RotateKey(ctx context.Context, actor, kind, name string) (strin
 		return "", err
 	}
 	st[kind] = keyState{Active: name, Previous: cur.Active, Since: time.Now().UTC()}
-	if err := s.auditAction(ctx, actor, "keys.rotate", kind, cur.Active+" -> "+name, func(pgx.Tx) error {
-		return writeKeyStates(dir, st)
+	if err := s.auditAction(ctx, actor, "keys.rotate", kind, cur.Active+" -> "+name, func(tx pgx.Tx) error {
+		if err := writeKeyStates(dir, st); err != nil {
+			return err
+		}
+		return s.storeKeyFingerprints(ctx, tx)
 	}); err != nil {
 		return "", err
 	}
@@ -504,6 +513,12 @@ func (s *Server) FinishKey(ctx context.Context, actor, kind string, force bool) 
 	if kind == kindSession {
 		return s.finishSession(ctx, actor)
 	}
+	// not while an instance starts and checks its keys (checkSharedKeys)
+	unlock, err := clusterLock(ctx, s.db, lockStartup, 30*time.Second)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
 	dir, p := s.cfg.CADir, s.cfg.Keys
 	st, err := readKeyStates(dir)
 	if err != nil {
@@ -543,8 +558,11 @@ func (s *Server) FinishKey(ctx context.Context, actor, kind string, force bool) 
 	if done < total {
 		detail += " (forced)"
 	}
-	if err := s.auditAction(ctx, actor, "keys.finish", kind, detail, func(pgx.Tx) error {
-		return writeKeyStates(dir, st)
+	if err := s.auditAction(ctx, actor, "keys.finish", kind, detail, func(tx pgx.Tx) error {
+		if err := writeKeyStates(dir, st); err != nil {
+			return err
+		}
+		return s.storeKeyFingerprints(ctx, tx)
 	}); err != nil {
 		return "", err
 	}

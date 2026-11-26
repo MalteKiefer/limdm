@@ -121,6 +121,11 @@ still depend on the old key; `-force` (console: force) finishes anyway, and thos
 must enroll again. Agents must run 0.16 or newer for a rotation: older agents never report
 the new key and keep `finish` waiting.
 
+With several instances ([high-availability.md](high-availability.md)) every step also
+records the key fingerprints in the database. Between `rotate` and `finish` an instance
+starts with the old or the new CA directory; after `finish` an instance whose directory
+still holds the old keys refuses to start. A step waits while an instance starts.
+
 ### Device CA
 
 1. `rotate ca` creates a new CA. After the restart it issues every new and renewed client

@@ -37,6 +37,9 @@ PostgreSQL itself is made highly available with the usual tools (see
   one the other server instances use"), and so does an instance whose directory lacks
   `audit-keyed-from` after the audit chain switched to keyed hashes. Concurrent first
   starts are serialized by an advisory lock, so only one instance creates keys.
+  A key rotation ([keys.md](keys.md)) updates the recorded fingerprints at `rotate` and
+  `finish`: during the overlap an instance with the old or the new directory starts; after
+  `finish` only the updated directory does, so copy it to every instance before restarting.
 * `LIMDM_RELEASE_DIR` stays local: every instance downloads and verifies the agent packages
   of the five newest releases itself and serves them from its own directory. For older
   versions still pinned to devices, copy the directory from an existing instance.

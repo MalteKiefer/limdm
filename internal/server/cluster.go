@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -255,13 +257,46 @@ func (s *Server) Drain(delay time.Duration) {
 	}
 }
 
+// keyFingerprints names the loaded keys: the active one of each kind and,
+// during a rotation, the one being retired ("<kind>_previous").
+func (s *Server) keyFingerprints() map[string]string {
+	cmd := func(k crypto.Signer) string { return fmt.Sprintf("%x", sha256.Sum256(k.Public().(ed25519.PublicKey))) }
+	fp := map[string]string{"device_ca": s.ca.Fingerprint(), "network_ca": s.netCA.Fingerprint(), "command_key": cmd(s.cmdKey)}
+	if s.kr.caPrev != nil {
+		fp["device_ca_previous"] = s.kr.caPrev.Fingerprint()
+	}
+	if s.kr.netPrev != nil {
+		fp["network_ca_previous"] = s.kr.netPrev.Fingerprint()
+	}
+	if s.kr.cmdPrev != nil {
+		fp["command_key_previous"] = cmd(s.kr.cmdPrev)
+	}
+	return fp
+}
+
+// storeKeyFingerprints records the keys of the CA directory after a
+// rotation step (keys.go), so instances restarting with it pass
+// checkSharedKeys.
+func (s *Server) storeKeyFingerprints(ctx context.Context, tx pgx.Tx) error {
+	disk := &Server{cfg: s.cfg}
+	if err := disk.loadKeys(); err != nil {
+		return err
+	}
+	doc, _ := json.Marshal(disk.keyFingerprints())
+	_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('key_fingerprints', $1)
+		ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, doc)
+	return err
+}
+
 // checkSharedKeys makes sure every instance uses the same key material: the
 // first instance records the fingerprints, later ones must match them. Two
 // instances with separate, freshly created CA directories would otherwise
-// each run their own device CA.
+// each run their own device CA. During a rotation an instance may still
+// run the retiring key alone (its directory from before the rotation); after
+// finish only the new key passes, and a directory still trusting the
+// retired key is refused too.
 func (s *Server) checkSharedKeys(ctx context.Context) error {
-	fp := map[string]string{"device_ca": s.ca.Fingerprint(), "network_ca": s.netCA.Fingerprint(),
-		"command_key": fmt.Sprintf("%x", sha256.Sum256(s.cmdKey.Public().(ed25519.PublicKey)))}
+	fp := s.keyFingerprints()
 	doc, _ := json.Marshal(fp)
 	var stored map[string]string
 	err := s.db.QueryRow(ctx, `INSERT INTO settings(key, value) VALUES ('key_fingerprints', $1) ON CONFLICT (key) DO UPDATE SET key = settings.key
@@ -269,10 +304,13 @@ func (s *Server) checkSharedKeys(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for k, v := range fp {
-		if stored[k] != v {
-			return fmt.Errorf("%s in %s differs from the one the other server instances use: give every instance the same CA directory (docs/high-availability.md)", k, s.cfg.CADir)
+	for _, k := range []string{"device_ca", "network_ca", "command_key"} {
+		cur, prev := fp[k], fp[k+"_previous"]
+		sCur, sPrev := stored[k], stored[k+"_previous"]
+		if (cur == sCur && prev == sPrev) || (sPrev != "" && cur == sPrev && prev == "") {
+			continue
 		}
+		return fmt.Errorf("%s in %s differs from the one the other server instances use: give every instance the same CA directory (docs/high-availability.md, docs/keys.md)", k, s.cfg.CADir)
 	}
 	return nil
 }
