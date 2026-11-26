@@ -217,6 +217,13 @@ again on every request, so leaving the group ends access after the next director
 strongest mapped role wins. Accounts created or edited in **Users** are explicit and
 ignore the mapping.
 
+A mapping to `admin` grants the role only through the OIDC `groups` claim or Google
+Workspace groups, never through a group the person is in only by SCIM: the static SCIM
+token alone must not create global administrators. While
+[four eyes approval](security.md#four-eyes-approval) is on, no group grants `admin` at
+all; the person gets the strongest other mapped role. Administrators are then added
+explicitly in **Users**, with an approval.
+
 ### Local admins
 
 `limdm-server local-admin` manages local accounts from the server host, for the first

@@ -272,32 +272,22 @@ func (s *Server) appSave(w http.ResponseWriter, r *http.Request, sess session) {
 		s.renderApp(w, r, sess, app, isNew, err.Error())
 		return
 	}
+	if s.appNeedsApproval(app.CatalogApp) { // four eyes (foureyes.go); an uploaded icon is not kept
+		if _, err := s.requestApproval(ctx, sess, "catalog.save", app.ID, catalogApproval{App: app, New: isNew}, ""); err != nil {
+			s.renderApp(w, r, sess, app, isNew, err.Error())
+			return
+		}
+		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+		return
+	}
 	src, _ := json.Marshal(app.Sources)
-	detect := append([]string{}, app.Detect...)
-	scope := append([]int64{}, app.Scope...)
 	err := s.auditAction(ctx, sess.Email, "catalog.save", app.ID, string(src), func(tx pgx.Tx) error {
-		var tag interface{ RowsAffected() int64 }
-		var err error
-		if isNew {
-			tag, err = tx.Exec(ctx, `INSERT INTO catalog_apps(slug, name, summary, category, mode, enabled, sources, detect, scope)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (slug) DO NOTHING`,
-				app.ID, app.Name, app.Summary, app.Category, app.Mode, app.Enabled, src, detect, scope)
-		} else {
-			tag, err = tx.Exec(ctx, `UPDATE catalog_apps SET name=$2, summary=$3, category=$4, mode=$5, enabled=$6, sources=$7, detect=$8, scope=$9,
-				icon_tried=NULL, updated_at=now() WHERE slug=$1`,
-				app.ID, app.Name, app.Summary, app.Category, app.Mode, app.Enabled, src, detect, scope)
-		}
-		if err == nil && tag.RowsAffected() == 0 {
-			err = errAppExists
-		}
+		err := s.writeCatalogApp(ctx, tx, app, isNew)
 		if err == nil && icon != nil {
 			_, err = tx.Exec(ctx, `UPDATE catalog_apps SET icon=$2 WHERE slug=$1`, app.ID, icon)
 		}
 		if err == nil && r.FormValue("remove_icon") == "on" && icon == nil {
 			_, err = tx.Exec(ctx, `UPDATE catalog_apps SET icon=NULL, icon_tried=now() WHERE slug=$1`, app.ID)
-		}
-		if err == nil {
-			err = s.signCatalogApp(ctx, tx, app.ID)
 		}
 		return err
 	})
@@ -607,6 +597,36 @@ func (s *Server) flathubAdd(w http.ResponseWriter, r *http.Request, sess session
 	}
 	if m := r.FormValue("mode"); m == api.AppOnRequest || m == api.AppRequired {
 		app.Mode = m
+	}
+	if s.appNeedsApproval(app) { // four eyes for a required app (foureyes.go)
+		err := func() error {
+			tx, err := s.db.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback(ctx)
+			var exists bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM catalog_apps a, jsonb_array_elements(a.sources) src WHERE src->>'flatpak'=$1)`, id).Scan(&exists); err != nil || exists {
+				return errors.Join(err, errAppExists)
+			}
+			if app.ID, err = s.slugFor(ctx, tx, app.Name); err != nil {
+				return err
+			}
+			if err := app.Validate(); err != nil {
+				return err
+			}
+			_, err = s.requestApproval(ctx, sess, "catalog.save", app.ID, catalogApproval{App: catalogRow{CatalogApp: app, Enabled: true}, New: true}, "")
+			return err
+		}()
+		switch {
+		case errors.Is(err, errAppExists):
+			http.Redirect(w, r, "/software", http.StatusSeeOther)
+		case err != nil:
+			s.fail(w, err)
+		default:
+			http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+		}
+		return
 	}
 	var slug string
 	err = s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {

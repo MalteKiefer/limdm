@@ -564,6 +564,10 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		return
 	}
 	if err := s.saveLibraryItem(r.Context(), sess.Email, &it); err != nil {
+		if _, ok := pendingApproval(err); ok {
+			http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+			return
+		}
 		fail(err)
 		return
 	}
@@ -632,44 +636,58 @@ func (s *Server) storeItem(ctx context.Context, actor, action, note string, it *
 		return invalid(err)
 	}
 	it.Payload = compact.Bytes()
-	sig := signItem(it.Name, it.Type, compact.Bytes())
-	detail := it.Type + " " + compact.String()
+	if s.itemNeedsApproval(*it) { // four eyes: stored as a request, signed when approved
+		return s.requestItemApproval(ctx, actor, action, note, *it, restore)
+	}
+	return s.auditAction(ctx, actor, action, it.Name, itemDetail(*it, note), func(tx pgx.Tx) error {
+		return writeItem(ctx, tx, actor, note, it, restore)
+	})
+}
+
+// itemDetail is the audit text of an item save.
+func itemDetail(it api.LibraryItem, note string) string {
+	detail := it.Type + " " + string(it.Payload)
 	if it.Type == api.TypeNetwork {
-		detail = it.Type + " " + string(api.MaskNetworkSecrets(compact.Bytes())) // no secrets in the audit log
+		detail = it.Type + " " + string(api.MaskNetworkSecrets(it.Payload)) // no secrets in the audit log
 	}
 	if note != "save" {
 		detail = note + ": " + detail
 	}
-	return s.auditAction(ctx, actor, action, it.Name, detail, func(tx pgx.Tx) error {
-		id := it.ID
-		if id > 0 {
-			if err := tenantGuard(ctx, tx, "library_items", id); err != nil {
-				return err
-			}
-			if err := ensureItemBaseline(ctx, tx, id); err != nil {
-				return err
-			}
-			tag, err := tx.Exec(ctx, `UPDATE library_items SET name=$2, type=$3, description=$4, payload=$5, signature=$6, updated_at=now() WHERE id=$1`,
-				id, it.Name, it.Type, it.Description, compact.String(), sig)
-			if err != nil {
-				return err
-			}
-			if tag.RowsAffected() == 0 {
-				if !restore {
-					return &userError{http.StatusNotFound, "library item not found"}
-				}
-				if _, err := tx.Exec(ctx, `INSERT INTO library_items(id, name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-					id, it.Name, it.Type, it.Description, compact.String(), sig, ownerTenant(ctx)); err != nil {
-					return err
-				}
-			}
-		} else if err := tx.QueryRow(ctx, `INSERT INTO library_items(name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-			it.Name, it.Type, it.Description, compact.String(), sig, ownerTenant(ctx)).Scan(&id); err != nil {
+	return detail
+}
+
+// writeItem signs and writes a validated, compact item with its version in
+// tx and sets it.ID.
+func writeItem(ctx context.Context, tx pgx.Tx, actor, note string, it *api.LibraryItem, restore bool) error {
+	sig := signItem(it.Name, it.Type, it.Payload)
+	id := it.ID
+	if id > 0 {
+		if err := tenantGuard(ctx, tx, "library_items", id); err != nil {
 			return err
 		}
-		it.ID = id
-		return recordItemVersion(ctx, tx, id, actor, note, false)
-	})
+		if err := ensureItemBaseline(ctx, tx, id); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE library_items SET name=$2, type=$3, description=$4, payload=$5, signature=$6, updated_at=now() WHERE id=$1`,
+			id, it.Name, it.Type, it.Description, string(it.Payload), sig)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			if !restore {
+				return &userError{http.StatusNotFound, "library item not found"}
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO library_items(id, name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+				id, it.Name, it.Type, it.Description, string(it.Payload), sig, ownerTenant(ctx)); err != nil {
+				return err
+			}
+		}
+	} else if err := tx.QueryRow(ctx, `INSERT INTO library_items(name, type, description, payload, signature, tenant_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+		it.Name, it.Type, it.Description, string(it.Payload), sig, ownerTenant(ctx)).Scan(&id); err != nil {
+		return err
+	}
+	it.ID = id
+	return recordItemVersion(ctx, tx, id, actor, note, false)
 }
 
 func (s *Server) libraryDelete(w http.ResponseWriter, r *http.Request, sess session) {

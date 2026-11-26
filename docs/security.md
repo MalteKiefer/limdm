@@ -186,7 +186,27 @@ global only.
 **Settings**, **Security**, **Four eyes approval** makes a second administrator approve:
 wipe, lost mode, scripts, role changes of console users, every change to an administrator
 account (adding one, disabling or enabling one, resetting a local administrator's
-credentials), and optionally recovery key views and remote shell sessions. New local
+credentials), admin API tokens, and optionally recovery key views and remote shell sessions.
+It also covers the declarations that act like a script, so one administrator cannot reach
+root on devices without a second one:
+
+* saving or rolling back a library item (console and admin API) of the types
+  `com.limdm.scripts`, `com.limdm.sudo`, `com.limdm.localusers`, `com.limdm.repositories`,
+  `com.limdm.login` (desktop login and its PAM setup), `com.limdm.ssh`, `com.limdm.polkit`,
+  `com.limdm.certificates` (system trust anchors), and `com.limdm.files` when a path needs
+  `allow_scripts` on the device (outside `/etc/motd`, `/etc/issue`, `/etc/issue.net`,
+  `/etc/motd.d/`, `/srv/`, `/etc/opt/`, `/var/opt/`). Other types (packages from the
+  configured repositories, firewall, updates, compliance and so on) are saved directly;
+* catalog apps that are required or bring a vendor package repository (an icon uploaded
+  with the request is not kept; Flathub icons are fetched again);
+* console administrators from group mappings: while the setting is on, a mapping of a
+  directory group or OIDC `groups` claim to `admin` is ignored, the person gets the strongest
+  other mapped role or none, and accounts from groups do not count as administrators. Add
+  administrators explicitly, which needs an approval.
+
+The item, app or token is validated when requested and signed or created when approved, in
+the name of the requester. A new admin API token is shown once to the approving admin, who
+hands it over. Assigning an approved item to a blueprint needs no further approval. New local
 administrator credentials after an approved add or reset are shown once to the approving
 admin, who hands them over, so the requester never holds a second administrator account. A
 remote shell approval names the local user: an approval for one account never opens a shell
@@ -204,7 +224,7 @@ The setting can only be switched on with at least two active administrators (wit
 nobody could approve), and while it is on the second to last admin cannot be demoted or
 disabled. The recovery key and remote shell options require the main switch. With the
 setting off everything runs directly as before. Roles derived from directory groups follow
-the directory, not this approval. While it is on, the approver of a
+the directory, except that they never grant the admin role while the setting is on. While it is on, the approver of a
 [risk exception](compliance.md#risk-exceptions) must be someone other than the admin who
 records it. With several tenants a request belongs to the requester's tenant (for a global
 administrator: the tenant of the device or user concerned) and is decided there.

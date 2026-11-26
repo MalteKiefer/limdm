@@ -315,12 +315,21 @@ func (s *Server) apiTokenCreate(w http.ResponseWriter, r *http.Request, sess ses
 	if sess.Tenant != 0 {
 		tenantID = &sess.Tenant
 	}
-	token := "lma_" + randToken(32)
-	prefix := token[:12]
-	err = s.auditAction(r.Context(), sess.Email, "api_token.create", name, fmt.Sprintf("role=%s read_only=%t days=%d prefix=%s scope_tags=%s", role, readOnly, days, prefix, strings.Join(scope, ",")), func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO api_tokens(name, prefix, token_hash, role, read_only, created_by, expires_at, scope_tags, tenant_id)
-			VALUES ($1,$2,$3,$4,$5,$6, now() + make_interval(days => $7), $8, $9)`, name, prefix, sha(token), role, readOnly, sess.Email, days, scope, tenantID)
-		return err
+	t := tokenApproval{Name: name, Role: role, ReadOnly: readOnly, Days: days, Scope: scope, Tenant: tenantID}
+	if role == "admin" && s.settings().FourEyes { // four eyes: the approver gets the token once (foureyes.go)
+		if _, err := s.requestApproval(r.Context(), sess, "token.add", name, t, ""); err != nil {
+			s.errorPage(w, r, sess, http.StatusBadRequest, err.Error())
+			return
+		}
+		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
+		return
+	}
+	var token string
+	err = s.auditActionFn(r.Context(), func(tx pgx.Tx) (string, string, string, string, error) {
+		var prefix string
+		var err error
+		token, prefix, err = insertToken(r.Context(), tx, t, sess.Email)
+		return sess.Email, "api_token.create", name, fmt.Sprintf("role=%s read_only=%t days=%d prefix=%s scope_tags=%s", role, readOnly, days, prefix, strings.Join(scope, ",")), err
 	})
 	if err != nil {
 		s.fail(w, err)
@@ -834,6 +843,11 @@ func (s *Server) apiItemSave(w http.ResponseWriter, r *http.Request, c apiCaller
 	it.ID = id
 	it.Name, it.Description = strings.TrimSpace(it.Name), strings.TrimSpace(it.Description)
 	if err := s.saveLibraryItem(r.Context(), c.actor(), &it); err != nil {
+		if aid, ok := pendingApproval(err); ok { // four eyes: an admin decides in the console
+			w.Header().Set("Location", "/approvals")
+			writeJSONStatus(w, http.StatusAccepted, map[string]any{"approval_id": aid, "status": "pending"})
+			return
+		}
 		s.apiFail(w, err)
 		return
 	}

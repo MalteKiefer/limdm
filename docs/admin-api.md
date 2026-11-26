@@ -105,9 +105,9 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `POST /api/v1/devices/{id}/commands` | helpdesk | `{"type", "params"}`, see [Commands](#commands) | `202` command or `202` approval request |
 | `GET /api/v1/commands/{id}` | read | | `200` command: `id`, `device_id`, `type`, `status`, `output`, `created_by`, `created_at`, `updated_at` |
 | `GET /api/v1/library-items` | read | `limit`, `cursor` | `200` page of items (`id`, `name`, `type`, `description`, `payload`) |
-| `POST /api/v1/library-items` | admin | item without `id` | `201` item; audited as `library.save` |
+| `POST /api/v1/library-items` | admin | item without `id` | `201` item; audited as `library.save`; `202` approval request for root effective types while [four eyes approval](security.md#four-eyes-approval) is on |
 | `GET /api/v1/library-items/{id}` | read | | `200` item |
-| `PUT /api/v1/library-items/{id}` | admin | full item | `200` item; audited as `library.save` |
+| `PUT /api/v1/library-items/{id}` | admin | full item | `200` item; audited as `library.save`; `202` approval request as for `POST` |
 | `DELETE /api/v1/library-items/{id}` | admin | | `204`; `409` while a blueprint uses it; audited as `library.delete` |
 | `GET /api/v1/blueprints` | read | `limit`, `cursor` | `200` page of blueprints (`id`, `name`, `description`, `parent_id`, `tree`, `updated_at`) |
 | `POST /api/v1/blueprints` | admin | `{"name", "description", "parent_id", "tree"}` | `201` blueprint; audited as `blueprint.save` |

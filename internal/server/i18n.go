@@ -1391,4 +1391,9 @@ var deCatalog = map[string]string{
 	// review
 	"New administrator":               "Neuer Administrator",
 	"Administrator credentials reset": "Zugangsdaten eines Administrators zurückgesetzt",
+	// S1
+	"Admin API token": "Admin API Token",
+	"Four eyes approval: a second administrator decides wipe, lost mode, scripts, root effective library items and catalog apps, administrators, admin API tokens, role changes and recovery key views":                                                                                                                                                                                                                                        "Vier Augen Prinzip: Ein zweiter Administrator entscheidet über Löschen, Verlustmodus, Skripte, als root wirkende Bibliothekselemente und Katalog Apps, Administratoren, Admin API Tokens, Rollenänderungen und Wiederherstellungsschlüssel",
+	"Wipe, lost mode, scripts, library items that act as root, required catalog apps and apps with a package repository, new administrators, admin API tokens and role changes of console users wait until a second administrator approves them under Approvals. Directory groups grant no admin role meanwhile. The requester can never approve their own request; requests expire after 24 hours. Needs at least two active administrators.": "Löschen, Verlustmodus, Skripte, als root wirkende Bibliothekselemente, Pflicht Apps und Apps mit Paketquelle im Katalog, neue Administratoren, Admin API Tokens und Rollenänderungen von Konsolennutzern warten, bis ein zweiter Administrator sie unter Freigaben freigibt. Verzeichnisgruppen vergeben solange keine Admin Rolle. Wer anfragt, kann nie selbst freigeben; Anfragen verfallen nach 24 Stunden. Setzt mindestens zwei aktive Administratoren voraus.",
+	"this entry was changed outside the console; save it again in full": "dieser Eintrag wurde außerhalb der Konsole geändert; speichern Sie ihn vollständig neu",
 }
