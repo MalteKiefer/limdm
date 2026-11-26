@@ -1,11 +1,14 @@
 // The settings area: settings with their sections, the own profile and
 // help. Navigation entry and palette commands for every section.
-import { createRoute, lazyRouteComponent } from '@tanstack/react-router'
+import { createRoute, lazyRouteComponent, redirect } from '@tanstack/react-router'
 import { CircleHelp, Settings, UserRound } from 'lucide-react'
 import type { Area } from '../../app/area'
 import { str } from '../../app/Stub'
 import { t, type MessageKey } from '../../i18n'
 import { sections } from './sections'
+
+/** Other names of sections used by deep links. */
+const aliases: Record<string, string> = { branding: 'general', sso: 'signin', login: 'signin', mfa: 'signin', scim: 'directory', api: 'tokens', roles: 'users', 'four-eyes': 'approvals', security: 'password' }
 
 export const settingsArea: Area = {
   id: 'settings',
@@ -16,6 +19,14 @@ export const settingsArea: Area = {
       path: '/settings',
       component: lazyRouteComponent(() => import('./pages'), 'SettingsPage'),
       validateSearch: (s: Record<string, unknown>) => ({ s: str(s.s), sel: str(s.sel) }),
+    }),
+    // deep links by name (/settings/branding, /settings/sso, ...) open the section
+    createRoute({
+      getParentRoute: () => shell,
+      path: '/settings/$section',
+      beforeLoad: ({ params }) => {
+        throw redirect({ to: '/settings', search: { s: aliases[params.section] ?? params.section, sel: undefined } })
+      },
     }),
     createRoute({ getParentRoute: () => shell, path: '/profile', component: lazyRouteComponent(() => import('./profile'), 'ProfilePage') }),
     createRoute({ getParentRoute: () => shell, path: '/help', component: lazyRouteComponent(() => import('./profile'), 'HelpPage') }),

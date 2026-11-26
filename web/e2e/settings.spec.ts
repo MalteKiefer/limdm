@@ -151,3 +151,11 @@ test('a sign in started in the app returns there', async ({ browser }) => {
   await expect(page.locator('input[name=next]')).toHaveValue('/')
   await ctx.close()
 })
+
+test('deep links by section name open the section', async ({ page }) => {
+  await page.goto('/app/settings/branding')
+  await expect(page).toHaveURL(/\/app\/settings\?s=general$/)
+  await expect(page.getByRole('heading', { name: 'Branding', exact: true })).toBeVisible()
+  await page.goto('/app/settings/sso')
+  await expect(page).toHaveURL(/\/app\/settings\?s=signin$/)
+})

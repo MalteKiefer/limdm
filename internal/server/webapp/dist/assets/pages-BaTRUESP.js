@@ -1,0 +1,1 @@
+import{g as e}from"./index-B3sf3Mbw.js";import{W as t,rt as n}from"./states-B6Snzq_Y.js";var r=n();function i(){let n=t();return(0,r.jsx)(e,{title:n(`compliance.title`),sub:n(`compliance.sub`),oldPath:`/compliance`})}export{i as CompliancePage};
