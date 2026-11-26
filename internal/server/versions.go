@@ -27,19 +27,46 @@ import (
 // ensureItemBaseline keeps the current row as version 1 when the item has no
 // version yet (created by a migration since the last start).
 func ensureItemBaseline(ctx context.Context, tx pgx.Tx, id int64) error {
-	_, err := tx.Exec(ctx, `INSERT INTO library_item_versions(item_id, version, name, type, description, payload, signature, note, created_by, created_at)
-		SELECT i.id, 1, i.name, i.type, i.description, i.payload, i.signature, 'baseline', 'system', i.updated_at FROM library_items i
-		WHERE i.id = $1 AND NOT EXISTS (SELECT 1 FROM library_item_versions v WHERE v.item_id = i.id)`, id)
+	payload, err := versionPayload(ctx, tx, id)
+	if payload == nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO library_item_versions(item_id, version, name, type, description, payload, signature, note, created_by, created_at)
+		SELECT i.id, 1, i.name, i.type, i.description, $2, i.signature, 'baseline', 'system', i.updated_at FROM library_items i
+		WHERE i.id = $1 AND NOT EXISTS (SELECT 1 FROM library_item_versions v WHERE v.item_id = i.id)`, id, payload)
 	return err
 }
 
 // recordItemVersion stores the item row as it is now as its next version.
 func recordItemVersion(ctx context.Context, tx pgx.Tx, id int64, by, note string, deleted bool) error {
-	_, err := tx.Exec(ctx, `INSERT INTO library_item_versions(item_id, version, name, type, description, payload, signature, deleted, note, created_by)
+	payload, err := versionPayload(ctx, tx, id)
+	if payload == nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO library_item_versions(item_id, version, name, type, description, payload, signature, deleted, note, created_by)
 		SELECT i.id, coalesce((SELECT max(version) FROM library_item_versions WHERE item_id = i.id), 0) + 1,
-			i.name, i.type, i.description, i.payload, i.signature, $3, $4, $2
-		FROM library_items i WHERE i.id = $1`, id, by, deleted, note)
+			i.name, i.type, i.description, $5, i.signature, $3, $4, $2
+		FROM library_items i WHERE i.id = $1`, id, by, deleted, note, payload)
 	return err
+}
+
+// versionPayload is the payload a version of the item keeps: network
+// secrets masked, so they live in library_items only and never in the
+// append only history (a rollback takes them from the current item).
+// nil when the item does not exist.
+func versionPayload(ctx context.Context, tx pgx.Tx, id int64) (any, error) {
+	var typ string
+	var payload []byte
+	err := tx.QueryRow(ctx, `SELECT type, payload FROM library_items WHERE id=$1`, id).Scan(&typ, &payload)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	if typ == api.TypeNetwork {
+		payload = api.MaskNetworkSecrets(payload)
+	}
+	return string(payload), nil
 }
 
 func ensureBlueprintBaseline(ctx context.Context, tx pgx.Tx, id int64) error {
@@ -121,9 +148,13 @@ func (s *Server) blueprintVersions(ctx context.Context, id int64) ([]version, er
 // itemDoc is the readable text of an item version: header fields, then the
 // settings as indented JSON.
 func itemDoc(it api.LibraryItem) string {
+	payload := it.Payload
+	if it.Type == api.TypeNetwork { // diffs never show network secrets
+		payload = api.MaskNetworkSecrets(payload)
+	}
 	var pretty bytes.Buffer
-	if json.Indent(&pretty, canonicalJSON(it.Payload), "", "  ") != nil { // JSONB reorders keys
-		pretty.Write(it.Payload)
+	if json.Indent(&pretty, canonicalJSON(payload), "", "  ") != nil { // JSONB reorders keys
+		pretty.Write(payload)
 	}
 	return fmt.Sprintf("name: %s\ntype: %s\ndescription: %s\n\n%s\n", it.Name, it.Type, it.Description, pretty.String())
 }

@@ -190,6 +190,7 @@ type Server struct {
 	cfg    Config
 	db     *pgxpool.Pool
 	ca     *deviceCA
+	netCA  *deviceCA          // issues EAP-TLS device certificates (devicecerts.go)
 	cmdKey ed25519.PrivateKey // signs commands (command.key next to the CA)
 	log    *slog.Logger
 	limit  limiter
@@ -263,7 +264,11 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	if err := initAuditKey(ctx, db, cfg.CADir, cmdKey); err != nil {
 		return nil, fmt.Errorf("audit key: %w", err)
 	}
-	s := &Server{cfg: cfg, db: db, ca: ca, cmdKey: cmdKey, log: log, geoSem: make(chan struct{}, 1)}
+	netCA, err := loadOrCreateNetworkCA(cfg.CADir)
+	if err != nil {
+		return nil, fmt.Errorf("network CA: %w", err)
+	}
+	s := &Server{cfg: cfg, db: db, ca: ca, netCA: netCA, cmdKey: cmdKey, log: log, geoSem: make(chan struct{}, 1)}
 	if itemSecrets, err = s.aead(infoItems); err != nil {
 		return nil, err
 	}
@@ -271,10 +276,11 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 		return nil, fmt.Errorf("sealing login client secrets: %w", err)
 	}
 	// baseline version of items saved before versioning existed; here and not
-	// in schema.sql, so it holds the signed payload with secrets sealed
+	// in schema.sql, so it holds the signed payload with secrets sealed.
+	// Network items get theirs masked at their first change (versions.go).
 	if _, err := db.Exec(ctx, `INSERT INTO library_item_versions(item_id, version, name, type, description, payload, signature, note, created_by, created_at)
 		SELECT i.id, 1, i.name, i.type, i.description, i.payload, i.signature, 'baseline', 'system', i.updated_at FROM library_items i
-		WHERE NOT EXISTS (SELECT 1 FROM library_item_versions v WHERE v.item_id = i.id)`); err != nil {
+		WHERE i.type <> $1 AND NOT EXISTS (SELECT 1 FROM library_item_versions v WHERE v.item_id = i.id)`, api.TypeNetwork); err != nil {
 		return nil, fmt.Errorf("library baseline versions: %w", err)
 	}
 	if err := s.seedConsoleUsers(ctx); err != nil {
@@ -367,6 +373,7 @@ func (s *Server) AgentHandler() http.Handler {
 	mux.HandleFunc("POST /api/v1/renew", s.deviceAuth(s.renew, true))
 	mux.HandleFunc("POST /api/v1/checkin", s.deviceAuth(s.checkin, false))
 	mux.HandleFunc("POST /api/v1/poll", s.deviceAuth(s.poll, false))
+	mux.HandleFunc("POST /api/v1/network-cert", s.deviceAuth(s.deviceLimit(5, s.networkCert), false))
 	mux.HandleFunc("GET /api/v1/agent-packages/{version}/{file}", s.deviceAuth(s.agentPackage, false))
 	mux.HandleFunc("GET /api/v1/catalog/icons/{id}", s.deviceAuth(s.catalogIcon, false))
 	mux.HandleFunc("GET /api/v1/catalog/search", s.deviceAuth(s.deviceLimit(30, s.flathubSearchJSON), false))

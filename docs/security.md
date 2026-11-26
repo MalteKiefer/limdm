@@ -24,6 +24,11 @@
   can only write to the database cannot make a device run anything. Recovery keys for lost
   mode travel beside the signed payload, inside the mTLS channel. Back up `command.key`
   with the CA: a new key makes every device refuse commands until it is re-enrolled.
+* **Network CA.** EAP-TLS device certificates come from a second root, `network-ca.crt` and
+  `network-ca.key` next to the device CA, so mTLS certificates never authenticate to the
+  network and network certificates never reach the agent API. Agents send only a CSR; the
+  server sets subject and SANs. Retire and wipe revoke them on the CRL. See
+  [Network profiles](network.md).
 * **Fallback DNS.** When the system resolver cannot resolve the server's name or none of
   its addresses answers, the agent asks Cloudflare (1.1.1.1, 1.0.0.1) and Google (8.8.8.8,
   8.8.4.4) over DNS over HTTPS, by IP and with their certificates checked; plain DNS on

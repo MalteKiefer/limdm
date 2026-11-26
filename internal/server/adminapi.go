@@ -722,8 +722,19 @@ func (s *Server) apiItems(w http.ResponseWriter, r *http.Request, _ apiCaller) {
 		list = list[:limit]
 		page.NextCursor = cursor(strconv.FormatInt(list[limit-1].ID, 10))
 	}
+	for i := range list {
+		maskItem(&list[i])
+	}
 	page.Items = list
 	writeJSON(w, page)
+}
+
+// maskItem hides network secrets in API answers, as the console editor
+// does; a PUT that sends the mask back keeps the stored value.
+func maskItem(it *api.LibraryItem) {
+	if it.Type == api.TypeNetwork {
+		it.Payload = api.MaskNetworkSecrets(it.Payload)
+	}
 }
 
 func (s *Server) apiItemGet(w http.ResponseWriter, r *http.Request, _ apiCaller) {
@@ -740,6 +751,7 @@ func (s *Server) apiItemGet(w http.ResponseWriter, r *http.Request, _ apiCaller)
 		s.apiFail(w, err)
 		return
 	}
+	maskItem(&it)
 	writeJSON(w, it)
 }
 
@@ -768,6 +780,7 @@ func (s *Server) apiItemSave(w http.ResponseWriter, r *http.Request, c apiCaller
 		status = http.StatusCreated
 		w.Header().Set("Location", "/api/v1/library-items/"+strconv.FormatInt(it.ID, 10))
 	}
+	maskItem(&it)
 	writeJSONStatus(w, status, it)
 }
 

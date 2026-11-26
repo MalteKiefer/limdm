@@ -63,7 +63,9 @@ newest one; it is validated, signed and audited (`library.rollback`, `blueprint.
 like any save. A deleted object keeps its last version: the library and blueprint pages
 list deleted objects, and **Restore** brings one back under its old ID (blueprints that
 inherited from a deleted blueprint and devices assigned to it are not reassigned). The
-version tables are append only.
+version tables are append only. Secrets never enter them: login client secrets are stored
+sealed, network secrets masked ([Network profiles](network.md#secrets)). Saves through the
+admin API create versions like console saves.
 
 The editor saves in two steps: **Review changes** shows the diff against the stored
 version and the active devices that get the change (devices whose blueprint, or a

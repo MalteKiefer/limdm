@@ -172,8 +172,15 @@ var webhookClient = notifyClient
 
 // insertCommand stores a command with its signature: the ID and creation
 // time come from the insert, the signature covers them with the payload.
+// Every path (console, admin API, four eyes approval) queues through here,
+// so a wipe revokes the device's network certificates on all of them.
 func (s *Server) insertCommand(ctx context.Context, tx pgx.Tx, deviceID, typ, payload, by string) (int64, error) {
 	c := api.Command{Type: typ, Payload: payload}
+	if typ == "wipe" { // a wiped device no longer needs network access
+		if err := revokeNetworkCerts(ctx, tx, deviceID, "wiped"); err != nil {
+			return 0, err
+		}
+	}
 	if err := tx.QueryRow(ctx, `INSERT INTO commands(device_id, type, payload, created_by, created_at) VALUES ($1,$2,$3,$4, date_trunc('microseconds', now()))
 		RETURNING id, created_at`, deviceID, typ, payload, by).Scan(&c.ID, &c.CreatedAt); err != nil {
 		return 0, err

@@ -111,3 +111,51 @@ func TestVersioning(t *testing.T) {
 		t.Fatal("version history must be append only")
 	}
 }
+
+// Network secrets live in library_items only: versions, diffs, the preview
+// and the audit log show the mask, and a rollback takes the stored secret.
+func TestNetworkSecretsNotVersioned(t *testing.T) {
+	_, db, ui := evidenceServer(t)
+	ctx := context.Background()
+	const secret = "supersecret-psk-1"
+	payload := func(ssid, psk string) string {
+		return `{"profiles":[{"name":"w","type":"wifi","ssid":"` + ssid + `","security":"wpa2-personal","psk":"` + psk + `"}]}`
+	}
+	if code, body := ui("POST", "/library", url.Values{"name": {"wlan"}, "type": {"com.limdm.network"}, "payload": {payload("Corp", secret)}}); code != http.StatusSeeOther {
+		t.Fatalf("create: %d %s", code, body)
+	}
+	var itemID int64
+	db.QueryRow(ctx, `SELECT id FROM library_items WHERE name='wlan'`).Scan(&itemID)
+	id := strconv.FormatInt(itemID, 10)
+	// the editor sends the mask back with a changed SSID
+	edit := url.Values{"id": {id}, "name": {"wlan"}, "type": {"com.limdm.network"}, "payload": {payload("Corp2", "••••••")}}
+	edit.Set("preview", "1")
+	if code, body := ui("POST", "/library", edit); code != 200 || strings.Contains(body, secret) {
+		t.Fatalf("preview shows the secret: %d", code)
+	}
+	edit.Del("preview")
+	if code, body := ui("POST", "/library", edit); code != http.StatusSeeOther {
+		t.Fatalf("save: %d %s", code, body)
+	}
+	var stored string
+	db.QueryRow(ctx, `SELECT payload::text FROM library_items WHERE id=$1`, itemID).Scan(&stored)
+	if !strings.Contains(stored, secret) || !strings.Contains(stored, "Corp2") {
+		t.Fatalf("stored secret lost: %s", stored)
+	}
+	var leaks int
+	db.QueryRow(ctx, `SELECT (SELECT count(*) FROM library_item_versions WHERE payload::text LIKE '%'||$1||'%')
+		+ (SELECT count(*) FROM audit_log WHERE detail LIKE '%'||$1||'%')`, secret).Scan(&leaks)
+	if leaks != 0 {
+		t.Fatalf("secret in versions or audit log: %d", leaks)
+	}
+	if code, body := ui("GET", "/library/"+id+"/history", nil); code != 200 || strings.Contains(body, secret) {
+		t.Fatalf("history shows the secret: %d", code)
+	}
+	if code, body := ui("POST", "/library/"+id+"/rollback", url.Values{"version": {"1"}}); code != http.StatusSeeOther {
+		t.Fatalf("rollback: %d %s", code, body)
+	}
+	db.QueryRow(ctx, `SELECT payload::text FROM library_items WHERE id=$1`, itemID).Scan(&stored)
+	if !strings.Contains(stored, secret) || strings.Contains(stored, "Corp2") {
+		t.Fatalf("rollback: %s", stored)
+	}
+}

@@ -583,6 +583,7 @@ type Inventory struct {
 	DNS            []DNSConfig         `json:"dns,omitempty"`             // only with privacy.network_info
 	Routes         []Route             `json:"routes,omitempty"`          // only with privacy.network_info
 	VPNs           []VPN               `json:"vpns,omitempty"`
+	WireGuardKeys  []WireGuardKey      `json:"wireguard_keys,omitempty"` // public keys of LiMDM managed WireGuard profiles
 	Groups         []Group             `json:"groups,omitempty"`
 	IPs            []string            `json:"ips,omitempty"`             // only with privacy.network_info
 	Users          []string            `json:"logged_in_users,omitempty"` // only with privacy.logged_in_users

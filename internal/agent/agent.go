@@ -537,6 +537,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	defer a.saveState()
 	defer a.publishDesktop()
 	a.renewIdentity(ctx)
+	a.ensureNetworkCert(ctx)
 	a.takeEscrowRequests()
 	a.checkUpdateOutcome()
 	a.collectTamper()
@@ -547,6 +548,7 @@ func (a *Agent) cycle(ctx context.Context) {
 
 	inv := a.host.inventory(a.pol.Privacy)
 	inv.Certificates = certInfo(a.pol.Extra.Certificates)
+	inv.WireGuardKeys = wireguardKeys(a.pol.Extra.Network)
 	a.applyCatalog(inv.Flatpaks)
 	inv.Apps = a.catalogStates(inv.Flatpaks)
 	a.lastFlatpaks = inv.Flatpaks

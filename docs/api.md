@@ -38,6 +38,7 @@ Content-Type: application/problem+json
 | `POST /api/v1/enroll` | token | 64 KiB | `{"token", "csr", "hostname", "machine_id"}` → `{"device_id", "cert"}`; 20 attempts per 5 minutes and address. A second enrollment of the same `machine_id` is recorded in the audit log (`device.duplicate`); retiring the older record is left to an admin, because the machine ID proves nothing. |
 | `POST /api/v1/renew` | device (expired allowed) | 64 KiB | new CSR → new certificate, active at its first use |
 | `POST /api/v1/checkin` | device | 16 MiB | status, inventory, results, events → declarations, users, commands, catalog, update offer |
+| `POST /api/v1/network-cert` | device | 64 KiB | `{"csr"}` → `{"device_id", "cert"}`: EAP-TLS certificate from the network CA, only with an EAP-TLS network profile; 5 per 10 minutes and device. See [Network profiles](network.md). |
 | `POST /api/v1/poll` | device | | `{"pending": true}` when commands, a due agent update or a directory change for a device user wait; the agent then checks in |
 | `GET /api/v1/agent-packages/{version}/{file}` | device | | agent package of an approved release, or the version picked for the device |
 | `GET /api/v1/catalog/icons/{id}` | device | | catalog app icon (PNG) |

@@ -207,6 +207,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, na
 }
 
 func (s *Server) webRoutes(mux *http.ServeMux) {
+	s.networkRoutes(mux)
 	mux.HandleFunc("GET /{$}", s.page(s.overview))
 	mux.HandleFunc("GET /devices", s.page(s.devices))
 	mux.HandleFunc("GET /devices/{id}", s.page(s.device))
@@ -858,7 +859,14 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 			return
 		}
 	}
-	s.render(w, r, sess, "device", map[string]any{"EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames, "AppBusy": appBusy, "AppNotes": appNotes, "CatalogFlatpaks": catalogFlatpaks,
+	var netCerts []netCertRow
+	if tab == "network" {
+		if netCerts, err = s.networkCerts(ctx, id); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+	s.render(w, r, sess, "device", map[string]any{"NetCerts": netCerts, "EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames, "AppBusy": appBusy, "AppNotes": appNotes, "CatalogFlatpaks": catalogFlatpaks,
 		"PwError": pwError(r), "PwMin": s.settings().Rules.Min(),
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,
@@ -1127,8 +1135,10 @@ func (s *Server) deviceAssign(w http.ResponseWriter, r *http.Request, sess sessi
 func (s *Server) deviceRetire(w http.ResponseWriter, r *http.Request, sess session) {
 	id := r.PathValue("id")
 	err := s.auditAction(r.Context(), sess.Email, "device.retire", id, "client certificate revoked", func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `UPDATE devices SET retired=true, cert_serial='', pending_serial=NULL WHERE id=$1`, id)
-		return err
+		if _, err := tx.Exec(r.Context(), `UPDATE devices SET retired=true, cert_serial='', pending_serial=NULL WHERE id=$1`, id); err != nil {
+			return err
+		}
+		return revokeNetworkCerts(r.Context(), tx, id, "retired")
 	})
 	if err != nil {
 		s.fail(w, err)

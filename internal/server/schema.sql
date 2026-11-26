@@ -565,3 +565,18 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     last_used_at TIMESTAMPTZ,
     revoked_at   TIMESTAMPTZ
 );
+-- E1
+-- EAP-TLS device certificates issued by the network CA. No foreign key: a
+-- revoked certificate stays on the CRL until it expires, also when the
+-- device record is gone.
+CREATE TABLE IF NOT EXISTS network_certs (
+    serial        TEXT PRIMARY KEY,
+    device_id     TEXT NOT NULL,
+    subject       TEXT NOT NULL,
+    sans          TEXT NOT NULL DEFAULT '',
+    not_before    TIMESTAMPTZ NOT NULL,
+    not_after     TIMESTAMPTZ NOT NULL,
+    revoked_at    TIMESTAMPTZ,
+    revoke_reason TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS network_certs_device ON network_certs(device_id);

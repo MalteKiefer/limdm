@@ -483,6 +483,9 @@ func (s *Server) libraryEdit(w http.ResponseWriter, r *http.Request, sess sessio
 	} else {
 		it.Type, it.Payload = api.TypePackages, json.RawMessage(api.Types[api.TypePackages])
 	}
+	if it.ID > 0 && it.Type == api.TypeNetwork { // secrets stay on the server
+		it.Payload = api.MaskNetworkSecrets(it.Payload)
+	}
 	var pretty bytes.Buffer
 	if err := json.Indent(&pretty, it.Payload, "", "  "); err != nil {
 		pretty.WriteString(string(it.Payload))
@@ -526,6 +529,10 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		it.Payload = p
 	}
 	if r.FormValue("preview") != "" {
+		if err := s.restoreNetworkSecrets(r.Context(), &it); err != nil {
+			fail(err)
+			return
+		}
 		if err := it.Validate(); err != nil {
 			fail(err)
 			return
@@ -536,7 +543,11 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 			return
 		}
 		// the form goes back with the processed settings (uploaded
-		// certificates added, a boot loader password hashed)
+		// certificates added, a boot loader password hashed), network
+		// secrets masked again
+		if it.Type == api.TypeNetwork {
+			it.Payload = api.MaskNetworkSecrets(it.Payload)
+		}
 		render(prettyJSON(string(it.Payload)), map[string]any{"Preview": p})
 		return
 	}
@@ -545,6 +556,27 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request, sess sessio
 		return
 	}
 	http.Redirect(w, r, "/library", http.StatusSeeOther)
+}
+
+// restoreNetworkSecrets puts the stored secrets of a network item back where
+// the edited payload (console editor, admin API, a masked version) still
+// holds the mask; masks with nothing stored stay and fail validation.
+func (s *Server) restoreNetworkSecrets(ctx context.Context, it *api.LibraryItem) error {
+	if it.Type != api.TypeNetwork {
+		return nil
+	}
+	var stored []byte
+	if it.ID > 0 {
+		if err := s.db.QueryRow(ctx, `SELECT payload FROM library_items WHERE id=$1 AND type=$2`, it.ID, it.Type).Scan(&stored); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+	}
+	p, err := api.RestoreNetworkSecrets(it.Payload, stored)
+	if err != nil {
+		return invalid(err)
+	}
+	it.Payload = p
+	return nil
 }
 
 // saveLibraryItem prepares, validates, signs and stores a library item with
@@ -565,6 +597,9 @@ func (s *Server) saveLibraryItem(ctx context.Context, actor string, it *api.Libr
 // audit entry in one transaction and sets it.ID. restore lets a rollback
 // recreate a deleted item under its old ID.
 func (s *Server) storeItem(ctx context.Context, actor, action, note string, it *api.LibraryItem, restore bool) error {
+	if err := s.restoreNetworkSecrets(ctx, it); err != nil {
+		return err
+	}
 	if err := it.Validate(); err != nil {
 		return invalid(err)
 	}
@@ -579,6 +614,9 @@ func (s *Server) storeItem(ctx context.Context, actor, action, note string, it *
 	it.Payload = compact.Bytes()
 	sig := signItem(it.Name, it.Type, compact.Bytes())
 	detail := it.Type + " " + compact.String()
+	if it.Type == api.TypeNetwork {
+		detail = it.Type + " " + string(api.MaskNetworkSecrets(compact.Bytes())) // no secrets in the audit log
+	}
 	if note != "save" {
 		detail = note + ": " + detail
 	}
