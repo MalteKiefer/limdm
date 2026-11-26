@@ -29,7 +29,15 @@ const (
 	TypeProxy         = "com.limdm.proxy"
 	TypeFlatpak       = "com.limdm.flatpak"
 	TypeScripts       = "com.limdm.scripts"
+	TypeDconf         = "com.limdm.dconf"
 )
+
+// Dconf are GNOME (dconf) defaults for every user: key paths with GVariant
+// values, and keys or directories users cannot change.
+type Dconf struct {
+	Settings map[string]string `json:"settings"`
+	Locks    []string          `json:"locks,omitempty"`
+}
 
 type Repository struct {
 	Name       string `json:"name"`
@@ -136,6 +144,7 @@ type ExtraPolicy struct {
 	Proxy         *Proxy            `json:"proxy,omitempty"`
 	Flatpak       *Flatpak          `json:"flatpak,omitempty"`
 	Scripts       []Script          `json:"scripts,omitempty"`
+	Dconf         *Dconf            `json:"dconf,omitempty"`
 
 	DiskEncryption *DiskEncryption `json:"disk_encryption,omitempty"`
 	Polkit         []PolkitRule    `json:"polkit,omitempty"`
@@ -156,6 +165,7 @@ var extraExamples = map[string]string{
 	TypeProxy:         `{"http": "http://proxy.example.com:3128", "https": "http://proxy.example.com:3128", "no_proxy": "localhost,127.0.0.1,.example.com"}`,
 	TypeFlatpak:       `{"remotes": [{"name": "flathub", "url": "https://dl.flathub.org/repo/flathub.flatpakrepo"}], "install": ["org.mozilla.firefox"], "remove": []}`,
 	TypeScripts:       `{"scripts": [{"name": "cleanup", "interval_hours": 24, "body": "#!/bin/sh\njournalctl --vacuum-time=30d"}]}`,
+	TypeDconf:         `{"settings": {"/org/gnome/desktop/interface/clock-show-seconds": "true"}, "locks": ["/org/gnome/desktop/interface/clock-show-seconds"]}`,
 }
 
 var (
@@ -168,7 +178,7 @@ func init() {
 	for t, ex := range extraExamples {
 		Types[t] = ex
 	}
-	for _, t := range []string{TypeRepositories, TypeCertificates, TypeSysctl, TypeKernelModules, TypeSSH, TypeFlatpak, TypeScripts} {
+	for _, t := range []string{TypeRepositories, TypeCertificates, TypeSysctl, TypeKernelModules, TypeSSH, TypeFlatpak, TypeScripts, TypeDconf} {
 		listTypes[t] = true
 	}
 }
@@ -183,6 +193,7 @@ var (
 	suiteRe    = regexp.MustCompile(`^[A-Za-z0-9._/ -]{0,200}$`)
 	sshValRe   = regexp.MustCompile(`^[A-Za-z0-9 ,@._:/*-]{1,200}$`)
 	repoFileRe = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9._-]{0,100}\.(list|sources|repo)|sources\.list)$`)
+	dconfKeyRe = regexp.MustCompile(`^(/[A-Za-z0-9_.-]+)+$`)
 	keyFileRe  = regexp.MustCompile(`^(/usr/share/keyrings|/etc/apt/keyrings|/etc/pki/rpm-gpg)/[A-Za-z0-9][A-Za-z0-9._-]{0,100}$`)
 )
 
@@ -389,6 +400,23 @@ func (d Declaration) applyExtra(p *Policy) (bool, error) {
 			}
 		}
 		p.Extra.Scripts = v.Scripts
+	case TypeDconf:
+		var v Dconf
+		if err := strict(d.Payload, &v); err != nil {
+			return true, err
+		}
+		for k, val := range v.Settings {
+			// a key needs a directory: /dir/key; values are GVariant text on one line
+			if !dconfKeyRe.MatchString(k) || strings.Count(k, "/") < 2 || val == "" || !noControl(val, 1024) || strings.ContainsAny(val, "\n\t") {
+				bad("dconf %q: key path /dir/key and a one line GVariant value up to 1024 characters", k)
+			}
+		}
+		for _, l := range v.Locks {
+			if !dconfKeyRe.MatchString(strings.TrimSuffix(l, "/")) {
+				bad("dconf lock %q: a key path or a directory ending in /", l)
+			}
+		}
+		p.Extra.Dconf = &v
 	default:
 		return d.applySecurity(p)
 	}
@@ -471,6 +499,18 @@ func mergeExtra(typ string, a, b json.RawMessage) (json.RawMessage, bool, error)
 		out, err = mergeMap("settings")
 	case TypeSSH:
 		out, err = mergeMap("options")
+	case TypeDconf:
+		var x, y Dconf
+		if err = errors.Join(json.Unmarshal(a, &x), json.Unmarshal(b, &y)); err == nil {
+			m := map[string]string{}
+			for k, v := range x.Settings {
+				m[k] = v
+			}
+			for k, v := range y.Settings {
+				m[k] = v
+			}
+			out, err = json.Marshal(Dconf{Settings: m, Locks: union(x.Locks, y.Locks)})
+		}
 	case TypeKernelModules:
 		var x, y struct {
 			Block []string `json:"block"`

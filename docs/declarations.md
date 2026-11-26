@@ -266,6 +266,20 @@ which would otherwise win. `"hide_users": true` hides the user list (GDM
 LightDM guest sessions are off whenever the login screen is managed. Agents before 0.9.2
 reject the two keys as unknown, so add them only after the fleet runs 0.9.2.
 
+### `com.limdm.dconf` (list)
+
+```json
+{"settings": {"/org/gnome/desktop/interface/clock-show-seconds": "true",
+              "/org/gnome/desktop/background/picture-uri": "'file:///usr/share/backgrounds/corp.png'"},
+ "locks": ["/org/gnome/desktop/background/"]}
+```
+
+Defaults for every user of GNOME and other dconf based desktops. Keys are full paths, values
+GVariant text (strings in single quotes) on one line. `locks` lists keys or directories
+(ending in `/`) users cannot change. Written to `/etc/dconf/db/local.d/70-limdm-custom`
+and its locks file next to the screen lock settings, compiled with `dconf update`; items
+are merged by key, locks are joined. Removing the declaration removes both files.
+
 ### `com.limdm.sudo` (list)
 
 ```json

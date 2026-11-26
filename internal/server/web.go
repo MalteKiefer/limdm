@@ -185,6 +185,7 @@ var typeLabels = map[string]string{
 	api.TypeFlatpak: "Flatpak apps", api.TypeScripts: "Recurring scripts",
 	api.TypeDiskEncryption: "Disk encryption recovery", api.TypePolkit: "polkit rules", api.TypeSudo: "sudo rules",
 	api.TypeBootloader: "Boot loader password", api.TypeSoftwareStore: "Software store policy",
+	api.TypeDconf: "GNOME settings (dconf)",
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, sess session, name string, data map[string]any) {
