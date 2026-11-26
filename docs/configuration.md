@@ -9,14 +9,16 @@ the environment.
 | Variable | Default | Meaning |
 |---|---|---|
 | `LIMDM_DATABASE_URL` | required | PostgreSQL URL. Remote hosts need `sslmode=verify-full`. |
-| `LIMDM_SESSION_KEY` | required | At least 32 bytes as hex (`openssl rand -hex 32`). Signs sessions and derives the keys for stored secrets, recovery keys and webhook signatures. Changing it invalidates sessions and makes stored secrets unreadable. |
+| `LIMDM_SESSION_KEY` | required | At least 32 bytes as hex (`openssl rand -hex 32`). Signs sessions and derives the keys for stored secrets, recovery keys and webhook signatures. During a rotation a comma separated list, the new key first: the first seals and signs, all open and verify. Replacing it without a rotation invalidates sessions and makes stored secrets unreadable ([keys.md](keys.md#session-key)). |
 | `LIMDM_PUBLIC_URL` | required | Console URL as users see it, for example `https://mdm.example.com`. |
 | `LIMDM_AGENT_URL` | required | Agent API URL, `https://`. Its host goes into the server certificate agents verify. |
 | `LIMDM_AGENT_LISTEN` | `:8444` | Listener of the agent API (mTLS terminates here). |
 | `LIMDM_AGENT_HOSTS` | | Extra names or IPs for the agent certificate, comma separated. |
 | `LIMDM_LISTEN` | `127.0.0.1:8080`, `:8443` with a certificate | Console listener. Without a certificate only loopback is allowed. |
 | `LIMDM_TLS_CERT`, `LIMDM_TLS_KEY` | | Console certificate when no reverse proxy is used. |
-| `LIMDM_CA_DIR` | `/var/lib/limdm-server/ca` | Device CA (key file 0600). Back it up. |
+| `LIMDM_CA_DIR` | `/var/lib/limdm-server/ca` | Device CA, network CA, command key (key files 0600), `keys.json`, `audit-keys`. Back it up ([keys.md](keys.md)). |
+| `LIMDM_KEY_PROVIDER` | `file` | Where the private keys of the CAs and the command key live: `file` or `pkcs11` (HSM, needs a server built with `-tags pkcs11`). |
+| `LIMDM_PKCS11_MODULE`, `LIMDM_PKCS11_TOKEN`, `LIMDM_PKCS11_PIN` | | PKCS#11 module path, token label and user PIN for `LIMDM_KEY_PROVIDER=pkcs11` ([keys.md](keys.md#key-provider-and-hsm)). |
 | `LIMDM_LOCAL_LOGIN` | `false` | Allow local accounts (password and TOTP). |
 | `LIMDM_OIDC_ISSUER`, `LIMDM_OIDC_CLIENT_ID`, `LIMDM_OIDC_CLIENT_SECRET` | | Console single sign on. Optional; also configurable in the console. |
 | `LIMDM_OIDC_ALLOWED_DOMAIN` | | Only accept this Google `hd` claim or email domain. |

@@ -959,6 +959,12 @@ type CheckinRequest struct {
 	CatalogHash       string          `json:"catalog_hash,omitempty"`
 	AppRequests       []AppRequest    `json:"app_requests,omitempty"`   // self service requests of users
 	ScriptResults     []ScriptResult  `json:"script_results,omitempty"` // runs of recurring scripts
+	// CommandKey is the command key the agent has pinned (hex), so the
+	// console can show how far a key rotation has reached the fleet.
+	CommandKey string `json:"command_key,omitempty"`
+	// CAHash is the SHA-256 (hex) of the agent's trusted device CA file; the
+	// server sends DeviceCAs when it differs.
+	CAHash string `json:"ca_hash,omitempty"`
 }
 
 // Branding is the company name and PNG logo shown by the desktop helper.
@@ -998,6 +1004,17 @@ type CheckinResponse struct {
 	// FallbackDNS allows the agent to ask public DNS over HTTPS resolvers
 	// when the system resolver fails (server setting, default off).
 	FallbackDNS bool `json:"fallback_dns,omitempty"`
+	// CommandKeyRollover announces CommandKey while the previous key is
+	// being retired, signed with that previous key.
+	CommandKeyRollover *KeyRollover `json:"command_key_rollover,omitempty"`
+	// DeviceCAs is the PEM bundle of the device CAs the agent should trust
+	// (both during a CA rotation), sent when the agent's CAHash differs.
+	DeviceCAs string `json:"device_cas,omitempty"`
+	// RenewCert asks the agent to renew its client certificate now (it was
+	// issued by a device CA that is being retired).
+	RenewCert bool `json:"renew_cert,omitempty"`
+	// RenewNetworkCert does the same for the EAP-TLS certificate.
+	RenewNetworkCert bool `json:"renew_network_cert,omitempty"`
 }
 
 // ---- signed agent releases ----

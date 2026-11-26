@@ -185,6 +185,10 @@ func (s *Server) insertCommand(ctx context.Context, tx pgx.Tx, deviceID, typ, pa
 		RETURNING id, created_at`, deviceID, typ, payload, by).Scan(&c.ID, &c.CreatedAt); err != nil {
 		return 0, err
 	}
-	_, err := tx.Exec(ctx, `UPDATE commands SET signature=$2 WHERE id=$1`, c.ID, api.SignCommand(s.cmdKey, deviceID, c))
+	sig, err := signEd25519(s.cmdKey, api.CommandSigned(deviceID, c))
+	if err != nil {
+		return 0, fmt.Errorf("signing the command: %w", err)
+	}
+	_, err = tx.Exec(ctx, `UPDATE commands SET signature=$2 WHERE id=$1`, c.ID, hex.EncodeToString(sig))
 	return c.ID, err
 }

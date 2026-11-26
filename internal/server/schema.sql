@@ -702,3 +702,26 @@ DROP TRIGGER IF EXISTS compliance_changes_tenant ON compliance_changes;
 CREATE TRIGGER compliance_changes_tenant BEFORE INSERT ON compliance_changes FOR EACH ROW EXECUTE FUNCTION limdm_device_tenant();
 DROP TRIGGER IF EXISTS network_certs_tenant ON network_certs;
 CREATE TRIGGER network_certs_tenant BEFORE INSERT ON network_certs FOR EACH ROW EXECUTE FUNCTION limdm_device_tenant();
+-- E4b
+-- key rotation (keys.go): how far each device has moved to the active device
+-- CA (set when its certificate is from that CA and it trusts the CA bundle)
+-- and which command key it has pinned; the CA that issued a network certificate
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS cert_ca TEXT;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS command_key TEXT;
+ALTER TABLE network_certs ADD COLUMN IF NOT EXISTS ca TEXT NOT NULL DEFAULT '';
+-- the current audit key (its id): an instance with another key cannot write entries
+CREATE TABLE IF NOT EXISTS audit_key (
+    one    BOOLEAN PRIMARY KEY DEFAULT true CHECK (one),
+    key_id TEXT NOT NULL
+);
+-- the version history stays append only, except that a session key rotation
+-- may seal a login client secret again (payload only, flag set per transaction)
+CREATE OR REPLACE FUNCTION rows_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'UPDATE' AND TG_TABLE_NAME = 'library_item_versions' AND current_setting('limdm.reseal', true) = 'on' THEN
+        IF to_jsonb(NEW) - 'payload' = to_jsonb(OLD) - 'payload' THEN
+            RETURN NEW;
+        END IF;
+    END IF;
+    RAISE EXCEPTION '% is append only', TG_TABLE_NAME;
+END $$;

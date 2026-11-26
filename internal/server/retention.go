@@ -93,8 +93,10 @@ func (s *Server) pruneAudit(ctx context.Context) error {
 
 // cutMAC signs a retention cut with the audit chain key, like the keyed
 // entries: whoever can only write to the database cannot move the cut.
-func cutMAC(id int64, hash []byte) []byte {
-	m := hmac.New(sha256.New, auditKey)
+func cutMAC(id int64, hash []byte) []byte { return cutMACWith(auditKey, id, hash) }
+
+func cutMACWith(key []byte, id int64, hash []byte) []byte {
+	m := hmac.New(sha256.New, key)
 	fmt.Fprintf(m, "audit-cut|%d|%x", id, hash)
 	return m.Sum(nil)
 }

@@ -42,8 +42,10 @@ func TestHighAvailabilityIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	// New sets the package wide keys; the other tests expect theirs
-	ik, ak, from, sec := itemKey, auditKey, auditKeyedFrom, itemSecrets
-	defer func() { itemKey, auditKey, auditKeyedFrom, itemSecrets = ik, ak, from, sec }()
+	ik, ipk, ak, from, sec, aks, cur := itemKey, itemPrevKey, auditKey, auditKeyedFrom, itemSecrets, auditKeys, auditKeyCur
+	defer func() {
+		itemKey, itemPrevKey, auditKey, auditKeyedFrom, itemSecrets, auditKeys, auditKeyCur = ik, ipk, ak, from, sec, aks, cur
+	}()
 	defer func(d time.Duration) { leaderRetry = d }(leaderRetry)
 	leaderRetry = 200 * time.Millisecond
 	cfg := Config{DatabaseURL: dsn, PublicURL: "https://mdm.test", AgentURL: "https://mdm.test:8444", CADir: t.TempDir(),

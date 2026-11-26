@@ -60,4 +60,9 @@ check in per device runs at a time (row lock).
   outside the console is not delivered and logged as an error.
 * Agent packages are verified against the release's signed `SHA256SUMS`.
 
-`command.key` lives in the CA directory, never in the database. Back it up with the CA key.
+`command.key` lives in the CA directory (or the HSM), never in the database. Back it up with
+the CA key. During a command key rotation the check in response also carries
+`command_key_rollover` (the new key signed by the old one) and the agent reports its pinned
+key as `command_key`; during a device CA rotation the response carries `device_cas` (the CA
+bundle, when the agent's `ca_hash` differs) and `renew_cert`/`renew_network_cert`
+([keys.md](keys.md)).

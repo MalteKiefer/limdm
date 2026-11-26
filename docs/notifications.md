@@ -21,6 +21,7 @@ is in the channel's last delivery and kept for 30 days. **Send test** checks a c
 | `approval.request` | a four eyes approval was requested |
 | `audit.broken` | the daily verification found the audit hash chain broken |
 | `network.crl_token` | an admin rotated the bearer token for network CRL downloads |
+| `keys.rotate` | a key rotation was started or finished, or a new session key generated ([keys.md](keys.md)) |
 
 ## Channels
 

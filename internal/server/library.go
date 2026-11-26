@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
@@ -1080,14 +1081,24 @@ func itemExamples() map[string]string {
 	return m
 }
 
-// itemKey signs library items; it is command.key, set when the server starts.
-var itemKey ed25519.PrivateKey
+// itemKey signs library items; it is the command key, set when the server
+// starts. itemPrevKey is the previous command key while a rotation runs:
+// items signed with it stay valid until they are signed again (keys_reseal.go).
+var (
+	itemKey     crypto.Signer
+	itemPrevKey ed25519.PublicKey
+)
 
 func signItem(name, typ string, payload []byte) string {
 	if itemKey == nil {
 		return ""
 	}
-	return hex.EncodeToString(ed25519.Sign(itemKey, api.ItemSigned(name, typ, canonicalJSON(payload))))
+	sig, err := signEd25519(itemKey, api.ItemSigned(name, typ, canonicalJSON(payload)))
+	if err != nil {
+		slog.Error("signing library item", "item", name, "err", err) // unsigned: withheld from devices
+		return ""
+	}
+	return hex.EncodeToString(sig)
 }
 
 // canonicalJSON is the form a signature covers: decoded and encoded again, so
@@ -1108,11 +1119,15 @@ func itemSignatureOK(name, typ string, payload []byte, sig string) bool {
 	if itemKey == nil {
 		return true // no key (tools without the CA directory)
 	}
+	return itemSigValid(itemKey.Public().(ed25519.PublicKey), name, typ, payload, sig) ||
+		(itemPrevKey != nil && itemSigValid(itemPrevKey, name, typ, payload, sig))
+}
+
+func itemSigValid(pub ed25519.PublicKey, name, typ string, payload []byte, sig string) bool {
 	b, err := hex.DecodeString(sig)
 	if err != nil {
 		return false
 	}
-	pub := itemKey.Public().(ed25519.PublicKey)
 	if ed25519.Verify(pub, api.ItemSigned(name, typ, canonicalJSON(payload)), b) {
 		return true
 	}

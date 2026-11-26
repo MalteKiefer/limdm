@@ -278,6 +278,7 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /settings/notifications", s.page(s.channelSave))
 	mux.HandleFunc("POST /settings/notifications/{id}/{op}", s.page(s.channelOp))
 	mux.HandleFunc("POST /settings", s.page(s.settingsSave))
+	mux.HandleFunc("POST /settings/keys/{op}/{kind}", s.page(s.unscoped(s.keysAction))) // keys.go
 	mux.HandleFunc("POST /devices/{id}/assign", s.page(s.deviceAssign))
 	mux.HandleFunc("POST /devices/{id}/retire", s.page(s.deviceRetire))
 	mux.HandleFunc("GET /blueprints", s.page(s.blueprints))
@@ -1274,7 +1275,7 @@ func (s *Server) tokenPage(w http.ResponseWriter, r *http.Request, sess session,
 		return
 	}
 	s.render(w, r, sess, "tokens", map[string]any{"Tokens": list, "Blueprints": bps, "Created": created,
-		"AgentURL": s.cfg.AgentURL, "Fingerprint": s.ca.Fingerprint(), "PublicURL": s.cfg.PublicURL, "Repo": s.cfg.ReleaseRepo})
+		"AgentURL": s.cfg.AgentURL, "Fingerprint": s.tlsCA().Fingerprint(), "PublicURL": s.cfg.PublicURL, "Repo": s.cfg.ReleaseRepo})
 }
 
 func (s *Server) tokenCreate(w http.ResponseWriter, r *http.Request, sess session) {
@@ -1612,7 +1613,7 @@ func (s *Server) verifyAuditFrom(ctx context.Context, incremental bool) (int64, 
 		if err := rows.Scan(&a.ID, &a.At, &a.Actor, &a.Action, &a.Target, &a.Detail, &a.Prev, &a.Hash, &a.Tenant); err != nil {
 			return 0, err
 		}
-		if !auditEntryOK(auditKey, auditKeyedFrom, prev, a) {
+		if !auditEntryOK(auditKeys, prev, a) {
 			return a.ID, nil
 		}
 		prev, last = a.Hash, a.ID

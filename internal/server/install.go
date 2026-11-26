@@ -148,7 +148,7 @@ func (s *Server) installScript(w http.ResponseWriter, r *http.Request) {
 	}
 	var b strings.Builder
 	err := installTmpl.Execute(&b, map[string]string{"Console": s.cfg.PublicURL, "Server": s.cfg.AgentURL,
-		"Fingerprint": s.ca.Fingerprint(), "Repo": repo, "OsqueryKey": strings.TrimSpace(api.OsqueryKey)})
+		"Fingerprint": s.tlsCA().Fingerprint(), "Repo": repo, "OsqueryKey": strings.TrimSpace(api.OsqueryKey)})
 	if err != nil {
 		s.fail(w, err)
 		return

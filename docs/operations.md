@@ -7,7 +7,7 @@ Back up regularly and before every upgrade:
 | What | Where | Why |
 |---|---|---|
 | PostgreSQL database | `pg_dump limdm` | devices, configuration, audit log, sealed secrets |
-| Device CA | `LIMDM_CA_DIR` (default `/var/lib/limdm-server/ca`) | without it no device can check in |
+| CA directory | `LIMDM_CA_DIR` (default `/var/lib/limdm-server/ca`) | device and network CA, command key, `keys.json`, `audit-keys`: without it no device can check in and the audit log cannot be verified |
 | `LIMDM_SESSION_KEY` | `server.env` or `.env` | without it sealed secrets and recovery keys are unreadable |
 
 ```sh
@@ -15,9 +15,17 @@ sudo -u postgres pg_dump -Fc limdm > limdm-$(date +%F).dump          # package i
 docker compose exec db pg_dump -U limdm -Fc limdm > limdm-$(date +%F).dump   # Docker
 ```
 
-Store the CA key and the session key apart from the database dump, encrypted.
+Store the CA key and the session key apart from the database dump, encrypted. With
+`LIMDM_KEY_PROVIDER=pkcs11` the private keys are in the HSM: back up the token as its vendor
+describes, and the CA directory for the certificates, `keys.json` and `audit-keys`.
 For point in time recovery, RPO and RTO guidance and a restore test procedure see
 [high-availability.md](high-availability.md#backup).
+
+## Key rotation
+
+`limdm-server keys status|rotate KIND|finish KIND` and **Settings, Security, Keys** rotate the
+device CA, the network CA, the command key and the session key without enrolling devices
+again. Each step takes effect after a restart of every instance. Runbooks: [keys.md](keys.md).
 
 ## Restore
 
@@ -70,7 +78,9 @@ The private key is a CI secret, not an offline key. It is protected by the envir
 required reviewers and the tag ruleset, so anyone who can approve a release run can sign.
 Keep a copy of `release.key` outside GitHub to rotate or recover it.
 
-Manual signing: `limdm-server sign -key release.key limdm_<version>_SHA256SUMS`.
+Manual signing: `limdm-server sign -key release.key limdm_<version>_SHA256SUMS`, or with a key
+in an HSM: `limdm-server sign -pkcs11 LABEL limdm_<version>_SHA256SUMS` (server built with
+`-tags pkcs11`, [keys.md](keys.md#release-key)).
 
 ## Monitoring
 

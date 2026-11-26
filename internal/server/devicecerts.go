@@ -41,7 +41,7 @@ const (
 func init() { typeLabels[api.TypeNetwork] = "Network profiles" }
 
 func loadOrCreateNetworkCA(dir string) (*deviceCA, error) {
-	return loadOrCreateRoot(dir, "network-ca", "LiMDM Network CA")
+	return loadRoot(KeyProvider{}, dir, kindNetCA, "LiMDM Network CA")
 }
 
 var certHostRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,252}[A-Za-z0-9])?$`)
@@ -138,8 +138,8 @@ func (s *Server) networkCert(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid certificate signing request")
 		return
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO network_certs(serial, device_id, subject, sans, not_before, not_after) VALUES ($1,$2,$3,$4,$5,$6)`,
-		row.Serial, id, row.Subject, row.SANs, row.NotBefore, row.NotAfter); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO network_certs(serial, device_id, subject, sans, not_before, not_after, ca) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		row.Serial, id, row.Subject, row.SANs, row.NotBefore, row.NotAfter, s.keyStates()[kindNetCA].Active); err != nil {
 		s.failAPI(w, err)
 		return
 	}
@@ -161,7 +161,9 @@ func revokeNetworkCerts(ctx context.Context, tx pgx.Tx, deviceID, reason string)
 	return err
 }
 
-// networkCRL is the PEM CRL of the network CA. Expired certificates drop out.
+// networkCRL is the PEM CRL of the network CA, during a rotation followed by
+// the CRL of the retiring CA (both list every revoked serial; serials are
+// random 127 bit numbers). Expired certificates drop out.
 func (s *Server) networkCRL(ctx context.Context) ([]byte, error) {
 	rows, err := s.db.Query(ctx, `SELECT serial, revoked_at FROM network_certs WHERE revoked_at IS NOT NULL AND not_after > now() ORDER BY revoked_at`)
 	if err != nil {
@@ -184,12 +186,19 @@ func (s *Server) networkCRL(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 	now := time.Now()
-	der, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{Number: big.NewInt(now.UnixNano()),
-		ThisUpdate: now, NextUpdate: now.Add(crlValidity), RevokedCertificateEntries: entries}, s.netCA.cert, s.netCA.key)
-	if err != nil {
-		return nil, err
+	var out []byte
+	for _, ca := range []*deviceCA{s.netCA, s.kr.netPrev} {
+		if ca == nil {
+			continue
+		}
+		der, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{Number: big.NewInt(now.UnixNano()),
+			ThisUpdate: now, NextUpdate: now.Add(crlValidity), RevokedCertificateEntries: entries}, ca.cert, ca.key)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, pem.EncodeToMemory(&pem.Block{Type: "X509 CRL", Bytes: der})...)
 	}
-	return pem.EncodeToMemory(&pem.Block{Type: "X509 CRL", Bytes: der}), nil
+	return out, nil
 }
 
 func (s *Server) networkRoutes(mux *http.ServeMux) {
@@ -199,6 +208,9 @@ func (s *Server) networkRoutes(mux *http.ServeMux) {
 		w.Header().Set("Content-Type", "application/x-pem-file")
 		w.Header().Set("Content-Disposition", `attachment; filename="limdm-network-ca.pem"`)
 		w.Write(s.netCA.pem)
+		if s.kr.netPrev != nil { // RADIUS trusts both during a rotation
+			w.Write(s.kr.netPrev.pem)
+		}
 	}))
 	mux.HandleFunc("GET /network/crl.pem", s.networkCRLDownload)
 }

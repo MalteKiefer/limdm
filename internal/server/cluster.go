@@ -217,7 +217,7 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	} else if !current {
 		problems = append(problems, "database schema does not match this version")
 	}
-	if s.ca == nil || s.netCA == nil || len(s.cmdKey) == 0 || auditKey == nil {
+	if s.ca == nil || s.netCA == nil || s.cmdKey == nil || auditKey == nil {
 		problems = append(problems, "keys not loaded")
 	}
 	if !s.ha.listening.Load() {
