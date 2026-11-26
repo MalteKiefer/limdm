@@ -386,7 +386,11 @@ func (s *Server) shellWSRemote(w http.ResponseWriter, r *http.Request, sess sess
 // its end is stored, so the page after the redirect shows it.
 func (s *Server) shellEndRemote(w http.ResponseWriter, r *http.Request, sess session, sid string) {
 	ctx := r.Context()
-	if _, owner, ok := s.remoteShell(ctx, sid); ok {
+	if device, owner, ok := s.remoteShell(ctx, sid); ok {
+		if !s.inScope(ctx, sess, device) {
+			s.notFound(w, r, sess)
+			return
+		}
 		if owner != sess.Email && sess.Role != "admin" {
 			s.errorPage(w, r, sess, http.StatusForbidden, "only the user who started the session or an admin can end it")
 			return

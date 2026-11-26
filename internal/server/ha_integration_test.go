@@ -249,6 +249,17 @@ func TestHighAvailabilityIntegration(t *testing.T) {
 		if typ, p, err := api.ReadShellFrame(resp.Body); err != nil || typ != api.ShellInput || string(p) != "ls\r" {
 			t.Fatalf("case %d input: %c %q %v", i, typ, p, err)
 		}
+		if i == 0 {
+			// a session out of the account's scope cannot end it from the other instance
+			outside := session{Email: "local:help", Role: "helpdesk", Tags: []string{"elsewhere"}, IAT: time.Now(), Last: time.Now()}
+			rec := httptest.NewRecorder()
+			b.shellEndRemote(rec, httptest.NewRequest("POST", "/shell/"+sid+"/end", nil), outside, sid)
+			var ended bool
+			db.QueryRow(ctx, `SELECT ended_at IS NOT NULL FROM shell_sessions WHERE id=$1`, sid).Scan(&ended)
+			if rec.Code != http.StatusNotFound || ended {
+				t.Fatalf("out of scope end on the other instance: %d ended=%v", rec.Code, ended)
+			}
+		}
 		tc.end(sid, pw)
 		var reason string
 		var transcript []byte
