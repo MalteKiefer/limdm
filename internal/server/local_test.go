@@ -89,6 +89,20 @@ func TestLimiter(t *testing.T) {
 	if d1 || !d3 || !login || !enroll {
 		t.Fatalf("eviction: dev:1 %v dev:3 %v login %v enroll %v", d1, d3, login, enroll)
 	}
+	// failure counters have their own, larger bound
+	prevF := limiterMaxFailureKeys
+	limiterMaxFailureKeys = 1
+	t.Cleanup(func() { limiterMaxFailureKeys = prevF })
+	l.mu.Lock()
+	l.hits = map[string][]time.Time{"enroll:a": {now.Add(-2 * time.Minute)}, "enroll:b": {now.Add(-time.Minute)}}
+	l.swept = time.Time{}
+	l.sweep(now)
+	_, a := l.hits["enroll:a"]
+	_, b := l.hits["enroll:b"]
+	l.mu.Unlock()
+	if a || !b {
+		t.Fatalf("failure key bound: a %v b %v", a, b)
+	}
 	// IPv6 clients share the budget of their /64
 	r1, r2 := httptest.NewRequest("GET", "/", nil), httptest.NewRequest("GET", "/", nil)
 	r1.RemoteAddr, r2.RemoteAddr = "[2001:db8:1:2::1]:4000", "[2001:db8:1:2::ffff]:4000"

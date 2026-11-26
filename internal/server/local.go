@@ -144,8 +144,10 @@ const limiterTTL = time.Hour
 // limiterMaxKeys bounds the keys of throughput limits (devices, API tokens);
 // beyond it the least recently used of them are dropped. Failure counters
 // (sign in, enrollment, token, SCIM and CRL failures) are never dropped
-// before their window ends: dropping them would reset a lockout.
-var limiterMaxKeys = 200000
+// before their window ends: dropping them would reset a lockout. Only
+// beyond limiterMaxFailureKeys (a flood from many IPv6 prefixes) the oldest
+// of them go too, so memory stays bounded.
+var limiterMaxKeys, limiterMaxFailureKeys = 200000, 1000000
 
 // failureKey reports a key that counts failures (see limiterMaxKeys).
 func failureKey(k string) bool {
@@ -168,19 +170,26 @@ func (l *limiter) sweep(now time.Time) {
 		key  string
 		last time.Time
 	}
-	var others []use
+	var others, failures []use
 	for k, ts := range l.hits {
 		switch {
 		case len(ts) == 0 || now.Sub(ts[len(ts)-1]) > limiterTTL:
 			delete(l.hits, k)
-		case !failureKey(k):
+		case failureKey(k):
+			failures = append(failures, use{k, ts[len(ts)-1]})
+		default:
 			others = append(others, use{k, ts[len(ts)-1]})
 		}
 	}
-	if over := len(others) - limiterMaxKeys; over > 0 {
-		slices.SortFunc(others, func(a, b use) int { return a.last.Compare(b.last) })
-		for _, u := range others[:over] {
-			delete(l.hits, u.key)
+	for _, g := range []struct {
+		keys []use
+		max  int
+	}{{others, limiterMaxKeys}, {failures, limiterMaxFailureKeys}} {
+		if over := len(g.keys) - g.max; over > 0 {
+			slices.SortFunc(g.keys, func(a, b use) int { return a.last.Compare(b.last) })
+			for _, u := range g.keys[:over] {
+				delete(l.hits, u.key)
+			}
 		}
 	}
 }
