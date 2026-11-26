@@ -88,6 +88,15 @@ version and the active devices that get the change (devices whose blueprint, or 
 blueprint inheriting from it, uses the item), then **Save item** or **Save blueprint**
 stores it. **Review again** shows the preview once more after further edits.
 
+The console app (`/app/config`) reviews while you edit: the effect panel shows the devices
+that get the change (online and offline), the expected effect on compliance (a changed
+level, checks newly excluded or advisory, library items added to or removed from a
+blueprint) and the diff. A blueprint change can go to **pilot devices first**: the changed
+map is saved as a copy of the blueprint (`<name>.pilot`, same parent) and set on the chosen
+devices of the blueprint. **Promote to all** saves the map into the blueprint as a new
+version, **Abort** drops it; both put the pilot devices back on what they had set before
+and delete the copy (audited as `blueprint.pilot` and `blueprint.pilot_end`).
+
 ### Which blueprint a device gets
 
 Every device has exactly one blueprint:

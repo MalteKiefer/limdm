@@ -120,7 +120,7 @@ func (s *Server) approvalDecide(w http.ResponseWriter, r *http.Request, sess ses
 		http.NotFound(w, r)
 		return
 	}
-	creds, notices, err := s.decideApproval(ctx, sess, id, op)
+	creds, notices, err := s.decideApproval(ctx, sess, id, op, "")
 	var ae errApproval
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
@@ -228,9 +228,13 @@ func globalRequest(a approval) bool {
 }
 
 // decideApproval approves or rejects a pending request for the console and
-// the admin API. It returns new local credentials (shown once to the
-// approver) and notifications to send after the commit.
-func (s *Server) decideApproval(ctx context.Context, sess session, id int64, op string) (creds string, notices []func(), err error) {
+// the admin API, with the decider's reason (may be empty). It returns new
+// local credentials (shown once to the approver) and notifications to send
+// after the commit.
+func (s *Server) decideApproval(ctx context.Context, sess session, id int64, op, reason string) (creds string, notices []func(), err error) {
+	if len(reason) > 500 {
+		return "", nil, errApproval("reason: up to 500 characters")
+	}
 	err = func() error {
 		tx, err := s.db.Begin(ctx)
 		if err != nil {
@@ -325,6 +329,10 @@ func (s *Server) decideApproval(ctx context.Context, sess session, id int64, op 
 				if creds, err = applyTokenApproval(ctx, tx, a, sess.Email); err != nil {
 					return err
 				}
+			case "exception.add":
+				if err := applyExceptionApproval(ctx, tx, a, sess.Email); err != nil {
+					return err
+				}
 			case "artifact.upload": // the upload becomes installable (packages.go)
 				var c struct {
 					Tenant int64 `json:"tenant"`
@@ -341,11 +349,15 @@ func (s *Server) decideApproval(ctx context.Context, sess session, id int64, op 
 				return fmt.Errorf("unknown approval action %q", a.Action)
 			}
 		}
-		if _, err := tx.Exec(ctx, `UPDATE approvals SET status=$2, decided_by=$3, decided_at=now(), expires_at=$4 WHERE id=$1`,
-			a.ID, status, sess.Email, expires); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE approvals SET status=$2, decided_by=$3, decided_at=now(), expires_at=$4, decision_reason=$5 WHERE id=$1`,
+			a.ID, status, sess.Email, expires, reason); err != nil {
 			return err
 		}
-		if err := audit(ctx, tx, sess.Email, "approval."+op, a.Target, fmt.Sprintf("#%d %s requested by %s", a.ID, a.Action, a.RequestedBy)); err != nil {
+		detail := fmt.Sprintf("#%d %s requested by %s", a.ID, a.Action, a.RequestedBy)
+		if reason != "" {
+			detail += fmt.Sprintf(" reason=%q", reason)
+		}
+		if err := audit(ctx, tx, sess.Email, "approval."+op, a.Target, detail); err != nil {
 			return err
 		}
 		return tx.Commit(ctx)

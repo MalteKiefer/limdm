@@ -449,7 +449,8 @@ func (s *Server) Close() {
 // Background runs periodic jobs until ctx ends.
 func (s *Server) Background(ctx context.Context) {
 	for name, loop := range map[string]func(context.Context){"google sync": s.googleSyncLoop, "history": s.historyLoop,
-		"catalog icons": s.iconLoop, "syslog": s.syslogLoop, "reseal": s.resealLoop, "backup": s.backupLoop} {
+		"catalog icons": s.iconLoop, "syslog": s.syslogLoop, "reseal": s.resealLoop, "backup": s.backupLoop,
+		"reports": s.reportLoop} {
 		go s.background(ctx, name, loop, true)
 	}
 	// every instance serves agent packages from its own release directory
@@ -553,6 +554,7 @@ func (s *Server) AdminHandler() http.Handler {
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	s.webRoutes(mux)
 	s.apiRoutes(mux)
+	s.webappRoutes(mux) // console app under /app/ (webapp.go)
 	return s.countRequests("console", securityHeaders(s.consoleFilter(mux)))
 }
 
@@ -1220,8 +1222,8 @@ func audit(ctx context.Context, tx pgx.Tx, actor, action, target, detail string)
 	}
 	// another instance started with a new command key: entries keyed with
 	// the old one would break the chain
-	if auditKey != nil && keyID != nil && *keyID != auditKeyCur {
-		return errAuditKeyStale
+	if keyID != nil && (auditKey == nil || *keyID != auditKeyCur) {
+		return errAuditKeyStale // without the current key an entry breaks the chain
 	}
 	tenant, err := auditTenant(ctx, tx, target)
 	if err != nil {

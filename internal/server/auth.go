@@ -64,6 +64,7 @@ type session struct {
 
 type flow struct {
 	State, Nonce, Verifier string
+	Next                   string // page to return to (safeNext)
 	Exp                    time.Time
 }
 
@@ -124,7 +125,8 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	f := flow{State: randToken(24), Nonce: randToken(24), Verifier: oauth2.GenerateVerifier(), Exp: time.Now().Add(10 * time.Minute)}
+	f := flow{State: randToken(24), Nonce: randToken(24), Verifier: oauth2.GenerateVerifier(), Exp: time.Now().Add(10 * time.Minute),
+		Next: safeNext(r.URL.Query().Get("next"))}
 	s.setCookie(w, flowCookie, s.seal(f), 10*time.Minute)
 	opts := []oauth2.AuthCodeOption{oauth2.S256ChallengeOption(f.Verifier), oidc.Nonce(f.Nonce)}
 	if d := s.settings().AllowedDomain; d != "" {
@@ -213,7 +215,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	_, gen := s.account(r.Context(), email)
 	s.setCookie(w, sessionCookie, s.seal(session{Email: email, Role: role, IAT: now, Last: now, Gen: gen}), maxSession)
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, safeNext(f.Next), http.StatusFound)
 }
 
 func (s *Server) roleFor(ctx context.Context, email string, verified bool, hd string, groups []string) string {

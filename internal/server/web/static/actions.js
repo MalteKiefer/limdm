@@ -180,7 +180,7 @@
     const form = sel.closest('form').parentElement;
     const desc = form.querySelector('[data-type-desc]'), doc = form.querySelector('[data-type-doc]'), body = form.querySelector('[data-type-fields]');
     if (desc) desc.textContent = meta.desc;
-    if (doc) doc.href = meta.doc;
+    if (doc && /^(https:\/\/|\/[^/\\])/.test(meta.doc || '')) doc.href = meta.doc;
     if (body) body.replaceChildren(...(meta.fields || []).map(([p, k]) => {
       const tr = el('tr'); tr.append(el('td', 'mono', p), el('td', 'muted', k)); return tr;
     }));

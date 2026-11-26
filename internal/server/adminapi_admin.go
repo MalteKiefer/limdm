@@ -55,12 +55,14 @@ type apiApproval struct {
 	DecidedAt   *time.Time      `json:"decided_at"`
 	CreatedAt   time.Time       `json:"created_at"`
 	ExpiresAt   time.Time       `json:"expires_at"`
+	// DecisionReason is why the deciding admin approved or rejected.
+	DecisionReason string `json:"decision_reason"`
 	// Credentials are new local credentials an approved user.add or
 	// user.reset created; only in the answer of the decision.
 	Credentials string `json:"credentials,omitempty"`
 }
 
-const apiApprovalCols = `id, action, target, payload, reason, requested_by, status, decided_by, decided_at, created_at, expires_at, ''`
+const apiApprovalCols = `id, action, target, payload, reason, requested_by, status, decided_by, decided_at, created_at, expires_at, decision_reason, ''`
 
 // approvalCond limits approvals to the caller's tenant; helpdesk tokens see
 // their own requests only, as in the console.
@@ -129,7 +131,8 @@ func (s *Server) apiApprovalGet(w http.ResponseWriter, r *http.Request, c apiCal
 }
 
 // apiApprovalDecide approves or rejects a request like the console: never
-// one the token (or the person who created it) requested.
+// one the token (or the person who created it) requested. An optional JSON
+// body {"reason": "..."} records why; the console app must give one to reject.
 func (s *Server) apiApprovalDecide(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -139,7 +142,18 @@ func (s *Server) apiApprovalDecide(w http.ResponseWriter, r *http.Request, c api
 	if strings.HasSuffix(r.URL.Path, "/reject") {
 		op = "reject"
 	}
-	creds, notices, err := s.decideApproval(r.Context(), c.sess(), id, op)
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	if r.ContentLength != 0 && !decodeJSON(w, r, &in) {
+		return
+	}
+	in.Reason = strings.TrimSpace(in.Reason)
+	if op == "reject" && in.Reason == "" && c.Sess != nil {
+		problemField(w, http.StatusUnprocessableEntity, "reason", "reason: say why the request is rejected")
+		return
+	}
+	creds, notices, err := s.decideApproval(r.Context(), c.sess(), id, op, in.Reason)
 	var ae errApproval
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
@@ -181,17 +195,21 @@ type apiException struct {
 	State     string     `json:"state"`
 }
 
+func apiExceptionsOf(list []riskException) []apiException {
+	out := make([]apiException, len(list))
+	for i, e := range list {
+		out[i] = apiException{e.ID, e.CheckID, e.Mode, e.Tag, e.Reason, e.Owner, e.Approver, e.Expires, e.CreatedBy, e.Created, e.Revoked, e.State()}
+	}
+	return out
+}
+
 func (s *Server) apiExceptions(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	list, err := s.riskExceptions(r.Context())
 	if err != nil {
 		s.apiFail(w, err)
 		return
 	}
-	out := make([]apiException, len(list))
-	for i, e := range list {
-		out[i] = apiException{e.ID, e.CheckID, e.Mode, e.Tag, e.Reason, e.Owner, e.Approver, e.Expires, e.CreatedBy, e.Created, e.Revoked, e.State()}
-	}
-	writeJSON(w, listPage{Items: out})
+	writeJSON(w, listPage{Items: apiExceptionsOf(list)})
 }
 
 func (s *Server) apiExceptionAdd(w http.ResponseWriter, r *http.Request, c apiCaller) {
@@ -207,10 +225,15 @@ func (s *Server) apiExceptionAdd(w http.ResponseWriter, r *http.Request, c apiCa
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	id, err := s.addException(r.Context(), c.sess(), riskException{CheckID: body.CheckID, Mode: body.Mode, Tag: body.Tag, Reason: body.Reason,
+	id, pending, err := s.addOrRequestException(r.Context(), c.sess(), riskException{CheckID: body.CheckID, Mode: body.Mode, Tag: body.Tag, Reason: body.Reason,
 		Owner: body.Owner, Approver: body.Approver}, body.Expires)
 	if err != nil {
 		s.apiFail(w, err)
+		return
+	}
+	if pending { // four eyes: another admin approves it and is recorded as approver
+		w.Header().Set("Location", "/api/v1/approvals/"+strconv.FormatInt(id, 10))
+		writeJSONStatus(w, http.StatusAccepted, map[string]any{"approval_id": id, "status": "pending"})
 		return
 	}
 	w.Header().Set("Location", "/api/v1/exceptions/"+strconv.FormatInt(id, 10))
@@ -324,14 +347,15 @@ func (s *Server) apiTokenDelete(w http.ResponseWriter, r *http.Request, c apiCal
 // ---- tenants ----
 
 // superAPI limits a route to global tokens while multi tenancy is on, as
-// superOnly does for console pages.
+// superOnly does for console pages (a super admin's session keeps the
+// right while it looks at one tenant).
 func (s *Server) superAPI(h apiHandlerFunc) apiHandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request, c apiCaller) {
 		if !s.cfg.MultiTenant {
 			problem(w, http.StatusNotFound, "multi tenancy is off")
 			return
 		}
-		if c.Tenant != 0 {
+		if c.Tenant != 0 && (c.Sess == nil || !c.Sess.Super) {
 			s.deny(w, r, c, "only global tokens manage tenants")
 			return
 		}

@@ -98,18 +98,25 @@ func applyExceptions(ctx context.Context, q pgx.Tx, deviceID string, decls []api
 func (s *Server) exceptionAdd(w http.ResponseWriter, r *http.Request, sess session) {
 	e := riskException{CheckID: r.FormValue("check_id"), Mode: r.FormValue("mode"), Tag: r.FormValue("tag"),
 		Reason: r.FormValue("reason"), Owner: r.FormValue("owner"), Approver: r.FormValue("approver")}
-	if _, err := s.addException(r.Context(), sess, e, r.FormValue("expires")); err != nil {
+	_, pending, err := s.addOrRequestException(r.Context(), sess, e, r.FormValue("expires"))
+	if err != nil {
 		s.failUser(w, r, sess, err)
+		return
+	}
+	if pending {
+		http.Redirect(w, r, "/approvals", http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/compliance#exceptions", http.StatusSeeOther)
 }
 
-// addException validates and stores a risk exception for the console and
-// the admin API; expires is the last day it applies (YYYY-MM-DD).
-// Validation errors are userErrors (400).
-func (s *Server) addException(ctx context.Context, sess session, e riskException, expires string) (int64, error) {
-	bad := func(msg string) (int64, error) { return 0, &userError{http.StatusBadRequest, msg} }
+// checkException validates a risk exception for the console and the admin
+// API; expires is the last day it applies (YYYY-MM-DD). With approver the
+// approver named by the caller is checked too (four eyes: another person);
+// a request leaves it to the admin who approves it. Validation errors are
+// userErrors (400).
+func (s *Server) checkException(ctx context.Context, sess session, e *riskException, expires string, approver bool) error {
+	bad := func(msg string) error { return &userError{http.StatusBadRequest, msg} }
 	e.CheckID, e.Reason, e.Owner, e.Approver, e.CreatedBy = strings.TrimSpace(e.CheckID), strings.TrimSpace(e.Reason),
 		strings.TrimSpace(e.Owner), strings.TrimSpace(e.Approver), sess.Email
 	tags, err := parseTags(e.Tag)
@@ -129,20 +136,89 @@ func (s *Server) addException(ctx context.Context, sess session, e riskException
 		return bad("mode: exclude or advisory")
 	case e.Reason == "" || len(e.Reason) > 1000:
 		return bad("reason: 1 to 1000 characters")
-	case e.Owner == "" || len(e.Owner) > 200 || e.Approver == "" || len(e.Approver) > 200:
+	case e.Owner == "" || len(e.Owner) > 200:
 		return bad("risk owner and approver: 1 to 200 characters")
-	case s.settings().FourEyes && s.selfApprover(ctx, sess.Email, e.Approver):
+	case approver && (e.Approver == "" || len(e.Approver) > 200):
+		return bad("risk owner and approver: 1 to 200 characters")
+	case approver && s.settings().FourEyes && s.selfApprover(ctx, sess.Email, e.Approver):
 		return bad("four eyes approval is on: the approver must be another person")
 	case err != nil || !e.Expires.After(time.Now()) || e.Expires.After(time.Now().AddDate(3, 0, 1)):
 		return bad("expiry: a date within the next three years")
 	}
+	return nil
+}
+
+// addException validates and stores a risk exception for the console and
+// the admin API.
+func (s *Server) addException(ctx context.Context, sess session, e riskException, expires string) (int64, error) {
+	if err := s.checkException(ctx, sess, &e, expires, true); err != nil {
+		return 0, err
+	}
 	var id int64
-	err = s.auditAction(ctx, sess.Email, "exception.add", e.CheckID, fmt.Sprintf("mode=%s tag=%q owner=%q approver=%q expires=%s reason=%q",
+	err := s.auditAction(ctx, sess.Email, "exception.add", e.CheckID, fmt.Sprintf("mode=%s tag=%q owner=%q approver=%q expires=%s reason=%q",
 		e.Mode, e.Tag, e.Owner, e.Approver, e.Expires.Format(time.DateOnly), e.Reason), func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `INSERT INTO risk_exceptions(check_id, mode, tag, reason, owner, approver, expires_at, created_by, tenant_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, e.CheckID, e.Mode, e.Tag, e.Reason, e.Owner, e.Approver, e.Expires, e.CreatedBy, ownerTenant(ctx)).Scan(&id)
+		var err error
+		id, err = insertException(ctx, tx, e, ownerTenant(ctx))
+		return err
 	})
 	return id, err
+}
+
+func insertException(ctx context.Context, tx pgx.Tx, e riskException, tenant int64) (int64, error) {
+	var id int64
+	err := tx.QueryRow(ctx, `INSERT INTO risk_exceptions(check_id, mode, tag, reason, owner, approver, expires_at, created_by, tenant_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, e.CheckID, e.Mode, e.Tag, e.Reason, e.Owner, e.Approver, e.Expires, e.CreatedBy, tenant).Scan(&id)
+	return id, err
+}
+
+// exceptionApproval is the payload of a requested risk exception
+// (approval action exception.add). The admin who approves it is recorded
+// as its approver, the requester as its creator.
+type exceptionApproval struct {
+	CheckID string    `json:"check_id"`
+	Mode    string    `json:"mode"`
+	Tag     string    `json:"tag"`
+	Reason  string    `json:"reason"`
+	Owner   string    `json:"owner"`
+	Expires time.Time `json:"expires_at"`
+	Tenant  int64     `json:"tenant"`
+}
+
+// requestException stores a risk exception as a four eyes request: another
+// admin approves it in the inbox (applyExceptionApproval).
+func (s *Server) requestException(ctx context.Context, sess session, e riskException, expires string) (int64, error) {
+	if err := s.checkException(ctx, sess, &e, expires, false); err != nil {
+		return 0, err
+	}
+	return s.requestApproval(ctx, sess, "exception.add", e.CheckID, exceptionApproval{e.CheckID, e.Mode, e.Tag, e.Reason, e.Owner, e.Expires, ownerTenant(ctx)}, truncate(e.Reason, 500))
+}
+
+// addOrRequestException adds the exception directly, or with four eyes
+// approval on stores it as a request (pending).
+func (s *Server) addOrRequestException(ctx context.Context, sess session, e riskException, expires string) (id int64, pending bool, err error) {
+	if s.settings().FourEyes {
+		id, err = s.requestException(ctx, sess, e, expires)
+		return id, true, err
+	}
+	id, err = s.addException(ctx, sess, e, expires)
+	return id, false, err
+}
+
+func applyExceptionApproval(ctx context.Context, tx pgx.Tx, a approval, approver string) error {
+	var c exceptionApproval
+	if err := json.Unmarshal(a.Payload, &c); err != nil {
+		return err
+	}
+	if !c.Expires.After(time.Now()) {
+		return errApproval("the requested exception would have expired already")
+	}
+	e := riskException{CheckID: c.CheckID, Mode: c.Mode, Tag: c.Tag, Reason: c.Reason, Owner: c.Owner, Approver: approver, Expires: c.Expires, CreatedBy: a.RequestedBy}
+	id, err := insertException(ctx, tx, e, c.Tenant)
+	if err != nil {
+		return err
+	}
+	return audit(ctx, tx, a.RequestedBy, "exception.add", c.CheckID, fmt.Sprintf("#%d mode=%s tag=%q owner=%q approver=%q expires=%s reason=%q (approval #%d by %s)",
+		id, c.Mode, c.Tag, c.Owner, approver, c.Expires.Format(time.DateOnly), c.Reason, a.ID, approver))
 }
 
 func (s *Server) exceptionRevoke(w http.ResponseWriter, r *http.Request, sess session) {

@@ -28,9 +28,9 @@ import (
 
 // The admin REST API lives on the console listener under /api/v1/. Every
 // action goes through the same functions the console uses, so rules,
-// validation and audit entries stay identical. Callers authenticate with a
-// bearer token created on the API tokens page; there are no cookies, so
-// there is nothing for CSRF to abuse.
+// validation and audit entries stay identical. Automation authenticates
+// with a bearer token created on the API tokens page; the console app under
+// /app/ sends the session cookie plus the CSRF header (sessionCaller).
 
 //go:embed openapi.json
 var openAPIDoc []byte
@@ -50,11 +50,11 @@ func (s *Server) apiFail(w http.ResponseWriter, err error) {
 		return
 	}
 	if overloaded(err) {
-		s.log.Warn("admin api request: database busy", "err", err, "request_id", requestID(w))
+		s.log.Warn("admin api request: database busy", "err", logSafe(err.Error()), "request_id", logSafe(requestID(w)))
 		retryLater(w, 30, "server busy, retry later")
 		return
 	}
-	s.log.Error("admin api request failed", "err", err, "request_id", requestID(w))
+	s.log.Error("admin api request failed", "err", logSafe(err.Error()), "request_id", logSafe(requestID(w)))
 	problem(w, http.StatusInternalServerError, "internal error")
 }
 
@@ -68,14 +68,24 @@ type apiCaller struct {
 	Tags     []string // device scope of a helpdesk or auditor token; empty: every device
 	Tenant   int64    // tenant of the token, 0 for global tokens (tenant.go)
 	Scopes   []string // tokenScopes it is limited to; empty: all its role allows
+	Sess     *session // console session of a cookie authenticated caller (sessionCaller), nil for tokens
 }
 
-// actor names the token in the audit log and as creator of commands.
-func (c apiCaller) actor() string { return fmt.Sprintf("api:%s#%d", c.Name, c.ID) }
+// actor names the token in the audit log and as creator of commands; a
+// console session acts under its login, as on the console pages.
+func (c apiCaller) actor() string {
+	if c.Sess != nil {
+		return c.Sess.Email
+	}
+	return fmt.Sprintf("api:%s#%d", c.Name, c.ID)
+}
 
 // sess is the session the shared console functions check roles against.
 // It carries the token's device scope, so the W2 scope rules apply.
 func (c apiCaller) sess() session {
+	if c.Sess != nil {
+		return *c.Sess
+	}
 	return session{Email: c.actor(), Role: c.Role, Tags: c.Tags, Tenant: c.Tenant, Super: c.Tenant == 0}
 }
 
@@ -196,9 +206,10 @@ func routeScope(r *http.Request, level string) string {
 		return "audit"
 	case level == "helpdesk":
 		return "commands"
-	case level == "read":
+	case level == "read", level == "self":
 		return "read"
-	case strings.HasPrefix(path, "/api/v1/library-items"), strings.HasPrefix(path, "/api/v1/blueprints"), strings.HasPrefix(path, "/api/v1/devices"):
+	case strings.HasPrefix(path, "/api/v1/library-items"), strings.HasPrefix(path, "/api/v1/blueprints"), strings.HasPrefix(path, "/api/v1/devices"),
+		strings.HasPrefix(path, "/api/v1/config/"):
 		return "library"
 	}
 	return "admin"
@@ -222,24 +233,56 @@ func (s *Server) auditRead(r *http.Request, level string) bool {
 
 type apiHandlerFunc func(w http.ResponseWriter, r *http.Request, c apiCaller)
 
-// need guards an API handler. Levels: read (every API role), audit (admin
-// and auditor, as the console's audit page), helpdesk (admin and helpdesk
-// writes, as device commands), admin (admin writes).
+// allows tells whether the caller's role passes an access level: read
+// (every API role), self (changes to the caller's own data, as saved
+// views), audit (admin and auditor, as the console's audit page), helpdesk
+// (admin and helpdesk writes, as device commands), admin (admin writes).
+func (c apiCaller) allows(level string) bool {
+	switch level {
+	case "read":
+		return true
+	case "self":
+		return !c.ReadOnly
+	case "audit":
+		return c.Role == "admin" || c.Role == "auditor"
+	case "helpdesk":
+		return !c.ReadOnly && (c.Role == "admin" || c.Role == "helpdesk")
+	case "admin":
+		return !c.ReadOnly && c.Role == "admin"
+	}
+	return false
+}
+
+// levelScopes are the token scopes that open an access level outside a
+// route (can); routeScope decides for routes.
+var levelScopes = map[string][]string{
+	"read": {"read"}, "self": {"read"}, "audit": {"audit"}, "helpdesk": {"commands"}, "admin": {"library", "admin"},
+}
+
+// can tells whether the caller passes an access level by role and token
+// scopes, as need does for a route. Handlers use it for data or actions
+// beyond their route's own level (audit entries in a stream, sharing).
+func (c apiCaller) can(level string) bool {
+	if !c.allows(level) {
+		return false
+	}
+	if len(c.Scopes) == 0 {
+		return true
+	}
+	for _, sc := range levelScopes[level] {
+		if slices.Contains(c.Scopes, sc) {
+			return true
+		}
+	}
+	return false
+}
+
+// need guards an API handler with an access level (allows) and the
+// token's scopes.
 func (s *Server) need(level string, h apiHandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c, _ := r.Context().Value(apiCallerKey).(apiCaller)
-		var ok bool
-		switch level {
-		case "read":
-			ok = true
-		case "audit":
-			ok = c.Role == "admin" || c.Role == "auditor"
-		case "helpdesk":
-			ok = !c.ReadOnly && (c.Role == "admin" || c.Role == "helpdesk")
-		case "admin":
-			ok = !c.ReadOnly && c.Role == "admin"
-		}
-		if !ok {
+		if !c.allows(level) {
 			s.deny(w, r, c, "the token's role cannot do this")
 			return
 		}
@@ -317,9 +360,16 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/tags", s.need("read", s.apiTags))
 	m.HandleFunc("GET /api/v1/audit", s.need("audit", s.apiAudit))
 	s.apiAdminRoutes(mux, m)
+	s.appAPIRoutes(m) // console app endpoints (appapi.go)
 	mux.Handle("/api/v1/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pw := &problemWriter{ResponseWriter: w}
-		c, ok := s.bearer(pw, r)
+		var c apiCaller
+		var ok bool
+		if _, err := r.Cookie(sessionCookie); err == nil && r.Header.Get("Authorization") == "" {
+			c, ok = s.sessionCaller(pw, r)
+		} else {
+			c, ok = s.bearer(pw, r)
+		}
 		if !ok {
 			return
 		}
@@ -327,7 +377,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 			s.deny(pw, r, c, "metrics tokens only read /metrics")
 			return
 		}
-		r.Body = http.MaxBytesReader(pw, r.Body, 1<<20)
+		r.Body = http.MaxBytesReader(pw, r.Body, s.apiBodyLimit(pw, r)) // 1 MiB, package uploads more
 		m.ServeHTTP(pw, r.WithContext(context.WithValue(r.Context(), apiCallerKey, c)))
 	}))
 }
@@ -587,6 +637,9 @@ type apiDevice struct {
 	Checks       int             `json:"checks"`
 	LastSeen     *time.Time      `json:"last_seen"`
 	Retired      bool            `json:"retired"`
+	Desktop      string          `json:"desktop"`
+	MemoryMB     uint64          `json:"memory_mb"`
+	Locked       bool            `json:"auto_locked"`
 	BlueprintID  *int64          `json:"blueprint_id,omitempty"`
 	EnrolledAt   *time.Time      `json:"enrolled_at,omitempty"`
 	Inventory    json.RawMessage `json:"inventory,omitempty"`
@@ -597,11 +650,12 @@ func toAPIDevice(d deviceRow) apiDevice {
 		d.Tags = []string{}
 	}
 	return apiDevice{ID: d.ID, Hostname: d.Hostname, OS: d.OS, AgentVersion: d.AgentVersion, Blueprint: d.Blueprints, Tags: d.Tags,
-		Status: d.Status, Failing: d.Failing, Checks: d.Checks, LastSeen: d.LastSeen, Retired: d.Retired}
+		Status: d.Status, Failing: d.Failing, Checks: d.Checks, LastSeen: d.LastSeen, Retired: d.Retired,
+		Desktop: d.Desktop, MemoryMB: d.MemoryMB, Locked: d.AutoLocked}
 }
 
 func (s *Server) apiDevices(w http.ResponseWriter, r *http.Request, c apiCaller) {
-	dq, err := parseDeviceQuery(r.URL.Query(), s.staleAfter())
+	where, err := s.apiDeviceWhere(r, c)
 	if err != nil {
 		problem(w, http.StatusBadRequest, err.Error())
 		return
@@ -610,18 +664,12 @@ func (s *Server) apiDevices(w http.ResponseWriter, r *http.Request, c apiCaller)
 	if !ok {
 		return
 	}
-	where := dq.where()
-	scope, sargs := scopeCond(c.sess(), 0)
-	where.add(scope, sargs...)
-	if cur != "" {
-		host, id, ok := strings.Cut(cur, "\x00")
-		if !ok {
-			problem(w, http.StatusBadRequest, "invalid cursor")
-			return
-		}
-		where.add(`(d.hostname, d.id) > ($1, $2)`, host, id)
+	order, so, err := deviceOrder(r.URL.Query().Get("sort"), cur, &where)
+	if err != nil {
+		problem(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	list, err := s.listDevicesQuery(r.Context(), where.sql(), fmt.Sprintf(" ORDER BY d.hostname, d.id LIMIT %d", limit+1), where.args...)
+	list, err := s.listDevicesQuery(r.Context(), where.sql(), fmt.Sprintf("%s LIMIT %d", order, limit+1), where.args...)
 	if err != nil {
 		s.apiFail(w, err)
 		return
@@ -629,7 +677,7 @@ func (s *Server) apiDevices(w http.ResponseWriter, r *http.Request, c apiCaller)
 	page := listPage{}
 	if len(list) > limit {
 		list = list[:limit]
-		page.NextCursor = cursor(list[limit-1].Hostname + "\x00" + list[limit-1].ID)
+		page.NextCursor = deviceCursor(so, list[limit-1])
 	}
 	items := make([]apiDevice, len(list))
 	for i, d := range list {
@@ -668,17 +716,45 @@ func (s *Server) apiDeviceGet(w http.ResponseWriter, r *http.Request, c apiCalle
 	writeJSON(w, d)
 }
 
-// apiDevicePatch changes a device's tags and explicit blueprint (null:
-// default), with the console's tag rules and audit action.
+// apiDevicePatch changes a device's tags, explicit blueprint (null:
+// default), desktop users and primary user (empty: none), with the
+// console's rules and audit action (deviceAssign).
 func (s *Server) apiDevicePatch(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	ctx := r.Context()
 	id := r.PathValue("id")
 	var body struct {
 		Tags        *[]string       `json:"tags"`
 		BlueprintID json.RawMessage `json:"blueprint_id"`
+		Users       *[]api.User     `json:"users"`
+		PrimaryUser *string         `json:"primary_user"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
+	}
+	users := []byte("[]") // a valid parameter even when users stay
+	if body.Users != nil {
+		seen := map[string]bool{}
+		for i, u := range *body.Users {
+			u.Email = strings.ToLower(strings.TrimSpace(u.Email))
+			(*body.Users)[i] = u
+			if err := u.Validate(); err != nil || seen[u.Username] {
+				problemField(w, http.StatusUnprocessableEntity, "users", "invalid or repeated user "+strconv.Quote(u.Username))
+				return
+			}
+			seen[u.Username] = true
+		}
+		users, _ = json.Marshal(*body.Users)
+	}
+	var primary *int64
+	if body.PrimaryUser != nil {
+		if email := strings.ToLower(strings.TrimSpace(*body.PrimaryUser)); email != "" {
+			uid, err := s.dirPersonID(ctx, c.sess(), email)
+			if err != nil {
+				problemField(w, http.StatusUnprocessableEntity, "primary_user", "primary user not found in the directory")
+				return
+			}
+			primary = &uid
+		}
 	}
 	var tags []string
 	if body.Tags != nil {
@@ -722,11 +798,23 @@ func (s *Server) apiDevicePatch(w http.ResponseWriter, r *http.Request, c apiCal
 	if setBP {
 		detail = append(detail, "blueprint="+strings.Trim(string(body.BlueprintID), " "))
 	}
+	if body.Users != nil {
+		detail = append(detail, "users="+string(users))
+	}
+	if body.PrimaryUser != nil {
+		detail = append(detail, "primary_user="+strings.ToLower(strings.TrimSpace(*body.PrimaryUser)))
+	}
 	err := s.auditAction(ctx, c.actor(), "device.assign", id, strings.Join(detail, " "), func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `UPDATE devices SET tags = CASE WHEN $2 THEN $3::text[] ELSE tags END,
-			blueprint_id = CASE WHEN $4 THEN $5::bigint ELSE blueprint_id END WHERE id=$1`, id, body.Tags != nil, tags, setBP, bpID)
+			blueprint_id = CASE WHEN $4 THEN $5::bigint ELSE blueprint_id END,
+			users = CASE WHEN $6 THEN $7::jsonb ELSE users END,
+			primary_user_id = CASE WHEN $8 THEN $9::bigint ELSE primary_user_id END WHERE id=$1`,
+			id, body.Tags != nil, tags, setBP, bpID, body.Users != nil, string(users), body.PrimaryUser != nil, primary)
 		if err == nil && tag.RowsAffected() == 0 {
 			err = &userError{http.StatusNotFound, "device not found"}
+		}
+		if err == nil && body.Users != nil {
+			err = signDeviceUsers(ctx, tx, id)
 		}
 		return err
 	})

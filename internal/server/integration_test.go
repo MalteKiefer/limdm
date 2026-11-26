@@ -114,8 +114,15 @@ func TestIntegration(t *testing.T) {
 		return resp.StatusCode, string(b)
 	}
 
-	if code, _ := ui("GET", "/", nil, session{}); code != http.StatusFound {
+	if code, _ := ui("GET", "/classic", nil, session{}); code != http.StatusFound {
 		t.Fatalf("anonymous must be redirected to login, got %d", code)
+	}
+	if req, _ := http.NewRequest("GET", admin.URL+"/", nil); true {
+		resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+		if err != nil || resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/app/" {
+			t.Fatalf("/ must lead to the console app: %v %v", resp, err)
+		}
+		resp.Body.Close()
 	}
 	code, body := ui("POST", "/tokens", url.Values{"note": {"test"}, "uses": {"2"}, "days": {"1"}, "blueprint_id": {"0"}}, adminSess)
 	token := regexp.MustCompile(`lmt_[A-Za-z0-9_-]+`).FindString(body)
@@ -378,7 +385,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// every admin page renders
-	pages := []string{"/", "/devices", "/devices?status=non-compliant&q=laptop", "/compliance", "/compliance?state=failing&level=1&framework=iso&sort=fail&q=luks", "/blueprints", "/blueprints/" + bpID, "/blueprints/new", "/library", "/library/new?type=com.limdm.packages", "/library/" + itemID("Debian tools"), "/tokens", "/audit"}
+	pages := []string{"/classic", "/devices", "/devices?status=non-compliant&q=laptop", "/compliance", "/compliance?state=failing&level=1&framework=iso&sort=fail&q=luks", "/blueprints", "/blueprints/" + bpID, "/blueprints/new", "/library", "/library/new?type=com.limdm.packages", "/library/" + itemID("Debian tools"), "/tokens", "/audit"}
 	for _, tab := range []string{"overview", "hardware", "network", "software", "software&sub=sources", "accounts", "accounts&sub=groups&system=1", "compliance", "declarations", "commands&type=reboot"} {
 		pages = append(pages, "/devices/"+er.DeviceID+"?tab="+tab+"&q=open&page=2")
 	}
@@ -649,7 +656,7 @@ func TestIntegration(t *testing.T) {
 		t.Fatal("replayed TOTP code accepted")
 	}
 	getWith := func(c *http.Cookie) int {
-		req, _ := http.NewRequest("GET", admin.URL+"/", nil)
+		req, _ := http.NewRequest("GET", admin.URL+"/classic", nil)
 		req.AddCookie(c)
 		resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
 		if err != nil {
@@ -742,7 +749,7 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("GET %s: %d", p, code)
 		}
 	}
-	if code, body := ui("GET", "/", nil, adminSess); code != 200 || !strings.Contains(body, "First steps") {
+	if code, body := ui("GET", "/classic", nil, adminSess); code != 200 || !strings.Contains(body, "First steps") {
 		t.Fatalf("overview without company settings must show the first steps: %d", code)
 	}
 	if code, _ := ui("POST", "/onboarding/dismiss", url.Values{}, adminSess); code != http.StatusSeeOther {
@@ -780,14 +787,14 @@ func TestIntegration(t *testing.T) {
 	if _, body := ui("POST", "/users/update", url.Values{"login": {"admin@firma.de"}, "role": {"admin"}, "disabled": {"on"}}, other); strings.Contains(body, "must remain") {
 		t.Fatal("disabling one of two admins must be allowed")
 	}
-	if code, _ := ui("GET", "/", nil, adminSess); code != http.StatusFound {
+	if code, _ := ui("GET", "/classic", nil, adminSess); code != http.StatusFound {
 		t.Fatalf("session of a disabled OIDC admin must end: %d", code)
 	}
 	if _, body := ui("POST", "/users/update", url.Values{"login": {"neu@firma.de"}, "role": {"auditor"}}, other); !strings.Contains(body, "your own account") {
 		t.Fatal("the last admin demoting themselves must be refused")
 	}
 	db.Exec(ctx, `UPDATE console_users SET disabled=false, role='admin' WHERE email='admin@firma.de'`)
-	if code, _ := ui("GET", "/", nil, adminSess); code != http.StatusFound {
+	if code, _ := ui("GET", "/classic", nil, adminSess); code != http.StatusFound {
 		t.Fatalf("a session revoked by disabling must stay invalid after re-enabling: %d", code)
 	}
 	db.QueryRow(ctx, `SELECT session_gen FROM console_users WHERE email='admin@firma.de'`).Scan(&adminSess.Gen) // signs in again
@@ -879,7 +886,7 @@ func TestIntegration(t *testing.T) {
 	if s.settings().StaleHours != 48 || s.oidc() != nil {
 		t.Fatalf("settings not active: %+v", s.settings())
 	}
-	if code, _ := ui("GET", "/", nil, adminSess); code != http.StatusFound {
+	if code, _ := ui("GET", "/classic", nil, adminSess); code != http.StatusFound {
 		t.Fatal("OIDC sessions must end once OIDC is removed")
 	}
 	s.rt.Store(&runtimeState{set: Settings{LocalLogin: true, StaleHours: 24, OIDCIssuer: "https://idp.test", OIDCClientID: "x"}, auth: &oidcAuth{}})

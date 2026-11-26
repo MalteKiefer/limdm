@@ -1,0 +1,24 @@
+-- Devices for the devices area tests (e2e/devices.spec.ts); idempotent.
+BEGIN;
+SET LOCAL limdm.retention = 'on'; -- device_events are append only outside the retention
+DELETE FROM devices WHERE id LIKE 'e2e-%';
+INSERT INTO devices(id, cert_serial, cert_not_after, hostname, inventory, tags, last_seen, checks, failing, agent_version, enrolled_at)
+VALUES
+  ('e2e-ws1', 's1', now() + interval '300 days', 'e2e-ws1',
+   '{"os_name":"Ubuntu 24.04 LTS","os_version":"24.04","kernel":"6.8.0","arch":"x86_64","desktop":"GNOME","memory_mb":16384,"vendor":"Lenovo","model":"T14","serial":"PF12345",
+     "cpu":"Intel Core i7","cpu_cores":8,"cpu_threads":16,"disk_gb":512,
+     "volumes":[{"device":"/dev/mapper/root","mount":"/","fs":"ext4","size_gb":500,"free_gb":120,"encrypted":true,"encryption":"LUKS2"}],
+     "disks":[{"name":"nvme0n1","model":"Samsung","size_gb":512,"type":"ssd"}],
+     "accounts":[{"name":"jdoe","uid":1000,"home":"/home/jdoe","shell":"/bin/bash","source":"local","admin":true}],
+     "interfaces":[{"name":"wlp0s20f3","kind":"wifi","state":"up","ips":["192.168.1.20/24"],"mac":"aa:bb:cc:dd:ee:ff","mtu":1500}],
+     "flatpaks":[{"id":"org.mozilla.firefox","name":"Firefox","version":"130.0","branch":"stable","origin":"flathub","installation":"system"}]}',
+   '{prod,berlin}', now(), '[{"id":"ssh.root","title":"SSH root login disabled","level":1,"status":"pass","refs":{"bsi":["SYS.1.3.A2"]}}]', 0, '0.17.0', now() - interval '30 days'),
+  ('e2e-ws2', 's2', now() + interval '300 days', 'e2e-ws2',
+   '{"os_name":"Debian 12","desktop":"KDE","memory_mb":8192,"serial":"PF67890"}',
+   '{prod}', now() - interval '2 hours', '[{"id":"disk.encryption","title":"Disk encryption","level":1,"status":"fail","detail":"/ is not encrypted"}]', 1, '0.16.0', now() - interval '10 days'),
+  ('e2e-srv1', 's3', now() + interval '300 days', 'e2e-srv1',
+   '{"os_name":"Fedora 41","memory_mb":32768}',
+   '{}', now() - interval '9 days', '[]', 0, '0.17.0', now() - interval '60 days');
+INSERT INTO device_events(device_id, at, detail) VALUES ('e2e-ws1', now() - interval '5 minutes', 'checked in from the e2e seed');
+INSERT INTO device_packages(device_id, name, version, arch) VALUES ('e2e-ws1', 'openssl', '3.0.2-0ubuntu1', 'amd64'), ('e2e-ws1', 'bash', '5.2.21', 'amd64'), ('e2e-ws2', 'openssl', '3.0.15-1', 'amd64');
+COMMIT;

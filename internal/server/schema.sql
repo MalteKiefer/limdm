@@ -859,3 +859,75 @@ CREATE INDEX IF NOT EXISTS device_packages_name ON device_packages(name, device_
 ALTER TABLE catalog_apps ADD COLUMN IF NOT EXISTS seq BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE catalog_remotes ADD COLUMN IF NOT EXISTS seq BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS users_seq BIGINT NOT NULL DEFAULT 0;
+
+-- UI-F
+-- saved views of the console app (views.go): personal, or shared by an
+-- admin with the tenant (tenant_id NULL: the global view)
+CREATE TABLE IF NOT EXISTS saved_views (
+    id         BIGSERIAL PRIMARY KEY,
+    owner      TEXT NOT NULL,
+    tenant_id  BIGINT REFERENCES tenants(id) ON DELETE CASCADE,
+    list       TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    query      TEXT NOT NULL DEFAULT '',
+    sort       TEXT NOT NULL DEFAULT '',
+    columns    TEXT[] NOT NULL DEFAULT '{}',
+    shared     BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS saved_views_owner ON saved_views(owner, list);
+CREATE INDEX IF NOT EXISTS saved_views_shared ON saved_views(tenant_id, list) WHERE shared;
+-- the console app counts failed commands of the last day (appstats.go)
+CREATE INDEX IF NOT EXISTS commands_updated ON commands(updated_at);
+
+-- UI-D
+-- why an approval was approved or rejected (app inbox, approvals.go)
+ALTER TABLE approvals ADD COLUMN IF NOT EXISTS decision_reason TEXT NOT NULL DEFAULT '';
+-- daily security update and agent version counts (app_home_updates.go); NULL before recorded
+ALTER TABLE fleet_history ADD COLUMN IF NOT EXISTS security_devices INT;
+ALTER TABLE fleet_history ADD COLUMN IF NOT EXISTS security_old INT;
+ALTER TABLE fleet_history ADD COLUMN IF NOT EXISTS agent_current INT;
+ALTER TABLE fleet_history ADD COLUMN IF NOT EXISTS agent_total INT;
+-- scheduled reports (app_reports_schedule.go): a saved report preset run
+-- as its owner in the tenant view it was scheduled in, sent as a link
+CREATE TABLE IF NOT EXISTS report_schedules (
+    id         BIGSERIAL PRIMARY KEY,
+    view_id    BIGINT NOT NULL REFERENCES saved_views(id) ON DELETE CASCADE,
+    owner      TEXT NOT NULL,
+    tenant_id  BIGINT REFERENCES tenants(id) ON DELETE CASCADE, -- NULL: the all tenants view
+    cadence    TEXT NOT NULL CHECK (cadence IN ('daily', 'weekly', 'monthly')),
+    channels   BIGINT[] NOT NULL DEFAULT '{}',
+    emails     TEXT[] NOT NULL DEFAULT '{}',
+    next_run   TIMESTAMPTZ NOT NULL,
+    last_run   TIMESTAMPTZ,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (view_id, owner)
+);
+CREATE INDEX IF NOT EXISTS report_schedules_due ON report_schedules(next_run);
+CREATE TABLE IF NOT EXISTS report_runs (
+    id          BIGSERIAL PRIMARY KEY,
+    schedule_id BIGINT NOT NULL REFERENCES report_schedules(id) ON DELETE CASCADE,
+    at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    kind        TEXT NOT NULL,
+    rows        INT NOT NULL DEFAULT 0,
+    sha256      TEXT NOT NULL DEFAULT '',
+    content     BYTEA NOT NULL DEFAULT '',
+    error       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS report_runs_schedule ON report_runs(schedule_id, id DESC);
+
+-- ws/ui-config
+-- pilot rollout of a blueprint change (app_config_pilot.go): the devices
+-- moved to the pilot copy and the blueprint they had set before
+CREATE TABLE IF NOT EXISTS blueprint_pilots (
+    pilot_id          BIGINT NOT NULL REFERENCES blueprints(id) ON DELETE CASCADE,
+    blueprint_id      BIGINT NOT NULL REFERENCES blueprints(id) ON DELETE CASCADE,
+    device_id         TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    prev_blueprint_id BIGINT,
+    created_by        TEXT NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (pilot_id, device_id)
+);
+CREATE INDEX IF NOT EXISTS blueprint_pilots_blueprint ON blueprint_pilots(blueprint_id);

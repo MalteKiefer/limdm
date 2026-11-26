@@ -4,6 +4,41 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## Unreleased
+
+### Upgrade notes
+- The new console app under `/app/` is the default: `/` and a sign in without a target open it. The classic console stays complete as a fallback, its overview moved from `/` to `/classic`; the app links to it (**Classic console**) and back (**New console**).
+- `limdm-server local-admin` needs the CA directory (`LIMDM_CA_DIR`, for example through `-env`) once a server has started, to key its audit entry; without it the command stops instead of breaking the audit chain.
+
+### Added
+- Console app (React, served by the server itself, strict CSP, German and English, light and dark, compact density, keyboard and screen reader support, down to 390 px): home, inbox, devices, compliance, configuration, activity, reports and settings, with a command palette and global search.
+- Home: KPIs, tenant comparison, first steps with deep links, failed command trend, open security updates and current agents with daily history.
+- Inbox, activity and reports pages; event annotations in the compliance history.
+- Scheduled reports (daily, weekly, monthly) for saved report presets, sent as a link to notification channels or e-mail, run as the owner with current rights, audited.
+- Devices area: list with query language (German aliases, `status:locked`, `kind`), side sheet, device page with six tabs, every device action, remote shell, bulk actions and the add device flow.
+- Compliance area: score and trend, framework cards, checks and controls with drill down to devices, remediation hints, heatmap, risk exceptions, history at a date, policies and custom checks, evidence export with SHA-256 check.
+- Signed evidence export (`evidence.json`, Ed25519 with the command key) and PDF evidence report (`evidence.pdf`), both audited; `limdm-server evidence verify FILE`.
+- Risk exception requests through four eyes approval (`POST /api/v1/exception-requests`, approval action `exception.add`) for the helpdesk and admins.
+- Configuration area: blueprints with a visual tree editor, library forms for all 33 declaration types, versions with diff, rollback and restore, software catalog and package repository; pilot rollout of blueprint changes (promote or abort).
+- Titles, help texts, sections, choices, widgets and limits in English and German for every declaration schema; `lang` parameter, `/api/v1/schemas` with description, documentation link and four eyes flag.
+- New library items start from the example payload of their type, or from a source or Flatpak remote a device reported (`GET /api/v1/config/library/template`).
+- Settings area: every administration section, profile with the date notation, help and glossary.
+- Audited tenant switch through the API (`tenant.switch`).
+- Sign in returns to the page it started from through a checked `next` target.
+- Admin API endpoints for all of the above: session API (`/api/v1/me`, live events, saved views), statistics (`/stats/fleet`, `/stats/compliance`, `/stats/attention`, `/stats/tenants`, `/stats/commands`, `/stats/updates`, `/stats/annotations`), `/onboarding`, `/commands`, `/activity`, `/audit/status`, `/audit/verify`, `/compliance`, `/compliance/history`, `/compliance/policies`, `/exports/{kind}`, `/report-schedules`, `/report-runs/{id}`, device detail, packages, timeline, retire, delete, agent update, recovery key view, remote shell, bulk actions, enrollment tokens, configuration and software, settings, users, tenants, keys, backup, notification channels, directory, network, agents and profile. Every endpoint is in `openapi.json`.
+
+### Changed
+- Console and API share one function per action (settings, users, tenants, backup, directory, agents, network, profile, channels, software, packages), so roles, scope, tenant, four eyes and audit are the same; rejected requests carry an HTTP status.
+- Approval decisions take a reason (stored, audited); the console app requires one to reject.
+- With four eyes approval on, adding a risk exception becomes a request; the approving admin is recorded as approver.
+- `PATCH /api/v1/devices/{id}` also sets desktop users and the primary user; device list items carry desktop, memory_mb and auto_locked.
+
+### Fixed
+- `limdm-server local-admin` wrote its audit entry without the HMAC key, which broke a keyed audit chain; the audit function now refuses to write into a keyed chain without the key.
+- Tenant and scoped accounts no longer see or assign directory people outside their devices.
+- Device scoped callers are refused on every configuration route.
+- A shadowed embedded field (`enabled` in login) appeared twice in the schema.
+
 ## 0.17.0 (2026-11-26)
 
 ### Upgrade notes

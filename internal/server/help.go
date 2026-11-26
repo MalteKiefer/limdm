@@ -361,5 +361,5 @@ func (s *Server) onboarding(ctx context.Context, r *http.Request, sess session) 
 func (s *Server) onboardingDismiss(w http.ResponseWriter, r *http.Request, _ session) {
 	http.SetCookie(w, &http.Cookie{Name: onboardingCookie, Value: "hidden", Path: "/", Secure: true, HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, MaxAge: 365 * 24 * 3600})
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/classic", http.StatusSeeOther)
 }

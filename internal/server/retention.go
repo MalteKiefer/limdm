@@ -211,31 +211,37 @@ func (s *Server) auditStart(ctx context.Context) (int64, []byte, error) {
 // metrics, commands, recovery keys and app requests. Audit entries about it
 // stay (they follow the audit retention); the deletion is one of them.
 func (s *Server) deviceDelete(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	id := r.PathValue("id")
+	err := s.deleteDevice(r.Context(), sess.Email, r.PathValue("id"), r.FormValue("confirm"))
+	var ue *userError
+	switch {
+	case errors.Is(err, errNotFound):
+		http.NotFound(w, r)
+	case errors.As(err, &ue):
+		s.errorPage(w, r, sess, ue.Status, ue.Msg)
+	case err != nil:
+		s.fail(w, err)
+	default:
+		http.Redirect(w, r, "/devices", http.StatusSeeOther)
+	}
+}
+
+// deleteDevice deletes a retired device whose host name confirm repeats.
+func (s *Server) deleteDevice(ctx context.Context, actor, id, confirm string) error {
 	var host string
 	var retired bool
 	if err := s.db.QueryRow(ctx, `SELECT hostname, retired FROM devices WHERE id=$1`, id).Scan(&host, &retired); err != nil {
-		http.NotFound(w, r)
-		return
+		return errNotFound
 	}
 	if !retired {
-		s.errorPage(w, r, sess, http.StatusBadRequest, "retire the device before deleting it")
-		return
+		return &userError{http.StatusBadRequest, "retire the device before deleting it"}
 	}
-	if !strings.EqualFold(strings.TrimSpace(r.FormValue("confirm")), host) {
-		s.errorPage(w, r, sess, http.StatusBadRequest, "type the host name to confirm")
-		return
+	if !strings.EqualFold(strings.TrimSpace(confirm), host) {
+		return &userError{http.StatusBadRequest, "type the host name to confirm"}
 	}
-	err := s.retentionTx(ctx, func(tx pgx.Tx) error {
+	return s.retentionTx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM devices WHERE id=$1 AND retired`, id); err != nil {
 			return err
 		}
-		return audit(ctx, tx, sess.Email, "device.delete", id, "hostname="+host+"; device, events, metrics, commands, recovery keys and app requests deleted")
+		return audit(ctx, tx, actor, "device.delete", id, "hostname="+host+"; device, events, metrics, commands, recovery keys and app requests deleted")
 	})
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/devices", http.StatusSeeOther)
 }

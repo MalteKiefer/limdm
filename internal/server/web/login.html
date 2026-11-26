@@ -6,11 +6,11 @@
     <h1>{{t "Sign in"}}</h1>
     <p class="sub">{{t "Device management console"}}</p>
     {{template "err" .Error}}
-    {{if .OIDC}}<a class="button" href="/login/oidc">{{t "Continue with single sign on"}}</a>{{end}}
+    {{if .OIDC}}<a class="button" href="/login/oidc{{with .Next}}?next={{.}}{{end}}">{{t "Continue with single sign on"}}</a>{{end}}
     {{if and .OIDC .Local}}<div class="or">{{t "or local administrator"}}</div>{{end}}
     {{if .Local}}
     <form method="post" action="/login/local" autocomplete="off">
-      <input type="hidden" name="csrf" value="{{.LoginCSRF}}">
+      <input type="hidden" name="csrf" value="{{.LoginCSRF}}">{{with .Next}}<input type="hidden" name="next" value="{{.}}">{{end}}
       <label>{{t "Username"}}<input name="username" required autocomplete="username" autocapitalize="none" spellcheck="false"></label>
       <label>{{t "Password"}}<input name="password" type="password" required autocomplete="current-password"></label>
       <label>{{t "Authenticator code"}}<input name="totp" pattern="[0-9]{6}|[A-Za-z2-7]{4}(-[A-Za-z2-7]{4}){2}|[A-Za-z2-7]{4}(-[A-Za-z2-7]{4}){5}" maxlength="29" required autocomplete="one-time-code" spellcheck="false"><small class="field-hint">{{t "Or a recovery code"}}</small></label>

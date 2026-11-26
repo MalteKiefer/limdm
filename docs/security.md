@@ -116,7 +116,17 @@
 * Sessions: sealed cookies, 30 minutes idle and 8 hours absolute timeout, CSRF tokens on
   every form, `SameSite=Lax`, `Secure`, `HttpOnly`; the sign in form uses a separate
   `SameSite=Strict` token. Signing out ends the sessions of the account everywhere.
-* Admin API and metrics: bearer tokens only, no cookies. Tokens carry a role (`admin`,
+  A page opened without a session sends the browser to the sign in with its own path as
+  `next`; after the sign in it returns there. Only a path of the console origin is
+  accepted (no other host, no `//`, no backslash or control characters, not the sign in
+  pages or the API); anything else lands on the start page, so `next` is no open redirect.
+* Console app (`/app/`): its HTML is served to signed in sessions only, its hashed scripts,
+  styles and fonts are the public build and are cached for a year. It calls the admin API
+  with the session cookie; the API then requires a same origin request (`Sec-Fetch-Site`,
+  `Origin`) and, for every change, the session's CSRF token in `X-CSRF-Token`
+  ([admin-api.md](admin-api.md#console-app)). It runs under the same CSP as every console
+  page, which a Playwright test checks for every page and component.
+* Admin API and metrics for automation: bearer tokens. Tokens carry a role (`admin`,
   `helpdesk`, `auditor`, `metrics`), optional scope tags, always expire, are stored as
   SHA-256 hashes, are shown once and can be revoked; creation, revocation, failed
   authentication and role denials are audited. See [admin-api.md](admin-api.md).
@@ -208,7 +218,8 @@ global only.
 **Settings**, **Security**, **Four eyes approval** makes a second administrator approve:
 wipe, lost mode, scripts, role changes of console users, every change to an administrator
 account (adding one, disabling or enabling one, resetting a local administrator's
-credentials), admin API tokens, and optionally recovery key views and remote shell sessions.
+credentials), admin API tokens, risk exceptions (the approving admin is recorded as their
+approver), and optionally recovery key views and remote shell sessions.
 It also covers the declarations that act like a script, so one administrator cannot reach
 root on devices without a second one:
 
