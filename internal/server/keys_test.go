@@ -38,6 +38,34 @@ func TestKeyProviderSelection(t *testing.T) {
 	}
 }
 
+// Rotation steps are for global admins only, whatever the route wrappers
+// do: helpdesk, auditor and admins limited to a scope get 403 before any
+// key is touched.
+func TestKeysActionRoles(t *testing.T) {
+	s := &Server{cfg: Config{CADir: t.TempDir()}, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	call := func(sess session, op string) int {
+		r := httptest.NewRequest("POST", "/settings/keys/"+op+"/ca", nil)
+		r.SetPathValue("op", op)
+		r.SetPathValue("kind", "ca")
+		w := httptest.NewRecorder()
+		s.keysAction(w, r, sess)
+		return w.Code
+	}
+	for _, sess := range []session{{Role: "helpdesk"}, {Role: "auditor"}, {Role: "admin", Tags: []string{"finance"}}} {
+		for _, op := range []string{"rotate", "finish"} {
+			if code := call(sess, op); code != 403 {
+				t.Errorf("%s %v %s: %d", sess.Role, sess.Tags, op, code)
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(s.cfg.CADir, keysFile)); err == nil {
+		t.Fatal("a denied request changed keys.json")
+	}
+	if code := call(session{Role: "admin"}, "bogus"); code != 404 { // passes the role check
+		t.Fatalf("admin: %d", code)
+	}
+}
+
 func TestFileSigner(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "k.key")

@@ -616,8 +616,18 @@ func (s *Server) keyNotice(n notice) {
 	}
 }
 
+// keysAllowed: key status and rotation are for global administrators only.
+func keysAllowed(sess session) bool {
+	// integration hook: once tenants exist, also require a global (non tenant) account here
+	return sess.Role == "admin" && len(sess.Tags) == 0 && len(sess.Groups) == 0
+}
+
 // keysAction runs a rotation step from the Settings, Security, Keys card.
 func (s *Server) keysAction(w http.ResponseWriter, r *http.Request, sess session) {
+	if !keysAllowed(sess) { // checked here too, not only by the route wrappers
+		s.errorPage(w, r, sess, http.StatusForbidden, "only administrators of the whole installation manage keys")
+		return
+	}
 	kind, op := r.PathValue("kind"), r.PathValue("op")
 	var msg string
 	var err error

@@ -380,7 +380,7 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess ses
 		}
 		data["Channels"], data["NotifyEvents"] = views, notifyEvents
 	}
-	if tab == "security" && sess.Role == "admin" && !sess.scoped() {
+	if tab == "security" && keysAllowed(sess) {
 		if keys, err := s.KeysStatus(r.Context()); err != nil {
 			s.log.Error("key status", "err", err)
 		} else {
