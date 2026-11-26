@@ -26,7 +26,7 @@ func TestProxyProtocol(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer ln.Close()
-		pl := proxyListener{ln, []netip.Prefix{netip.MustParsePrefix(trusted)}}
+		pl := proxyListener{ln, func() []netip.Prefix { return []netip.Prefix{netip.MustParsePrefix(trusted)} }}
 		go func() {
 			c, err := net.Dial("tcp", ln.Addr().String())
 			if err == nil {

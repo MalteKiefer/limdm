@@ -15,9 +15,10 @@ import (
 )
 
 // Audit entries and device events go to a SIEM as RFC 5424 syslog messages
-// when LIMDM_SYSLOG names a target (udp://host:514, tcp://host:514 or, with
-// TLS as in RFC 5425, tcp+tls://host:6514; LIMDM_SYSLOG_CA trusts a private
-// CA instead of the system roots). A
+// when Settings, Operations names a target (udp://host:514, tcp://host:514
+// or, with TLS as in RFC 5425, tcp+tls://host:6514; a CA in PEM trusts a
+// private CA instead of the system roots; LIMDM_SYSLOG and LIMDM_SYSLOG_CA
+// are the initial values). A
 // copy outside the database anchors the audit chain externally. Forwarding
 // starts with the entries written after the server started and retries
 // unsent ones; the loop runs on one instance only.
@@ -63,33 +64,22 @@ func syslogToken(s string) string {
 }
 
 func (s *Server) syslogLoop(ctx context.Context) {
-	target := s.cfg.Syslog
-	if target == "" {
-		<-ctx.Done()
-		return
-	}
-	u, err := url.Parse(target)
-	if err != nil || (u.Scheme != "udp" && u.Scheme != "tcp" && u.Scheme != "tcp+tls") || u.Host == "" {
-		s.log.Error("LIMDM_SYSLOG must be udp://host:port, tcp://host:port or tcp+tls://host:port")
-		<-ctx.Done()
-		return
-	}
-	dial, err := syslogDialer(u, s.cfg.SyslogCA)
-	if err != nil {
-		s.log.Error("syslog", "err", err)
-		<-ctx.Done()
-		return
-	}
 	host, _ := os.Hostname()
-	// continue where the last leader stopped (high availability); the first
-	// start begins with new entries
-	var lastAudit, lastEvent int64
-	if err := s.db.QueryRow(ctx, `SELECT coalesce((SELECT last_id FROM syslog_cursor WHERE stream='audit'), (SELECT max(id) FROM audit_log), 0),
-		coalesce((SELECT last_id FROM syslog_cursor WHERE stream='events'), (SELECT max(id) FROM device_events), 0)`).Scan(&lastAudit, &lastEvent); err != nil {
-		s.log.Error("syslog start", "err", err)
-		return
+	var (
+		target, ca           string // the configuration dial belongs to
+		scheme               string
+		dial                 func(context.Context) (net.Conn, error)
+		conn                 net.Conn
+		started              bool
+		lastAudit, lastEvent int64
+	)
+	closeConn := func() {
+		if conn != nil {
+			conn.Close()
+			conn = nil
+		}
 	}
-	var conn net.Conn
+	defer closeConn()
 	send := func(m string) error {
 		if conn == nil {
 			c, err := dial(ctx)
@@ -98,22 +88,16 @@ func (s *Server) syslogLoop(ctx context.Context) {
 			}
 			conn = c
 		}
-		if u.Scheme != "udp" { // octet counting framing (RFC 6587, RFC 5425)
+		if scheme != "udp" { // octet counting framing (RFC 6587, RFC 5425)
 			m = strconv.Itoa(len(m)) + " " + m
 		}
 		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 		if _, err := conn.Write([]byte(m)); err != nil {
-			conn.Close()
-			conn = nil
+			closeConn()
 			return err
 		}
 		return nil
 	}
-	defer func() {
-		if conn != nil {
-			conn.Close()
-		}
-	}()
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 	for {
@@ -121,6 +105,34 @@ func (s *Server) syslogLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		}
+		// target and CA come from Settings, Operations and may change at any time
+		if o := s.ops(); o.Syslog != target || o.SyslogCA != ca {
+			closeConn()
+			target, ca, dial = o.Syslog, o.SyslogCA, nil
+			if target != "" {
+				u, err := url.Parse(target) // validated by prepare
+				if err == nil {
+					scheme = u.Scheme
+					dial, err = syslogDialer(u, ca)
+				}
+				if err != nil {
+					s.log.Error("syslog", "err", err)
+				}
+			}
+		}
+		if dial == nil {
+			continue
+		}
+		if !started {
+			// continue where the last leader stopped (high availability); the
+			// first start begins with new entries
+			if err := s.db.QueryRow(ctx, `SELECT coalesce((SELECT last_id FROM syslog_cursor WHERE stream='audit'), (SELECT max(id) FROM audit_log), 0),
+				coalesce((SELECT last_id FROM syslog_cursor WHERE stream='events'), (SELECT max(id) FROM device_events), 0)`).Scan(&lastAudit, &lastEvent); err != nil {
+				s.log.Error("syslog start", "err", err)
+				continue
+			}
+			started = true
 		}
 		prevAudit, prevEvent := lastAudit, lastEvent
 		if err := s.forwardAudit(ctx, host, &lastAudit, send); err != nil {
@@ -146,13 +158,9 @@ func syslogDialer(u *url.URL, ca string) (func(context.Context) (net.Conn, error
 	}
 	cfg := &tls.Config{ServerName: u.Hostname(), MinVersion: tls.VersionTLS12}
 	if ca != "" {
-		pem, err := os.ReadFile(ca)
-		if err != nil {
-			return nil, fmt.Errorf("LIMDM_SYSLOG_CA: %w", err)
-		}
 		cfg.RootCAs = x509.NewCertPool()
-		if !cfg.RootCAs.AppendCertsFromPEM(pem) {
-			return nil, errors.New("LIMDM_SYSLOG_CA: no certificate found")
+		if !cfg.RootCAs.AppendCertsFromPEM([]byte(ca)) {
+			return nil, errors.New("syslog CA: no certificate found")
 		}
 	}
 	td := &tls.Dialer{NetDialer: d, Config: cfg}

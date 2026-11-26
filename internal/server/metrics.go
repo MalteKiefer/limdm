@@ -105,7 +105,7 @@ func (s *Server) countRequests(listener string, next http.Handler) http.Handler 
 		next.ServeHTTP(rec, r)
 		took := time.Since(start)
 		observeLatency(listener, took)
-		if s.cfg.AccessLog {
+		if s.ops().AccessLog {
 			// the path only: query strings can carry codes and filters
 			s.log.Info("request", "listener", listener, "method", r.Method, "path", truncate(r.URL.Path, 200), "status", max(rec.code, 200),
 				"ms", took.Milliseconds(), "remote", clientIP(r), "request_id", id)

@@ -68,7 +68,10 @@ type Config struct {
 	Keys           KeyProvider
 	ReleaseDir     string
 	StaleAfter     time.Duration
-	Syslog         string // udp://host:port, tcp://host:port or tcp+tls://host:port: audit entries and device events as RFC 5424
+	// initial values of Settings, Operations (OpsSettings): LIMDM_SYSLOG,
+	// LIMDM_SYSLOG_CA (read into PEM), LIMDM_LOG_LEVEL and the ones below
+	Syslog   string
+	LogLevel string
 	// proxies (load balancers) whose X-Forwarded-For is trusted for the client address, besides loopback
 	TrustedProxies []netip.Prefix
 	DrainDelay     time.Duration // between failing /readyz and closing connections at shutdown
@@ -77,7 +80,7 @@ type Config struct {
 	// parallel agent package downloads per instance; more wait, then get 503 (LIMDM_UPDATE_DOWNLOADS)
 	UpdateDownloads int
 	MaxCheckins     int    // check ins decoded and processed at once per instance (LIMDM_MAX_CHECKINS)
-	SyslogCA        string // CA file for tcp+tls syslog targets; empty: system roots
+	SyslogCA        string // PEM of the CA for tcp+tls syslog targets; empty: system roots
 	AccessLog       bool   // a log line per request (LIMDM_ACCESS_LOG)
 	AuditAPIReads   string // off, sensitive or all: API reads written to the audit log (LIMDM_AUDIT_API_READS)
 	// load balancers that send a PROXY v2 header to the agent listener (LIMDM_AGENT_PROXY_PROTOCOL)
@@ -124,7 +127,6 @@ func ConfigFromEnv() (Config, error) {
 		ReleaseKey:    envOr("LIMDM_RELEASE_PUBLIC_KEY", ReleasePubKey),
 		GeoIPURL:      envOr("LIMDM_GEOIP_URL", "https://ipwho.is/"),
 		Syslog:        os.Getenv("LIMDM_SYSLOG"),
-		SyslogCA:      os.Getenv("LIMDM_SYSLOG_CA"),
 		AccessLog:     os.Getenv("LIMDM_ACCESS_LOG") == "true",
 		AuditAPIReads: envOr("LIMDM_AUDIT_API_READS", "sensitive"),
 		MultiTenant:   os.Getenv("LIMDM_MULTI_TENANT") == "true",
@@ -169,6 +171,17 @@ func ConfigFromEnv() (Config, error) {
 	}
 	if !slices.Contains([]string{"off", "sensitive", "all"}, c.AuditAPIReads) {
 		return c, errors.New("LIMDM_AUDIT_API_READS must be off, sensitive or all")
+	}
+	c.LogLevel = envOr("LIMDM_LOG_LEVEL", "info")
+	if f := os.Getenv("LIMDM_SYSLOG_CA"); f != "" {
+		pem, err := os.ReadFile(f)
+		if err != nil {
+			return c, fmt.Errorf("LIMDM_SYSLOG_CA: %w", err)
+		}
+		c.SyslogCA = string(pem)
+	}
+	if _, err := envSettings(c).Ops.validate(); err != nil {
+		return c, fmt.Errorf("LIMDM_SYSLOG, LIMDM_SYSLOG_CA or LIMDM_LOG_LEVEL: %w", err)
 	}
 	var missing []string
 	required := map[string]string{
@@ -268,10 +281,10 @@ type Server struct {
 	brands     sync.Map // tenant id -> brandEntry (tenant.go)
 
 	// load limits of the agent API; nil: no limit
-	downloads chan struct{} // agent package downloads running (agentPackage)
+	downloads *slots // agent package downloads running (agentPackage)
 	// check ins running, and those with a body over 1 MiB (inventory, package
-	// list) among them (checkinSlot)
-	checkins, bigCheckins chan struct{}
+	// list) among them (checkinSlot); sizes from Settings, Operations (applyOps)
+	checkins, bigCheckins *slots
 	rolloutC              atomic.Pointer[rolloutCache] // agentupdates.go
 }
 
@@ -363,8 +376,8 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 // openCore loads the keys and the audit chain state: what the server and
 // limdm-server keys need.
 func openCore(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Pool) (*Server, error) {
-	s := &Server{cfg: cfg, db: db, log: log, geoSem: make(chan struct{}, 1), downloads: make(chan struct{}, max(cfg.UpdateDownloads, 1)),
-		checkins: make(chan struct{}, max(cfg.MaxCheckins, 1)), bigCheckins: make(chan struct{}, max(cfg.MaxCheckins/8, 1))}
+	s := &Server{cfg: cfg, db: db, log: log, geoSem: make(chan struct{}, 1), downloads: newSlots(cfg.UpdateDownloads),
+		checkins: newSlots(cfg.MaxCheckins), bigCheckins: newSlots(cfg.MaxCheckins / 8)}
 	if err := s.loadKeys(); err != nil {
 		return nil, err
 	}
@@ -881,9 +894,9 @@ func (s *Server) checkinSlot(w http.ResponseWriter, r *http.Request) (release fu
 			<-c
 		}
 	}
-	sems := []chan struct{}{s.checkins}
+	sems := []chan struct{}{s.checkins.get()}
 	if r.ContentLength < 0 || r.ContentLength > 1<<20 {
-		sems = append(sems, s.bigCheckins)
+		sems = append(sems, s.bigCheckins.get())
 	}
 	t := time.NewTimer(checkinWait)
 	defer t.Stop()

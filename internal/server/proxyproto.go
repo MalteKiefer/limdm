@@ -23,20 +23,22 @@ import (
 
 var proxySig = []byte("\r\n\r\n\x00\r\nQUIT\n")
 
-// proxyListener reads the PROXY v2 header of connections from trusted.
+// proxyListener reads the PROXY v2 header of connections from the sources
+// trusted returns at the moment of the connection (Settings, Operations).
 type proxyListener struct {
 	net.Listener
-	trusted []netip.Prefix
+	trusted func() []netip.Prefix
 }
 
-// AgentListener listens for the agent API, with PROXY protocol v2 when
-// LIMDM_AGENT_PROXY_PROTOCOL names the load balancers.
+// AgentListener listens for the agent API, with PROXY protocol v2 for the
+// load balancers named in Settings, Operations (LIMDM_AGENT_PROXY_PROTOCOL
+// is the initial value).
 func (s *Server) AgentListener(addr string) (net.Listener, error) {
 	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", addr)
-	if err != nil || len(s.cfg.AgentProxyFrom) == 0 {
+	if err != nil {
 		return ln, err
 	}
-	return proxyListener{ln, s.cfg.AgentProxyFrom}, nil
+	return proxyListener{ln, s.proxySources}, nil
 }
 
 func (l proxyListener) Accept() (net.Conn, error) {
@@ -45,7 +47,7 @@ func (l proxyListener) Accept() (net.Conn, error) {
 		return nil, err
 	}
 	ap, err := netip.ParseAddrPort(c.RemoteAddr().String())
-	if err != nil || !containsAddr(l.trusted, ap.Addr().Unmap()) {
+	if err != nil || !containsAddr(l.trusted(), ap.Addr().Unmap()) {
 		return c, nil
 	}
 	return &proxyConn{Conn: c}, nil

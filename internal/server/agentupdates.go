@@ -268,12 +268,12 @@ func (s *Server) agentPackage(w http.ResponseWriter, r *http.Request) {
 	}
 	// a bounded number of downloads at once: the rest waits a little, then is
 	// asked to come back (the agent honors Retry-After and retries later)
-	if s.downloads != nil {
+	if sem := s.downloads.get(); sem != nil {
 		t := time.NewTimer(downloadWait)
 		defer t.Stop()
 		select {
-		case s.downloads <- struct{}{}:
-			defer func() { <-s.downloads }()
+		case sem <- struct{}{}:
+			defer func() { <-sem }()
 		case <-t.C:
 			retryLater(w, 60+mrand.IntN(240), "too many agent package downloads, retry later") //nolint:gosec // jitter, not a secret
 			return

@@ -300,8 +300,8 @@ func TestStaggeredRollout(t *testing.T) {
 		t.Fatalf("%d of 200 devices due 6 hours into a 24 hour window", due)
 	}
 
-	s.downloads = make(chan struct{}, 1)
-	s.downloads <- struct{}{} // one download running
+	s.downloads = newSlots(1)
+	s.downloads.get() <- struct{}{} // one download running
 	prev := downloadWait
 	downloadWait = 10 * time.Millisecond
 	t.Cleanup(func() { downloadWait = prev })
@@ -317,7 +317,7 @@ func TestStaggeredRollout(t *testing.T) {
 	if w := get(); w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") == "" {
 		t.Fatalf("download over the limit: %d %q", w.Code, w.Header().Get("Retry-After"))
 	}
-	<-s.downloads
+	<-s.downloads.get()
 	if w := get(); w.Code != http.StatusOK || w.Body.String() != "pkg" {
 		t.Fatalf("download: %d", w.Code)
 	}
@@ -345,24 +345,24 @@ func mustBegin(t *testing.T, db *pgxpool.Pool) pgx.Tx {
 // Check ins beyond the limit are asked to come back instead of queuing
 // without bound; a busy database answers 503 as well, not 500.
 func TestCheckinBackpressure(t *testing.T) {
-	s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil)), checkins: make(chan struct{}, 1), bigCheckins: make(chan struct{}, 1)}
+	s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil)), checkins: newSlots(1), bigCheckins: newSlots(1)}
 	prev := checkinWait
 	checkinWait = 10 * time.Millisecond
 	t.Cleanup(func() { checkinWait = prev })
-	s.checkins <- struct{}{}
+	s.checkins.get() <- struct{}{}
 	w := agentCall(s.checkin, "d1", "/api/v1/checkin", api.CheckinRequest{})
 	if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") == "" {
 		t.Fatalf("check in over the limit: %d %q", w.Code, w.Header().Get("Retry-After"))
 	}
-	<-s.checkins
+	<-s.checkins.get()
 	// a big body also needs one of the few big slots
-	s.bigCheckins <- struct{}{}
+	s.bigCheckins.get() <- struct{}{}
 	r := httptest.NewRequest("POST", "/api/v1/checkin", strings.NewReader("{}"))
 	r.ContentLength = 2 << 20
 	if _, ok := s.checkinSlot(httptest.NewRecorder(), r); ok {
 		t.Fatal("big check in without a big slot")
 	}
-	if len(s.checkins) != 0 {
+	if len(s.checkins.get()) != 0 {
 		t.Fatal("slot not released")
 	}
 	for _, err := range []error{&pgconn.PgError{Code: "55P03"}, &pgconn.PgError{Code: "57014"}, fmt.Errorf("x: %w", context.DeadlineExceeded)} {

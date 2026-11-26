@@ -7,8 +7,6 @@ import (
 	"encoding/pem"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -37,13 +35,10 @@ func TestSyslogTLS(t *testing.T) {
 			}
 		}
 	}()
-	ca := filepath.Join(t.TempDir(), "ca.pem")
-	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ts.Certificate().Raw}), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	ca := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ts.Certificate().Raw}))
 	u, _ := url.Parse("tcp+tls://" + ln.Addr().String())
-	if _, err := syslogDialer(u, filepath.Join(t.TempDir(), "missing.pem")); err == nil {
-		t.Fatal("missing CA file accepted")
+	if _, err := syslogDialer(u, "no certificate"); err == nil {
+		t.Fatal("a CA without a certificate accepted")
 	}
 	// without the CA the self signed collector is refused
 	dial, err := syslogDialer(u, "")

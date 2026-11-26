@@ -26,12 +26,12 @@ import (
 
 func main() {
 	// LIMDM_LOG_LEVEL: debug, info (default), warn or error
-	var level slog.Level
-	if err := level.UnmarshalText([]byte(cmp.Or(os.Getenv("LIMDM_LOG_LEVEL"), "info"))); err != nil {
+	// the initial level; Settings, Operations changes it at runtime
+	if err := server.LogLevel.UnmarshalText([]byte(cmp.Or(os.Getenv("LIMDM_LOG_LEVEL"), "info"))); err != nil {
 		fmt.Fprintln(os.Stderr, "error: LIMDM_LOG_LEVEL must be debug, info, warn or error")
 		os.Exit(1)
 	}
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: server.LogLevel}))
 	cmd := "serve"
 	if len(os.Args) > 1 {
 		cmd = os.Args[1]
@@ -107,7 +107,7 @@ func serve(log *slog.Logger) error {
 		}
 	}()
 	go func() {
-		log.Info("agent API listening (mTLS, TLS 1.3)", "addr", cfg.AgentListen, "proxy_protocol", len(cfg.AgentProxyFrom) > 0)
+		log.Info("agent API listening (mTLS, TLS 1.3)", "addr", cfg.AgentListen, "proxy_protocol_env", len(cfg.AgentProxyFrom) > 0)
 		errc <- agent.ServeTLS(agentLn, "", "")
 	}()
 	select {

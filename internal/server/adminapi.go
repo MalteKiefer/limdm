@@ -206,7 +206,7 @@ func (s *Server) auditRead(r *http.Request, level string) bool {
 	if r.Method != http.MethodGet {
 		return false // writes audit themselves
 	}
-	switch s.cfg.AuditAPIReads {
+	switch s.ops().AuditAPIReads {
 	case "all":
 		return true
 	case "off":
