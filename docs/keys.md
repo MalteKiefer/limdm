@@ -103,7 +103,7 @@ small; Vault users can use Vault's PKCS#11 provider (Vault Enterprise) or an HSM
 ## Rotation
 
 A rotation has two steps, `rotate` and `finish`, from the console (**Settings, Security,
-Keys**, admins without a device scope) or the command line:
+Keys**, global admins without a device scope; tenant accounts do not see the card) or the command line:
 
 ```sh
 limdm-server keys -env /etc/limdm-server/server.env status

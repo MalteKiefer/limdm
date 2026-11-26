@@ -616,10 +616,11 @@ func (s *Server) keyNotice(n notice) {
 	}
 }
 
-// keysAllowed: key status and rotation are for global administrators only.
+// keysAllowed: key status and rotation are for global administrators only:
+// no device scope and no tenant account (a super admin switched into a
+// tenant still manages the keys of the whole installation).
 func keysAllowed(sess session) bool {
-	// integration hook: once tenants exist, also require a global (non tenant) account here
-	return sess.Role == "admin" && len(sess.Tags) == 0 && len(sess.Groups) == 0
+	return sess.Role == "admin" && len(sess.Tags) == 0 && len(sess.Groups) == 0 && !sess.TenantOnly()
 }
 
 // keysAction runs a rotation step from the Settings, Security, Keys card.

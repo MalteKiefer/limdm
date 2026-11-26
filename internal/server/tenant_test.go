@@ -85,7 +85,7 @@ func TestTenantIsolation(t *testing.T) {
 	}
 	s := &Server{db: db, cmdKey: testCmdKey, ca: ca, netCA: netCA, log: slog.New(slog.NewTextHandler(io.Discard, nil)), cfg: Config{
 		PublicURL: "https://mdm.test", AgentURL: "https://127.0.0.1:8444", StaleAfter: 24 * time.Hour, MultiTenant: true,
-		SessionKey: bytes.Repeat([]byte{7}, 32), LocalLogin: true,
+		SessionKey: bytes.Repeat([]byte{7}, 32), LocalLogin: true, CADir: t.TempDir(),
 	}}
 	s.rt.Store(&runtimeState{set: Settings{LocalLogin: true, StaleHours: 24, OIDCIssuer: "https://idp.test", OIDCClientID: "x"}, auth: &oidcAuth{}})
 
@@ -324,9 +324,23 @@ func TestTenantIsolation(t *testing.T) {
 		t.Fatal(got)
 	}
 
+	// keys belong to the whole installation: tenant admins neither see the
+	// Keys card nor reach the rotation steps
+	if code, body := do("GET", "/settings?tab=security", nil); code != 200 || strings.Contains(body, "/settings/keys/") {
+		t.Fatalf("tenant admin sees the Keys card: %d", code)
+	}
+	for _, op := range []string{"rotate", "finish"} {
+		if code, _ := do("POST", "/settings/keys/"+op+"/ca", url.Values{}); code != http.StatusForbidden {
+			t.Fatalf("tenant admin %s: %d", op, code)
+		}
+	}
+
 	// a super admin sees both tenants; switching narrows the view
 	root := session{Email: "root@msp.test", Role: "admin", IAT: time.Now(), Last: time.Now()}
 	sessA = root
+	if _, body := do("GET", "/settings?tab=security", nil); !strings.Contains(body, "/settings/keys/rotate/ca") {
+		t.Fatal("super admin misses the Keys card")
+	}
 	if code, body := do("GET", "/devices", nil); code != 200 || !strings.Contains(body, "host-b-secret") || !strings.Contains(body, "host-a") {
 		t.Fatalf("global view: %d", code)
 	}
