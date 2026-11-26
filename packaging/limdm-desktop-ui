@@ -93,7 +93,7 @@ PAGES = [
     ("overview", "computer-symbolic", tr("Overview", "Übersicht")),
     ("software", "system-software-install-symbolic", tr("Software", "Software")),
     ("compliance", "security-high-symbolic", tr("Compliance", "Compliance")),
-    ("profiles", "emblem-documents-symbolic", tr("Profiles", "Profile")),
+    ("blueprint", "emblem-documents-symbolic", tr("Blueprint", "Blueprint")),
     ("certificates", "channel-secure-symbolic", tr("Certificates", "Zertifikate")),
     ("disk", "drive-harddisk-system-symbolic", tr("Disk Encryption", "Verschlüsselung")),
     ("log", "utilities-terminal-symbolic", tr("Agent Log", "Agent Protokoll")),
@@ -195,7 +195,10 @@ class Window(Adw.ApplicationWindow):
         self.page = Adw.NavigationPage(title="", child=self.content)
         self.split.set_content(self.page)
 
+        start = {"profiles": "blueprint"}.get(start, start)  # page name before 0.19
         self.current = start if any(p[0] == start for p in PAGES) else "overview"
+        self.shown = None  # the info the current page was built from
+        self.logo_path = False
         self.refresh()
         GLib.timeout_add_seconds(60, self._tick)
 
@@ -215,12 +218,39 @@ class Window(Adw.ApplicationWindow):
             self.info = res
         company = self.info.get("company") or "LiMDM"
         self.side_title.set_title(company)
-        child = self.logo.get_first_child()
-        if child:
-            self.logo.remove(child)
-        self.logo.append(logo_image(self.info.get("logo"), 24))
+        if self.logo_path != self.info.get("logo"):
+            self.logo_path = self.info.get("logo")
+            child = self.logo.get_first_child()
+            if child:
+                self.logo.remove(child)
+            self.logo.append(logo_image(self.logo_path, 24))
         self.side_title.set_subtitle(tr("Managed device", "Verwaltetes Gerät"))
-        self.show(self.current)
+        # Rebuild the page only when its data changed and the user does not
+        # work in it; the software page loads its own data.
+        if self.shown is None or (self.current != "software" and self.info != self.shown and not self._holds_input()):
+            self.show(self.current)
+        return False
+
+    def _holds_input(self):
+        """True while the user types in the page or left text in a field that
+        is not sent yet (a disk passphrase). A refresh then keeps the page."""
+        page = self.content.get_content()
+        if page is None:
+            return False
+        focus = self.get_focus()
+        if isinstance(focus, Gtk.Editable) and focus.is_ancestor(page):
+            return True
+        todo = [page]
+        while todo:
+            w = todo.pop()
+            if isinstance(w, Gtk.SearchEntry):
+                continue  # the software search is kept across rebuilds
+            if isinstance(w, Gtk.Editable) and w.get_text():
+                return True
+            c = w.get_first_child()
+            while c is not None:
+                todo.append(c)
+                c = c.get_next_sibling()
         return False
 
     def toast(self, text):
@@ -229,7 +259,7 @@ class Window(Adw.ApplicationWindow):
     # ---- pages ----
 
     def show(self, key):
-        self.current = key
+        self.current, self.shown = key, self.info
         for i, p in enumerate(PAGES):
             if p[0] == key:
                 self.nav.select_row(self.nav.get_row_at_index(i))
@@ -271,9 +301,9 @@ class Window(Adw.ApplicationWindow):
         dev = Adw.PreferencesGroup(title=tr("Device", "Gerät"))
         dev.add(self._row(tr("Name", "Name"), st.get("hostname", ""), "computer-symbolic"))
         dev.add(self._row(tr("Managed by", "Verwaltet von"), self.info.get("company", ""), "system-users-symbolic"))
-        sync = Gtk.Button(label=tr("Check In Now", "Jetzt synchronisieren"), valign=Gtk.Align.CENTER, css_classes=["suggested-action"])
+        sync = Gtk.Button(label=tr("Sync Now", "Jetzt synchronisieren"), valign=Gtk.Align.CENTER, css_classes=["suggested-action"])
         sync.connect("clicked", self._sync)
-        last = self._row(tr("Last check in", "Letzte Synchronisierung"), when(st.get("last_checkin")), "emblem-synchronizing-symbolic")
+        last = self._row(tr("Last sync", "Letzte Synchronisierung"), when(st.get("last_checkin")), "emblem-synchronizing-symbolic")
         last.add_suffix(sync)
         dev.add(last)
         page.add(dev)
@@ -385,12 +415,12 @@ class Window(Adw.ApplicationWindow):
         self.log_problems_only = switch.get_active()
         self.show("log")
 
-    def page_profiles(self):
+    def page_blueprint(self):
         page = Adw.PreferencesPage()
         profiles = self.info.get("profiles") or []
-        g = Adw.PreferencesGroup(title=tr("Installed Profiles", "Installierte Profile"),
-                                 description=tr("Settings IT applies to this device. Secrets are hidden.",
-                                                "Einstellungen, die die IT auf diesem Gerät anwendet. Geheimnisse sind ausgeblendet."))
+        g = Adw.PreferencesGroup(title=tr("Settings of Your Blueprint", "Einstellungen Ihres Blueprints"),
+                                 description=tr("Settings IT applies to this device through its blueprint. Secrets are hidden.",
+                                                "Einstellungen, die die IT über den Blueprint auf diesem Gerät anwendet. Geheimnisse sind ausgeblendet."))
         for pr in profiles:
             row = Adw.ExpanderRow(title=GLib.markup_escape_text(pr.get("identifier", "")),
                                   subtitle=GLib.markup_escape_text(TYPE_NAMES.get(pr.get("type"), pr.get("type", ""))))
@@ -406,7 +436,7 @@ class Window(Adw.ApplicationWindow):
             row.add_row(view)
             g.add(row)
         if not profiles:
-            g.add(Adw.StatusPage(icon_name="emblem-documents-symbolic", title=tr("No Profiles", "Keine Profile"), css_classes=["compact"]))
+            g.add(Adw.StatusPage(icon_name="emblem-documents-symbolic", title=tr("No Settings", "Keine Einstellungen"), css_classes=["compact"]))
         page.add(g)
         return page
 
@@ -489,6 +519,9 @@ class Window(Adw.ApplicationWindow):
 
     def _catalog_loaded(self, res, err):
         if self.current != "software":
+            return False
+        if self._holds_input():  # typing in the search: try again shortly
+            GLib.timeout_add_seconds(3, lambda: (self._load_catalog(), False)[1])
             return False
         box = self.sw_box
         while box.get_first_child():
@@ -753,7 +786,7 @@ class Window(Adw.ApplicationWindow):
             if err or not res.get("ok"):
                 self.toast((res or {}).get("error") or str(err))
             else:
-                self.toast(tr("Check in started", "Synchronisierung gestartet"))
+                self.toast(tr("Sync started", "Synchronisierung gestartet"))
                 GLib.timeout_add_seconds(15, lambda: (self.refresh(), False)[1])
             return False
 
