@@ -66,7 +66,7 @@ func TestValidateOsquerySQL(t *testing.T) {
 		// functions in quotes, unicode look alikes, comments
 		"SELECT \"load_extension\"('/tmp/x.so')",
 		"SELECT * FROM ｃｕｒｌ",
-		"SELECT * FROM \"cu​rl\"",
+		"SELECT * FROM \"cu\u200brl\"",
 		"SELECT 1 FROM users -- x",
 		"SELECT 1 FROM users /* x",
 		"SELECT * FROM",

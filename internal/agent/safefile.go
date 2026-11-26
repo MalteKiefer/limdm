@@ -45,11 +45,11 @@ func openDirNoFollow(dir string, create bool) (*os.File, error) {
 		if errors.Is(err, unix.ENOENT) && create {
 			if err = unix.Mkdirat(fd, c, 0o755); err == nil || errors.Is(err, unix.EEXIST) {
 				if nfd, err = unix.Openat(fd, c, flags, 0); err == nil {
-					err = unix.Fchmod(nfd, 0o755) //nolint:gosec // parent directories of declared files are world readable by design
+					err = unix.Fchmod(nfd, 0o755)
 				}
 			}
 		}
-		unix.Close(fd)
+		_ = unix.Close(fd)
 		if err != nil {
 			if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
 				return nil, fmt.Errorf("%s is a symlink or no directory; declare the real path", cur)
@@ -139,7 +139,7 @@ func writeNoFollow(path string, content []byte, mode os.FileMode, uid, gid int) 
 // when it wrote it. A missing file is no error; anything else LiMDM did
 // not write is errNotOurs.
 func removeNoFollow(path, sum string) error {
-	notOurs := func(err error) error { return fmt.Errorf("%w (%v)", errNotOurs, err) }
+	notOurs := func(err error) error { return fmt.Errorf("%w (%w)", errNotOurs, err) }
 	dir, err := openDirNoFollow(filepath.Dir(path), false)
 	if errors.Is(err, unix.ENOENT) {
 		return nil
