@@ -375,7 +375,12 @@ Agents are updated from the console, page **Agents**:
 2. An admin **approves** a version. Nothing is installed before that.
 3. Rollout: with **Update agents automatically**, devices tagged with the **Pilot tag** get
    an approved version at their next check in, all others after the delay (default 7
-   days). **Update agent…** on a device page installs the newest approved version, or any
+   days) spread over the **Rollout window** (default 24 hours): each device gets the version
+   at its own fixed offset within the window (derived from device and version), so a release
+   reaches the fleet evenly instead of within one poll minute. 0 hands it to all at once.
+   The server serves at most `LIMDM_UPDATE_DOWNLOADS` packages at once per instance
+   (default 20); further downloads wait up to 20 seconds, then get 503 with `Retry-After`
+   and the agent tries again later without counting a failed update. **Update agent…** on a device page installs the newest approved version, or any
    fetched version that is not blocked and newer than the running one, on that device
    only, regardless of policy and delay. Picking a version counts as its approval for this
    device. Agents never downgrade: an older pick is dropped. **Outdated agents** on the

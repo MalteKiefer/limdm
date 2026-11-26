@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
+	mrand "math/rand/v2"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,7 +26,8 @@ import (
 // Agent updates. The server fetches releases from LIMDM_RELEASE_REPO on
 // GitHub, verifies every agent package against the release's SHA256SUMS and
 // keeps them in LIMDM_RELEASE_DIR. An admin approves a version; devices tagged
-// "pilot" (configurable) get it at once, all others after delay_days. The
+// "pilot" (configurable) get it at once, all others after delay_days plus a
+// fixed offset per device within spread_hours (rolloutOffset). The
 // agent installs the package itself and rolls back to the previous binary
 // when the new one does not check in (see internal/agent/update.go); after
 // rollbackLimit rollbacks a version is blocked automatically.
@@ -36,10 +39,26 @@ type UpdatePolicy struct {
 	Auto      bool   `json:"auto"`
 	DelayDays int    `json:"delay_days"`
 	PilotTag  string `json:"pilot_tag"`
+	// SpreadHours spreads the devices after the delay over this window, each
+	// at its own fixed offset, so a release does not reach the whole fleet in
+	// the same minute (downloads, check ins with results, audit entries)
+	SpreadHours int `json:"spread_hours"`
+}
+
+// rolloutOffset is the fixed point of a device within the rollout window of
+// a version: the same device gets the same offset at every check in, and the
+// devices are spread evenly over the window.
+func rolloutOffset(deviceID, version string, spread time.Duration) time.Duration {
+	if spread <= 0 {
+		return 0
+	}
+	h := fnv.New64a()
+	h.Write([]byte(deviceID + "\x00" + version))
+	return time.Duration(h.Sum64() % uint64(spread)) //nolint:gosec // spread is positive
 }
 
 func (s *Server) updatePolicy(ctx context.Context, q querier) (UpdatePolicy, error) {
-	p := UpdatePolicy{DelayDays: 7, PilotTag: "pilot"}
+	p := UpdatePolicy{DelayDays: 7, PilotTag: "pilot", SpreadHours: 24}
 	var raw []byte
 	err := q.QueryRow(ctx, `SELECT value FROM settings WHERE key='agent_updates'`).Scan(&raw)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -117,7 +136,8 @@ func (s *Server) dueUpdate(ctx context.Context, q querier, deviceID, running str
 	slices.SortFunc(rels, func(a, b agentRelease) int { return api.CompareVersions(b.Version, a.Version) })
 	pilot := pol.PilotTag != "" && slices.ContainsFunc(tags, func(t string) bool { return strings.EqualFold(t, pol.PilotTag) })
 	for _, r := range rels {
-		due := requested || pilot || time.Since(*r.ApprovedAt) >= time.Duration(pol.DelayDays)*24*time.Hour
+		due := requested || pilot ||
+			time.Since(*r.ApprovedAt) >= time.Duration(pol.DelayDays)*24*time.Hour+rolloutOffset(deviceID, r.Version, time.Duration(pol.SpreadHours)*time.Hour)
 		failedHere := !requested && r.Version == lastVersion && (state == "failed" || state == "rolled_back")
 		if !due || failedHere || !api.NewerVersion(r.Version, running) {
 			continue
@@ -153,6 +173,11 @@ func (s *Server) recordUpdateResult(ctx context.Context, tx pgx.Tx, deviceID str
 	if res == nil || !api.PackageRe.MatchString(api.PackageName(res.To, "amd64", "deb")) {
 		return nil
 	}
+	// agents before 0.17 report a download refused for load (503) as a failed
+	// update; it says nothing about the version and must not block it
+	if !res.OK && !res.RolledBack && strings.Contains(res.Detail, "503 Service Unavailable") {
+		return nil
+	}
 	state := "failed"
 	switch {
 	case res.OK:
@@ -186,6 +211,9 @@ func (s *Server) recordUpdateResult(ctx context.Context, tx pgx.Tx, deviceID str
 }
 
 // agentPackage serves a package of an approved release to devices (mTLS).
+// downloadWait is how long a package download waits for a free slot.
+var downloadWait = 20 * time.Second
+
 func (s *Server) agentPackage(w http.ResponseWriter, r *http.Request) {
 	version, file := r.PathValue("version"), r.PathValue("file")
 	m := api.PackageRe.FindStringSubmatch(file)
@@ -204,6 +232,21 @@ func (s *Server) agentPackage(w http.ResponseWriter, r *http.Request) {
 	if _, err := api.SumsEntry(sums, file); err != nil {
 		http.NotFound(w, r)
 		return
+	}
+	// a bounded number of downloads at once: the rest waits a little, then is
+	// asked to come back (the agent honors Retry-After and retries later)
+	if s.downloads != nil {
+		t := time.NewTimer(downloadWait)
+		defer t.Stop()
+		select {
+		case s.downloads <- struct{}{}:
+			defer func() { <-s.downloads }()
+		case <-t.C:
+			retryLater(w, 60+mrand.IntN(240), "too many agent package downloads, retry later") //nolint:gosec // jitter, not a secret
+			return
+		case <-r.Context().Done():
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	http.ServeFile(w, r, filepath.Join(s.cfg.ReleaseDir, version, file))
@@ -496,9 +539,14 @@ func (s *Server) renderAgents(w http.ResponseWriter, r *http.Request, sess sessi
 
 func (s *Server) agentsPolicy(w http.ResponseWriter, r *http.Request, sess session) {
 	delay, err := strconv.Atoi(r.FormValue("delay_days"))
-	pol := UpdatePolicy{Auto: r.FormValue("auto") == "on", DelayDays: delay, PilotTag: strings.ToLower(strings.TrimSpace(r.FormValue("pilot_tag")))}
+	spread, serr := strconv.Atoi(r.FormValue("spread_hours"))
+	pol := UpdatePolicy{Auto: r.FormValue("auto") == "on", DelayDays: delay, SpreadHours: spread, PilotTag: strings.ToLower(strings.TrimSpace(r.FormValue("pilot_tag")))}
 	if err != nil || delay < 0 || delay > 90 || (pol.PilotTag != "" && (!identOK(pol.PilotTag) || len(pol.PilotTag) > 32)) {
 		s.renderAgents(w, r, sess, "", "The delay must be 0 to 90 days and the pilot tag a simple word.")
+		return
+	}
+	if serr != nil || spread < 0 || spread > 720 {
+		s.renderAgents(w, r, sess, "", "The rollout window must be 0 to 720 hours.")
 		return
 	}
 	doc, _ := json.Marshal(pol)

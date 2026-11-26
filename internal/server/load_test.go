@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -166,4 +167,109 @@ func TestMigrateUnchangedTakesNoLock(t *testing.T) {
 	if err := db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (9, 10)`).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("one off migrations: %d %v", n, err)
 	}
+}
+
+func TestRolloutOffset(t *testing.T) {
+	spread := 24 * time.Hour
+	if rolloutOffset("d1", "1.0.0", spread) != rolloutOffset("d1", "1.0.0", spread) {
+		t.Fatal("offset not stable")
+	}
+	var early int
+	for i := range 1000 {
+		o := rolloutOffset("d"+strconv.Itoa(i), "1.0.0", spread)
+		if o < 0 || o >= spread {
+			t.Fatalf("offset outside the window: %v", o)
+		}
+		if o < spread/4 {
+			early++
+		}
+	}
+	if early < 200 || early > 300 { // a quarter of the fleet in the first quarter
+		t.Fatalf("offsets not spread: %d of 1000 in the first quarter", early)
+	}
+	if rolloutOffset("d1", "1.0.0", 0) != 0 {
+		t.Fatal("no window, no offset")
+	}
+}
+
+// An approved release reaches the fleet spread over the rollout window,
+// pilot devices at once; package downloads beyond the limit get 503 with
+// Retry-After instead of saturating the server.
+func TestStaggeredRollout(t *testing.T) {
+	db := loadTestDB(t, 8)
+	s := loadTestServer(db)
+	s.cfg.ReleaseDir = t.TempDir()
+	ctx := context.Background()
+	file := api.PackageName("9.0.0", "amd64", "deb")
+	if err := os.MkdirAll(s.cfg.ReleaseDir+"/9.0.0", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.cfg.ReleaseDir+"/9.0.0/"+file, []byte("pkg"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, tags)
+			SELECT 'd'||i, 's', now(), 'pc'||i, CASE WHEN i = 1 THEN ARRAY['pilot'] ELSE '{}' END FROM generate_series(1, 200) i;
+		INSERT INTO settings(key, value) VALUES ('agent_updates', '{"auto": true, "delay_days": 0, "pilot_tag": "pilot", "spread_hours": 24}')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO agent_releases(version, published_at, sums, approved_at) VALUES ('9.0.0', now(), $1, now() - interval '6 hours')`,
+		strings.Repeat("a", 64)+"  "+file+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	due := 0
+	for i := 1; i <= 200; i++ {
+		rel, _, err := s.dueUpdate(ctx, db, "d"+strconv.Itoa(i), "1.0.0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rel != nil {
+			due++
+		} else if i == 1 {
+			t.Fatal("pilot device waits")
+		}
+	}
+	if due < 25 || due > 80 { // about a quarter after 6 of 24 hours
+		t.Fatalf("%d of 200 devices due 6 hours into a 24 hour window", due)
+	}
+
+	s.downloads = make(chan struct{}, 1)
+	s.downloads <- struct{}{} // one download running
+	prev := downloadWait
+	downloadWait = 10 * time.Millisecond
+	t.Cleanup(func() { downloadWait = prev })
+	get := func() *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "/api/v1/agent-packages/9.0.0/"+file, nil)
+		r.SetPathValue("version", "9.0.0")
+		r.SetPathValue("file", file)
+		r = r.WithContext(context.WithValue(r.Context(), deviceKey, "d1"))
+		w := httptest.NewRecorder()
+		s.agentPackage(w, r)
+		return w
+	}
+	if w := get(); w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") == "" {
+		t.Fatalf("download over the limit: %d %q", w.Code, w.Header().Get("Retry-After"))
+	}
+	<-s.downloads
+	if w := get(); w.Code != http.StatusOK || w.Body.String() != "pkg" {
+		t.Fatalf("download: %d", w.Code)
+	}
+	// an old agent reports the refused download as failure: it must not count
+	if err := s.recordUpdateResult(ctx, &auditTx{Tx: mustBegin(t, db)}, "d2", &api.UpdateResult{From: "1.0.0", To: "9.0.0",
+		Detail: "download " + file + ": 503 Service Unavailable"}); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := db.QueryRow(ctx, `SELECT update_state FROM devices WHERE id='d2'`).Scan(&state); err != nil || state == "failed" {
+		t.Fatalf("refused download counted as failed update: %q %v", state, err)
+	}
+}
+
+func mustBegin(t *testing.T, db *pgxpool.Pool) pgx.Tx {
+	t.Helper()
+	tx, err := db.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { tx.Rollback(context.Background()) })
+	return tx
 }

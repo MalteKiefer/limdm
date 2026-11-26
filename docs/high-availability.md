@@ -302,7 +302,16 @@ ones run. `server_instances.version` shows which version each instance runs:
 All instances connect to the primary. Requirements of LiMDM:
 
 * `LISTEN/NOTIFY` and session advisory locks: connect directly or through a pooler in
-  **session** mode. PgBouncer transaction or statement pooling breaks both.
+  **session** mode. PgBouncer transaction or statement pooling breaks both (the
+  notification listener, leader election of background jobs, session settings of the
+  index build), so it is not supported.
+* Connections: each instance opens up to `LIMDM_DB_MAX_CONNS` (default 32) plus one for
+  notifications and, at a schema change, one for the migration. Keep the sum over all
+  instances below `max_connections` (default 100) minus what backups and monitoring use,
+  for example 3 instances with 24 each for 100. Transactions never wait for a second
+  connection of the same pool, so a small pool slows requests down but cannot lock up.
+  For many instances put PgBouncer in **session** mode in front and size
+  `default_pool_size` like the sum above.
 * Writes only: standbys cannot serve LiMDM (no read routing).
 * After a failover, connections break: instances reconnect (pool, notification listener),
   background jobs restart under new locks, running remote shells end.

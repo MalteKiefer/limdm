@@ -1391,4 +1391,8 @@ var deCatalog = map[string]string{
 	// review
 	"New administrator":               "Neuer Administrator",
 	"Administrator credentials reset": "Zugangsdaten eines Administrators zurückgesetzt",
+	// L
+	"Rollout window (hours)": "Verteilungsfenster (Stunden)",
+	"After the delay each device gets the version at its own fixed time within this window": "Nach der Verzögerung erhält jedes Gerät die Version zu seinem eigenen festen Zeitpunkt in diesem Fenster",
+	"The rollout window must be 0 to 720 hours.":                                            "Das Verteilungsfenster muss 0 bis 720 Stunden betragen.",
 }

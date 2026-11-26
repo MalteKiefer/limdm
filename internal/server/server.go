@@ -71,6 +71,18 @@ type Config struct {
 	TrustedProxies []netip.Prefix
 	DrainDelay     time.Duration // between failing /readyz and closing connections at shutdown
 	MultiTenant    bool          // tenant pages and switcher (tenant.go); isolation applies always
+	DBMaxConns     int           // connections in the pool of this instance (LIMDM_DB_MAX_CONNS)
+	// parallel agent package downloads per instance; more wait, then get 503 (LIMDM_UPDATE_DOWNLOADS)
+	UpdateDownloads int
+}
+
+// envInt reads a number setting within [lo, hi]; def when unset.
+func envInt(k string, def, lo, hi int) (int, error) {
+	n, err := strconv.Atoi(envOr(k, strconv.Itoa(def)))
+	if err != nil || n < lo || n > hi {
+		return 0, fmt.Errorf("%s must be %d to %d", k, lo, hi)
+	}
+	return n, nil
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -131,6 +143,12 @@ func ConfigFromEnv() (Config, error) {
 		return c, errors.New("LIMDM_DRAIN_SECONDS must be 0 to 300")
 	}
 	c.DrainDelay = time.Duration(drain) * time.Second
+	if c.DBMaxConns, err = envInt("LIMDM_DB_MAX_CONNS", 32, 4, 1000); err != nil {
+		return c, err
+	}
+	if c.UpdateDownloads, err = envInt("LIMDM_UPDATE_DOWNLOADS", 20, 1, 10000); err != nil {
+		return c, err
+	}
 	var missing []string
 	required := map[string]string{
 		"LIMDM_DATABASE_URL": c.DatabaseURL, "LIMDM_PUBLIC_URL": c.PublicURL, "LIMDM_AGENT_URL": c.AgentURL,
@@ -227,9 +245,10 @@ type Server struct {
 	shells     shellHub // remote shell sessions this instance holds
 	ha         cluster  // instance identity, notifications, relay (cluster.go)
 	brands     sync.Map // tenant id -> brandEntry (tenant.go)
+	downloads  chan struct{} // agent package downloads running (agentPackage); nil: no limit
 }
 
-func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
+func pgxPoolConfig(databaseURL string, maxConns int) (*pgxpool.Config, error) {
 	pc, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, err
@@ -237,7 +256,7 @@ func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
 	// explicit limits instead of the pgx default of max(4, CPUs); a pool_max_conns
 	// parameter in the URL still wins
 	if !strings.Contains(databaseURL, "pool_max_conns") {
-		pc.MaxConns = 32
+		pc.MaxConns = int32(max(maxConns, 4)) //nolint:gosec // bounded by ConfigFromEnv
 	}
 	pc.MinConns = 2
 	pc.MaxConnIdleTime = 5 * time.Minute
@@ -256,7 +275,7 @@ func newPool(ctx context.Context, pc *pgxpool.Config) (*pgxpool.Pool, error) {
 }
 
 func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
-	pc, err := pgxPoolConfig(cfg.DatabaseURL)
+	pc, err := pgxPoolConfig(cfg.DatabaseURL, cfg.DBMaxConns)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +330,7 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 // openCore loads the keys and the audit chain state: what the server and
 // limdm-server keys need.
 func openCore(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Pool) (*Server, error) {
-	s := &Server{cfg: cfg, db: db, log: log, geoSem: make(chan struct{}, 1)}
+	s := &Server{cfg: cfg, db: db, log: log, geoSem: make(chan struct{}, 1), downloads: make(chan struct{}, max(cfg.UpdateDownloads, 1))}
 	if err := s.loadKeys(); err != nil {
 		return nil, err
 	}
@@ -340,7 +359,7 @@ func openCore(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Poo
 
 // OpenKeys opens the database and the keys for limdm-server keys.
 func OpenKeys(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
-	pc, err := pgxPoolConfig(cfg.DatabaseURL)
+	pc, err := pgxPoolConfig(cfg.DatabaseURL, cfg.DBMaxConns)
 	if err != nil {
 		return nil, err
 	}
@@ -1159,6 +1178,13 @@ func problem(w http.ResponseWriter, status int, detail string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{"type": "about:blank", "title": http.StatusText(status), "status": status, "detail": detail})
+}
+
+// retryLater answers 503 with Retry-After: the server is overloaded, not the
+// request wrong; agents wait that long before they try again.
+func retryLater(w http.ResponseWriter, seconds int, detail string) {
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	problem(w, http.StatusServiceUnavailable, detail)
 }
 
 // failAPI logs an internal error and answers with a generic problem.

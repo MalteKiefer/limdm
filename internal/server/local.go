@@ -451,7 +451,7 @@ func (r rowsOne) RowsAffected() int64 {
 // LocalAdmin manages local admin accounts: add, reset, disable, enable, list.
 // add and reset return a generated password and TOTP URI.
 func LocalAdmin(ctx context.Context, databaseURL, op, name, role string) (string, error) {
-	pc, err := pgxPoolConfig(databaseURL)
+	pc, err := pgxPoolConfig(databaseURL, 4)
 	if err != nil {
 		return "", err
 	}
