@@ -39,6 +39,24 @@ and Integrations; each tab saves only its own fields:
   they take effect, no restart needed. Redirect URI: `<LIMDM_PUBLIC_URL>/auth/callback`.
 * **Local accounts.** Can only be disabled while an OIDC administrator exists and you are
   signed in with OIDC, so nobody locks everyone out.
+* **Multi factor authentication (SSO tab).** With **Require multi factor authentication**
+  an OIDC sign in is refused unless the id token's `amr` claim names `mfa` (or `mca`), or two
+  methods one of which is a second factor (`otp`, `hwk`, `swk`, `sms`, `tel`, `sc`, `pop`,
+  `fpt`, `face`, `iris`, `retina`, `vbm`). With **Accepted acr values** set, the `acr` claim
+  must be one of them instead, and the sign in request asks for them (`acr_values`).
+  Refused sign ins are audited as `login.denied`. Google sends neither claim: enforce
+  two step verification in the Workspace admin console, or use acr values your provider sets.
+* **Console roles from groups (SSO tab).** One mapping per line, `group; role; tags`, for
+  example `support; helpdesk; berlin,munich`. Groups are directory groups (Google
+  Workspace sync, SCIM) by name, and the OIDC `groups` claim when the provider sends one.
+  A person without an explicit console account whose groups map to a role gets an account
+  at sign in (marked *from directory group*); its role is derived again on every request,
+  so leaving the group ends access after the next directory sync. The strongest mapped role
+  wins; tags limit helpdesk and auditor roles (see scopes below). Accounts created or
+  edited in **Users** are explicit and ignore the mapping.
+* **Four eyes approval (Security tab).** See [security.md](security.md#four-eyes-approval).
+* **Audit log retention (Security tab).** 0 keeps everything (default); otherwise 365 to
+  36500 days ([security.md](security.md#audit-log)).
 * **Stale threshold** and **compliance webhook** ([compliance.md](compliance.md#webhook)).
 * **Branding.** Company name (up to 80 characters) and a PNG logo (16 to 1024 pixels, up to
   256 KiB, square works best). Shown in the console, on the sign in page and in the desktop
@@ -73,9 +91,18 @@ Other providers (Entra ID, Okta, authentik, Keycloak) work the same way with the
 Users are OIDC identities (email) or local accounts (`local:<name>`, password and TOTP).
 Rules enforced by the server:
 
-* At least one active administrator always remains.
+* At least one active administrator always remains (two while four eyes approval is on).
 * Nobody can demote, disable or reset their own account. The own row in **Users** is read
   only; personal settings live in the **Profile**.
+
+**Scopes.** Helpdesk and auditor accounts can be limited to device tags and directory
+groups (comma separated in **Users**; a device is in scope when it carries one of the tags
+or its primary user is in one of the groups). Empty means every device; admins are never
+limited. The server enforces the scope on the device list, overview, compliance page, device
+page, commands (single and bulk), recovery keys, CSV exports and the audit log (entries
+about devices in scope); a device outside the scope is answered with 404. Pages with fleet
+wide data that are not filtered (Directory, Agents, Software) are refused to scoped
+accounts.
 
 ## Profile
 

@@ -53,7 +53,7 @@ training stay with the ISMS.
 |---|---|
 | `level` | 1 or 2 |
 | `remediate` | apply automatic fixes |
-| `exclude` | documented risk acceptance; shown as `excepted`, never as passed |
+| `exclude` | checks excluded by policy; shown as `excepted`, never as passed. Without a reason or expiry: prefer risk exceptions (below) |
 | `advisory` | reported but not counted against compliance |
 | `grace_hours` | a failing device is `in grace` this long before it counts as non-compliant |
 | `notify` | send the webhook once the grace period is over |
@@ -62,6 +62,21 @@ training stay with the ISMS.
 
 Automatic lock and unlock use the same mechanism as the console command (new logins
 blocked, sessions locked) and are written to the audit log as `policy` actions.
+
+## Risk exceptions
+
+**Compliance**, **Risk exceptions** documents accepted risks (ISO/IEC 27001 6.1.3, BSI
+200-2 residual risk). Each exception names the check, the mode (`exclude`: shown as
+`excepted`; `advisory`: reported, not counted), the devices (one tag, or every device), the
+reason, the risk owner, the approver (the person who accepted the risk; with four eyes
+approval on it must not be the admin who records it) and an expiry date (at most three
+years ahead). Adding and revoking are audited.
+
+The server merges the active exceptions into the compliance declaration it sends to each
+device. An expired or revoked exception is no longer sent, so it stops applying at the next
+check in; the agent itself only knows the resulting `exclude` and `advisory` lists and
+reports such checks as `excluded by policy (exception)`. Lists written directly in a
+compliance library item still work, but have no reason, owner or expiry.
 
 ## Webhook
 
@@ -89,7 +104,10 @@ way with `"type": "device.tamper"` and a `detail` field.
 
 ## Evidence
 
-* **Evidence CSV** (`/export/compliance.csv`): every check result per device.
+* **Evidence CSV** (`/export/compliance.csv`): every check result per device, with reason,
+  owner, approver and expiry of the active risk exception that covers it.
+* **Exceptions CSV** (`/export/exceptions.csv`): every risk exception with its state
+  (active, expired, revoked).
 * **Inventory CSV** and **Audit CSV** for asset management and audits.
 * The audit log is append only and hash chained; the audit page verifies the chain
   ([security.md](security.md#audit-log)).

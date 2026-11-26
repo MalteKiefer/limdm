@@ -14,6 +14,12 @@ is in the channel's last delivery and kept for 30 days. **Send test** checks a c
 | `agent.update_failed` | an agent update failed, with or without rollback |
 | `catalog.request` | a user requested an app |
 | `directory.user_disabled` | a device user was disabled in the directory; the device locks the account |
+| `recovery.view` | somebody viewed a disk recovery key (with the reason, if given) |
+| `command.wipe_lost` | a wipe or lost mode was queued for a device |
+| `command.script` | a script was queued for a device (the text is in the audit log) |
+| `user.role_change` | the role of a console user changed (and who approved it) |
+| `approval.request` | a four eyes approval was requested |
+| `audit.broken` | the daily verification found the audit hash chain broken |
 
 ## Channels
 
