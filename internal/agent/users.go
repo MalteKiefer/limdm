@@ -170,8 +170,12 @@ func sudoersNames(text, name string, groups ...string) bool {
 	return false
 }
 
+// rootEquivalentGroups reach root without sudo: a container or VM daemon
+// that mounts / for its members, or raw access to the disks.
+var rootEquivalentGroups = []string{"docker", "lxd", "incus-admin", "libvirt", "disk"}
+
 // privileged says why an account can reach root: uid 0, membership in an
-// admin group or a sudoers rule for the account or one of its groups (which
+// admin or root equivalent group or a sudoers rule for the account or one of its groups (which
 // covers NOPASSWD rules). Empty means none of these.
 func privileged(name string) string {
 	u, err := user.Lookup(name)
@@ -189,7 +193,7 @@ func privileged(name string) string {
 			}
 		}
 	}
-	for _, g := range adminGroups {
+	for _, g := range slices.Concat(adminGroups, rootEquivalentGroups) {
 		if slices.Contains(groups, g) || slices.Contains(groupMembers(g), name) {
 			return name + " is a member of " + g
 		}

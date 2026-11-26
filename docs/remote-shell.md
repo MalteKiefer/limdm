@@ -17,7 +17,7 @@ A session needs all of these:
    |---|---|---|
    | Allow remote shells (admins) | off | admins may start sessions |
    | The helpdesk role may start sessions | off | |
-   | Sessions may run as root | off | otherwise `root`, every other account with UID 0 and every account with admin rights (member of `sudo`, `wheel` or `admin`, or named in a sudoers rule directly or through a `%group`, `NOPASSWD` rules included) are refused, by the server from the inventory and by the agent |
+   | Sessions may run as root | off | otherwise `root`, every other account with UID 0 and every account with admin rights (member of `sudo`, `wheel` or `admin`, or named in a sudoers rule directly or through a `%group`, `NOPASSWD` rules included) are refused, by the server from the inventory and by the agent; the agent also refuses members of `docker`, `lxd`, `incus-admin`, `libvirt` and `disk` |
    | Maximum duration (minutes) | 60 | 5 to 480 |
    | Idle timeout (minutes) | 15 | 1 to 120 and not longer than the maximum; no keyboard input from the console |
 

@@ -354,7 +354,8 @@ list for console, bulk actions and API): `sync`, `update`, `reboot`, `shutdown`,
 and download logs). Scripts, lost mode, wipe, retire, delete, agent updates, software,
 tags, account creation, deletion and admin rights stay with admins. The helpdesk cannot
 reset, lock or unlock accounts that can reach root (uid 0, member of `sudo`, `wheel` or
-`admin`, named in a sudoers rule): the server refuses them from the last inventory with a
+`admin`, named in a sudoers rule; the agent also refuses members of `docker`, `lxd`,
+`incus-admin`, `libvirt` and `disk`, which reach root without sudo): the server refuses them from the last inventory with a
 clear message, and the agent refuses them from its own view, because the server signs a
 `no_admin` flag into every user command of the helpdesk. Accounts with uid 0 are refused
 for every role. The help page and the
