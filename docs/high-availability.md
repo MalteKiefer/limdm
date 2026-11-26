@@ -301,6 +301,13 @@ ones run. `server_instances.version` shows which version each instance runs:
   `/readyz`, then distribute the CA directory (it now contains `audit-keyed-from`) and
   start the others. The other changes of this upgrade:
   [operations.md](operations.md#upgrading-from-015-to-016).
+* **0.16 to 0.17:** 0.16 instances write device packages into `devices.packages`, which
+  0.17 moved into `device_packages` (devices whose package list does not change are not
+  sent again), and save device users and enroll devices without the user list signature
+  (agents then get no user list until it is saved again). The first 0.17 start also
+  partitions `device_metrics` and moves the package lists while it holds the schema
+  locks. Stop all instances, start one 0.17 instance, wait for `/readyz`, then start the
+  others.
 * changes of `LIMDM_SESSION_KEY` (sealed secrets would be unreadable on the other
   instances) and key rotations of the CA directory.
 
