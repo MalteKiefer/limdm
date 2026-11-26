@@ -190,7 +190,7 @@ allowed), `ATTACH`, `DETACH`, `PRAGMA`, `load_extension`, `writefile` or `readfi
 The validator tokenizes the query like SQLite (quoted names `"x"`, `[x]` and `` `x` ``,
 schema qualified `main.x`) and checks every table after `FROM`, `JOIN`, a comma in a
 `FROM` clause and `IN` against an allowlist of local tables:
-`apparmor_profiles`, `apt_sources`, `augeas`, `authorized_keys`, `block_devices`,
+`apparmor_profiles`, `apt_sources`, `authorized_keys`, `block_devices`,
 `cpu_info`, `crontab`, `deb_packages`, `disk_encryption`, `dns_resolvers`, `etc_hosts`,
 `etc_protocols`, `etc_services`, `file`, `groups`, `hash`, `interface_addresses`,
 `interface_details`, `iptables`, `kernel_info`, `kernel_modules`, `last`,
@@ -202,7 +202,7 @@ schema qualified `main.x`) and checks every table after `FROM`, `JOIN`, a comma 
 `systemd_units`, `time`, `tpm_info`, `uptime`, `usb_devices`, `user_groups`,
 `user_ssh_keys`, `users`, `yum_sources`, plus the common table expressions of a leading
 `WITH`. Tables that reach the network (`curl`, `curl_certificate`, cloud metadata,
-`prometheus_metrics`), carve files or read process environments are refused. The agent
+`prometheus_metrics`), carve files, read process environments or read any file (`augeas`, whose lenses parse `/etc/shadow` too) are refused. The agent
 also starts `osqueryi` with `--enable_tables` set to the same allowlist and
 `--disable_tables` for the network and carving tables, so osquery itself does not offer
 them. The result sent to the server holds only the row count and, for `compare`, the

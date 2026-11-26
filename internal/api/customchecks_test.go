@@ -116,3 +116,9 @@ func TestCustomChecksValidateAndMerge(t *testing.T) {
 		t.Fatalf("merge: %+v %+v", st, pol.Extra.CustomChecks)
 	}
 }
+
+func TestOsqueryNoAugeas(t *testing.T) {
+	if err := ValidateOsquerySQL(`SELECT value FROM augeas WHERE path='/etc/shadow'`); err == nil {
+		t.Fatal("augeas reads /etc/shadow")
+	}
+}

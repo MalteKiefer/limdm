@@ -97,9 +97,10 @@ var (
 // OsqueryTables are the only tables a custom check may read: local system
 // state for compliance. Tables that reach the network (curl, cloud metadata,
 // prometheus_metrics), carve files, expose process environments or talk to
-// container daemons are not on the list.
+// container daemons are not on the list, nor augeas: its lenses read any
+// configuration file, /etc/shadow with the password hashes included.
 var OsqueryTables = []string{
-	"apparmor_profiles", "apt_sources", "augeas", "authorized_keys", "block_devices", "cpu_info",
+	"apparmor_profiles", "apt_sources", "authorized_keys", "block_devices", "cpu_info",
 	"crontab", "deb_packages", "disk_encryption", "dns_resolvers", "etc_hosts", "etc_protocols",
 	"etc_services", "file", "groups", "hash", "interface_addresses", "interface_details", "iptables",
 	"kernel_info", "kernel_modules", "last", "listening_ports", "logged_in_users", "md_devices",
