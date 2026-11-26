@@ -1,0 +1,1 @@
+import{y as e}from"./index-C_w7nMVy.js";import{U as t,rt as n}from"./states-PXyFD-VH.js";var r=n();function i(){let n=t();return(0,r.jsx)(e,{title:n(`settings.title`),sub:n(`settings.sub`),oldPath:`/settings`})}export{i as SettingsPage};
