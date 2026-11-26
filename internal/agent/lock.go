@@ -54,6 +54,45 @@ func parsePeople(passwd string) []string {
 // lockAfterLost records a lock sent during lost mode.
 const lockAfterLost = stateDir + "/lock-after-lost"
 
+// While the device is locked or lost, the lock screen of GNOME, Cinnamon
+// and MATE cannot be switched off by the user: disable-lock-screen in the
+// user's own settings makes these shells ignore logind's lock request, and
+// lockSessions trusts them to lock. A system setting with a dconf lock
+// overrides it; removed again on unlock.
+const (
+	lockdownSettings = "/etc/dconf/db/local.d/50-limdm-device-lock"
+	lockdownLocks    = "/etc/dconf/db/local.d/locks/50-limdm-device-lock"
+)
+
+// lockdownDirs hold disable-lock-screen (keys of absent desktops are ignored).
+var lockdownDirs = []string{"org/gnome/desktop/lockdown", "org/cinnamon/desktop/lockdown", "org/mate/lockdown"}
+
+func lockdownFiles() (settings, locks string) {
+	settings, locks = managedHeader, managedHeader
+	for _, dir := range lockdownDirs {
+		settings += "\n[" + dir + "]\ndisable-lock-screen=false\n"
+		locks += "/" + dir + "/disable-lock-screen\n"
+	}
+	return settings, locks
+}
+
+// setLockdown writes (on) or removes the lock screen lockdown.
+func setLockdown(on bool) error {
+	if !hasCmd("dconf") {
+		return nil
+	}
+	settings, locks := "", ""
+	if on {
+		settings, locks = lockdownFiles()
+	}
+	c1, e1 := writeOrRemove(lockdownSettings, settings, 0o644)
+	c2, e2 := writeOrRemove(lockdownLocks, locks, 0o644)
+	if err := errors.Join(e1, e2); err != nil || !c1 && !c2 {
+		return err
+	}
+	return dconfUpdate(true, on)
+}
+
 func readLockUsers() []string {
 	var users []string
 	_ = json.Unmarshal([]byte(readFile(deviceLockUsers)), &users)
@@ -70,6 +109,9 @@ func (a *Agent) lockDevice() (string, error) {
 	}
 	if _, err := writeIfChanged(nologinFile, nologinText, 0o644); err != nil {
 		return "", err
+	}
+	if err := setLockdown(true); err != nil { // before the lock request, or the shell may ignore it
+		a.event("keeping the lock screen enabled: %v", err)
 	}
 	locked, err := lockPasswords()
 	ended := endConsoleSessions()
@@ -90,6 +132,9 @@ func (a *Agent) unlockDevice() (string, error) {
 		}
 	}
 	_ = os.Remove(lockAfterLost)
+	if err := setLockdown(false); err != nil {
+		a.event("removing the lock screen lockdown: %v", err)
+	}
 	released, err := a.releasePasswords()
 	return "logins allowed again, local passwords released: " + strings.Join(released, ", ") + "; users unlock their screen with their password", err
 }
@@ -149,7 +194,11 @@ func (a *Agent) releasePasswords() ([]string, error) {
 // enforceDeviceLock keeps sessions locked while the device is locked; run
 // every minute, so ending the locker does not help.
 func (a *Agent) enforceDeviceLock() {
-	if readFile(nologinFile) == nologinText {
+	locked := readFile(nologinFile) == nologinText
+	if err := setLockdown(locked || inLostMode()); err != nil {
+		a.event("lock screen lockdown: %v", err)
+	}
+	if locked {
 		if ended := endConsoleSessions(); len(ended) > 0 {
 			a.event("device locked: ended %s", strings.Join(ended, ", "))
 		}

@@ -469,7 +469,12 @@ well.
 Whether a session still needs the agent's locker is decided only from what the session's
 user cannot fake. The agent skips a session whose logind `Desktop` (set by the display
 manager at login) is GNOME, KDE Plasma, Cinnamon or MATE, whose shell locks itself on
-logind's request. Every other graphical session gets swaylock or i3lock started by the
+logind's request. So that the user cannot make these shells ignore the request with their
+own `disable-lock-screen` setting (`org.gnome.desktop.lockdown`, `org.cinnamon.desktop.lockdown`,
+`org.mate.lockdown`), the agent sets it to `false` in the dconf system database with a lock
+while the device is locked or lost (`/etc/dconf/db/local.d/50-limdm-device-lock`), and removes
+it on unlock. KDE Plasma has no such dconf key; its user restriction `action/lock_screen` in
+`kdeglobals` is not overridden. Every other graphical session gets swaylock or i3lock started by the
 agent, even when a locker seems to run already: logind's `LockedHint` (the session owner
 sets it), process names (any program can be called `i3lock`) and a locker's environment
 (a real locker can run on another, nested or virtual display) are not trusted. A second

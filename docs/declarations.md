@@ -602,7 +602,7 @@ cannot change:
 
 | Desktop | How |
 |---|---|
-| GNOME, Budgie, Cinnamon, MATE | dconf system database with locked keys |
+| GNOME, Budgie, Cinnamon, MATE | dconf system database with locked keys, `disable-lock-screen` locked to `false` too |
 | KDE Plasma | `/etc/xdg/kscreenlockerrc`, immutable through KDE kiosk (`[$i]`) |
 | Xfce | xfconf system defaults with locked properties (xfce4-screensaver) |
 | sway, Hyprland, river, labwc, niri, Wayfire | `swayidle` with `swaylock`; for sway also `/etc/sway/config.d` |
