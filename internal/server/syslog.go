@@ -70,8 +70,11 @@ func (s *Server) syslogLoop(ctx context.Context) {
 		return
 	}
 	host, _ := os.Hostname()
+	// continue where the last leader stopped (high availability); the first
+	// start begins with new entries
 	var lastAudit, lastEvent int64
-	if err := s.db.QueryRow(ctx, `SELECT coalesce((SELECT max(id) FROM audit_log), 0), coalesce((SELECT max(id) FROM device_events), 0)`).Scan(&lastAudit, &lastEvent); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT coalesce((SELECT last_id FROM syslog_cursor WHERE stream='audit'), (SELECT max(id) FROM audit_log), 0),
+		coalesce((SELECT last_id FROM syslog_cursor WHERE stream='events'), (SELECT max(id) FROM device_events), 0)`).Scan(&lastAudit, &lastEvent); err != nil {
 		s.log.Error("syslog start", "err", err)
 		return
 	}
@@ -108,12 +111,17 @@ func (s *Server) syslogLoop(ctx context.Context) {
 			return
 		case <-t.C:
 		}
+		prevAudit, prevEvent := lastAudit, lastEvent
 		if err := s.forwardAudit(ctx, host, &lastAudit, send); err != nil {
 			s.log.Warn("syslog forwarding", "err", err)
-			continue
-		}
-		if err := s.forwardEvents(ctx, host, &lastEvent, send); err != nil {
+		} else if err := s.forwardEvents(ctx, host, &lastEvent, send); err != nil {
 			s.log.Warn("syslog forwarding", "err", err)
+		}
+		if lastAudit != prevAudit || lastEvent != prevEvent {
+			if _, err := s.db.Exec(ctx, `INSERT INTO syslog_cursor(stream, last_id) VALUES ('audit', $1), ('events', $2)
+				ON CONFLICT (stream) DO UPDATE SET last_id = EXCLUDED.last_id`, lastAudit, lastEvent); err != nil {
+				s.log.Warn("syslog position", "err", err)
+			}
 		}
 	}
 }

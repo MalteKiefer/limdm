@@ -64,6 +64,9 @@ type Config struct {
 	ReleaseDir    string
 	StaleAfter    time.Duration
 	Syslog        string // udp://host:port or tcp://host:port: audit entries and device events as RFC 5424
+	// proxies (load balancers) whose X-Forwarded-For is trusted for the client address, besides loopback
+	TrustedProxies []netip.Prefix
+	DrainDelay     time.Duration // between failing /readyz and closing connections at shutdown
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -115,6 +118,14 @@ func ConfigFromEnv() (Config, error) {
 		return c, errors.New("LIMDM_STALE_HOURS must be a positive integer")
 	}
 	c.StaleAfter = time.Duration(hours) * time.Hour
+	if c.TrustedProxies, err = parseProxies(os.Getenv("LIMDM_TRUSTED_PROXIES")); err != nil {
+		return c, err
+	}
+	drain, err := strconv.Atoi(envOr("LIMDM_DRAIN_SECONDS", "5"))
+	if err != nil || drain < 0 || drain > 300 {
+		return c, errors.New("LIMDM_DRAIN_SECONDS must be 0 to 300")
+	}
+	c.DrainDelay = time.Duration(drain) * time.Second
 	var missing []string
 	required := map[string]string{
 		"LIMDM_DATABASE_URL": c.DatabaseURL, "LIMDM_PUBLIC_URL": c.PublicURL, "LIMDM_AGENT_URL": c.AgentURL,
@@ -198,16 +209,11 @@ type Server struct {
 	hooks  *http.Client                 // webhook client; nil uses http.DefaultClient (tests inject one)
 	geoSem chan struct{}                // one location lookup at a time
 
-	saveMu     sync.Mutex  // serializes settings saves
+	saveMu     sync.Mutex  // serializes settings saves in this instance (clusterLock across instances)
 	rediscover atomic.Bool // OIDC discovery failed at startup and is retried
-	// ponytail: per process; a database row lock when SCIM runs on several instances
-	scimMu sync.Mutex // serializes SCIM PATCH read-modify-write
-	fleet  atomic.Pointer[fleetCache]
-	// first broken audit entry found by the last full verification, 0 = intact
-	auditBroken atomic.Int64
-	// when the last full verification ran (Unix seconds), 0 = not yet
-	auditVerifiedAt atomic.Int64
-	shells          shellHub // running remote shell sessions
+	fleet      atomic.Pointer[fleetCache]
+	shells     shellHub // remote shell sessions this instance holds
+	ha         cluster  // instance identity, notifications, relay (cluster.go)
 }
 
 func pgxPoolConfig(databaseURL string) (*pgxpool.Config, error) {
@@ -248,6 +254,13 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	if err := migrate(ctx, db); err != nil {
 		return nil, err
 	}
+	trustedProxies = cfg.TrustedProxies
+	// instances starting at once must not each create keys or migrate data
+	unlock, err := clusterLock(ctx, db, lockStartup, 5*time.Minute)
+	if err != nil {
+		return nil, fmt.Errorf("startup lock: %w", err)
+	}
+	defer unlock()
 	ca, err := loadOrCreateCA(cfg.CADir)
 	if err != nil {
 		return nil, fmt.Errorf("device CA: %w", err)
@@ -262,6 +275,9 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	if err := signExistingItems(ctx, db, cfg.CADir); err != nil {
 		return nil, fmt.Errorf("signing library items: %w", err)
 	}
+	if err := checkAuditSwitch(ctx, db, cfg.CADir); err != nil {
+		return nil, err
+	}
 	if err := initAuditKey(ctx, db, cfg.CADir, cmdKey); err != nil {
 		return nil, fmt.Errorf("audit key: %w", err)
 	}
@@ -270,6 +286,9 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 		return nil, fmt.Errorf("network CA: %w", err)
 	}
 	s := &Server{cfg: cfg, db: db, ca: ca, netCA: netCA, cmdKey: cmdKey, log: log, geoSem: make(chan struct{}, 1)}
+	if err := s.checkSharedKeys(ctx); err != nil {
+		return nil, err
+	}
 	if itemSecrets, err = s.aead(infoItems); err != nil {
 		return nil, err
 	}
@@ -290,25 +309,42 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Server, error) {
 	if err := s.loadSettings(ctx); err != nil {
 		return nil, fmt.Errorf("settings: %w", err)
 	}
+	if err := s.startCluster(); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
-func (s *Server) Close() { s.db.Close() }
+// Close stops heartbeat and listener, deregisters the instance and closes
+// the database pool.
+func (s *Server) Close() {
+	if s.ha.cancel != nil {
+		s.ha.cancel()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, _ = s.db.Exec(ctx, `DELETE FROM server_instances WHERE id=$1`, s.ha.id)
+		cancel()
+	}
+	s.db.Close()
+}
 
 // Background runs periodic jobs until ctx ends.
 func (s *Server) Background(ctx context.Context) {
 	for name, loop := range map[string]func(context.Context){"google sync": s.googleSyncLoop, "history": s.historyLoop,
-		"releases": s.releaseLoop, "catalog icons": s.iconLoop, "syslog": s.syslogLoop} {
-		go s.background(ctx, name, loop)
+		"catalog icons": s.iconLoop, "syslog": s.syslogLoop} {
+		go s.background(ctx, name, loop, true)
 	}
+	// every instance serves agent packages from its own release directory
+	go s.background(ctx, "releases", s.releaseLoop, false)
 	go s.rediscoverLoop(ctx)
 }
 
 // background runs a loop for the life of the server: a panic is logged and
 // the loop restarts after a minute instead of taking the server down. With
 // several server instances only the one holding the loop's advisory lock
-// runs it, so syncs and downloads do not happen twice.
-func (s *Server) background(ctx context.Context, name string, loop func(context.Context)) {
+// runs it (leader), so syncs and downloads do not happen twice. The leader
+// checks its lock connection; when the connection breaks the lock is gone
+// and the loop stops, so another instance can take over without overlap.
+func (s *Server) background(ctx context.Context, name string, loop func(context.Context), leader bool) {
 	key := int64(crc32.ChecksumIEEE([]byte("limdm-loop:" + name)))
 	for ctx.Err() == nil {
 		func() {
@@ -317,21 +353,51 @@ func (s *Server) background(ctx context.Context, name string, loop func(context.
 					s.log.Error("background loop panicked", "loop", name, "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
 				}
 			}()
+			if !leader {
+				loop(ctx)
+				return
+			}
 			conn, err := s.db.Acquire(ctx)
 			if err != nil {
 				return
 			}
 			defer conn.Release()
-			var leader bool
-			if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&leader); err != nil || !leader {
+			var got bool
+			if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&got); err != nil || !got {
 				return // another instance runs it
 			}
-			defer func() { _, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, key) }()
-			loop(ctx)
+			s.log.Info("leading background loop", "loop", name, "instance", s.ha.id)
+			lctx, cancel := context.WithCancel(ctx)
+			watched := make(chan struct{})
+			go func() { // the lock lives as long as this session
+				defer close(watched)
+				t := time.NewTicker(leaderRetry)
+				defer t.Stop()
+				for {
+					select {
+					case <-lctx.Done():
+						return
+					case <-t.C:
+						if _, err := conn.Exec(lctx, `SELECT 1`); err != nil && lctx.Err() == nil {
+							s.log.Error("lost the background loop lock", "loop", name, "err", err)
+							cancel()
+							return
+						}
+					}
+				}
+			}()
+			defer func() {
+				cancel()
+				<-watched // the connection is free again
+				if _, err := conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, key); err != nil {
+					_ = conn.Conn().Close(context.WithoutCancel(ctx))
+				}
+			}()
+			loop(lctx)
 		}()
 		select {
 		case <-ctx.Done():
-		case <-time.After(time.Minute):
+		case <-time.After(leaderRetry):
 		}
 	}
 }
@@ -339,13 +405,12 @@ func (s *Server) background(ctx context.Context, name string, loop func(context.
 // AdminHandler serves the web UI.
 func (s *Server) AdminHandler() http.Handler {
 	mux := http.NewServeMux()
+	// liveness: the process serves requests; readiness (database, schema,
+	// keys, notifications) is /readyz
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		if err := s.db.Ping(r.Context()); err != nil {
-			http.Error(w, "db down", http.StatusServiceUnavailable)
-			return
-		}
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
+	mux.HandleFunc("GET /readyz", s.readyz)
 	s.scimRoutes(mux)
 	mux.HandleFunc("GET /login", s.loginPage)
 	mux.HandleFunc("GET /lang/{lang}", s.setLang)
@@ -759,7 +824,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if typ == "shell" && !res.OK {
-			s.shells.refused(res.ID, res.Output)
+			s.shellRefused(ctx, res.ID, res.Output)
 		}
 		if !res.OK && slices.Contains([]string{"lock", "unlock", "lost", "found", "wipe", "script"}, typ) {
 			notices = append(notices, notice{Type: "command.failed", Severity: "critical", Title: "Command failed: " + typ,
@@ -1041,7 +1106,7 @@ func jsonb(v any) string {
 func (s *Server) consoleFilter(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if p == "/healthz" || p == "/install.sh" || strings.HasPrefix(p, "/scim/") {
+		if p == "/healthz" || p == "/readyz" || p == "/install.sh" || strings.HasPrefix(p, "/scim/") {
 			next.ServeHTTP(w, r)
 			return
 		}

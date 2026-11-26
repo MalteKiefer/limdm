@@ -265,7 +265,10 @@ func (s *Server) fetchReleases(ctx context.Context) (int, error) {
 		if err := s.db.QueryRow(ctx, `SELECT sums_sig FROM agent_releases WHERE version=$1`, version).Scan(&sig); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return n, err
 		}
-		if sig != nil {
+		// imported by another instance but not here yet: every instance
+		// keeps its own copy of the packages it serves
+		_, statErr := os.Stat(filepath.Join(s.cfg.ReleaseDir, version, api.PackageName(version, "amd64", "deb")))
+		if sig != nil && statErr == nil {
 			if *sig == "" { // fetched before the signature was uploaded
 				if err := s.addReleaseSignature(ctx, version, rel); err != nil {
 					s.log.Warn("release signature", "version", version, "err", err)

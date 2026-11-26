@@ -24,11 +24,9 @@ import (
 // page; the server stores it, sends the signed "shell" command and relays
 // between the console (WebSocket on the console listener) and the agent
 // (POST /api/v1/shell/{id} over mTLS, opened by the device). Every session is
-// audited and its output is kept as a transcript.
-//
-// ponytail: the relay lives in this process; with several server instances
-// console and agent must reach the same one (sticky routing) or the session
-// waits until it times out.
+// audited and its output is kept as a transcript. With several server
+// instances, console and device may reach other instances than the one
+// holding the session; those relay to it (shellrelay.go).
 
 const (
 	shellTranscriptCap = 1 << 20         // bytes of output kept per session
@@ -188,8 +186,9 @@ func (h *shellHub) remove(id string) {
 	delete(h.live, id)
 }
 
-// refused ends the session of a shell command the device did not run.
-func (h *shellHub) refused(cmdID int64, output string) {
+// refused ends the session of a shell command the device did not run, if
+// this instance holds it.
+func (h *shellHub) refused(cmdID int64, reason string) bool {
 	h.mu.Lock()
 	var hit *liveShell
 	for _, l := range h.live {
@@ -199,8 +198,9 @@ func (h *shellHub) refused(cmdID int64, output string) {
 	}
 	h.mu.Unlock()
 	if hit != nil {
-		hit.end("the device refused the session: " + truncate(strings.TrimSpace(output), 300))
+		hit.end(reason)
 	}
+	return hit != nil
 }
 
 func (s *Server) shellRoutes(mux *http.ServeMux) {
@@ -224,16 +224,18 @@ type shellRow struct {
 }
 
 const shellCols = `s.id, s.device_id, d.hostname, s.requested_by, s.local_user, s.end_reason, s.created_at, s.connected_at, s.ended_at,
-	octet_length(s.transcript), s.truncated`
+	octet_length(s.transcript), s.truncated,
+	coalesce((SELECT i.seen_at > now() - interval '` + instanceAlive + `' FROM server_instances i WHERE i.id = s.instance), false)`
 
 func (s *Server) scanShell(row pgx.Row) (shellRow, error) {
 	var r shellRow
-	err := row.Scan(&r.ID, &r.Device, &r.Hostname, &r.By, &r.User, &r.Reason, &r.Created, &r.Connected, &r.Ended, &r.Bytes, &r.Truncated)
+	var alive bool // the instance holding the session runs
+	err := row.Scan(&r.ID, &r.Device, &r.Hostname, &r.By, &r.User, &r.Reason, &r.Created, &r.Connected, &r.Ended, &r.Bytes, &r.Truncated, &alive)
 	switch {
 	case r.Ended != nil:
 		r.State = "ended"
-	case s.shells.get(r.ID) == nil:
-		r.State = "interrupted" // the server restarted while it ran
+	case s.shells.get(r.ID) == nil && !alive:
+		r.State = "interrupted" // the server instance stopped while it ran
 	case r.Connected != nil:
 		r.State = "active"
 	default:
@@ -331,8 +333,8 @@ func (s *Server) shellStart(w http.ResponseWriter, r *http.Request, sess session
 		if cmdID, err = s.insertCommand(ctx, tx, id, "shell", string(payload), sess.Email); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO shell_sessions(id, device_id, command_id, requested_by, local_user) VALUES ($1,$2,$3,$4,$5)`,
-			cmd.Session, id, cmdID, sess.Email, user)
+		_, err = tx.Exec(ctx, `INSERT INTO shell_sessions(id, device_id, command_id, requested_by, local_user, instance) VALUES ($1,$2,$3,$4,$5,$6)`,
+			cmd.Session, id, cmdID, sess.Email, user, s.ha.id)
 		return err
 	})
 	if err != nil {
@@ -341,6 +343,7 @@ func (s *Server) shellStart(w http.ResponseWriter, r *http.Request, sess session
 	}
 	l := newLiveShell(cmd.Session, id, sess.Email, cmdID)
 	s.shells.put(l)
+	go s.homeRelay(l, s.openBox(l.id, "h"))
 	go s.watchShell(l, time.Duration(maxM)*time.Minute, time.Duration(idleM)*time.Minute) //nolint:gosec // the session outlives this request
 	http.Redirect(w, r, "/shell/"+cmd.Session, http.StatusSeeOther)
 }
@@ -428,8 +431,8 @@ func (s *Server) shellView(w http.ResponseWriter, r *http.Request, sess session)
 		http.NotFound(w, r)
 		return
 	}
-	l := s.shells.get(sid)
-	live := l != nil && sr.By == sess.Email
+	running := sr.State != "ended" && sr.State != "interrupted" // here or on another instance
+	live := running && sr.By == sess.Email
 	if !live && sess.Role != "admin" && sess.Role != "auditor" {
 		s.errorPage(w, r, sess, http.StatusForbidden, "transcripts are available to admins and auditors")
 		return
@@ -445,14 +448,14 @@ func (s *Server) shellView(w http.ResponseWriter, r *http.Request, sess session)
 	}
 	_, vendorErr := fs.Stat(staticFS, "static/vendor/xterm/xterm.js")
 	s.render(w, r, sess, "shellsession", map[string]any{"S": sr, "Live": live, "Transcript": text, "Terminal": vendorErr == nil,
-		"Running": l != nil, "CanEnd": l != nil && (sr.By == sess.Email || sess.Role == "admin")})
+		"Running": running, "CanEnd": running && (sr.By == sess.Email || sess.Role == "admin")})
 }
 
 func (s *Server) shellEnd(w http.ResponseWriter, r *http.Request, sess session) {
 	sid := r.PathValue("sid")
 	l := s.shells.get(sid)
 	if l == nil {
-		http.Redirect(w, r, "/shell/"+sid, http.StatusSeeOther)
+		s.shellEndRemote(w, r, sess, sid)
 		return
 	}
 	if l.owner != sess.Email && sess.Role != "admin" {
@@ -481,7 +484,11 @@ func (s *Server) shellWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	l := s.shells.get(r.PathValue("sid"))
-	if l == nil || l.owner != sess.Email || !s.settings().RemoteShell.allows(sess.Role) || !s.inScope(r.Context(), sess, l.device) {
+	if l == nil {
+		s.shellWSRemote(w, r, sess, r.PathValue("sid"))
+		return
+	}
+	if l.owner != sess.Email || !s.settings().RemoteShell.allows(sess.Role) || !s.inScope(r.Context(), sess, l.device) {
 		http.Error(w, "no such session", http.StatusNotFound)
 		return
 	}
@@ -571,7 +578,11 @@ func consoleFrame(l *liveShell, msg []byte) error {
 func (s *Server) shellAgent(w http.ResponseWriter, r *http.Request) {
 	device := r.Context().Value(deviceKey).(string)
 	l := s.shells.get(r.PathValue("sid"))
-	if l == nil || l.device != device {
+	if l == nil {
+		s.shellAgentRemote(w, r, r.PathValue("sid"), device)
+		return
+	}
+	if l.device != device {
 		problem(w, http.StatusNotFound, "no such session")
 		return
 	}

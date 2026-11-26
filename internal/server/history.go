@@ -37,13 +37,16 @@ func (s *Server) historyLoop(ctx context.Context) {
 			if broken, err := s.verifyAuditFrom(ctx, false); err != nil {
 				s.log.Error("audit verification", "err", err)
 			} else {
-				// shown on the audit page next to the incremental result
-				if prev := s.auditBroken.Swap(broken); broken != 0 && prev != broken {
+				// shown on the audit page next to the incremental result, on every instance
+				prev, err := s.storeAuditVerification(ctx, broken)
+				if err != nil {
+					s.log.Error("store audit verification", "err", err)
+				}
+				if err == nil && broken != 0 && prev != broken {
 					s.notify(notice{Type: "audit.broken", Severity: "critical", Title: "Audit log verification failed",
 						Text: fmt.Sprintf("The hash chain of the audit log is broken at entry %d: entries were changed or removed outside LiMDM.", broken),
 						URL:  s.cfg.PublicURL + "/audit"})
 				}
-				s.auditVerifiedAt.Store(time.Now().Unix())
 				if broken != 0 {
 					s.log.Error("audit log hash chain broken", "entry", broken)
 				} else if err := s.pruneAudit(ctx); err != nil { // only behind a verified chain

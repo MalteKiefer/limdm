@@ -127,7 +127,10 @@ func totpURI(name, secret string) string {
 
 // ---- per IP rate limit ----
 
-// ponytail: in memory, per process; move to the database when running more than one server.
+// ponytail: in memory, per instance: with n instances an address gets up to
+// n times the budget (docs/high-availability.md). The lockout of local
+// accounts lives in the database and counts across instances; move this to
+// the database when per instance limits are not enough.
 type limiter struct {
 	mu    sync.Mutex
 	hits  map[string][]time.Time
@@ -210,7 +213,7 @@ func clientIP(r *http.Request) string {
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+	if trustedPeer(host) {
 		// the entry the proxy appended: the last of all header lines (a proxy
 		// may add its own line instead of extending the client's)
 		if xff := strings.Join(r.Header.Values("X-Forwarded-For"), ","); xff != "" {
@@ -222,6 +225,52 @@ func clientIP(r *http.Request) string {
 		}
 	}
 	return host
+}
+
+// trustedProxies are load balancers (LIMDM_TRUSTED_PROXIES) whose
+// X-Forwarded-For names the client, like a reverse proxy on loopback.
+// Set once at startup.
+var trustedProxies []netip.Prefix
+
+func trustedPeer(host string) bool {
+	a, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	a = a.Unmap()
+	if a.IsLoopback() {
+		return true
+	}
+	for _, p := range trustedProxies {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// parseProxies reads a comma separated list of addresses and networks.
+func parseProxies(list string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, f := range strings.Split(list, ",") {
+		if f = strings.TrimSpace(f); f == "" {
+			continue
+		}
+		if !strings.Contains(f, "/") {
+			a, err := netip.ParseAddr(f)
+			if err != nil {
+				return nil, fmt.Errorf("LIMDM_TRUSTED_PROXIES: %w", err)
+			}
+			out = append(out, netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen()))
+			continue
+		}
+		p, err := netip.ParsePrefix(f)
+		if err != nil {
+			return nil, fmt.Errorf("LIMDM_TRUSTED_PROXIES: %w", err)
+		}
+		out = append(out, p.Masked())
+	}
+	return out, nil
 }
 
 // ---- login handlers ----

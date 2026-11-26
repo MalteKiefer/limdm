@@ -1536,17 +1536,13 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess session)
 		newest = "/audit?" + filter.Encode()
 	}
 	brokenAt, err := s.verifyAudit(ctx)
-	if full := s.auditBroken.Load(); err == nil && brokenAt == 0 && full != 0 {
+	full, verifiedAt := s.auditVerification(ctx)
+	if err == nil && brokenAt == 0 && full != 0 {
 		brokenAt = full
 	}
 	if err != nil {
 		s.fail(w, err)
 		return
-	}
-	var verifiedAt *time.Time
-	if v := s.auditVerifiedAt.Load(); v != 0 {
-		t := time.Unix(v, 0)
-		verifiedAt = &t
 	}
 	var actions []string
 	if rows, err := s.db.Query(ctx, `SELECT DISTINCT action FROM audit_log ORDER BY 1`); err == nil {

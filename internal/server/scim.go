@@ -430,9 +430,23 @@ func (s *Server) scimGetUser(w http.ResponseWriter, r *http.Request) {
 	s.respondUser(w, r.Context(), r.PathValue("id"), http.StatusOK)
 }
 
+// scimLock serializes SCIM read, modify and write across all instances: two
+// concurrent requests must not restore what the other one changed.
+func (s *Server) scimLock(w http.ResponseWriter, r *http.Request) (func(), bool) {
+	unlock, err := clusterLock(r.Context(), s.db, lockSCIM, 30*time.Second)
+	if err != nil {
+		scimErr(w, http.StatusServiceUnavailable, "busy, try again")
+		return nil, false
+	}
+	return unlock, true
+}
+
 func (s *Server) scimReplaceUser(w http.ResponseWriter, r *http.Request) {
-	s.scimMu.Lock() // see scimPatchUser: a PUT must not interleave with a PATCH
-	defer s.scimMu.Unlock()
+	unlock, ok := s.scimLock(w, r)
+	if !ok {
+		return
+	}
+	defer unlock()
 	var u scimUser
 	if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
 		scimErr(w, http.StatusBadRequest, "invalid JSON")
@@ -586,8 +600,11 @@ func (s *Server) scimPatchUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	// read, patch and write as one step: two concurrent PATCHes must not
 	// restore what the other one changed (active=false undone)
-	s.scimMu.Lock()
-	defer s.scimMu.Unlock()
+	unlock, ok := s.scimLock(w, r)
+	if !ok {
+		return
+	}
+	defer unlock()
 	cur, err := s.loadDirUser(ctx, r.PathValue("id"))
 	if err != nil {
 		scimErr(w, http.StatusNotFound, "user not found")
@@ -802,8 +819,11 @@ func (s *Server) scimGetGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) scimReplaceGroup(w http.ResponseWriter, r *http.Request) {
-	s.scimMu.Lock()
-	defer s.scimMu.Unlock()
+	unlock, ok := s.scimLock(w, r)
+	if !ok {
+		return
+	}
+	defer unlock()
 	var g scimGroup
 	if err := json.NewDecoder(r.Body).Decode(&g); err != nil {
 		scimErr(w, http.StatusBadRequest, "invalid JSON")
@@ -821,8 +841,11 @@ var memberFilterRe = regexp.MustCompile(`(?i)^members\[value eq "([^"]+)"\]$`)
 
 func (s *Server) scimPatchGroup(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	s.scimMu.Lock() // see scimPatchUser
-	defer s.scimMu.Unlock()
+	unlock, ok := s.scimLock(w, r)
+	if !ok {
+		return
+	}
+	defer unlock()
 	g, err := s.loadGroup(ctx, r.PathValue("id"))
 	if err != nil {
 		scimErr(w, http.StatusNotFound, "group not found")
