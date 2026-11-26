@@ -93,7 +93,9 @@ func (s *Server) apiEventStream(w http.ResponseWriter, r *http.Request, c apiCal
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Accel-Buffering", "no") // nginx: pass events through at once
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, "retry: 3000\n\n")
+	if _, err := fmt.Fprint(w, "retry: 3000\n\n"); err != nil {
+		return
+	}
 	t := time.NewTicker(eventPoll)
 	defer t.Stop()
 	for {
