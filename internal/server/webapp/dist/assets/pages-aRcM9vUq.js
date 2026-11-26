@@ -1,0 +1,1 @@
+import{h as e}from"./index-DvPT2U8H.js";import{G as t,it as n}from"./states-ChiKtiFY.js";var r=n();function i(){let n=t();return(0,r.jsx)(e,{title:n(`devices.title`),sub:n(`devices.sub`),oldPath:`/devices`})}function a(){let n=t();return(0,r.jsx)(e,{title:n(`devices.title`),sub:n(`devices.sub`),oldPath:`/devices`})}export{i as DevicePage,a as DevicesPage};
