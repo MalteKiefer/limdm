@@ -293,25 +293,37 @@ func tenantName(v string) (string, error) {
 }
 
 func (s *Server) tenantCreate(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
-	name, err := tenantName(r.FormValue("name"))
-	if err != nil {
-		s.renderTenants(w, r, sess, err.Error())
+	id, err := s.createTenant(r.Context(), sess, r.FormValue("name"))
+	var ue *userError
+	switch {
+	case errors.As(err, &ue) && ue.Status == http.StatusConflict:
+		s.renderTenants(w, r, sess, "A tenant with this name exists already.")
 		return
+	case errors.As(err, &ue):
+		s.renderTenants(w, r, sess, ue.Msg)
+		return
+	case err != nil:
+		s.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/tenants/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
+}
+
+// createTenant adds a tenant (console and admin API); a bad or taken name
+// is a userError.
+func (s *Server) createTenant(ctx context.Context, sess session, name string) (int64, error) {
+	name, err := tenantName(name)
+	if err != nil {
+		return 0, &userError{http.StatusBadRequest, err.Error()}
 	}
 	var id int64
 	err = s.auditAction(ctx, sess.Email, "tenant.add", name, "", func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO tenants(name) VALUES ($1) RETURNING id`, name).Scan(&id)
 	})
-	if err != nil {
-		if strings.Contains(err.Error(), "duplicate key") {
-			s.renderTenants(w, r, sess, "A tenant with this name exists already.")
-			return
-		}
-		s.fail(w, err)
-		return
+	if isUnique(err) {
+		return 0, &userError{http.StatusConflict, "a tenant with this name exists already"}
 	}
-	http.Redirect(w, r, "/tenants/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
+	return id, err
 }
 
 // tenantSwitch sets the tenant context of a super admin (0: global view).

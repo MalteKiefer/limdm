@@ -62,6 +62,7 @@ type apiCaller struct {
 	ReadOnly bool
 	Tags     []string // device scope of a helpdesk or auditor token; empty: every device
 	Tenant   int64    // tenant of the token, 0 for global tokens (tenant.go)
+	Scopes   []string // tokenScopes it is limited to; empty: all its role allows
 }
 
 // actor names the token in the audit log and as creator of commands.
@@ -126,9 +127,9 @@ func (s *Server) bearer(w http.ResponseWriter, r *http.Request) (apiCaller, bool
 		var expires time.Time
 		var revoked *time.Time
 		var tenantOff bool
-		err := s.db.QueryRow(ctx, `SELECT k.id, k.name, k.role, k.read_only, k.scope_tags, coalesce(k.tenant_id, 0), coalesce(t.disabled, false), k.expires_at, k.revoked_at
+		err := s.db.QueryRow(ctx, `SELECT k.id, k.name, k.role, k.read_only, k.scope_tags, coalesce(k.tenant_id, 0), coalesce(t.disabled, false), k.expires_at, k.revoked_at, k.scopes
 			FROM api_tokens k LEFT JOIN tenants t ON t.id=k.tenant_id WHERE k.token_hash=$1`, th).
-			Scan(&c.ID, &c.Name, &c.Role, &c.ReadOnly, &c.Tags, &c.Tenant, &tenantOff, &expires, &revoked)
+			Scan(&c.ID, &c.Name, &c.Role, &c.ReadOnly, &c.Tags, &c.Tenant, &tenantOff, &expires, &revoked, &c.Scopes)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			reason = "unknown token"
@@ -179,6 +180,25 @@ func (s *Server) deny(w http.ResponseWriter, r *http.Request, c apiCaller, msg s
 	problem(w, http.StatusForbidden, msg)
 }
 
+// routeScope is the token scope a route needs (tokenScopes).
+func routeScope(r *http.Request, level string) string {
+	path := strings.TrimPrefix(r.Pattern, r.Method+" ")
+	switch {
+	case strings.HasPrefix(path, "/api/v1/approvals"), strings.HasPrefix(path, "/api/v1/exceptions"),
+		strings.HasPrefix(path, "/api/v1/tokens"), strings.HasPrefix(path, "/api/v1/tenants"):
+		return "admin"
+	case level == "audit":
+		return "audit"
+	case level == "helpdesk":
+		return "commands"
+	case level == "read":
+		return "read"
+	case strings.HasPrefix(path, "/api/v1/library-items"), strings.HasPrefix(path, "/api/v1/blueprints"), strings.HasPrefix(path, "/api/v1/devices"):
+		return "library"
+	}
+	return "admin"
+}
+
 // auditRead tells whether a read through the API goes to the audit log
 // (LIMDM_AUDIT_API_READS): all reads, none, or (default) the sensitive
 // ones, which are the audit log and a single device with its inventory.
@@ -216,6 +236,10 @@ func (s *Server) need(level string, h apiHandlerFunc) http.HandlerFunc {
 		}
 		if !ok {
 			s.deny(w, r, c, "the token's role cannot do this")
+			return
+		}
+		if sc := routeScope(r, level); len(c.Scopes) > 0 && !slices.Contains(c.Scopes, sc) {
+			s.deny(w, r, c, "the token's scopes do not include "+sc)
 			return
 		}
 		if c.Tenant != 0 {
@@ -273,7 +297,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/devices/{id}", s.need("read", s.apiDeviceGet))
 	m.HandleFunc("PATCH /api/v1/devices/{id}", s.need("admin", s.apiDevicePatch))
 	m.HandleFunc("GET /api/v1/devices/{id}/commands", s.need("read", s.apiDeviceCommands))
-	m.HandleFunc("POST /api/v1/devices/{id}/commands", s.need("helpdesk", s.apiCommandCreate))
+	m.HandleFunc("POST /api/v1/devices/{id}/commands", s.need("helpdesk", s.idempotent(s.apiCommandCreate)))
 	m.HandleFunc("GET /api/v1/commands/{id}", s.need("read", s.apiCommandGet))
 	m.HandleFunc("GET /api/v1/library-items", s.need("read", s.apiItems))
 	m.HandleFunc("POST /api/v1/library-items", s.need("admin", s.apiItemSave))
@@ -287,6 +311,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	m.HandleFunc("DELETE /api/v1/blueprints/{id}", s.need("admin", s.apiBlueprintDelete))
 	m.HandleFunc("GET /api/v1/tags", s.need("read", s.apiTags))
 	m.HandleFunc("GET /api/v1/audit", s.need("audit", s.apiAudit))
+	s.apiAdminRoutes(mux, m)
 	mux.Handle("/api/v1/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pw := &problemWriter{ResponseWriter: w}
 		c, ok := s.bearer(pw, r)
@@ -313,6 +338,7 @@ type apiTokenRow struct {
 	LastUsed, RevokedAt *time.Time
 	State               string // active | expired | revoked
 	Scope               []string
+	Scopes              []string
 }
 
 func (s *Server) apiTokensPage(w http.ResponseWriter, r *http.Request, sess session) {
@@ -321,7 +347,7 @@ func (s *Server) apiTokensPage(w http.ResponseWriter, r *http.Request, sess sess
 
 func (s *Server) renderAPITokens(w http.ResponseWriter, r *http.Request, sess session, created string) {
 	tcond, targs := tenantCond(sess, "tenant_id", 0)
-	rows, err := s.db.Query(r.Context(), `SELECT id, name, prefix, role, read_only, created_by, created_at, expires_at, last_used_at, revoked_at, '', scope_tags
+	rows, err := s.db.Query(r.Context(), `SELECT id, name, prefix, role, read_only, created_by, created_at, expires_at, last_used_at, revoked_at, '', scope_tags, scopes
 		FROM api_tokens WHERE `+tcond+` ORDER BY revoked_at IS NOT NULL, expires_at < now(), created_at DESC`, targs...)
 	if err != nil {
 		s.fail(w, err)
@@ -342,30 +368,69 @@ func (s *Server) renderAPITokens(w http.ResponseWriter, r *http.Request, sess se
 			list[i].State = "active"
 		}
 	}
-	s.render(w, r, sess, "apitokens", map[string]any{"Tokens": list, "Created": created, "Roles": apiRoles, "PublicURL": s.cfg.PublicURL})
+	s.render(w, r, sess, "apitokens", map[string]any{"Tokens": list, "Created": created, "Roles": apiRoles, "Scopes": tokenScopes, "PublicURL": s.cfg.PublicURL})
 }
 
 func (s *Server) apiTokenCreate(w http.ResponseWriter, r *http.Request, sess session) {
-	name := strings.TrimSpace(r.FormValue("name"))
-	role := r.FormValue("role")
-	days, err := strconv.Atoi(r.FormValue("days"))
-	if name == "" || len(name) > 100 || strings.ContainsFunc(name, unicode.IsControl) || !slices.Contains(apiRoles, role) || err != nil || days < 1 || days > 365 {
-		s.errorPage(w, r, sess, http.StatusBadRequest, "name up to 100 characters, a role, and 1..365 days")
-		return
-	}
-	readOnly := r.FormValue("read_only") == "on" || role == "auditor" || role == "metrics"
+	days, _ := strconv.Atoi(r.FormValue("days")) // 0 is refused
 	scope, err := parseTags(r.FormValue("scope_tags"))
 	if err != nil {
 		s.errorPage(w, r, sess, http.StatusBadRequest, err.Error())
 		return
 	}
-	if len(scope) > 0 && role != "helpdesk" && role != "auditor" {
-		s.errorPage(w, r, sess, http.StatusBadRequest, "a device scope applies to helpdesk and auditor tokens only")
+	token, _, err := s.createAPIToken(r.Context(), sess, tokenSpec{Name: r.FormValue("name"), Role: r.FormValue("role"), Days: days,
+		ReadOnly: r.FormValue("read_only") == "on", ScopeTags: scope, Scopes: r.Form["scopes"]})
+	if err != nil {
+		s.failUser(w, r, sess, err)
 		return
 	}
-	if role == "metrics" && sess.Tenant != 0 {
-		s.errorPage(w, r, sess, http.StatusBadRequest, "metrics tokens are global: switch to the global view")
-		return
+	s.renderAPITokens(w, r, sess, token)
+}
+
+// tokenScopes are what a token may be limited to; no scopes is all its role
+// allows. read: devices, commands, library items, blueprints and tags;
+// commands: send device commands; library: change library items,
+// blueprints and devices; audit: the audit log; admin: approvals,
+// exceptions, tokens and tenants.
+var tokenScopes = []string{"read", "commands", "library", "audit", "admin"}
+
+// tokenSpec is a new API token, from the console form or the admin API.
+type tokenSpec struct {
+	Name      string   `json:"name"`
+	Role      string   `json:"role"`
+	Days      int      `json:"days"`
+	ReadOnly  bool     `json:"read_only"`
+	ScopeTags []string `json:"scope_tags"`
+	Scopes    []string `json:"scopes"`
+}
+
+// createAPIToken validates and stores a token of the session's tenant and
+// returns it (shown once) with its id. Validation errors are userErrors.
+func (s *Server) createAPIToken(ctx context.Context, sess session, t tokenSpec) (string, int64, error) {
+	bad := func(msg string) (string, int64, error) { return "", 0, &userError{http.StatusBadRequest, msg} }
+	t.Name = strings.TrimSpace(t.Name)
+	if t.Name == "" || len(t.Name) > 100 || strings.ContainsFunc(t.Name, unicode.IsControl) || !slices.Contains(apiRoles, t.Role) || t.Days < 1 || t.Days > 365 {
+		return bad("name up to 100 characters, a role, and 1..365 days")
+	}
+	readOnly := t.ReadOnly || t.Role == "auditor" || t.Role == "metrics"
+	if len(t.ScopeTags) > 0 && t.Role != "helpdesk" && t.Role != "auditor" {
+		return bad("a device scope applies to helpdesk and auditor tokens only")
+	}
+	if t.Role == "metrics" && sess.Tenant != 0 {
+		return bad("metrics tokens are global: switch to the global view")
+	}
+	slices.Sort(t.Scopes)
+	t.Scopes = slices.Compact(t.Scopes)
+	for _, sc := range t.Scopes {
+		if !slices.Contains(tokenScopes, sc) {
+			return bad("scopes: " + strings.Join(tokenScopes, ", "))
+		}
+	}
+	if t.Scopes == nil {
+		t.Scopes = []string{}
+	}
+	if t.ScopeTags == nil {
+		t.ScopeTags = []string{}
 	}
 	var tenantID *int64 // NULL: a global token
 	if sess.Tenant != 0 {
@@ -373,16 +438,14 @@ func (s *Server) apiTokenCreate(w http.ResponseWriter, r *http.Request, sess ses
 	}
 	token := "lma_" + randToken(32)
 	prefix := token[:12]
-	err = s.auditAction(r.Context(), sess.Email, "api_token.create", name, fmt.Sprintf("role=%s read_only=%t days=%d prefix=%s scope_tags=%s", role, readOnly, days, prefix, strings.Join(scope, ",")), func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO api_tokens(name, prefix, token_hash, role, read_only, created_by, expires_at, scope_tags, tenant_id)
-			VALUES ($1,$2,$3,$4,$5,$6, now() + make_interval(days => $7), $8, $9)`, name, prefix, sha(token), role, readOnly, sess.Email, days, scope, tenantID)
-		return err
+	var id int64
+	err := s.auditAction(ctx, sess.Email, "api_token.create", t.Name, fmt.Sprintf("role=%s read_only=%t days=%d prefix=%s scope_tags=%s scopes=%s",
+		t.Role, readOnly, t.Days, prefix, strings.Join(t.ScopeTags, ","), strings.Join(t.Scopes, ",")), func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO api_tokens(name, prefix, token_hash, role, read_only, created_by, expires_at, scope_tags, tenant_id, scopes)
+			VALUES ($1,$2,$3,$4,$5,$6, now() + make_interval(days => $7), $8, $9, $10) RETURNING id`,
+			t.Name, prefix, sha(token), t.Role, readOnly, sess.Email, t.Days, t.ScopeTags, tenantID, t.Scopes).Scan(&id)
 	})
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.renderAPITokens(w, r, sess, token)
+	return token, id, err
 }
 
 func (s *Server) apiTokenRevoke(w http.ResponseWriter, r *http.Request, sess session) {
@@ -391,12 +454,7 @@ func (s *Server) apiTokenRevoke(w http.ResponseWriter, r *http.Request, sess ses
 		http.NotFound(w, r)
 		return
 	}
-	err = s.auditActionFn(r.Context(), func(tx pgx.Tx) (string, string, string, string, error) {
-		var name, prefix string
-		tcond, targs := tenantCond(sess, "tenant_id", 1)
-		err := tx.QueryRow(r.Context(), `UPDATE api_tokens SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL AND `+tcond+` RETURNING name, prefix`, append([]any{id}, targs...)...).Scan(&name, &prefix)
-		return sess.Email, "api_token.revoke", name, "prefix=" + prefix, err
-	})
+	err = s.revokeAPIToken(r.Context(), sess, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.NotFound(w, r)
 		return
@@ -406,6 +464,17 @@ func (s *Server) apiTokenRevoke(w http.ResponseWriter, r *http.Request, sess ses
 		return
 	}
 	http.Redirect(w, r, "/settings/api", http.StatusSeeOther)
+}
+
+// revokeAPIToken revokes an active token of the session's tenant;
+// pgx.ErrNoRows when there is none.
+func (s *Server) revokeAPIToken(ctx context.Context, sess session, id int64) error {
+	return s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
+		var name, prefix string
+		tcond, targs := tenantCond(sess, "tenant_id", 1)
+		err := tx.QueryRow(ctx, `UPDATE api_tokens SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL AND `+tcond+` RETURNING name, prefix`, append([]any{id}, targs...)...).Scan(&name, &prefix)
+		return sess.Email, "api_token.revoke", name, "prefix=" + prefix, err
+	})
 }
 
 // ---- helpers ----
@@ -727,7 +796,7 @@ func (s *Server) apiCommandCreate(w http.ResponseWriter, r *http.Request, c apiC
 			problem(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
-		w.Header().Set("Location", "/approvals")
+		w.Header().Set("Location", "/api/v1/approvals/"+strconv.FormatInt(aid, 10))
 		writeJSONStatus(w, http.StatusAccepted, map[string]any{"approval_id": aid, "status": "pending"})
 		return
 	}
@@ -870,6 +939,7 @@ func (s *Server) apiItemGet(w http.ResponseWriter, r *http.Request, c apiCaller)
 		return
 	}
 	maskItem(&it)
+	s.setETag(r.Context(), w, "library_items", id)
 	writeJSON(w, it)
 }
 
@@ -887,6 +957,9 @@ func (s *Server) apiItemSave(w http.ResponseWriter, r *http.Request, c apiCaller
 	if !decodeJSON(w, r, &it) {
 		return
 	}
+	if id != 0 && !s.ifMatch(w, r, "library_items", id) {
+		return
+	}
 	it.ID = id
 	it.Name, it.Description = strings.TrimSpace(it.Name), strings.TrimSpace(it.Description)
 	if err := s.saveLibraryItem(r.Context(), c.actor(), &it); err != nil {
@@ -899,6 +972,7 @@ func (s *Server) apiItemSave(w http.ResponseWriter, r *http.Request, c apiCaller
 		w.Header().Set("Location", "/api/v1/library-items/"+strconv.FormatInt(it.ID, 10))
 	}
 	maskItem(&it)
+	s.setETag(r.Context(), w, "library_items", it.ID)
 	writeJSONStatus(w, status, it)
 }
 
@@ -977,6 +1051,7 @@ func (s *Server) apiBlueprintGet(w http.ResponseWriter, r *http.Request, c apiCa
 		s.apiFail(w, err)
 		return
 	}
+	w.Header().Set("ETag", etagOf(b.Updated))
 	writeJSON(w, toAPIBlueprint(b))
 }
 
@@ -1002,6 +1077,9 @@ func (s *Server) apiBlueprintSave(w http.ResponseWriter, r *http.Request, c apiC
 	if body.ParentID != nil && *body.ParentID <= 0 {
 		body.ParentID = nil
 	}
+	if id != 0 && !s.ifMatch(w, r, "blueprints", id) {
+		return
+	}
 	bp := blueprintRec{ID: id, Name: strings.TrimSpace(body.Name), Desc: strings.TrimSpace(body.Description), Parent: body.ParentID, Tree: body.Tree}
 	if err := s.saveBlueprint(r.Context(), c.actor(), &bp); err != nil {
 		s.apiFail(w, err)
@@ -1017,6 +1095,7 @@ func (s *Server) apiBlueprintSave(w http.ResponseWriter, r *http.Request, c apiC
 		status = http.StatusCreated
 		w.Header().Set("Location", "/api/v1/blueprints/"+strconv.FormatInt(bp.ID, 10))
 	}
+	w.Header().Set("ETag", etagOf(saved.Updated))
 	writeJSONStatus(w, status, toAPIBlueprint(saved))
 }
 

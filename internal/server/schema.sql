@@ -756,3 +756,17 @@ BEGIN
         FOREIGN KEY (command_id) REFERENCES commands(id) ON DELETE SET NULL NOT VALID;
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+ALTER TABLE api_tokens ADD COLUMN IF NOT EXISTS scopes TEXT[] NOT NULL DEFAULT '{}'; -- tokenScopes (adminapi.go), empty: all of the role
+-- Idempotency-Key of admin API requests (adminapi_admin.go): the first
+-- answer per token and key, replayed for 24 hours
+CREATE TABLE IF NOT EXISTS api_idempotency (
+    token_id     BIGINT NOT NULL REFERENCES api_tokens(id) ON DELETE CASCADE,
+    key          TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    status       INT NOT NULL DEFAULT 0,
+    location     TEXT NOT NULL DEFAULT '',
+    body         BYTEA NOT NULL DEFAULT '',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (token_id, key)
+);
+CREATE INDEX IF NOT EXISTS api_idempotency_created ON api_idempotency(created_at);

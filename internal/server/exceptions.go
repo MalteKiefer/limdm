@@ -96,45 +96,53 @@ func applyExceptions(ctx context.Context, q pgx.Tx, deviceID string, decls []api
 }
 
 func (s *Server) exceptionAdd(w http.ResponseWriter, r *http.Request, sess session) {
-	e := riskException{CheckID: strings.TrimSpace(r.FormValue("check_id")), Mode: r.FormValue("mode"),
-		Reason: strings.TrimSpace(r.FormValue("reason")), Owner: strings.TrimSpace(r.FormValue("owner")),
-		Approver: strings.TrimSpace(r.FormValue("approver")), CreatedBy: sess.Email}
-	tags, err := parseTags(r.FormValue("tag"))
-	if err != nil || len(tags) > 1 {
-		s.errorPage(w, r, sess, http.StatusBadRequest, "tag: one tag or empty for every device")
+	e := riskException{CheckID: r.FormValue("check_id"), Mode: r.FormValue("mode"), Tag: r.FormValue("tag"),
+		Reason: r.FormValue("reason"), Owner: r.FormValue("owner"), Approver: r.FormValue("approver")}
+	if _, err := s.addException(r.Context(), sess, e, r.FormValue("expires")); err != nil {
+		s.failUser(w, r, sess, err)
 		return
 	}
+	http.Redirect(w, r, "/compliance#exceptions", http.StatusSeeOther)
+}
+
+// addException validates and stores a risk exception for the console and
+// the admin API; expires is the last day it applies (YYYY-MM-DD).
+// Validation errors are userErrors (400).
+func (s *Server) addException(ctx context.Context, sess session, e riskException, expires string) (int64, error) {
+	bad := func(msg string) (int64, error) { return 0, &userError{http.StatusBadRequest, msg} }
+	e.CheckID, e.Reason, e.Owner, e.Approver, e.CreatedBy = strings.TrimSpace(e.CheckID), strings.TrimSpace(e.Reason),
+		strings.TrimSpace(e.Owner), strings.TrimSpace(e.Approver), sess.Email
+	tags, err := parseTags(e.Tag)
+	if err != nil || len(tags) > 1 {
+		return bad("tag: one tag or empty for every device")
+	}
+	e.Tag = ""
 	if len(tags) == 1 {
 		e.Tag = tags[0]
 	}
-	expires, err := time.ParseInLocation("2006-01-02", r.FormValue("expires"), time.Local)
-	e.Expires = expires.AddDate(0, 0, 1) // valid through the given day
+	day, err := time.ParseInLocation("2006-01-02", expires, time.Local)
+	e.Expires = day.AddDate(0, 0, 1) // valid through the given day
 	switch {
 	case !identOK(e.CheckID):
-		s.errorPage(w, r, sess, http.StatusBadRequest, "check ID: letters, digits, dot, dash, underscore")
+		return bad("check ID: letters, digits, dot, dash, underscore")
 	case e.Mode != "exclude" && e.Mode != "advisory":
-		s.errorPage(w, r, sess, http.StatusBadRequest, "mode: exclude or advisory")
+		return bad("mode: exclude or advisory")
 	case e.Reason == "" || len(e.Reason) > 1000:
-		s.errorPage(w, r, sess, http.StatusBadRequest, "reason: 1 to 1000 characters")
+		return bad("reason: 1 to 1000 characters")
 	case e.Owner == "" || len(e.Owner) > 200 || e.Approver == "" || len(e.Approver) > 200:
-		s.errorPage(w, r, sess, http.StatusBadRequest, "risk owner and approver: 1 to 200 characters")
+		return bad("risk owner and approver: 1 to 200 characters")
 	case s.settings().FourEyes && strings.EqualFold(e.Approver, sess.Email):
-		s.errorPage(w, r, sess, http.StatusBadRequest, "four eyes approval is on: the approver must be another person")
+		return bad("four eyes approval is on: the approver must be another person")
 	case err != nil || !e.Expires.After(time.Now()) || e.Expires.After(time.Now().AddDate(3, 0, 1)):
-		s.errorPage(w, r, sess, http.StatusBadRequest, "expiry: a date within the next three years")
-	default:
-		err := s.auditAction(r.Context(), sess.Email, "exception.add", e.CheckID, fmt.Sprintf("mode=%s tag=%q owner=%q approver=%q expires=%s reason=%q",
-			e.Mode, e.Tag, e.Owner, e.Approver, e.Expires.Format(time.DateOnly), e.Reason), func(tx pgx.Tx) error {
-			_, err := tx.Exec(r.Context(), `INSERT INTO risk_exceptions(check_id, mode, tag, reason, owner, approver, expires_at, created_by, tenant_id)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, e.CheckID, e.Mode, e.Tag, e.Reason, e.Owner, e.Approver, e.Expires, e.CreatedBy, ownerTenant(r.Context()))
-			return err
-		})
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		http.Redirect(w, r, "/compliance#exceptions", http.StatusSeeOther)
+		return bad("expiry: a date within the next three years")
 	}
+	var id int64
+	err = s.auditAction(ctx, sess.Email, "exception.add", e.CheckID, fmt.Sprintf("mode=%s tag=%q owner=%q approver=%q expires=%s reason=%q",
+		e.Mode, e.Tag, e.Owner, e.Approver, e.Expires.Format(time.DateOnly), e.Reason), func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO risk_exceptions(check_id, mode, tag, reason, owner, approver, expires_at, created_by, tenant_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, e.CheckID, e.Mode, e.Tag, e.Reason, e.Owner, e.Approver, e.Expires, e.CreatedBy, ownerTenant(ctx)).Scan(&id)
+	})
+	return id, err
 }
 
 func (s *Server) exceptionRevoke(w http.ResponseWriter, r *http.Request, sess session) {
@@ -143,19 +151,32 @@ func (s *Server) exceptionRevoke(w http.ResponseWriter, r *http.Request, sess se
 		http.NotFound(w, r)
 		return
 	}
-	err = s.auditActionFn(r.Context(), func(tx pgx.Tx) (string, string, string, string, error) {
-		var check string
-		tcond, targs := tenantCond(sess, "tenant_id", 1)
-		err := tx.QueryRow(r.Context(), `UPDATE risk_exceptions SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL AND `+tcond+` RETURNING check_id`, append([]any{id}, targs...)...).Scan(&check)
-		return sess.Email, "exception.revoke", check, "#" + strconv.FormatInt(id, 10), err
-	})
-	if errors.Is(err, pgx.ErrNoRows) && !s.tenantOwns(r.Context(), sess, "risk_exceptions", id, false) {
+	err = s.revokeException(r.Context(), sess, id)
+	if errors.Is(err, errNotFound) {
 		s.notFound(w, r, sess)
 		return
 	}
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	http.Redirect(w, r, "/compliance#exceptions", http.StatusSeeOther)
+}
+
+// revokeException ends an exception of the session's tenant; revoking one
+// that is revoked already is no error, errNotFound one of another tenant.
+func (s *Server) revokeException(ctx context.Context, sess session, id int64) error {
+	err := s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
+		var check string
+		tcond, targs := tenantCond(sess, "tenant_id", 1)
+		err := tx.QueryRow(ctx, `UPDATE risk_exceptions SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL AND `+tcond+` RETURNING check_id`, append([]any{id}, targs...)...).Scan(&check)
+		return sess.Email, "exception.revoke", check, "#" + strconv.FormatInt(id, 10), err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		if !s.tenantOwns(ctx, sess, "risk_exceptions", id, false) {
+			return errNotFound
+		}
+		return nil
+	}
+	return err
 }
