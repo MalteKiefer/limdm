@@ -40,6 +40,7 @@ Content-Type: application/problem+json
 | `GET /api/v1/catalog/icons/{id}` | device | | catalog app icon (PNG) |
 | `GET /api/v1/catalog/search?q=` | device | | Flathub search through the server; 30 per 10 minutes and device, cached for an hour |
 | `GET /api/v1/catalog/flathub-icon?u=` | device | | Flathub icon proxy, only `dl.flathub.org`; 300 per 10 minutes and device, cached |
+| `POST /api/v1/shell/{session}` | device | stream | remote shell relay, only for the device of the session: the request body streams terminal output, the response streams frames (type `i` input or `r` resize, uint16 length, payload). See [remote-shell.md](remote-shell.md) |
 
 A device checks in once per check in interval (agent declaration, default 15 minutes) and
 polls every minute with jitter; after failures the poll backs off to five minutes. One

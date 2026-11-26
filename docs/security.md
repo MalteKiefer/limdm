@@ -65,7 +65,8 @@ start otherwise. Schema changes run as versioned migrations under an advisory lo
 Append only (a trigger blocks `UPDATE`, `DELETE` and `TRUNCATE`) and hash chained; the audit
 page verifies the whole chain and shows where it breaks. Recorded: console actions,
 settings changes, sign ins (also failed ones), enrollments, certificate rotations, command
-results, tamper events, recovery key escrow and every recovery key view, policy actions.
+results, tamper events, recovery key escrow and every recovery key view, policy actions,
+remote shell sessions (start and end).
 
 Routine agent events (every change the agent makes on a device, desktop logins) are high
 volume and kept separately in `device_events`: append only, 365 days, shown on the device
@@ -79,6 +80,39 @@ page (Commands tab). They do not take part in the hash chain.
   with `sshd -t`.
 * The desktop socket authorizes by peer credentials and active local session.
 * Secrets on the device (`device.pem`, login configuration, state) are root only, 0600.
+* **Custom compliance checks** run no shell. A query check starts `osqueryi` with one read
+  only `SELECT` (validated on server and agent, no extensions, 30 seconds); file, sysctl,
+  package and service tests are evaluated by the agent itself. Expressions are RE2 (linear
+  time). See [compliance.md](compliance.md#custom-checks-comlimdmcustomchecks).
+
+## Remote shell
+
+The remote shell ([remote-shell.md](remote-shell.md)) is remote code execution by design;
+these controls keep it narrow:
+
+* **Two opt ins.** The device must be enrolled with `allow_remote_shell` (local file, not
+  changeable from the server) and the server setting must be on. Helpdesk and root need
+  their own switches; the start goes through the four eyes hook `requireApproval`.
+* **Signed and fresh.** The `shell` command is signed like every command, and the agent
+  runs it only with a pinned command key and when it is younger than 10 minutes. Someone
+  who can write to the database cannot open a shell.
+* **No inbound port.** The device connects out over the existing mTLS agent channel; the
+  server pairs it only with the device the session was created for. The session ID is 256
+  random bits.
+* **Console side.** The WebSocket needs a valid console session of the user who started it,
+  the role and setting at that moment, the exact `Origin` and the CSRF token, so another
+  site cannot open it (cross site WebSocket hijacking). Access is checked again every
+  minute while the session runs.
+* **Visible and bounded.** The signed in user is notified and can end the session; maximum
+  duration and idle timeout are enforced on server and device; the whole process group is
+  hung up at the end.
+* **Accountable.** `shell.start` and `shell.end` go to the hash chained audit log, the
+  output is stored (1 MiB per session, 365 days) and only admins and auditors can read it.
+  Transcripts can contain whatever the session displayed, including secrets; treat them as
+  confidential.
+* The WebSocket server is a small RFC 6455 implementation without extensions (masked
+  client frames only, 64 KiB per message, UTF-8 checked); the terminal (xterm.js) is
+  served from the console, so the CSP stays `default-src 'self'`.
 
 ## Host hardening
 

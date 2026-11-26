@@ -40,6 +40,8 @@ and Integrations; each tab saves only its own fields:
 * **Local accounts.** Can only be disabled while an OIDC administrator exists and you are
   signed in with OIDC, so nobody locks everyone out.
 * **Stale threshold** and **compliance webhook** ([compliance.md](compliance.md#webhook)).
+* **Remote shell** (tab Security): on or off, helpdesk allowed, root allowed, maximum
+  duration and idle timeout ([remote-shell.md](remote-shell.md)).
 * **Branding.** Company name (up to 80 characters) and a PNG logo (16 to 1024 pixels, up to
   256 KiB, square works best). Shown in the console, on the sign in page and in the desktop
   helper's dialogs and notifications on devices. Only PNG is accepted because an SVG served
