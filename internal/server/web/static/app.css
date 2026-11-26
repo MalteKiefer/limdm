@@ -612,3 +612,4 @@ legend .hint, summary .hint { display: block; margin-top: 2px; font-size: 12px; 
 table.fieldref { margin-bottom: 10px; }
 table.fieldref th, table.fieldref td { padding: 5px 8px; font-size: 12.5px; }
 table.fieldref td.mono { overflow-wrap: anywhere; }
+.dh-facts dd .fact-sub { display: block; font-weight: 400; font-size: 12px; color: var(--text-3); }

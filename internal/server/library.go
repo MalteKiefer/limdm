@@ -602,7 +602,12 @@ func (s *Server) blueprints(w http.ResponseWriter, r *http.Request, sess session
 	for _, b := range bps {
 		names[b.ID] = b.Name
 	}
-	s.render(w, r, sess, "blueprints", map[string]any{"Blueprints": bps, "Names": names})
+	assign, err := s.blueprintAssignments(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.render(w, r, sess, "blueprints", map[string]any{"Blueprints": bps, "Names": names, "Assign": assign})
 }
 
 func (s *Server) blueprintEdit(w http.ResponseWriter, r *http.Request, sess session) {

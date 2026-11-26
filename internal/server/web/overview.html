@@ -5,20 +5,20 @@
   <div class="actions"><a class="button secondary" href="/export/compliance.csv">{{t "Evidence CSV"}}</a><a class="button" href="/tokens">{{t "Enroll device"}}</a></div>
 </div>
 <div class="stats">
-  <a class="stat" href="/devices?status=compliant"><div class="label"><span class="dot ok"></span>{{t "Compliant"}}</div><div class="value">{{index .Counts "compliant"}}</div><div class="hint">{{pct (index .Counts "compliant") .Active}}{{t "% of active"}}</div></a>
-  <a class="stat" href="/devices?status=non-compliant"><div class="label"><span class="dot bad"></span>{{t "Non-compliant"}}</div><div class="value">{{index .Counts "non-compliant"}}</div><div class="hint">{{t "At least one failing check"}}</div></a>
-  <a class="stat" href="/devices?status=stale"><div class="label"><span class="dot warn"></span>{{t "Stale"}}</div><div class="value">{{index .Counts "stale"}}</div><div class="hint">{{t "Silent for"}} {{.StaleHours}} {{t "h"}}</div></a>
-  <a class="stat" href="/devices?status=pending"><div class="label"><span class="dot na"></span>{{t "Pending"}}</div><div class="value">{{index .Counts "pending"}}</div><div class="hint">{{t "No report yet"}}</div></a>
+  <a class="stat" href="/devices?status=compliant" title="{{statusHelp "compliant"}}"><div class="label"><span class="dot ok"></span>{{t "Compliant"}}</div><div class="value">{{index .Counts "compliant"}}</div><div class="hint">{{pct (index .Counts "compliant") .Active}}{{t "% of active"}}</div></a>
+  <a class="stat" href="/devices?status=non-compliant" title="{{statusHelp "non-compliant"}}"><div class="label"><span class="dot bad"></span>{{t "Non-compliant"}}</div><div class="value">{{index .Counts "non-compliant"}}</div><div class="hint">{{t "At least one failing check"}}</div></a>
+  <a class="stat" href="/devices?status=stale" title="{{statusHelp "stale"}}"><div class="label"><span class="dot warn"></span>{{t "Stale"}}</div><div class="value">{{index .Counts "stale"}}</div><div class="hint">{{t "Silent for"}} {{.StaleHours}} {{t "h"}}</div></a>
+  <a class="stat" href="/devices?status=pending" title="{{statusHelp "pending"}}"><div class="label"><span class="dot na"></span>{{t "Pending"}}</div><div class="value">{{index .Counts "pending"}}</div><div class="hint">{{t "No report yet"}}</div></a>
 </div>
 <div class="grid{{if ne .Sess.Role "helpdesk"}} side-right{{end}}">
   <div>
     <section class="card chart-card">
-      <div class="card-head"><h2>{{t "Fleet status"}}</h2></div>
+      <div class="card-head"><h2>{{t "Fleet status"}}</h2><a class="muted" href="/help#status">{{t "What the states mean"}}</a></div>
       <div class="chart-row">{{.Donut}}
         <ul class="legend">
           <li><span class="dot ok"></span>{{t "Compliant"}}<b>{{index .Counts "compliant"}}</b></li>
           <li><span class="dot bad"></span>{{t "Non-compliant"}}<b>{{index .Counts "non-compliant"}}</b></li>
-          <li><span class="dot warn"></span>{{t "In grace period"}}<b>{{index .Counts "in grace"}}</b></li>
+          <li title="{{statusHelp "in grace"}}"><span class="dot warn"></span>{{t "In grace period"}}<b>{{index .Counts "in grace"}}</b></li>
           <li><span class="dot warn"></span>{{t "Stale"}}<b>{{index .Counts "stale"}}</b></li>
           <li><span class="dot na"></span>{{t "Pending"}}<b>{{index .Counts "pending"}}</b></li>
         </ul>

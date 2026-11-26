@@ -674,6 +674,15 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("helpdesk %s: %d, want %d", typ, code, want)
 		}
 	}
+	// the device page (retired by now) says where the blueprint comes from and hides admin dialogs
+	if code, body := ui("GET", "/devices/"+er.DeviceID, nil, help); code != 200 || strings.Contains(body, "dlg-wipe") || !strings.Contains(body, "/help#blueprint-source") {
+		t.Fatalf("helpdesk device page: %d", code)
+	}
+	for _, p := range []string{"/help", "/blueprints", "/library/new?type=com.limdm.screenlock"} {
+		if code, body := ui("GET", p, nil, adminSess); code != 200 || !strings.Contains(body, `class="doclink"`) && !strings.Contains(body, "Field reference") && !strings.Contains(body, "Glossary") {
+			t.Fatalf("GET %s: %d", p, code)
+		}
+	}
 	var cmdsBefore, cmdsAfter int
 	db.QueryRow(ctx, `SELECT count(*) FROM commands`).Scan(&cmdsBefore)
 	if code, _ := ui("POST", "/devices/"+er.DeviceID+"/command", url.Values{"type": {"user_password"}, "username": {"jdoe"},

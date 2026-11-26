@@ -50,7 +50,8 @@
     <div><dt>{{t "User"}}</dt><dd>{{if .Primary}}{{if eq .Sess.Role "helpdesk"}}{{.Primary}}{{else}}<a href="/directory?q={{.Primary}}">{{.Primary}}</a>{{end}}{{else}}–{{end}}</dd>
       <dt>{{t "Tags"}}</dt><dd>{{range .TagList}}<a class="tag" href="/devices?tag={{.}}">#{{.}}</a> {{else}}–{{end}}</dd>
       <dt>{{t "Signed in"}}</dt><dd>{{range .Inv.Users}}<span class="tag">{{.}}</span> {{else}}–{{end}}</dd></div>
-    <div><dt>{{t "Blueprint"}}</dt><dd>{{range .Blueprints}}{{if .Applies}}<a href="/blueprints/{{.ID}}">{{.Name}}</a>{{end}}{{end}}</dd>
+    <div><dt>{{t "Blueprint"}}</dt><dd>{{range .Blueprints}}{{if .Applies}}<a href="/blueprints/{{.ID}}">{{.Name}}</a>{{end}}{{end}}
+        <a class="fact-sub" href="/help#blueprint-source" title="{{t "Where the blueprint of a device comes from: set on the device (manually or by its enrollment token), else the directory group of its primary user with the lowest priority number, else default."}}">{{with .BPSource}}{{if eq .Kind "device"}}{{t "set on the device"}}{{else if eq .Kind "group"}}{{t "via group"}} {{.Group}} ({{t "priority"}} {{.Priority}}){{else}}{{t "no other assignment"}}{{end}}{{end}}</a></dd>
       <dt>{{t "Last check in"}}</dt><dd>{{ago .D.LastSeen}}</dd>
       <dt>{{t "Agent"}}</dt><dd><a href="/devices?agent={{.D.AgentVersion}}">{{.D.AgentVersion}}</a>{{if .D.UpdateRequested}} <span class="muted">· {{t "update requested"}}</span>{{else if .D.UpdateState}} <span class="muted">· {{.D.UpdateVersion}} {{t .D.UpdateState}}</span>{{end}}</dd></div>
     <div><dt>{{t "Network"}}</dt><dd>{{if .D.ExternalIP}}<span class="mono">{{.D.ExternalIP}}</span>{{else}}–{{end}}</dd>
@@ -125,7 +126,9 @@
 {{if eq .Tab "overview"}}
 {{if .Tampered}}<div class="notice error" role="status"><strong>{{t "Tamper attempt reported"}}</strong> {{fmtTime (derefTime .Tampered)}}. {{if eq .Sess.Role "helpdesk"}}{{t "Details are in the audit log (agent.tamper)."}}{{else}}<a href="/audit?action=agent.tamper&amp;target={{$id}}">{{t "Details are in the audit log (agent.tamper)."}}</a>{{end}}</div>{{end}}
 {{if .D.AutoLocked}}<div class="notice error" role="status"><strong>{{t "Locked by compliance policy."}}</strong> {{t "Logins are blocked until the device is compliant again or an admin unlocks it."}}</div>{{end}}
-{{if .Since}}<div class="notice">{{t "Failing compliance since"}} {{fmtTime (derefTime .Since)}}{{if .D.GraceUntil}}{{t "; grace period"}} {{if eq .D.Status "in grace"}}{{t "ends"}}{{else}}{{t "ended"}}{{end}} {{fmtTime (derefTime .D.GraceUntil)}}{{end}}.</div>{{end}}
+{{if .Since}}<div class="notice">{{t "Failing compliance since"}} {{fmtTime (derefTime .Since)}}{{if .D.GraceUntil}}{{t "; grace period"}} {{if eq .D.Status "in grace"}}{{t "ends"}}{{else}}{{t "ended"}}{{end}} {{fmtTime (derefTime .D.GraceUntil)}}{{end}}.
+  {{if .LockAt}}{{if not .D.AutoLocked}}{{t "Unless it is fixed, the device is locked automatically at"}} {{fmtTime (derefTime .LockAt)}}.{{end}}{{else}}{{t "The compliance item sets no automatic lock (lock_after_hours 0)."}}{{end}}
+  {{if .Notify}}{{t "A notification goes out when the grace period ends."}}{{end}} <a href="/help#grace-period">{{t "What does this mean?"}}</a></div>{{end}}
 <div class="stats">
   <div class="stat"><div class="label">{{t "Failing checks"}}</div><div class="value">{{.Failing}}</div><div class="hint">{{t "Of"}} {{len .Checks}} {{t "evaluated"}}</div></div>
   <div class="stat"><div class="label">{{t "Memory"}}</div><div class="value">{{gib .Inv.MemoryMB}}</div><div class="hint">{{if .Inv.SwapMB}}{{t "swap"}} {{gib .Inv.SwapMB}}{{else}}{{t "no swap"}}{{end}}</div></div>

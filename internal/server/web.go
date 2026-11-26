@@ -841,7 +841,19 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request, sess session) {
 			return
 		}
 	}
-	s.render(w, r, sess, "device", map[string]any{"EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames, "AppBusy": appBusy, "AppNotes": appNotes, "CatalogFlatpaks": catalogFlatpaks,
+	bpSrc, err := s.blueprintSource(ctx, id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	// what happens after the grace period: the compliance item of this device
+	comp, _ := api.Compose(want)
+	var lockAt *time.Time
+	if since != nil && comp.Compliance.LockAfterHours > 0 {
+		t := since.Add(time.Duration(comp.Compliance.LockAfterHours) * time.Hour)
+		lockAt = &t
+	}
+	s.render(w, r, sess, "device", map[string]any{"BPSource": bpSrc, "LockAt": lockAt, "Notify": comp.Compliance.Notify, "EncExcluded": encExcluded, "AgentVersions": agentVersions, "AppNames": appNames, "AppBusy": appBusy, "AppNotes": appNotes, "CatalogFlatpaks": catalogFlatpaks,
 		"PwError": pwError(r), "PwMin": s.settings().Rules.Min(),
 		"D": d, "Inv": data.Inv, "Checks": data.Checks, "Decl": declRows, "Users": strings.Join(userLines, "\n"),
 		"PackageCount": len(data.Packages), "Packages": pkgView, "PkgQ": pkgQ, "PkgMatched": matched,

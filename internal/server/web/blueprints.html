@@ -4,12 +4,13 @@
   <div><h1>{{t "Blueprints"}} {{template "doclink" "concepts.md#blueprints"}}</h1><div class="meta"><span>{{t "Assignment maps: which library items a device gets, under which conditions"}}</span></div></div>
   {{if eq .Sess.Role "admin"}}<div class="actions"><a class="button" href="/blueprints/new">{{t "New blueprint"}}</a></div>{{end}}
 </div>
-<div class="notice">Every device has exactly one blueprint; devices without one use <code>default</code>. A blueprint can inherit from a parent, whose map is evaluated first.</div>
+<div class="notice">{{t "Every device has exactly one blueprint. It comes from the first that applies: the blueprint set on the device (by an admin or its enrollment token), the directory group of its primary user with the lowest priority number, or default. A blueprint can inherit from a parent, whose map is evaluated first."}}</div>
 <div class="tablecard"><div class="scroll"><table>
-  <thead><tr><th>{{t "Blueprint"}}</th><th>{{t "Inherits from"}}</th><th class="num">{{t "Devices"}}</th><th>{{t "Updated"}}</th></tr></thead>
+  <thead><tr><th>{{t "Blueprint"}}</th><th>{{t "Inherits from"}}</th><th>{{t "Assigned through"}}</th><th class="num">{{t "Devices"}}</th><th>{{t "Updated"}}</th></tr></thead>
   <tbody>{{$names := .Names}}{{range .Blueprints}}<tr>
     <td><a class="rowlink" href="/blueprints/{{.ID}}">{{.Name}}</a>{{if .Desc}}<span class="sub">{{.Desc}}</span>{{end}}</td>
     <td>{{if .Parent}}{{index $names (deref .Parent)}}{{else}}<span class="muted">{{t "none"}}</span>{{end}}</td>
+    <td>{{with index $.Assign .ID}}{{if .Direct}}<span class="tag" title="{{t "set on the device"}}">{{.Direct}} {{t "set on the device"}}</span>{{end}}{{range .Groups}}<span class="tag" title="{{t "Directory group, priority"}}">{{.Group}} · {{.Priority}}</span>{{end}}{{end}}{{if eq .Name "default"}}<span class="muted">{{t "every device without another assignment"}}</span>{{end}}</td>
     <td class="num">{{if .Devices}}<a class="count" href="/devices?blueprint={{.Name}}">{{.Devices}}</a>{{else}}<span class="muted">0</span>{{end}}</td><td>{{fmtTime .Updated}}</td></tr>{{end}}</tbody>
 </table></div></div>
 {{end}}

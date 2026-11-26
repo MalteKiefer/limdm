@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"sort"
 	"strings"
@@ -193,4 +194,83 @@ func (s *Server) helpPage(w http.ResponseWriter, r *http.Request, sess session) 
 	}
 	sort.SliceStable(list, func(i, j int) bool { return strings.ToLower(list[i].Term) < strings.ToLower(list[j].Term) })
 	s.render(w, r, sess, "help", map[string]any{"Terms": list, "Statuses": []string{"compliant", "in grace", "non-compliant", "stale", "pending", "retired"}})
+}
+
+// bpSource says where the blueprint of a device comes from, in the order
+// resolveDevice applies: set on the device (by an admin or the enrollment
+// token), the primary user's directory group with the lowest priority
+// number, or the default blueprint.
+type bpSource struct {
+	Kind     string // "device", "group" or "default"
+	Group    string
+	Priority int
+}
+
+func (s *Server) blueprintSource(ctx context.Context, deviceID string) (bpSource, error) {
+	var direct bool
+	var group *string
+	var prio *int
+	err := s.db.QueryRow(ctx, `SELECT d.blueprint_id IS NOT NULL,
+		(SELECT g.name FROM dir_users u JOIN dir_members m ON m.user_id=u.id JOIN blueprint_group_assignments a ON a.group_id=m.group_id
+		 JOIN dir_groups g ON g.id=a.group_id WHERE u.id=d.primary_user_id AND u.active ORDER BY a.priority, a.group_id LIMIT 1),
+		(SELECT a.priority FROM dir_users u JOIN dir_members m ON m.user_id=u.id JOIN blueprint_group_assignments a ON a.group_id=m.group_id
+		 WHERE u.id=d.primary_user_id AND u.active ORDER BY a.priority, a.group_id LIMIT 1)
+		FROM devices d WHERE d.id=$1`, deviceID).Scan(&direct, &group, &prio)
+	switch {
+	case err != nil:
+		return bpSource{}, err
+	case direct:
+		return bpSource{Kind: "device"}, nil
+	case group != nil && prio != nil:
+		return bpSource{Kind: "group", Group: *group, Priority: *prio}, nil
+	}
+	return bpSource{Kind: "default"}, nil
+}
+
+// bpAssignments are, per blueprint, the devices that have it set directly
+// and the directory groups that assign it with their priority.
+type bpAssignments struct {
+	Direct int
+	Groups []bpSource
+}
+
+func (s *Server) blueprintAssignments(ctx context.Context) (map[int64]*bpAssignments, error) {
+	m := map[int64]*bpAssignments{}
+	get := func(id int64) *bpAssignments {
+		if m[id] == nil {
+			m[id] = &bpAssignments{}
+		}
+		return m[id]
+	}
+	rows, err := s.db.Query(ctx, `SELECT blueprint_id, count(*) FROM devices WHERE NOT retired AND blueprint_id IS NOT NULL GROUP BY 1`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id int64
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		get(id).Direct = n
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows, err = s.db.Query(ctx, `SELECT a.blueprint_id, g.name, a.priority FROM blueprint_group_assignments a JOIN dir_groups g ON g.id=a.group_id ORDER BY a.priority, g.name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		src := bpSource{Kind: "group"}
+		if err := rows.Scan(&id, &src.Group, &src.Priority); err != nil {
+			return nil, err
+		}
+		get(id).Groups = append(get(id).Groups, src)
+	}
+	return m, rows.Err()
 }
