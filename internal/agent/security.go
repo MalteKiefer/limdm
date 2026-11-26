@@ -56,7 +56,8 @@ func applyPolkit(rules []api.PolkitRule) error {
 	for _, r := range rules {
 		desired["60-limdm-"+r.Name+".rules"] = polkitJS(r)
 	}
-	_, err := syncManaged(polkitDir, "60-limdm-", ".rules", desired)
+	// the store lock rule shares the prefix and is the catalog's, not the polkit item's
+	_, err := syncManaged(polkitDir, "60-limdm-", ".rules", desired, filepath.Base(storeReadOnly))
 	return err // polkitd picks up changed rule files on its own
 }
 

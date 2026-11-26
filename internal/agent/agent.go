@@ -103,7 +103,8 @@ type Agent struct {
 	pol        api.Policy
 	polView    atomic.Pointer[api.Policy] // copy of pol for other goroutines
 	desktop    *desktopServer
-	evMu       sync.Mutex // guards state.Events and state.AppRequests: the desktop socket works from its own goroutines
+	evMu       sync.Mutex           // guards state.Events and state.AppRequests: the desktop socket works from its own goroutines
+	lastSeen   map[string]time.Time // event text -> last time it was queued (repeats are dropped, see event)
 	store      store
 	kick       chan struct{}
 	declStatus []api.DeclarationStatus
@@ -119,6 +120,7 @@ type Agent struct {
 	lastError    string
 	lastChecks   []api.CheckResult
 	lastFlatpaks []api.FlatpakApp // from the last inventory, for the desktop catalog
+	lastSystem   DesktopSystem    // from the last inventory, for limdm info
 }
 
 func validServerURL(s string) error {
@@ -393,10 +395,32 @@ func (a *Agent) problem(typ, format string, args ...any) {
 	}
 }
 
+// eventRepeat: the same event text is reported once in this window. The
+// server gets state changes, not a heartbeat of an unchanged state (a
+// remediation failing every cycle, a file rewritten every cycle).
+const eventRepeat = 6 * time.Hour
+
 func (a *Agent) event(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	a.log.Info(msg)
-	a.addEvent(time.Now().UTC().Format(time.RFC3339) + " " + msg)
+	now := time.Now()
+	a.evMu.Lock()
+	if a.lastSeen == nil {
+		a.lastSeen = map[string]time.Time{}
+	}
+	last, seen := a.lastSeen[msg]
+	repeat := seen && now.Sub(last) < eventRepeat && !strings.HasPrefix(msg, "tamper: ")
+	if !repeat {
+		a.lastSeen[msg] = now
+		if len(a.lastSeen) > 2000 { // bounded: forget the window rather than grow
+			clear(a.lastSeen)
+		}
+	}
+	a.evMu.Unlock()
+	if repeat {
+		return
+	}
+	a.addEvent(now.UTC().Format(time.RFC3339) + " " + msg)
 }
 
 // addEvent queues one line for the next check in (bounded while offline).
@@ -526,6 +550,8 @@ func (a *Agent) cycle(ctx context.Context) {
 	a.applyCatalog(inv.Flatpaks)
 	inv.Apps = a.catalogStates(inv.Flatpaks)
 	a.lastFlatpaks = inv.Flatpaks
+	a.lastSystem = DesktopSystem{OS: strings.TrimSpace(inv.OSName + " " + inv.OSVersion), Kernel: inv.Kernel, Arch: inv.Arch,
+		Inventory: inv.Source, Vendor: inv.Vendor, Model: inv.Model, Serial: inv.Serial}
 	status := api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus()}
 	sb, _ := json.Marshal(status)
 	sum := sha256.Sum256(sb)

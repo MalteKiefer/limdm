@@ -982,3 +982,20 @@ func TestTTYName(t *testing.T) {
 		}
 	}
 }
+
+func TestEventRepeatsAreDropped(t *testing.T) {
+	a := &Agent{log: slog.New(slog.DiscardHandler)}
+	a.event("software stores read only: %v", true)
+	a.event("software stores read only: %v", true)
+	a.event("software stores read only: %v", false)
+	a.event("tamper: unit stopped")
+	a.event("tamper: unit stopped")
+	if n := len(a.pendingEvents()); n != 4 {
+		t.Fatalf("queued %d events, want 4 (one repeat dropped, tamper always kept): %v", n, a.pendingEvents())
+	}
+	a.lastSeen["software stores read only: true"] = time.Now().Add(-eventRepeat - time.Minute)
+	a.event("software stores read only: %v", true)
+	if n := len(a.pendingEvents()); n != 5 {
+		t.Fatalf("a repeat after the window must be sent again, queued %d", n)
+	}
+}
