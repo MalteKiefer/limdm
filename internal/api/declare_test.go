@@ -37,7 +37,7 @@ func TestRootCodePath(t *testing.T) {
 		"/etc/profile.d/x.sh": true, "/etc/pam.d/sshd": true, "/etc/ld.so.preload": true, "/etc/init.d/x": true, "/etc/polkit-1/rules.d/x.rules": true,
 		"/etc/udev/rules.d/99.rules": true, "/etc/modprobe.d/x.conf": true, "/usr/local/bin/tool": true, "/etc/limdm/agent.json": true,
 		"/etc/default/grub.d/x.cfg": true,
-		"/etc/motd": false, "/etc/issue": false, "/etc/chrony/chrony.conf": false, "/etc/profiles": false, "/srv/app/config.yml": false,
+		"/etc/motd":                 false, "/etc/issue": false, "/etc/chrony/chrony.conf": false, "/etc/profiles": false, "/srv/app/config.yml": false,
 	} {
 		if RootCodePath(p) != want {
 			t.Errorf("%s: want %v", p, want)
