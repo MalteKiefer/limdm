@@ -275,6 +275,27 @@ func showMessage(title, text string) {
 	d.sheet("mail-unread", title, text, nil, "")
 }
 
+// offerRebootDefer asks whether to postpone the restart IT planned after
+// updates; the agent enforces how often and by how much.
+func offerRebootDefer(at string, left, minutes int) {
+	resp, _ := call(agent.DesktopRequest{Op: "status"})
+	d := dialogsFor(resp)
+	body := fmt.Sprintf(tr("The device restarts at %s to finish updates. Save your work. You can postpone the restart %d more times.",
+		"Das Gerät startet um %s neu, um Updates abzuschließen. Speichern Sie Ihre Arbeit. Sie können den Neustart noch %d Mal verschieben."), at, left)
+	if !d.ask(tr("Restart scheduled", "Neustart geplant"), body, fmt.Sprintf(tr("Postpone %d minutes", "%d Minuten verschieben"), minutes), tr("Restart as planned", "Wie geplant neu starten")) {
+		return
+	}
+	r, err := call(agent.DesktopRequest{Op: "reboot-defer"})
+	switch {
+	case err != nil:
+		d.message(tr("Restart not postponed", "Neustart nicht verschoben"), err.Error(), true)
+	case r.Error != "":
+		d.message(tr("Restart not postponed", "Neustart nicht verschoben"), r.Error, true)
+	default:
+		d.message(tr("Restart postponed", "Neustart verschoben"), fmt.Sprintf(tr("The device restarts at %s.", "Das Gerät startet um %s neu."), r.RebootAt), false)
+	}
+}
+
 const appPath = "/usr/lib/limdm/limdm-desktop-ui"
 
 // openApp opens the GTK 4 window on a page. Without GTK 4 and libadwaita 1.4

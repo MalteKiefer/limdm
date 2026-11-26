@@ -70,6 +70,12 @@ Optional patch management fields:
 * `snap_refresh` (only where snapd is installed): `hold` stops automatic snap refreshes,
   `window` sets `refresh.timer` to the update window and days. Removing it restores the
   snapd default.
+* Restart notice and deferral (with `reboot`): the restart is scheduled
+  `reboot_notice_minutes` ahead (default 5, at most 120) and announced in every desktop
+  session. With `reboot_max_defers` (0 to 5, default 0) the desktop helper offers to
+  postpone it by `reboot_defer_minutes` (15 to 480, default 60) that many times; it asks
+  again shortly before each new time. After the last deferral the restart happens. Every
+  deferral is reported as an event with the user name.
 
 ### `com.limdm.packages` (list)
 

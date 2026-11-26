@@ -71,7 +71,9 @@ type State struct {
 	Users         []api.User           `json:"users"`
 	LastUpdateRun time.Time            `json:"last_update_run"`
 	RebootSince   time.Time            `json:"reboot_since"`
-	RebootPlanned time.Time            `json:"reboot_planned"`        // when a post update reboot was scheduled
+	RebootPlanned time.Time            `json:"reboot_planned"`     // when a post update reboot was scheduled
+	RebootAt      time.Time            `json:"reboot_at,omitzero"` // when it happens, deferrals included (guarded by evMu)
+	RebootDefers  int                  `json:"reboot_defers,omitempty"`
 	ScriptRuns    map[string]time.Time `json:"script_runs,omitempty"` // last run of recurring scripts
 	Results       []api.CommandResult  `json:"results"`               // not yet reported
 	Events        []string             `json:"events"`
@@ -787,10 +789,9 @@ func (a *Agent) maintenance(now time.Time) {
 		}
 	}
 	// Schedule once: a new shutdown call would replace and postpone the pending one.
-	if u.Reboot && now.Sub(a.state.RebootPlanned) > time.Hour && a.host.rebootRequired() {
-		if _, err := sh("shutdown", "-r", "+5", "LiMDM: rebooting in 5 minutes to finish updates"); err == nil {
-			a.state.RebootPlanned = now.Round(0)
-			a.event("reboot scheduled after updates")
+	if u.Reboot && !a.rebootPending(now) && a.host.rebootRequired() {
+		if err := a.scheduleReboot(now, u.RebootDefer); err != nil {
+			a.problem(api.TypeUpdates, "reboot after updates: %v", err)
 		}
 	}
 }
