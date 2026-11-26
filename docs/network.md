@@ -94,7 +94,8 @@ On the device they are stored in the root only keyfiles, as NetworkManager requi
 When a device's declarations contain an EAP-TLS profile, the agent creates an ECDSA P-256 key
 (`/var/lib/limdm/network/device.key`, 0600), sends a CSR over mTLS
 (`POST /api/v1/network-cert`) and stores the certificate in `/var/lib/limdm/network/device.crt`.
-It renews 30 days before expiry with a new key. The server issues only to devices that have
+It renews 30 days before expiry with a new key, and at once when the server asks for it
+during a network CA rotation. The server issues only to devices that have
 an EAP-TLS profile, at most 5 requests per 10 minutes and device, and records each issue in
 the audit log (`network.cert_issue`).
 
@@ -112,14 +113,16 @@ The server ignores everything in the CSR except the key and fills in:
 ### Network CA
 
 The server creates `network-ca.crt` and `network-ca.key` (ECDSA P-384, 15 years) next to the
-device CA in `LIMDM_CA_DIR` at the first start. Back them up together with the device CA. It
+device CA in `LIMDM_CA_DIR` at the first start. Back them up together with the device CA. With
+`LIMDM_KEY_PROVIDER=pkcs11` the private key lives in the HSM under the label
+`limdm-network-ca` instead ([keys.md](keys.md#key-provider-and-hsm)). It
 is a root of its own and not an intermediate of the device CA: the device CA is limited to
 path length zero, and keeping the two apart means the agents' mTLS certificates can never be
 used for network access.
 
 Configure the RADIUS server to accept client certificates from the network CA only. Download
-it under **Network certificates** (`/network`, linked from a device's **Network** tab) or
-`/network/ca.pem`. FreeRADIUS example (`mods-available/eap`, `tls-config tls-common`):
+it under **Network certificates** (`/network`, admins and auditors, linked from a device's
+**Network** tab) or `/network/ca.pem` (any signed in console user). FreeRADIUS example (`mods-available/eap`, `tls-config tls-common`):
 
 ```
 ca_file = ${certdir}/limdm-network-ca.pem
@@ -127,14 +130,26 @@ check_crl = yes
 ca_path = ${certdir}/crl
 ```
 
+### Rotating the network CA
+
+The network CA can be replaced without touching devices by hand: `limdm-server keys rotate
+network-ca` or **Settings**, **Security**, **Keys**. During the rotation new certificates come
+from the new CA, devices with a certificate of the old CA renew at once, `/network/ca.pem`
+serves both CAs and `/network/crl.pem` a CRL for each. Install that bundle on every RADIUS
+server before the devices move, and replace it with the new CA alone after `keys finish
+network-ca`. The full runbook: [keys.md](keys.md#network-ca).
+
 ### Revocation
 
 Retiring a device and sending it a wipe revoke all its valid network certificates. The CRL of
 the network CA lists them until they expire; it is valid for 7 days and signed fresh on every
 download.
 
-* Console: **Network certificates**, **Download CRL** (any signed in role).
-* Automated: create a token on the same page (shown once, stored as a hash) and fetch
+* Console: **Network certificates**, **Download CRL**; `/network/crl.pem` itself works for
+  any signed in console user without a tenant.
+* Automated: an administrator creates a token on the same page (shown once, stored as a hash;
+  a new token replaces the old one, is audited as `network.crl_token` and raises the
+  notification event of the same name) and fetches
   `https://<console>/network/crl.pem` with `Authorization: Bearer <token>`, for example daily
   from cron on the RADIUS server:
 
