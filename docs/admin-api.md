@@ -184,7 +184,25 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `GET /api/v1/views` | read | `list` | `200` own and shared saved views |
 | `POST /api/v1/views` | self | `{"list", "name", "query", "sort", "columns", "shared"}` | `201` view; only admins share; shared views are audited as `view.save` |
 | `PUT /api/v1/views/{id}`, `DELETE /api/v1/views/{id}` | self | | `200` view or `204`; own views, admins also delete shared ones (`view.delete`) |
-| `GET /api/v1/schemas`, `GET /api/v1/schemas/{type}` | read | | declaration types; JSON Schema (draft 2020-12) of a payload, derived from the Go types |
+| `GET /api/v1/schemas`, `GET /api/v1/schemas/{type}` | read | `lang` (`de`, `en`) | declaration types with title, description, documentation link and `four_eyes`; JSON Schema (draft 2020-12) of a payload, derived from the Go types, with titles, help texts, sections, choices, widgets and limits per field |
+| `GET /api/v1/config/blueprints` | read | | `200` blueprints with `devices`, devices by `status`, `items`, assignment `sources` (devices, directory groups, default), `inherited`, `read_only`, a running `pilot`, plus `deleted` blueprints and the `rule_fields` of conditions |
+| `GET /api/v1/config/library` | read | | `200` library items (network secrets masked) with `used_by`, `invalid` signature, `read_only`, plus `deleted` items |
+| `POST /api/v1/config/library/preview`, `POST /api/v1/config/blueprints/preview` | admin | item or blueprint as for a save (with `id` for an existing one) | `200` review: line `diff` to the stored version, `devices` (`online`, `offline`, by `status`, `sample`), `needs_approval`, expected `impact` (compliance level, excluded or advisory checks, items added or removed); nothing is saved |
+| `GET /api/v1/config/{kind}/{id}/versions` | read, not device scoped | `kind` is `blueprints` or `library` | `200` versions newest first with the text diffs compare, `exists` |
+| `POST /api/v1/config/{kind}/{id}/rollback` | admin, not device scoped | `{"version"}` | `200` saved as the newest version or restored; `202` approval request for root effective items; audited as `library.rollback`, `blueprint.rollback` |
+| `POST /api/v1/config/blueprints/{id}/pilot` | admin, not device scoped | `{"tree", "devices"}` | `201` pilot: the changed map goes into a copy `<name>.pilot` set on these devices of the blueprint; audited as `blueprint.pilot` |
+| `POST /api/v1/config/blueprints/{id}/pilot/{op}` | admin, not device scoped | `op` `promote` or `abort` | `200`; promote saves the pilot map as a new version, both put the devices back and delete the copy; audited as `blueprint.pilot_end` |
+| `GET /api/v1/software/catalog`, `.../requests`, `.../remotes`, `.../settings` | audit, global accounts | | `200` catalog apps with installs and Flatpaks to take over; app requests; managed and found remotes; store settings |
+| `POST /api/v1/software/apps`, `PUT`/`DELETE /api/v1/software/apps/{id}` | admin, global accounts | catalog app with `sources`, `scope`, `icon` (PNG, base64) | `200`, `204`; `202` approval request for a required app with four eyes; audited as `catalog.save`, `catalog.delete` |
+| `POST /api/v1/software/flathub`, `GET /api/v1/software/flathub/search` | admin / audit | `{"id", "mode"}`, `q` | add a Flathub app (`201`, `202`), search Flathub through the server |
+| `POST /api/v1/software/import` | admin | `{"flatpaks"}` | `200` Flatpaks of the fleet taken into the catalog |
+| `POST /api/v1/software/requests/{id}/{op}` | admin | `op` `approve`, `approve-all`, `deny` | `200`; audited as `catalog.request.<op>` |
+| `PUT /api/v1/software/remotes/{name}`, `POST /api/v1/software/remotes/{name}/{op}` | admin | remote; `op` `allow`, `block`, `filter`, `unmanage` | `200`; audited as `catalog.remote` |
+| `PUT /api/v1/software/settings` | admin | `{"restrict_flathub", "stores_read_only", "only_managed_remotes"}` | `200`; audited as `catalog.settings` |
+| `GET /api/v1/packages` | audit, not device scoped | | `200` uploads of the tenant with `usage` and `snippet`, limits, quota use |
+| `POST /api/v1/packages` | admin, not device scoped | multipart: `name`, `version`, `kind`, `reason`, `file` (up to the upload limit) | `201` `uploaded`, or `pending` with four eyes; audited as `artifact.upload` |
+| `DELETE /api/v1/packages/{id}` | admin, not device scoped | | `204`; `409` while a library item uses it; audited as `artifact.delete` |
+| `PUT /api/v1/packages/settings` | admin, global accounts | `{"max_upload_mb", "quota_mb", "quota_count", "store", "s3"}` | `200`; an empty S3 `secret` keeps the stored one; audited as `artifact.settings` |
 | `GET /api/v1/stats/fleet` | read | | `200` devices per status, online, agent versions, OS, one fleet grid cell per device |
 | `GET /api/v1/stats/compliance` | read | `days` (1 to 400, default 30) | `200` score, frameworks, most failing checks, daily history (global view only) |
 | `GET /api/v1/stats/attention` | read | | `200` pending approvals, failed and sent commands of 24 hours, non compliant and stale devices, exceptions expiring in 7 days, last backup (global view, admin and auditor) |

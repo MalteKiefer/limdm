@@ -32,6 +32,7 @@ func (s *Server) appAPIRoutes(m *http.ServeMux) {
 	s.appInboxRoutes(m)
 	s.appActivityRoutes(m)
 	s.appReportsRoutes(m)
+	s.appConfigRoutes(m) // configuration area (app_config.go)
 }
 
 // csrfHeader carries the session's CSRF token on every state changing
@@ -154,12 +155,17 @@ func nonNil(v []string) []string {
 // apiSchemas lists the declaration types that have a payload schema.
 func (s *Server) apiSchemas(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	type item struct {
-		Type  string `json:"type"`
-		Title string `json:"title"`
+		Type        string `json:"type"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Doc         string `json:"doc"`
+		FourEyes    bool   `json:"four_eyes"` // root effective: saves need four eyes approval while it is on
 	}
+	lang := schemaLang(r)
 	out := []item{}
 	for _, t := range api.PayloadTypes() {
-		out = append(out, item{t, firstNonEmpty(typeLabels[t], t)})
+		out = append(out, item{t, translate(lang, firstNonEmpty(typeLabels[t], t)), translate(lang, typeInfo[t].Desc),
+			docsURL + "declarations.md#" + typeInfo[t].Anchor, rootTypes[t]})
 	}
 	writeJSON(w, listPage{Items: out})
 }
@@ -173,7 +179,10 @@ func (s *Server) apiSchema(w http.ResponseWriter, r *http.Request, c apiCaller) 
 		return
 	}
 	sch["$id"] = "/api/v1/schemas/" + typ
-	sch["title"] = firstNonEmpty(typeLabels[typ], typ)
+	lang := schemaLang(r)
+	sch["title"] = translate(lang, firstNonEmpty(typeLabels[typ], typ))
+	sch["description"] = translate(lang, typeInfo[typ].Desc)
+	annotateSchema(sch, typ, lang) // titles, help, choices and widgets (app_config_schema.go)
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	writeJSON(w, sch)
 }

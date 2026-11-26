@@ -22,6 +22,13 @@ func TestPayloadSchema(t *testing.T) {
 		if _, err := json.Marshal(s); err != nil {
 			t.Fatalf("%s: %v", typ, err)
 		}
+		seen := map[string]bool{} // shadowed embedded fields appear once
+		for _, k := range s["x-order"].([]string) {
+			if seen[k] {
+				t.Errorf("%s: %s twice in x-order", typ, k)
+			}
+			seen[k] = true
+		}
 		for _, f := range PayloadFields(typ) {
 			if lookup(s, f.Path) == nil {
 				t.Errorf("%s: schema lacks %s", typ, f.Path)

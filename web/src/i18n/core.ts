@@ -160,6 +160,9 @@ export const de = {
   'schema.value': 'Wert',
   'schema.chipsPlaceholder': 'Eintrag, Enter fügt hinzu',
   'schema.row': '{field}, Zeile {n}',
+  'schema.loadFile': 'Aus Datei laden',
+  'schema.show': 'Anzeigen',
+  'schema.hide': 'Verbergen',
 
   'chart.fleet': 'Flottenraster: {summary}',
 
@@ -339,6 +342,9 @@ export const en: Record<keyof typeof de, Msg> = {
   'schema.value': 'Value',
   'schema.chipsPlaceholder': 'Entry, Enter adds it',
   'schema.row': '{field}, row {n}',
+  'schema.loadFile': 'Load from file',
+  'schema.show': 'Show',
+  'schema.hide': 'Hide',
 
   'chart.fleet': 'Fleet grid: {summary}',
 

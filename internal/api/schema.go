@@ -71,7 +71,7 @@ func schemaOf(t reflect.Type, depth int) map[string]any {
 		return map[string]any{"type": "object", "additionalProperties": schemaOf(t.Elem(), depth+1)}
 	case reflect.Struct:
 		props, order := map[string]any{}, []string{}
-		structProps(t, props, &order, depth)
+		structProps(t, props, &order, depth, false)
 		return map[string]any{"type": "object", "properties": props, "additionalProperties": false, "x-order": order}
 	}
 	return map[string]any{} // interfaces: any value
@@ -79,7 +79,9 @@ func schemaOf(t reflect.Type, depth int) map[string]any {
 
 // structProps adds the JSON fields of struct t, embedded structs flattened
 // as encoding/json does.
-func structProps(t reflect.Type, props map[string]any, order *[]string, depth int) {
+// A field of the struct itself shadows an embedded field of the same name
+// (the shallower field wins), and every name appears once in order.
+func structProps(t reflect.Type, props map[string]any, order *[]string, depth int, embedded bool) {
 	for i := range t.NumField() {
 		f := t.Field(i)
 		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
@@ -91,16 +93,22 @@ func structProps(t reflect.Type, props map[string]any, order *[]string, depth in
 			ft = ft.Elem()
 		}
 		if f.Anonymous && name == "" && ft.Kind() == reflect.Struct {
-			structProps(ft, props, order, depth)
+			structProps(ft, props, order, depth, true)
 			continue
 		}
 		if name == "" {
 			name = f.Name
 		}
+		_, dup := props[name]
+		if dup && embedded {
+			continue
+		}
 		s := schemaOf(f.Type, depth+1)
 		s["title"] = fieldTitle(name)
 		props[name] = s
-		*order = append(*order, name)
+		if !dup {
+			*order = append(*order, name)
+		}
 	}
 }
 

@@ -917,3 +917,17 @@ CREATE TABLE IF NOT EXISTS report_runs (
     error       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS report_runs_schedule ON report_runs(schedule_id, id DESC);
+
+-- ws/ui-config
+-- pilot rollout of a blueprint change (app_config_pilot.go): the devices
+-- moved to the pilot copy and the blueprint they had set before
+CREATE TABLE IF NOT EXISTS blueprint_pilots (
+    pilot_id          BIGINT NOT NULL REFERENCES blueprints(id) ON DELETE CASCADE,
+    blueprint_id      BIGINT NOT NULL REFERENCES blueprints(id) ON DELETE CASCADE,
+    device_id         TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    prev_blueprint_id BIGINT,
+    created_by        TEXT NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (pilot_id, device_id)
+);
+CREATE INDEX IF NOT EXISTS blueprint_pilots_blueprint ON blueprint_pilots(blueprint_id);
