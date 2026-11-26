@@ -142,6 +142,8 @@ type ExtraPolicy struct {
 	Sudo           *Sudo           `json:"sudo,omitempty"`
 	Bootloader     *Bootloader     `json:"bootloader,omitempty"`
 	SoftwareStore  *SoftwareStore  `json:"software_store,omitempty"`
+
+	Network []NetworkProfile `json:"network,omitempty"`
 }
 
 var extraExamples = map[string]string{
