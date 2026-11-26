@@ -5,6 +5,23 @@ every page of the navigation in its order, names what it shows and which actions
 and ends with what each role may do. Labels are the English labels of the console; switch
 the language with **DE** and **EN** at the bottom of the sidebar.
 
+## Console app and classic console
+
+After sign in the server opens the console app under `/app/` (`/` leads there). It has the
+areas Home, Inbox, Devices, Compliance, Configuration, Activity, Reports and Settings, a
+command palette (Ctrl+K), light and dark design, comfortable and compact density, German and
+English, and works down to phone width. It talks only to the admin API (`/api/v1`) with the
+session cookie and a CSRF header, so every action has the same roles, scopes, tenant rules,
+four eyes approval and audit entries as in the classic console
+([admin-api.md](admin-api.md#console-app)).
+
+The classic console described below stays complete as a fallback: its overview is at
+`/classic`, every other page keeps its path. The app links to it from the sidebar and the
+user menu (**Classic console**), the classic sidebar links back (**New console**). The date
+notation picked in the profile of either console (ISO, German, British, US) is used by both.
+
+## Classic console
+
 The sidebar groups the pages:
 
 | Group | Pages |
@@ -22,7 +39,7 @@ carry a **?** link to the matching documentation.
 
 ## Overview
 
-The landing page (`/`).
+The landing page of the classic console (`/classic`).
 
 * **Fleet status**: active devices by state (**Compliant**, **In grace period**,
   **Non-compliant**, **Stale**, **Pending**) with **What the states mean**.

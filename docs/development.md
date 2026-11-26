@@ -100,7 +100,8 @@ configuration in `.golangci.yml` (`nolintlint` is on: an exception is a
 
 ## Console app
 
-The new console under `/app/` is a React app in `web/` (TypeScript strict, Vite, Tailwind 4,
+The console under `/app/` (the default after sign in; the classic console stays under its
+own paths, see [console.md](console.md#console-app-and-classic-console)) is a React app in `web/` (TypeScript strict, Vite, Tailwind 4,
 TanStack Router, Query, Table and Virtual, Base UI, cmdk, ECharts modules). Exact versions
 are pinned in `web/package.json` with `package-lock.json`. Node 24 or later is needed only
 to change the app: its build output `internal/server/webapp/dist` is committed and embedded
@@ -128,7 +129,7 @@ Inside `web/`:
 The end to end tests need `LIMDM_E2E_DATABASE_URL`, a disposable PostgreSQL database (it gets
 the schema, two local admins and a sealed session key in `web/test-results/e2e`). The setup
 builds `limdm-server`, starts it with a throw away TLS certificate on `https://localhost:18480`
-and signs in; `e2e/csp.spec.ts` fails on any CSP violation of any page or shared component
+(`LIMDM_E2E_PORT` picks another port, for parallel runs in several worktrees) and signs in; `e2e/csp.spec.ts` fails on any CSP violation of any page or shared component
 (`/app/dev/components` renders all of them) and checks that its detector works.
 
 For the dev server, run the LiMDM server locally and point it at the dev server's origin
@@ -136,6 +137,19 @@ For the dev server, run the LiMDM server locally and point it at the dev server'
 then start Vite with a local certificate: `LIMDM_DEV_CERT=... LIMDM_DEV_KEY=...
 LIMDM_DEV_BACKEND=https://localhost:8080 npm run dev`. Sign in on the dev server's `/login`
 and open `/app/`.
+
+Rules the checks enforce:
+
+* CSP: `default-src 'self'`, no inline script or style, no eval. zod compiles parsers with
+  `new Function` unless it runs jitless, so every area imports `z` from `src/lib/zod.ts`,
+  which sets that once; eslint refuses a direct `zod` import.
+* Translations: German and English for every text, one catalog per area
+  (`src/areas/<area>/messages.ts`) plus `src/i18n/core.ts`; the lint step fails on a key
+  missing in one language. The language follows the browser until the user picks one.
+* Bundle budget (gzip): first load 290 KB (the catalogs of all areas load up front), a lazy
+  chunk 120 KB, ECharts 220 KB, CSS 20 KB, a font 100 KB.
+* Shared building blocks live in `src/components` (settings forms, blueprint picker, badges,
+  downloads, data grid); an area imports another area's code only through its routes.
 
 How the app talks to the server, the rules for the feature areas (file layout, routes,
 endpoints, schemas, translations, CSP) and the checks are in

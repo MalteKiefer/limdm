@@ -302,6 +302,10 @@ limdm-server local-admin -env FILE disable NAME    # or enable
 limdm-server local-admin -env FILE list
 ```
 
+Once a server has started, the audit chain is keyed with the command key: the command
+then needs the CA directory too (`LIMDM_CA_DIR`, usually from the same env file, read by the
+`limdm` user) to key its audit entry, and stops when it cannot read it.
+
 `add` and `reset` print the user name, a generated password and the TOTP secret
 (`otpauth://` URI), or write them to a new 0600 file with `-out`. The role defaults to
 `admin`. Local accounts sign in only while local login is allowed.
