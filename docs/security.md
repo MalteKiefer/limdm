@@ -94,8 +94,12 @@
   `acr` claim must be one of them instead. A refused sign in is audited as `login.denied`
   ([configuration.md](configuration.md#console-settings)).
 * Local accounts: argon2id password and TOTP (RFC 6238, codes usable once), one time
-  recovery codes stored as SHA-256 hashes, lockout after 5 failures for 15 minutes (stored
-  in the database, so it counts across instances).
+  recovery codes stored as SHA-256 hashes. Sign in attempts are rate limited per client
+  address first (see below); after 5 failures an account is locked for 15 minutes for that
+  client network only (address, IPv6 per /64), stored in the database so it counts across
+  instances. Somebody who knows the name of a break glass account can therefore lock it
+  only for their own network, never for the administrators who need it. A reset of the
+  credentials clears every lockout of the account.
 * Sessions: sealed cookies, 30 minutes idle and 8 hours absolute timeout, CSRF tokens on
   every form, `SameSite=Lax`, `Secure`, `HttpOnly`; the sign in form uses a separate
   `SameSite=Strict` token. Signing out ends the sessions of the account everywhere.
@@ -243,9 +247,10 @@ start otherwise. Schema changes run as versioned migrations under an advisory lo
 
 Append only (a trigger blocks `UPDATE` and `TRUNCATE` always, `DELETE` outside the retention
 job) and hash chained. Recorded:
-console actions, settings changes, sign ins (also failed ones: local, and OIDC as
-`login.failed` with the reason `state`, `code exchange`, `id token` or `claims` and the
-client address, never codes or tokens; at most 30 per minute, the process log has all),
+console actions, settings changes, sign ins (also failed ones: local as
+`login.local.failed`, and OIDC as `login.failed` with the reason `state`, `code exchange`,
+`id token` or `claims` and the client address, never codes or tokens; failed ones at most
+30 per minute each, lockouts always, the process log has all),
 refused MFA sign ins (`login.denied`), enrollments, certificate rotations, commands, tamper
 events, recovery key escrow and every recovery key view, policy actions, exports
 (`export`, `export.done` with SHA-256), four eyes requests and decisions (`approval.*`),

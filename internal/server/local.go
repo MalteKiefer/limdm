@@ -309,7 +309,7 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 		// never log, query or audit arbitrary input; "(invalid)" cannot be a real account name
 		name = "(invalid)"
 	}
-	role, err := s.checkLocal(r.Context(), name, r.FormValue("password"), r.FormValue("totp"), clientIP(r))
+	role, err := s.checkLocal(r.Context(), name, r.FormValue("password"), r.FormValue("totp"), clientIP(r), rateKey(r))
 	if err != nil {
 		s.log.Warn("local login failed", "user", name, "remote", clientIP(r), "err", err)
 		s.renderLogin(w, r, "Sign in failed.")
@@ -324,26 +324,43 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 var errLoginFailed = errors.New("invalid credentials")
 
 // checkLocal verifies password and TOTP in one transaction with a row lock,
-// counts failures, locks the account after maxFailures, and audits every attempt.
-func (s *Server) checkLocal(ctx context.Context, name, password, code, ip string) (string, error) {
+// counts failures per account and client network (source, see rateKey),
+// locks the account for that source after maxFailures, and audits every
+// success and failed attempts within localFailures. A lockout from one
+// source leaves the account usable from others, so nobody can keep a break
+// glass account locked from the internet; the per source rate limit
+// (localLogin) slows guessing before that.
+func (s *Server) checkLocal(ctx context.Context, name, password, code, ip, source string) (string, error) {
 	var role, hash, secret string
 	var lastStep int64
 	var failures int
 	var lockedUntil *time.Time
 	result := "login.local.failed"
+	failed := func(detail string) (string, string, string, string, error) {
+		if !localFailures.take() { // committed without an entry; the process log has it
+			s.log.Warn("local login failure not audited: more than 30 per minute", "user", name)
+			return "", "", "", "", nil
+		}
+		return localPrefix + name, result, ip, detail, nil
+	}
 	err := s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
-		qerr := tx.QueryRow(ctx, `SELECT role, password_hash, totp_secret, totp_last_step, failures, locked_until
-			FROM local_admins WHERE name=$1 AND NOT disabled FOR UPDATE`, name).Scan(&role, &hash, &secret, &lastStep, &failures, &lockedUntil)
+		var accountLock *time.Time // set by failed checks of a signed in user (profile.go)
+		qerr := tx.QueryRow(ctx, `SELECT role, password_hash, totp_secret, totp_last_step, locked_until FROM local_admins WHERE name=$1 AND NOT disabled FOR UPDATE`, name).
+			Scan(&role, &hash, &secret, &lastStep, &accountLock)
 		if errors.Is(qerr, pgx.ErrNoRows) {
 			checkPassword(dummyHash, password)
-			return localPrefix + name, result, ip, "unknown user", nil
+			return failed("unknown user")
 		}
 		if qerr != nil {
 			return "", "", "", "", qerr
 		}
-		if lockedUntil != nil && time.Now().Before(*lockedUntil) {
+		if qerr := tx.QueryRow(ctx, `SELECT failures, locked_until FROM local_login_failures WHERE name=$1 AND source=$2`, name, source).
+			Scan(&failures, &lockedUntil); qerr != nil && !errors.Is(qerr, pgx.ErrNoRows) {
+			return "", "", "", "", qerr
+		}
+		if lockedUntil != nil && time.Now().Before(*lockedUntil) || accountLock != nil && time.Now().Before(*accountLock) {
 			checkPassword(dummyHash, password) // same timing as an active account
-			return localPrefix + name, result, ip, "account locked", nil
+			return failed("account locked for this source")
 		}
 		pwOK := checkPassword(hash, password)
 		step, totpOK := verifyTOTP(secret, code, time.Now(), lastStep)
@@ -362,6 +379,9 @@ func (s *Server) checkLocal(ctx context.Context, name, password, code, ip string
 			}
 			result = "login"
 			_, uerr := tx.Exec(ctx, `UPDATE local_admins SET failures=0, locked_until=NULL, totp_last_step=$2, last_login=now() WHERE name=$1`, name, step)
+			if uerr == nil {
+				_, uerr = tx.Exec(ctx, `DELETE FROM local_login_failures WHERE name=$1 AND source=$2`, name, source)
+			}
 			return localPrefix + name, result, ip, detail, uerr
 		}
 		failures++
@@ -369,10 +389,17 @@ func (s *Server) checkLocal(ctx context.Context, name, password, code, ip string
 		detail := "wrong password or code"
 		if failures >= maxFailures {
 			t := time.Now().Add(lockoutDuration)
-			lock, failures, detail = &t, 0, "wrong password or code, account locked"
+			lock, failures, detail = &t, 0, "wrong password or code, account locked for this source"
 		}
-		_, uerr := tx.Exec(ctx, `UPDATE local_admins SET failures=$2, locked_until=$3 WHERE name=$1`, name, failures, lock)
-		return localPrefix + name, result, ip, detail, uerr
+		if _, uerr := tx.Exec(ctx, `INSERT INTO local_login_failures(name, source, failures, locked_until) VALUES ($1,$2,$3,$4)
+			ON CONFLICT (name, source) DO UPDATE SET failures=EXCLUDED.failures, locked_until=EXCLUDED.locked_until, updated_at=now()`,
+			name, source, failures, lock); uerr != nil {
+			return "", "", "", "", uerr
+		}
+		if lock != nil {
+			return localPrefix + name, result, ip, detail, nil // a lockout is always audited
+		}
+		return failed(detail)
 	})
 	if err != nil {
 		return "", err
@@ -393,6 +420,9 @@ func (s *Server) auditActionFn(ctx context.Context, fn func(pgx.Tx) (actor, acti
 	actor, action, target, detail, err := fn(tx)
 	if err != nil {
 		return err
+	}
+	if action == "" { // nothing to record (rate limited failures)
+		return tx.Commit(ctx)
 	}
 	if err := audit(ctx, tx, actor, action, target, detail); err != nil {
 		return err
@@ -426,6 +456,9 @@ func localReset(ctx context.Context, tx pgx.Tx, name string) (string, error) {
 		WHERE name=$1 RETURNING role`, name, hashPassword(pw), secret).Scan(&role)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = errors.New("account not found")
+	}
+	if err == nil {
+		_, err = tx.Exec(ctx, `DELETE FROM local_login_failures WHERE name=$1`, name)
 	}
 	if err != nil {
 		return "", err

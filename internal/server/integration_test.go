@@ -1193,14 +1193,32 @@ func TestRecoveryCodeLogin(t *testing.T) {
 			pw = strings.TrimSpace(v)
 		}
 	}
-	if role, err := s.checkLocal(ctx, "alice", pw, strings.ToUpper(code), "127.0.0.1"); err != nil || role != "admin" {
+	if role, err := s.checkLocal(ctx, "alice", pw, strings.ToUpper(code), "127.0.0.1", "127.0.0.1"); err != nil || role != "admin" {
 		t.Fatalf("recovery code login: %q %v", role, err)
 	}
-	if _, err := s.checkLocal(ctx, "alice", pw, code, "127.0.0.1"); err == nil {
+	if _, err := s.checkLocal(ctx, "alice", pw, code, "127.0.0.1", "127.0.0.1"); err == nil {
 		t.Fatal("recovery code worked twice")
 	}
-	if _, err := s.checkLocal(ctx, "alice", "wrong", newRecoveryCode(), "127.0.0.1"); err == nil {
+	if _, err := s.checkLocal(ctx, "alice", "wrong", newRecoveryCode(), "127.0.0.1", "127.0.0.1"); err == nil {
 		t.Fatal("wrong password accepted")
+	}
+	// a lockout counts per source: an attacker locks out only their own network
+	var secret string
+	db.QueryRow(ctx, `SELECT totp_secret FROM local_admins WHERE name='alice'`).Scan(&secret)
+	for range maxFailures {
+		s.checkLocal(ctx, "alice", "wrong", "000000", "203.0.113.9", "203.0.113.9")
+	}
+	now, _ := totpCode(secret, time.Now().Unix()/30)
+	if _, err := s.checkLocal(ctx, "alice", pw, now, "203.0.113.9", "203.0.113.9"); err == nil {
+		t.Fatal("the locked source signed in")
+	}
+	if role, err := s.checkLocal(ctx, "alice", pw, now, "192.0.2.5", "192.0.2.5"); err != nil || role != "admin" {
+		t.Fatalf("another source must still sign in: %v", err)
+	}
+	var lockEntries int
+	db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action='login.local.failed' AND detail LIKE '%locked for this source'`).Scan(&lockEntries)
+	if lockEntries == 0 {
+		t.Fatal("a lockout must be audited")
 	}
 	// sign out ends every session of the account
 	_, gen0 := s.account(ctx, "local:alice")
