@@ -4,7 +4,7 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
-## Unreleased
+## 0.18.0 (2026-11-26)
 
 ### Upgrade notes
 - The console app under `/app/` is the only console. The classic server rendered console is removed; its page addresses redirect to the matching console app page.
