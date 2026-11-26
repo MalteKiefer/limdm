@@ -3596,7 +3596,9 @@
             "type": "string"
           },
           "payload": {
-            "type": "object"
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The request as stored; its shape depends on action"
           },
           "reason": {
             "type": "string"
@@ -3643,7 +3645,21 @@
             "type": "string",
             "description": "Why the deciding admin approved or rejected"
           }
-        }
+        },
+        "required": [
+          "id",
+          "action",
+          "target",
+          "payload",
+          "reason",
+          "requested_by",
+          "status",
+          "decided_by",
+          "decided_at",
+          "created_at",
+          "expires_at",
+          "decision_reason"
+        ]
       },
       "ApprovalPage": {
         "type": "object",

@@ -1023,26 +1023,29 @@ export interface components {
             expires_at?: string;
         };
         Approval: {
-            id?: number;
+            id: number;
             /** @description command, user.update, user.add, user.reset, recovery.view or remote_shell */
-            action?: string;
-            target?: string;
-            payload?: Record<string, never>;
-            reason?: string;
-            requested_by?: string;
+            action: string;
+            target: string;
+            /** @description The request as stored; its shape depends on action */
+            payload: {
+                [key: string]: unknown;
+            };
+            reason: string;
+            requested_by: string;
             /** @enum {string} */
-            status?: "pending" | "approved" | "rejected" | "expired" | "used";
-            decided_by?: string | null;
+            status: "pending" | "approved" | "rejected" | "expired" | "used";
+            decided_by: string | null;
             /** Format: date-time */
-            decided_at?: string | null;
+            decided_at: string | null;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            expires_at?: string;
+            expires_at: string;
             /** @description new local credentials of an approved user.add or user.reset, only in the decision's answer */
             credentials?: string;
             /** @description Why the deciding admin approved or rejected */
-            decision_reason?: string;
+            decision_reason: string;
         };
         ApprovalPage: {
             items?: components["schemas"]["Approval"][];
