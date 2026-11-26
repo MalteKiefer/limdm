@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -121,5 +122,61 @@ func TestAppComplianceAPI(t *testing.T) {
 	}
 	if code, _ := get(admin, "/api/v1/exports/secrets.csv", nil); code != 404 {
 		t.Fatalf("unknown export %d", code)
+	}
+
+	// signed evidence and the PDF report, audited like the CSV exports
+	code, body = get(admin, "/api/v1/exports/evidence.json?days=30", nil)
+	if code != 200 {
+		t.Fatalf("evidence %d %s", code, body)
+	}
+	if info, err := VerifyEvidence([]byte(body), []ed25519.PublicKey{testCmdKey.Public().(ed25519.PublicKey)}); err != nil || info.Devices != 2 || info.Changes != 1 {
+		t.Fatalf("evidence verify %+v %v", info, err)
+	}
+	if code, body = get(admin, "/api/v1/exports/evidence.pdf", nil); code != 200 || !strings.HasPrefix(body, "%PDF-") {
+		t.Fatalf("evidence pdf %d", code)
+	}
+	var signs, done int
+	db.QueryRow(ctx, `SELECT count(*) FILTER (WHERE action='evidence.sign'), count(*) FILTER (WHERE action='export.done' AND target LIKE 'evidence.%' AND detail LIKE '%sha256=%')
+		FROM audit_log`).Scan(&signs, &done)
+	if signs != 2 || done != 2 {
+		t.Fatalf("evidence audit: %d sign, %d done", signs, done)
+	}
+	if code, _ := get(admin, "/api/v1/exports/evidence.json?days=999", nil); code != 400 {
+		t.Fatalf("evidence days %d", code)
+	}
+
+	// the helpdesk asks for an exception; another admin approves it and is
+	// recorded as approver
+	post := func(tk, path, body string) (int, http.Header) {
+		t.Helper()
+		req, _ := http.NewRequest("POST", srv.URL+path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+tk)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode, resp.Header
+	}
+	day = time.Now().AddDate(0, 2, 0).Format(time.DateOnly)
+	code, hdr := post(helpdesk, "/api/v1/exception-requests", `{"check_id":"ssh.baseline","mode":"advisory","tag":"lab","reason":"legacy jump host","owner":"cto","expires":"`+day+`"}`)
+	if code != http.StatusAccepted {
+		t.Fatalf("exception request %d", code)
+	}
+	appr := hdr.Get("Location")
+	if code, _ := post(helpdesk, appr+"/approve", ""); code != http.StatusForbidden {
+		t.Fatalf("helpdesk decided %d", code)
+	}
+	if code, _ := post(admin, appr+"/approve", ""); code != 200 {
+		t.Fatalf("approve %d", code)
+	}
+	var approver, by string
+	if err := db.QueryRow(ctx, `SELECT approver, created_by FROM risk_exceptions WHERE check_id='ssh.baseline' AND tag='lab'`).Scan(&approver, &by); err != nil ||
+		!strings.HasPrefix(approver, "api:alice#") || !strings.HasPrefix(by, "api:hd#") {
+		t.Fatalf("approved exception: %q %q %v", approver, by, err)
+	}
+	if code, _ := post(helpdesk, "/api/v1/exception-requests", `{"check_id":"x","mode":"exclude","reason":"","owner":"o","expires":"`+day+`"}`); code != 400 {
+		t.Fatalf("invalid request %d", code)
 	}
 }

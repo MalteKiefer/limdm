@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -24,6 +26,7 @@ func (s *Server) appComplianceRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/compliance/history", s.need("read", s.apiComplianceHistory))
 	m.HandleFunc("GET /api/v1/compliance/policies", s.need("read", s.apiCompliancePolicies))
 	m.HandleFunc("GET /api/v1/exports/{kind}", s.need("audit", s.apiExport))
+	m.HandleFunc("POST /api/v1/exception-requests", s.need("helpdesk", s.apiExceptionRequest))
 }
 
 type appCheck struct {
@@ -355,7 +358,7 @@ func customTest(c api.CustomCheck) string {
 }
 
 // exportKinds are the exports of the console (export in web.go).
-var exportKinds = []string{"compliance.csv", "compliance-history.csv", "exceptions.csv", "inventory.csv", "packages.csv", "audit.csv", "audit.jsonl"}
+var exportKinds = []string{"compliance.csv", "compliance-history.csv", "exceptions.csv", "inventory.csv", "packages.csv", "audit.csv", "audit.jsonl", "evidence.json", "evidence.pdf"}
 
 // apiExport streams an export exactly as the console does, with the same
 // scope and the two audit entries (export, export.done with the SHA-256).
@@ -365,6 +368,10 @@ func (s *Server) apiExport(w http.ResponseWriter, r *http.Request, c apiCaller) 
 		problem(w, http.StatusNotFound, "unknown export")
 		return
 	}
+	if _, ok := evidenceDays(r); !ok && (kind == "evidence.json" || kind == "evidence.pdf") {
+		problem(w, http.StatusBadRequest, "days must be 1..365")
+		return
+	}
 	if kind == "compliance-history.csv" {
 		if _, _, ok := historyParams(r.URL.Query()); !ok {
 			problem(w, http.StatusBadRequest, "at must be a date (YYYY-MM-DD)")
@@ -372,4 +379,34 @@ func (s *Server) apiExport(w http.ResponseWriter, r *http.Request, c apiCaller) 
 		}
 	}
 	s.export(w, r, c.sess())
+}
+
+// apiExceptionRequest asks for a risk exception (admins and the helpdesk):
+// it lands in the inbox as a four eyes request whatever the setting, and the
+// admin who approves it is recorded as its approver. A scoped account can
+// only ask for one of its own tags.
+func (s *Server) apiExceptionRequest(w http.ResponseWriter, r *http.Request, c apiCaller) {
+	var body struct {
+		CheckID string `json:"check_id"`
+		Mode    string `json:"mode"`
+		Tag     string `json:"tag"`
+		Reason  string `json:"reason"`
+		Owner   string `json:"owner"`
+		Expires string `json:"expires"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	sess := c.sess()
+	if sess.scoped() && !slices.Contains(sess.Tags, strings.ToLower(strings.TrimSpace(body.Tag))) {
+		problemField(w, http.StatusUnprocessableEntity, "tag", "tag: one of the tags of your device scope")
+		return
+	}
+	id, err := s.requestException(r.Context(), sess, riskException{CheckID: body.CheckID, Mode: body.Mode, Tag: body.Tag, Reason: body.Reason, Owner: body.Owner}, body.Expires)
+	if err != nil {
+		s.apiFail(w, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/approvals/"+strconv.FormatInt(id, 10))
+	writeJSONStatus(w, http.StatusAccepted, map[string]any{"approval_id": id, "status": "pending"})
 }

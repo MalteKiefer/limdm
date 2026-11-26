@@ -1392,7 +1392,7 @@
       "post": {
         "operationId": "addException",
         "summary": "Add a risk exception",
-        "description": "Admin tokens, not read only. With four eyes approval on, the approver must be another person. Audited as exception.add.",
+        "description": "Admin tokens, not read only. With four eyes approval off it is added directly and the approver must be another person; with it on the request goes to the inbox (202, Location of the approval), and the admin who approves it is recorded as approver. Audited as exception.add.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1439,6 +1439,32 @@
           },
           "503": {
             "$ref": "#/components/responses/Problem"
+          },
+          "202": {
+            "description": "Four eyes: stored as a request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approval_id": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "API path of the approval"
+              }
+            }
           }
         }
       }
@@ -2522,7 +2548,7 @@
       "get": {
         "operationId": "export",
         "summary": "Evidence and data exports",
-        "description": "Admins and auditors (scope audit). Streams the same file as the console export and writes two audit entries: export before, export.done after with the row count and the SHA-256 of the bytes sent. Audit exports take the filters of /api/v1/audit.",
+        "description": "Admins and auditors (scope audit). Streams the same file as the console export and writes two audit entries: export before, export.done after with the row count and the SHA-256 of the bytes sent. Audit exports take the filters of /api/v1/audit. evidence.json is a bundle signed with the command key (Ed25519; check it with limdm-server evidence verify FILE), evidence.pdf the report rendered from such a bundle with its SHA-256 and signature; both also write evidence.sign with the bundle's SHA-256.",
         "parameters": [
           {
             "name": "kind",
@@ -2537,7 +2563,9 @@
                 "inventory.csv",
                 "packages.csv",
                 "audit.csv",
-                "audit.jsonl"
+                "audit.jsonl",
+                "evidence.json",
+                "evidence.pdf"
               ]
             }
           },
@@ -2557,6 +2585,17 @@
               "type": "string"
             },
             "description": "compliance-history.csv: device ID"
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 365,
+              "default": 90
+            },
+            "description": "evidence.json and evidence.pdf: history window"
           }
         ],
         "responses": {
@@ -2566,6 +2605,17 @@
               "text/csv": {
                 "schema": {
                   "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedEvidence"
+                }
+              },
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }
@@ -2580,6 +2630,72 @@
             "$ref": "#/components/responses/Problem"
           },
           "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/exception-requests": {
+      "post": {
+        "operationId": "requestException",
+        "summary": "Ask for a risk exception (four eyes)",
+        "description": "Admins and the helpdesk. Always stored as a request another admin approves in the inbox (action exception.add); the approving admin becomes the approver. Scoped accounts must name one of their tags.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExceptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Four eyes: stored as a request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approval_id": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "API path of the approval"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "415": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -4557,6 +4673,84 @@
           "policies",
           "custom_checks"
         ]
+      },
+      "SignedEvidence": {
+        "type": "object",
+        "required": [
+          "payload",
+          "signature"
+        ],
+        "properties": {
+          "payload": {
+            "type": "object",
+            "description": "format limdm-evidence/1: generated_at, generated_by, tenant, window_days, score, device states, frameworks, catalog_versions, agent_versions, devices with their check results, exceptions, history, changes"
+          },
+          "signature": {
+            "type": "object",
+            "required": [
+              "alg",
+              "public_key",
+              "key_id",
+              "value"
+            ],
+            "properties": {
+              "alg": {
+                "type": "string",
+                "enum": [
+                  "ed25519"
+                ]
+              },
+              "public_key": {
+                "type": "string"
+              },
+              "key_id": {
+                "type": "string",
+                "description": "SHA-256 of the public key, hex"
+              },
+              "value": {
+                "type": "string",
+                "description": "hex Ed25519 signature of 'limdm-evidence/1\\n' followed by the compact payload"
+              }
+            }
+          }
+        }
+      },
+      "ExceptionRequest": {
+        "type": "object",
+        "required": [
+          "check_id",
+          "mode",
+          "reason",
+          "owner",
+          "expires"
+        ],
+        "properties": {
+          "check_id": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "exclude",
+              "advisory"
+            ]
+          },
+          "tag": {
+            "type": "string",
+            "description": "one device tag, empty for every device"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "expires": {
+            "type": "string",
+            "format": "date",
+            "description": "last day it applies, within three years"
+          }
+        }
       }
     }
   }

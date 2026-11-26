@@ -1717,6 +1717,9 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, sess session) {
 	case "audit.jsonl":
 		s.auditExportJSONL(w, r, sess)
 		return
+	case "evidence.json", "evidence.pdf":
+		s.evidenceExport(w, r, sess, kind)
+		return
 	case "exceptions.csv":
 		header = []string{"id", "check_id", "mode", "tag", "reason", "owner", "approver", "expires_at", "created_by", "created_at", "state"}
 		var xcond string

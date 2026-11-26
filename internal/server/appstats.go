@@ -133,6 +133,23 @@ func percent(part, whole int) float64 {
 	return float64(int(float64(part)*1000/float64(whole)+0.5)) / 10
 }
 
+// frameworkStats sums the controls of each framework.
+func frameworkStats(fc fleetStats) []statsFramework {
+	out := []statsFramework{}
+	for _, f := range frameworkIDs {
+		fw := statsFramework{ID: f.ID, Name: f.Name}
+		for _, ctl := range fc.Controls {
+			if ctl.Framework == f.Name {
+				fw.Pass += ctl.Pass
+				fw.Fail += ctl.Fail
+			}
+		}
+		fw.Rate = percent(fw.Pass, fw.Pass+fw.Fail)
+		out = append(out, fw)
+	}
+	return out
+}
+
 func (s *Server) apiStatsCompliance(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	days := 30
 	if v := r.URL.Query().Get("days"); v != "" {
@@ -152,18 +169,7 @@ func (s *Server) apiStatsCompliance(w http.ResponseWriter, r *http.Request, c ap
 	}
 	reporting := fc.Total - fc.Stale - fc.Pending
 	out := statsCompliance{Score: percent(fc.Compliant, reporting), Reporting: reporting, Compliant: fc.Compliant,
-		Frameworks: []statsFramework{}, TopFailing: []statsCheck{}, History: []statsDay{}}
-	for _, f := range frameworkIDs {
-		fw := statsFramework{ID: f.ID, Name: f.Name}
-		for _, ctl := range fc.Controls {
-			if ctl.Framework == f.Name {
-				fw.Pass += ctl.Pass
-				fw.Fail += ctl.Fail
-			}
-		}
-		fw.Rate = percent(fw.Pass, fw.Pass+fw.Fail)
-		out.Frameworks = append(out.Frameworks, fw)
-	}
+		Frameworks: frameworkStats(fc), TopFailing: []statsCheck{}, History: []statsDay{}}
 	for _, ch := range fc.Checks {
 		if ch.Fail > 0 {
 			out.TopFailing = append(out.TopFailing, statsCheck{ch.ID, ch.Title, ch.Fail})
