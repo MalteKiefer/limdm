@@ -5962,6 +5962,2636 @@
           }
         }
       }
+    },
+    "/api/v1/settings": {
+      "get": {
+        "operationId": "getSettings",
+        "summary": "Server settings",
+        "description": "Admins and auditors of the whole installation; secrets are never returned.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Settings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/settings/{section}": {
+      "patch": {
+        "operationId": "saveSettings",
+        "summary": "Save one settings section",
+        "description": "Sections: general (local_login, stale_hours), network (console_allow, console_block, scim_allow), security (password_policy, four_eyes*, geolocation, fallback_dns), remote_shell, sso (oidc_*, allowed_domain, require_mfa, mfa_acr, role_groups, oidc_client_secret, clear_secret), monitoring (webhook_url, notify_private_networks), branding (company_name, logo_png, remove_logo), operations (ops), retention. Fields left out keep their value. The same guards as the console: no self lockout, local login only off with an OIDC admin, four eyes needs two admins, OIDC changes are checked against the provider. Audited as settings.save.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Settings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsInput"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "section",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "general",
+                "network",
+                "security",
+                "remote_shell",
+                "sso",
+                "monitoring",
+                "branding",
+                "operations",
+                "retention"
+              ]
+            },
+            "description": ""
+          }
+        ]
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "operationId": "listUsers",
+        "summary": "Console users",
+        "description": "OIDC and local accounts of the caller's tenant (all in the global view).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleUserList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "addUser",
+        "summary": "Add a console user",
+        "description": "Local accounts answer their credentials once. New admins wait for approval while four eyes approval is on. Audited as user.add.",
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Credentials"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Waits for four eyes approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalPending"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The approval"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleUserInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{login}": {
+      "patch": {
+        "operationId": "updateUser",
+        "summary": "Change role, state or scope",
+        "description": "Own account cannot be demoted or disabled; the last admin stays. Role changes and admin edits wait for approval while four eyes approval is on. Audited as user.update.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "202": {
+            "description": "Waits for four eyes approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalPending"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The approval"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleUserPatch"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "login",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Email or local:name"
+          }
+        ]
+      }
+    },
+    "/api/v1/users/{login}/reset": {
+      "post": {
+        "operationId": "resetUser",
+        "summary": "Reset password and TOTP of a local account",
+        "description": "Not the own account. For admins with four eyes approval the approver gets the credentials. Audited as user.reset.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Credentials"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Waits for four eyes approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalPending"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The approval"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "login",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Email or local:name"
+          }
+        ]
+      }
+    },
+    "/api/v1/tenants/switch": {
+      "post": {
+        "operationId": "switchTenant",
+        "summary": "Switch the tenant view",
+        "description": "Console sessions of super admins; 0 is the view of all tenants. Changes the session cookie. Audited as tenant.switch.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tenant": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "tenant"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tenants/shared": {
+      "get": {
+        "operationId": "getSharedObjects",
+        "summary": "Shared objects",
+        "description": "Blueprints and library items of the default tenant and whether every tenant may use them.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharedObjects"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "put": {
+        "operationId": "setSharedObjects",
+        "summary": "Set shared objects",
+        "description": "Ids of the blueprints and library items every tenant may use. Audited as tenant.shared.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "blueprints": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "required": [
+                  "blueprints",
+                  "items"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tenants/{id}": {
+      "get": {
+        "operationId": "getTenant",
+        "summary": "A tenant",
+        "description": "Super admins every tenant, tenant admins their own.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": ""
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "updateTenant",
+        "summary": "Change a tenant",
+        "description": "Name and state by super admins (the default tenant stays enabled), branding also by the tenant's admins. Audited as tenant.update.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantPatch"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": ""
+          }
+        ]
+      }
+    },
+    "/api/v1/keys": {
+      "get": {
+        "operationId": "listKeys",
+        "summary": "Server keys",
+        "description": "Admins of the whole installation without device scope.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/KeyStatus"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/keys/{kind}/{op}": {
+      "post": {
+        "operationId": "keyRotation",
+        "summary": "Rotate or finish a key rotation",
+        "description": "rotate starts a rotation (name: HSM key label), finish ends it (force: before every device moved). Audited.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "force": {
+                    "type": "boolean"
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ca",
+                "netca",
+                "command",
+                "session",
+                "webhook"
+              ]
+            },
+            "description": ""
+          },
+          {
+            "name": "op",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "rotate",
+                "finish"
+              ]
+            },
+            "description": ""
+          }
+        ]
+      }
+    },
+    "/api/v1/backup": {
+      "get": {
+        "operationId": "getBackup",
+        "summary": "Backup configuration and history",
+        "description": "Global admins. Target secrets are never returned.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Backup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "put": {
+        "operationId": "saveBackup",
+        "summary": "Save recipients, time zone and retention",
+        "description": "Audited as backup.settings.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backup/run": {
+      "post": {
+        "operationId": "runBackup",
+        "summary": "Back up now",
+        "description": "Starts a backup to every target; the history shows the result.",
+        "responses": {
+          "202": {
+            "description": "Started"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/backup/{id}/verify": {
+      "post": {
+        "operationId": "verifyBackup",
+        "summary": "Verify an archive",
+        "description": "Checks the checksum of a stored archive on its targets.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": ""
+          }
+        ]
+      }
+    },
+    "/api/v1/backup/targets/{name}": {
+      "put": {
+        "operationId": "saveBackupTarget",
+        "summary": "Add or replace a target",
+        "description": "S3, B2, SFTP, WebDAV or a local directory. Audited as backup.settings.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupTargetInput"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Lower case letters, digits, underscore"
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteBackupTarget",
+        "summary": "Remove a target",
+        "description": "Refused while a schedule uses it; archives on it stay.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Lower case letters, digits, underscore"
+          }
+        ]
+      }
+    },
+    "/api/v1/backup/targets/{name}/test": {
+      "post": {
+        "operationId": "testBackupTarget",
+        "summary": "Test a target",
+        "description": "Writes, reads and deletes a test object.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Lower case letters, digits, underscore"
+          }
+        ]
+      }
+    },
+    "/api/v1/backup/schedules/preview": {
+      "post": {
+        "operationId": "previewBackupSchedule",
+        "summary": "Preview a schedule",
+        "description": "Validates a schedule and answers its next runs and the archives its retention keeps over a year, without saving.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupSchedule"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupScheduleInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backup/schedules/{name}": {
+      "put": {
+        "operationId": "saveBackupSchedule",
+        "summary": "Add or replace a schedule",
+        "description": "Audited as backup.settings.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupScheduleInput"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Lower case letters, digits, underscore"
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteBackupSchedule",
+        "summary": "Delete a schedule",
+        "description": "Its archives follow the retention for archives outside a schedule.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Lower case letters, digits, underscore"
+          }
+        ]
+      }
+    },
+    "/api/v1/backup/schedules/{name}/{op}": {
+      "post": {
+        "operationId": "backupScheduleAction",
+        "summary": "Run, pause or resume a schedule",
+        "description": "run answers 202 and backs up in the background.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "202": {
+            "description": "Started"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Lower case letters, digits, underscore"
+          },
+          {
+            "name": "op",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "run",
+                "pause",
+                "resume"
+              ]
+            },
+            "description": ""
+          }
+        ]
+      }
+    },
+    "/api/v1/notification-channels": {
+      "get": {
+        "operationId": "listChannels",
+        "summary": "Notification channels",
+        "description": "Channels of the caller's tenant (all in the global view); webhook URLs and passwords are never returned.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "addChannel",
+        "summary": "Add a notification channel",
+        "description": "Audited as notification.channel_add.",
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Created"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notification-channels/{id}": {
+      "patch": {
+        "operationId": "setChannel",
+        "summary": "Switch a channel on or off",
+        "description": "Audited as notification.channel_enable or _disable.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": ""
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteChannel",
+        "summary": "Delete a channel",
+        "description": "Audited as notification.channel_delete.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": ""
+          }
+        ]
+      }
+    },
+    "/api/v1/notification-channels/{id}/test": {
+      "post": {
+        "operationId": "testChannel",
+        "summary": "Send a test notification",
+        "description": "A failed delivery answers 502 with the reason (tenant accounts without network details).",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": ""
+          }
+        ]
+      }
+    },
+    "/api/v1/directory": {
+      "get": {
+        "operationId": "getDirectory",
+        "summary": "Directory groups and connections",
+        "description": "Groups with their blueprint, Google Workspace and SCIM state, console roles from groups.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Directory"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/directory/users": {
+      "get": {
+        "operationId": "listDirectoryUsers",
+        "summary": "People of the directory",
+        "description": "At most 500, filtered by q (name, email, department).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DirectoryUser"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/directory/groups/{id}": {
+      "put": {
+        "operationId": "assignGroup",
+        "summary": "Map a group to a blueprint",
+        "description": "blueprint_id 0 removes the mapping; priority 0 to 10000 (default 100). Audited as directory.group_assign.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "blueprint_id": {
+                    "type": "integer"
+                  },
+                  "priority": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "blueprint_id"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": ""
+          }
+        ]
+      }
+    },
+    "/api/v1/directory/scim-token": {
+      "post": {
+        "operationId": "rotateSCIMToken",
+        "summary": "New SCIM token",
+        "description": "The previous token stops working; the answer holds the token once.",
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "token",
+                    "url"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/directory/google": {
+      "put": {
+        "operationId": "configureGoogle",
+        "summary": "Configure Google Workspace sync",
+        "description": "Delegated admin email and the service account JSON key (empty keeps the stored key); syncs at once.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "admin_email": {
+                    "type": "string"
+                  },
+                  "service_account": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "admin_email"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/directory/google/sync": {
+      "post": {
+        "operationId": "syncGoogle",
+        "summary": "Sync Google Workspace now",
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/network": {
+      "get": {
+        "operationId": "getNetwork",
+        "summary": "Network CA and certificates",
+        "description": "The latest 500 certificates of the caller's tenant.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Network"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/network/crl-token": {
+      "post": {
+        "operationId": "rotateCRLToken",
+        "summary": "New CRL download token",
+        "description": "For RADIUS servers fetching /network/crl.pem; shown once. Audited as network.crl_token.",
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Token1"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/agents": {
+      "get": {
+        "operationId": "getAgents",
+        "summary": "Agent releases and update policy",
+        "description": "Releases newest first with their spread in the fleet.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Agents"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/agents/policy": {
+      "put": {
+        "operationId": "saveUpdatePolicy",
+        "summary": "Save the agent update policy",
+        "description": "delay 0 to 90 days, spread 0 to 720 hours, pilot tag a simple word. Audited as agent_updates.policy.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePolicy"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/fetch": {
+      "post": {
+        "operationId": "fetchAgentReleases",
+        "summary": "Check for agent releases",
+        "description": "Fetches signed releases from the release repository.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "fetched": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "fetched"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/agents/releases/{version}/{op}": {
+      "post": {
+        "operationId": "agentReleaseAction",
+        "summary": "Approve or block a version",
+        "description": "Audited as agent_release.approve or .block.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "name": "op",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "approve",
+                "block"
+              ]
+            },
+            "description": ""
+          }
+        ]
+      }
+    },
+    "/api/v1/profile": {
+      "get": {
+        "operationId": "getProfile",
+        "summary": "Own profile",
+        "description": "Console sessions only.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/profile/password": {
+      "post": {
+        "operationId": "changePassword",
+        "summary": "Change the own password",
+        "description": "Local accounts; checks the current password with the login lockout; other sessions end. Audited as profile.password.",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "current": {
+                    "type": "string"
+                  },
+                  "new": {
+                    "type": "string"
+                  },
+                  "repeat": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "current",
+                  "new",
+                  "repeat"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/profile/totp/qr.svg": {
+      "get": {
+        "operationId": "totpQR",
+        "summary": "QR code of the pending authenticator secret",
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "SVG",
+            "content": {
+              "image/svg+xml": {}
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/profile/totp/{step}": {
+      "post": {
+        "operationId": "profileTOTP",
+        "summary": "Replace the authenticator app",
+        "description": "start (current password) answers a pending secret, confirm (code) activates it and ends other sessions, cancel drops it.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "secret": {
+                      "type": "string"
+                    },
+                    "uri": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "secret",
+                    "uri"
+                  ]
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "current": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "step",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "start",
+                "confirm",
+                "cancel"
+              ]
+            },
+            "description": ""
+          }
+        ]
+      }
+    },
+    "/api/v1/profile/recovery-codes": {
+      "post": {
+        "operationId": "newRecoveryCodes",
+        "summary": "New recovery codes",
+        "description": "Replaces all recovery codes; shown once. Audited as profile.recovery_codes.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "codes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "codes"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "current": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "current"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/glossary": {
+      "get": {
+        "operationId": "getGlossary",
+        "summary": "Glossary",
+        "description": "Terms of the console and the device states, translated (lang de or en).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Glossary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "lang",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "de",
+                "en"
+              ]
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -10667,6 +13297,1911 @@
             "format": "date-time"
           }
         }
+      },
+      "PasswordPolicy": {
+        "type": "object",
+        "properties": {
+          "min_length": {
+            "type": "integer"
+          },
+          "upper": {
+            "type": "boolean"
+          },
+          "lower": {
+            "type": "boolean"
+          },
+          "digit": {
+            "type": "boolean"
+          },
+          "symbol": {
+            "type": "boolean"
+          },
+          "no_name": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      },
+      "RoleGroup": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "helpdesk",
+              "auditor"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "group",
+          "role"
+        ]
+      },
+      "RemoteShellSettings": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "helpdesk": {
+            "type": "boolean"
+          },
+          "allow_root": {
+            "type": "boolean"
+          },
+          "max_minutes": {
+            "type": "integer"
+          },
+          "idle_minutes": {
+            "type": "integer"
+          }
+        },
+        "required": []
+      },
+      "OpsSettings": {
+        "type": "object",
+        "properties": {
+          "log_level": {
+            "type": "string",
+            "enum": [
+              "debug",
+              "info",
+              "warn",
+              "error"
+            ]
+          },
+          "access_log": {
+            "type": "boolean"
+          },
+          "audit_api_reads": {
+            "type": "string",
+            "enum": [
+              "off",
+              "sensitive",
+              "all"
+            ]
+          },
+          "update_downloads": {
+            "type": "integer"
+          },
+          "max_checkins": {
+            "type": "integer"
+          },
+          "agent_proxy_protocol": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "syslog": {
+            "type": "string"
+          },
+          "syslog_ca": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "log_level",
+          "access_log",
+          "audit_api_reads",
+          "update_downloads",
+          "max_checkins",
+          "agent_proxy_protocol",
+          "syslog",
+          "syslog_ca"
+        ]
+      },
+      "SettingsInput": {
+        "type": "object",
+        "properties": {
+          "oidc_issuer": {
+            "type": "string"
+          },
+          "oidc_client_id": {
+            "type": "string"
+          },
+          "allowed_domain": {
+            "type": "string"
+          },
+          "local_login": {
+            "type": "boolean"
+          },
+          "stale_hours": {
+            "type": "integer"
+          },
+          "webhook_url": {
+            "type": "string"
+          },
+          "company_name": {
+            "type": "string"
+          },
+          "console_allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "console_block": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scim_allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notify_private_networks": {
+            "type": "boolean"
+          },
+          "password_policy": {
+            "$ref": "#/components/schemas/PasswordPolicy"
+          },
+          "four_eyes": {
+            "type": "boolean"
+          },
+          "four_eyes_recovery": {
+            "type": "boolean"
+          },
+          "four_eyes_shell": {
+            "type": "boolean"
+          },
+          "require_mfa": {
+            "type": "boolean"
+          },
+          "mfa_acr": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "retention": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Days per data type (retention_kinds); 0 keeps the audit log forever"
+          },
+          "role_groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoleGroup"
+            }
+          },
+          "geolocation": {
+            "type": "boolean"
+          },
+          "fallback_dns": {
+            "type": "boolean"
+          },
+          "remote_shell": {
+            "$ref": "#/components/schemas/RemoteShellSettings"
+          },
+          "ops": {
+            "$ref": "#/components/schemas/OpsSettings"
+          },
+          "oidc_client_secret": {
+            "type": "string",
+            "description": "New OIDC client secret; empty keeps the stored one"
+          },
+          "clear_secret": {
+            "type": "boolean"
+          },
+          "logo_png": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "description": "PNG, square, up to 256 KiB"
+          },
+          "remove_logo": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      },
+      "RetentionKind": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "days": {
+            "type": "integer"
+          },
+          "default": {
+            "type": "integer"
+          },
+          "min": {
+            "type": "integer"
+          },
+          "max": {
+            "type": "integer"
+          },
+          "forever": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "days",
+          "default",
+          "min",
+          "max",
+          "forever"
+        ]
+      },
+      "Settings": {
+        "type": "object",
+        "properties": {
+          "oidc_issuer": {
+            "type": "string"
+          },
+          "oidc_client_id": {
+            "type": "string"
+          },
+          "allowed_domain": {
+            "type": "string"
+          },
+          "local_login": {
+            "type": "boolean"
+          },
+          "stale_hours": {
+            "type": "integer"
+          },
+          "webhook_url": {
+            "type": "string"
+          },
+          "company_name": {
+            "type": "string"
+          },
+          "console_allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "console_block": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scim_allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notify_private_networks": {
+            "type": "boolean"
+          },
+          "password_policy": {
+            "$ref": "#/components/schemas/PasswordPolicy"
+          },
+          "four_eyes": {
+            "type": "boolean"
+          },
+          "four_eyes_recovery": {
+            "type": "boolean"
+          },
+          "four_eyes_shell": {
+            "type": "boolean"
+          },
+          "require_mfa": {
+            "type": "boolean"
+          },
+          "mfa_acr": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "retention": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Days per data type (retention_kinds); 0 keeps the audit log forever"
+          },
+          "role_groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoleGroup"
+            }
+          },
+          "geolocation": {
+            "type": "boolean"
+          },
+          "fallback_dns": {
+            "type": "boolean"
+          },
+          "remote_shell": {
+            "$ref": "#/components/schemas/RemoteShellSettings"
+          },
+          "ops": {
+            "$ref": "#/components/schemas/OpsSettings"
+          },
+          "has_oidc_secret": {
+            "type": "boolean"
+          },
+          "has_logo": {
+            "type": "boolean"
+          },
+          "public_url": {
+            "type": "string"
+          },
+          "redirect_uri": {
+            "type": "string"
+          },
+          "client_ip": {
+            "type": "string"
+          },
+          "webhook_secret": {
+            "type": "string",
+            "description": "Signing key of the compliance webhook; admins only"
+          },
+          "retention_kinds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RetentionKind"
+            }
+          }
+        },
+        "required": [
+          "local_login",
+          "stale_hours",
+          "password_policy",
+          "ops",
+          "has_oidc_secret",
+          "has_logo",
+          "public_url",
+          "redirect_uri",
+          "client_ip",
+          "retention_kinds"
+        ]
+      },
+      "ConsoleUser": {
+        "type": "object",
+        "properties": {
+          "login": {
+            "type": "string",
+            "description": "Email (OIDC) or local:name"
+          },
+          "role": {
+            "type": "string"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "local": {
+            "type": "boolean"
+          },
+          "last_login": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "scope_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scope_groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "from_group": {
+            "type": "boolean"
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "self": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "login",
+          "role",
+          "disabled",
+          "local",
+          "last_login",
+          "scope_tags",
+          "scope_groups",
+          "from_group",
+          "tenant",
+          "self"
+        ]
+      },
+      "ConsoleUserList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConsoleUser"
+            }
+          },
+          "local_login": {
+            "type": "boolean"
+          },
+          "oidc": {
+            "type": "boolean"
+          },
+          "four_eyes": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "local_login",
+          "oidc",
+          "four_eyes"
+        ]
+      },
+      "ConsoleUserInput": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "oidc",
+              "local"
+            ]
+          },
+          "login": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "helpdesk",
+              "auditor"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "login",
+          "role"
+        ]
+      },
+      "ConsoleUserPatch": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "helpdesk",
+              "auditor"
+            ]
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "scope_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scope_groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ]
+      },
+      "Credentials": {
+        "type": "object",
+        "properties": {
+          "credentials": {
+            "type": "string",
+            "description": "User, role, password, TOTP secret and otpauth URI; shown once"
+          }
+        },
+        "required": [
+          "credentials"
+        ]
+      },
+      "SharedObject": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "shared": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "shared"
+        ]
+      },
+      "SharedObjects": {
+        "type": "object",
+        "properties": {
+          "blueprints": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SharedObject"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SharedObject"
+            }
+          }
+        },
+        "required": [
+          "blueprints",
+          "items"
+        ]
+      },
+      "TenantDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "company_name": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "has_logo": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "disabled",
+          "company_name",
+          "color",
+          "has_logo",
+          "created_at"
+        ]
+      },
+      "TenantPatch": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "company_name": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string",
+            "description": "#rrggbb or empty"
+          },
+          "logo_png": {
+            "type": "string",
+            "contentEncoding": "base64"
+          },
+          "remove_logo": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      },
+      "KeyStatus": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "ca",
+              "netca",
+              "command",
+              "session",
+              "webhook"
+            ]
+          },
+          "active": {
+            "type": "string"
+          },
+          "previous": {
+            "type": "string"
+          },
+          "since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "done": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "restart": {
+            "type": "boolean"
+          },
+          "location": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "active",
+          "previous",
+          "since",
+          "done",
+          "total",
+          "restart",
+          "location"
+        ]
+      },
+      "KeepRule": {
+        "type": "object",
+        "properties": {
+          "last": {
+            "type": "integer"
+          },
+          "days": {
+            "type": "integer"
+          },
+          "daily": {
+            "type": "integer"
+          },
+          "weekly": {
+            "type": "integer"
+          },
+          "monthly": {
+            "type": "integer"
+          },
+          "yearly": {
+            "type": "integer"
+          }
+        },
+        "required": []
+      },
+      "BackupTarget": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "local",
+              "s3",
+              "b2",
+              "sftp",
+              "webdav"
+            ]
+          },
+          "dir": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "bucket": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "access_key": {
+            "type": "string"
+          },
+          "path_style": {
+            "type": "boolean"
+          },
+          "lock_mode": {
+            "type": "string",
+            "enum": [
+              "",
+              "GOVERNANCE",
+              "COMPLIANCE"
+            ]
+          },
+          "lock_days": {
+            "type": "integer"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "user": {
+            "type": "string"
+          },
+          "host_key": {
+            "type": "string"
+          },
+          "has_secret": {
+            "type": "boolean"
+          },
+          "has_key": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "has_secret",
+          "has_key"
+        ]
+      },
+      "BackupTargetInput": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "local",
+              "s3",
+              "b2",
+              "sftp",
+              "webdav"
+            ]
+          },
+          "dir": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "bucket": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "access_key": {
+            "type": "string"
+          },
+          "path_style": {
+            "type": "boolean"
+          },
+          "lock_mode": {
+            "type": "string",
+            "enum": [
+              "",
+              "GOVERNANCE",
+              "COMPLIANCE"
+            ]
+          },
+          "lock_days": {
+            "type": "integer"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "user": {
+            "type": "string"
+          },
+          "host_key": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string",
+            "description": "Secret key or password; empty keeps the stored one while the target points at the same server"
+          },
+          "private_key": {
+            "type": "string",
+            "description": "SFTP private key (PEM); empty keeps the stored one"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "BackupScheduleInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "interval",
+              "weekly",
+              "monthly",
+              "cron"
+            ]
+          },
+          "every": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "times": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "day": {
+            "type": "integer"
+          },
+          "cron": {
+            "type": "string"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "keep": {
+            "$ref": "#/components/schemas/KeepRule"
+          }
+        },
+        "required": [
+          "kind",
+          "targets",
+          "keep"
+        ]
+      },
+      "RetentionPreview": {
+        "type": "object",
+        "properties": {
+          "runs": {
+            "type": "integer"
+          },
+          "kept": {
+            "type": "integer"
+          },
+          "oldest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "dates": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "required": [
+          "runs",
+          "kept",
+          "oldest",
+          "dates"
+        ]
+      },
+      "BackupSchedule": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "interval",
+              "weekly",
+              "monthly",
+              "cron"
+            ]
+          },
+          "every": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "times": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "day": {
+            "type": "integer"
+          },
+          "cron": {
+            "type": "string"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "keep": {
+            "$ref": "#/components/schemas/KeepRule"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "next": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "preview": {
+            "$ref": "#/components/schemas/RetentionPreview"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "targets",
+          "keep",
+          "next",
+          "preview"
+        ]
+      },
+      "BackupRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "verified_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "verify_error": {
+            "type": "string"
+          },
+          "restore_tested_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "restore_test_error": {
+            "type": "string"
+          },
+          "deleted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "reason",
+          "actor",
+          "started_at",
+          "size",
+          "sha256",
+          "targets",
+          "status",
+          "error",
+          "verified_at",
+          "verify_error",
+          "restore_tested_at",
+          "restore_test_error",
+          "deleted_at"
+        ]
+      },
+      "Backup": {
+        "type": "object",
+        "properties": {
+          "recipients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "zone": {
+            "type": "string"
+          },
+          "keep": {
+            "$ref": "#/components/schemas/KeepRule"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackupTarget"
+            }
+          },
+          "schedules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackupSchedule"
+            }
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackupRun"
+            }
+          },
+          "offsite": {
+            "type": "boolean"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "rule_321": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "recipients",
+          "time_zone",
+          "zone",
+          "keep",
+          "targets",
+          "schedules",
+          "history",
+          "offsite",
+          "locked",
+          "rule_321"
+        ]
+      },
+      "BackupInput": {
+        "type": "object",
+        "properties": {
+          "recipients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "age X25519 public keys (age1...)"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "keep": {
+            "$ref": "#/components/schemas/KeepRule"
+          }
+        },
+        "required": [
+          "recipients",
+          "keep"
+        ]
+      },
+      "ChannelConfig": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "tls": {
+            "type": "string",
+            "enum": [
+              "starttls",
+              "tls"
+            ]
+          },
+          "user": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": []
+      },
+      "Channel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "slack",
+              "discord",
+              "email",
+              "webhook"
+            ]
+          },
+          "target": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "global": {
+            "type": "boolean"
+          },
+          "config": {
+            "$ref": "#/components/schemas/ChannelConfig"
+          },
+          "last_ok": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "last_event": {
+            "type": "string"
+          },
+          "last_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "target",
+          "events",
+          "enabled",
+          "global",
+          "config",
+          "last_ok",
+          "last_error",
+          "last_event",
+          "last_at"
+        ]
+      },
+      "ChannelList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Channel"
+            }
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "label"
+              ]
+            }
+          },
+          "notify_private": {
+            "type": "boolean"
+          },
+          "tenant_signing_key": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "events",
+          "notify_private"
+        ]
+      },
+      "ChannelInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "slack",
+              "discord",
+              "email",
+              "webhook"
+            ]
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "url": {
+            "type": "string",
+            "description": "Webhook URL (https), stored encrypted"
+          },
+          "password": {
+            "type": "string",
+            "description": "SMTP password, stored encrypted"
+          },
+          "config": {
+            "$ref": "#/components/schemas/ChannelConfig"
+          }
+        },
+        "required": [
+          "name",
+          "kind"
+        ]
+      },
+      "DirectoryGroup": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "external_id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "members": {
+            "type": "integer"
+          },
+          "blueprint_id": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "priority": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "external_id",
+          "source",
+          "name",
+          "members",
+          "blueprint_id",
+          "priority"
+        ]
+      },
+      "Directory": {
+        "type": "object",
+        "properties": {
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectoryGroup"
+            }
+          },
+          "google": {
+            "type": "object",
+            "properties": {
+              "admin_email": {
+                "type": "string"
+              },
+              "configured": {
+                "type": "boolean"
+              },
+              "last_result": {
+                "type": "string"
+              },
+              "last_sync": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "admin_email",
+              "configured",
+              "last_result",
+              "last_sync"
+            ]
+          },
+          "scim": {
+            "type": "object",
+            "properties": {
+              "configured": {
+                "type": "boolean"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "configured",
+              "url"
+            ]
+          },
+          "role_groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoleGroup"
+            }
+          }
+        },
+        "required": [
+          "groups",
+          "google",
+          "scim",
+          "role_groups"
+        ]
+      },
+      "DirectoryUser": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "external_id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "user_name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "department": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "group_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "external_id",
+          "source",
+          "user_name",
+          "email",
+          "display_name",
+          "department",
+          "title",
+          "active",
+          "groups",
+          "group_ids",
+          "updated_at"
+        ]
+      },
+      "NetworkCert": {
+        "type": "object",
+        "properties": {
+          "serial": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "sans": {
+            "type": "string"
+          },
+          "not_before": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "not_after": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "valid",
+              "expired",
+              "revoked"
+            ]
+          }
+        },
+        "required": [
+          "serial",
+          "device_id",
+          "hostname",
+          "subject",
+          "sans",
+          "not_before",
+          "not_after",
+          "revoked_at",
+          "reason",
+          "state"
+        ]
+      },
+      "Network": {
+        "type": "object",
+        "properties": {
+          "certs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkCert"
+            }
+          },
+          "crl_token_set": {
+            "type": "boolean"
+          },
+          "crl_url": {
+            "type": "string"
+          },
+          "ca_url": {
+            "type": "string"
+          },
+          "ca_fingerprint": {
+            "type": "string"
+          },
+          "ca_subject": {
+            "type": "string"
+          },
+          "ca_not_after": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "certs",
+          "crl_token_set",
+          "crl_url",
+          "ca_url",
+          "ca_fingerprint",
+          "ca_subject",
+          "ca_not_after"
+        ]
+      },
+      "UpdatePolicy": {
+        "type": "object",
+        "properties": {
+          "auto": {
+            "type": "boolean"
+          },
+          "delay_days": {
+            "type": "integer"
+          },
+          "pilot_tag": {
+            "type": "string"
+          },
+          "spread_hours": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "auto",
+          "delay_days",
+          "pilot_tag",
+          "spread_hours"
+        ]
+      },
+      "AgentRelease": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "signed": {
+            "type": "boolean"
+          },
+          "approved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "approved_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "blocked": {
+            "type": "boolean"
+          },
+          "blocked_reason": {
+            "type": "string"
+          },
+          "devices": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "older": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "version",
+          "published_at",
+          "signed",
+          "approved_at",
+          "approved_by",
+          "blocked",
+          "blocked_reason",
+          "devices",
+          "failed",
+          "older"
+        ]
+      },
+      "Agents": {
+        "type": "object",
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/UpdatePolicy"
+          },
+          "releases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentRelease"
+            }
+          },
+          "fleet": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "type": "string"
+                },
+                "devices": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "version",
+                "devices"
+              ]
+            }
+          },
+          "latest": {
+            "type": "string"
+          },
+          "outdated": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "hostname": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "last_seen": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "id",
+                "hostname",
+                "version",
+                "last_seen"
+              ]
+            }
+          },
+          "repo": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy",
+          "releases",
+          "fleet",
+          "latest",
+          "outdated",
+          "repo"
+        ]
+      },
+      "Profile": {
+        "type": "object",
+        "properties": {
+          "login": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "local": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "password_min": {
+            "type": "integer"
+          },
+          "password_rules": {
+            "$ref": "#/components/schemas/PasswordPolicy"
+          },
+          "recovery_left": {
+            "type": "integer"
+          },
+          "totp_pending": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "login",
+          "role",
+          "local",
+          "password_min",
+          "password_rules",
+          "recovery_left",
+          "totp_pending"
+        ]
+      },
+      "Token1": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "Glossary": {
+        "type": "object",
+        "properties": {
+          "terms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "term": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "doc": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "term",
+                "text"
+              ]
+            }
+          },
+          "states": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "docs": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "terms",
+          "states",
+          "docs"
+        ]
       }
     }
   }

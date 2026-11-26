@@ -268,19 +268,23 @@ func (s *Server) tenantShared(w http.ResponseWriter, r *http.Request, sess sessi
 		}
 		return out
 	}
-	bps, items := ids("blueprint"), ids("item")
-	err := s.auditAction(ctx, sess.Email, "tenant.shared", "", fmt.Sprintf("blueprints=%v items=%v", bps, items), func(tx pgx.Tx) error {
+	if err := s.setShared(ctx, sess, ids("blueprint"), ids("item")); err != nil {
+		s.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/tenants", http.StatusSeeOther)
+}
+
+// setShared sets which blueprints and library items of the default tenant
+// every tenant may read and use.
+func (s *Server) setShared(ctx context.Context, sess session, bps, items []int64) error {
+	return s.auditAction(ctx, sess.Email, "tenant.shared", "", fmt.Sprintf("blueprints=%v items=%v", bps, items), func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE blueprints SET shared = (id = ANY($1)) WHERE tenant_id=1`, bps); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `UPDATE library_items SET shared = (id = ANY($1)) WHERE tenant_id=1`, items)
 		return err
 	})
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/tenants", http.StatusSeeOther)
 }
 
 // tenantName checks a tenant name: 1 to 100 characters, no control characters.
@@ -346,19 +350,29 @@ func (s *Server) tenantSwitch(w http.ResponseWriter, r *http.Request, sess sessi
 // editableTenant parses {id}: super admins edit every tenant, tenant
 // admins only their own (branding).
 func (s *Server) editableTenant(w http.ResponseWriter, r *http.Request, sess session) (tenant, bool) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil || !s.cfg.MultiTenant || sess.TenantOnly() && id != sess.Tenant {
-		s.notFound(w, r, sess)
-		return tenant{}, false
-	}
-	var t tenant
-	err = s.db.QueryRow(r.Context(), `SELECT id, name, disabled, company_name, length(logo) > 0, color, 0, created_at FROM tenants WHERE id=$1`, id).
-		Scan(&t.ID, &t.Name, &t.Disabled, &t.CompanyName, &t.HasLogo, &t.Color, &t.Devices, &t.CreatedAt)
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	t, err := s.loadTenantFor(r.Context(), sess, id)
 	if err != nil {
 		s.notFound(w, r, sess)
 		return tenant{}, false
 	}
 	return t, true
+}
+
+// loadTenantFor loads a tenant sess may edit: super admins every tenant,
+// tenant admins only their own.
+func (s *Server) loadTenantFor(ctx context.Context, sess session, id int64) (tenant, error) {
+	notFound := &userError{http.StatusNotFound, "tenant not found"}
+	if id == 0 || !s.cfg.MultiTenant || sess.TenantOnly() && id != sess.Tenant {
+		return tenant{}, notFound
+	}
+	var t tenant
+	err := s.db.QueryRow(ctx, `SELECT id, name, disabled, company_name, length(logo) > 0, color, 0, created_at FROM tenants WHERE id=$1`, id).
+		Scan(&t.ID, &t.Name, &t.Disabled, &t.CompanyName, &t.HasLogo, &t.Color, &t.Devices, &t.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tenant{}, notFound
+	}
+	return t, err
 }
 
 func (s *Server) tenantEdit(w http.ResponseWriter, r *http.Request, sess session) {
@@ -371,34 +385,13 @@ var colorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
 // tenantSave stores name and state (super admins) and the branding.
 func (s *Server) tenantSave(w http.ResponseWriter, r *http.Request, sess session) {
-	ctx := r.Context()
 	t, ok := s.editableTenant(w, r, sess)
 	if !ok {
 		return
 	}
-	fail := func(msg string) { s.render(w, r, sess, "tenant", map[string]any{"T": t, "Error": msg}) }
-	if sess.Super {
-		name, err := tenantName(r.FormValue("name"))
-		if err != nil {
-			fail(err.Error())
-			return
-		}
-		t.Name = name
-		t.Disabled = r.FormValue("disabled") == "on" && t.ID != defaultTenant
-	}
-	t.CompanyName = strings.TrimSpace(r.FormValue("company_name"))
-	t.Color = strings.ToLower(strings.TrimSpace(r.FormValue("color")))
-	if t.Color == "#0f6e6e" { // the color picker's default: keep the console colors
-		t.Color = ""
-	}
-	if utf8.RuneCountInString(t.CompanyName) > 100 {
-		fail("company name: up to 100 characters")
-		return
-	}
-	if t.Color != "" && !colorRe.MatchString(t.Color) {
-		fail("color: #rrggbb")
-		return
-	}
+	in := t
+	in.Name, in.Disabled = r.FormValue("name"), r.FormValue("disabled") == "on"
+	in.CompanyName, in.Color = r.FormValue("company_name"), r.FormValue("color")
 	var logo []byte
 	keepLogo := r.FormValue("remove_logo") != "on"
 	if f, _, err := r.FormFile("logo"); err == nil {
@@ -408,11 +401,47 @@ func (s *Server) tenantSave(w http.ResponseWriter, r *http.Request, sess session
 			s.fail(w, err)
 			return
 		}
-		if err := validLogo(logo); err != nil {
-			fail(err.Error())
-			return
-		}
 		keepLogo = false
+	}
+	var ue *userError
+	switch err := s.updateTenant(r.Context(), sess, t, in, logo, keepLogo); {
+	case errors.As(err, &ue):
+		s.render(w, r, sess, "tenant", map[string]any{"T": t, "Error": ue.Msg})
+	case err != nil:
+		s.fail(w, err)
+	default:
+		http.Redirect(w, r, "/tenants/"+strconv.FormatInt(t.ID, 10), http.StatusSeeOther)
+	}
+}
+
+// updateTenant stores name and state (super admins only, the default
+// tenant stays enabled) and the branding of tenant t from in; logo
+// replaces the logo unless keepLogo (nil and !keepLogo removes it). The
+// console form and the admin API both call it.
+func (s *Server) updateTenant(ctx context.Context, sess session, t, in tenant, logo []byte, keepLogo bool) error {
+	if sess.Super {
+		name, err := tenantName(in.Name)
+		if err != nil {
+			return &userError{http.StatusUnprocessableEntity, err.Error()}
+		}
+		t.Name = name
+		t.Disabled = in.Disabled && t.ID != defaultTenant
+	}
+	t.CompanyName = strings.TrimSpace(in.CompanyName)
+	t.Color = strings.ToLower(strings.TrimSpace(in.Color))
+	if t.Color == "#0f6e6e" { // the color picker's default: keep the console colors
+		t.Color = ""
+	}
+	if utf8.RuneCountInString(t.CompanyName) > 100 {
+		return &userError{http.StatusUnprocessableEntity, "company name: up to 100 characters"}
+	}
+	if t.Color != "" && !colorRe.MatchString(t.Color) {
+		return &userError{http.StatusUnprocessableEntity, "color: #rrggbb"}
+	}
+	if !keepLogo && logo != nil {
+		if err := validLogo(logo); err != nil {
+			return &userError{http.StatusUnprocessableEntity, err.Error()}
+		}
 	}
 	detail := fmt.Sprintf("name=%q disabled=%v company=%q color=%q logo_bytes=%d keep_logo=%v", t.Name, t.Disabled, t.CompanyName, t.Color, len(logo), keepLogo)
 	err := s.auditAction(ctx, sess.Email, "tenant.update", strconv.FormatInt(t.ID, 10), detail, func(tx pgx.Tx) error {
@@ -420,16 +449,13 @@ func (s *Server) tenantSave(w http.ResponseWriter, r *http.Request, sess session
 			t.ID, t.Name, t.Disabled, t.CompanyName, t.Color, logo, keepLogo)
 		return err
 	})
-	if err != nil {
-		if strings.Contains(err.Error(), "duplicate key") {
-			fail("A tenant with this name exists already.")
-			return
-		}
-		s.fail(w, err)
-		return
+	if isUnique(err) {
+		return &userError{http.StatusConflict, "A tenant with this name exists already."}
 	}
-	s.brands.Delete(t.ID)
-	http.Redirect(w, r, "/tenants/"+strconv.FormatInt(t.ID, 10), http.StatusSeeOther)
+	if err == nil {
+		s.brands.Delete(t.ID)
+	}
+	return err
 }
 
 func (s *Server) tenantLogo(w http.ResponseWriter, r *http.Request, sess session) {

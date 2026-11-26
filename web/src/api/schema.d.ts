@@ -1847,6 +1847,812 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Server settings
+         * @description Admins and auditors of the whole installation; secrets are never returned.
+         */
+        get: operations["getSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/{section}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Save one settings section
+         * @description Sections: general (local_login, stale_hours), network (console_allow, console_block, scim_allow), security (password_policy, four_eyes*, geolocation, fallback_dns), remote_shell, sso (oidc_*, allowed_domain, require_mfa, mfa_acr, role_groups, oidc_client_secret, clear_secret), monitoring (webhook_url, notify_private_networks), branding (company_name, logo_png, remove_logo), operations (ops), retention. Fields left out keep their value. The same guards as the console: no self lockout, local login only off with an OIDC admin, four eyes needs two admins, OIDC changes are checked against the provider. Audited as settings.save.
+         */
+        patch: operations["saveSettings"];
+        trace?: never;
+    };
+    "/api/v1/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Console users
+         * @description OIDC and local accounts of the caller's tenant (all in the global view).
+         */
+        get: operations["listUsers"];
+        put?: never;
+        /**
+         * Add a console user
+         * @description Local accounts answer their credentials once. New admins wait for approval while four eyes approval is on. Audited as user.add.
+         */
+        post: operations["addUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{login}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change role, state or scope
+         * @description Own account cannot be demoted or disabled; the last admin stays. Role changes and admin edits wait for approval while four eyes approval is on. Audited as user.update.
+         */
+        patch: operations["updateUser"];
+        trace?: never;
+    };
+    "/api/v1/users/{login}/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset password and TOTP of a local account
+         * @description Not the own account. For admins with four eyes approval the approver gets the credentials. Audited as user.reset.
+         */
+        post: operations["resetUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Switch the tenant view
+         * @description Console sessions of super admins; 0 is the view of all tenants. Changes the session cookie. Audited as tenant.switch.
+         */
+        post: operations["switchTenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/shared": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Shared objects
+         * @description Blueprints and library items of the default tenant and whether every tenant may use them.
+         */
+        get: operations["getSharedObjects"];
+        /**
+         * Set shared objects
+         * @description Ids of the blueprints and library items every tenant may use. Audited as tenant.shared.
+         */
+        put: operations["setSharedObjects"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A tenant
+         * @description Super admins every tenant, tenant admins their own.
+         */
+        get: operations["getTenant"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change a tenant
+         * @description Name and state by super admins (the default tenant stays enabled), branding also by the tenant's admins. Audited as tenant.update.
+         */
+        patch: operations["updateTenant"];
+        trace?: never;
+    };
+    "/api/v1/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Server keys
+         * @description Admins of the whole installation without device scope.
+         */
+        get: operations["listKeys"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/keys/{kind}/{op}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate or finish a key rotation
+         * @description rotate starts a rotation (name: HSM key label), finish ends it (force: before every device moved). Audited.
+         */
+        post: operations["keyRotation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Backup configuration and history
+         * @description Global admins. Target secrets are never returned.
+         */
+        get: operations["getBackup"];
+        /**
+         * Save recipients, time zone and retention
+         * @description Audited as backup.settings.
+         */
+        put: operations["saveBackup"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Back up now
+         * @description Starts a backup to every target; the history shows the result.
+         */
+        post: operations["runBackup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup/{id}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify an archive
+         * @description Checks the checksum of a stored archive on its targets.
+         */
+        post: operations["verifyBackup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup/targets/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Add or replace a target
+         * @description S3, B2, SFTP, WebDAV or a local directory. Audited as backup.settings.
+         */
+        put: operations["saveBackupTarget"];
+        post?: never;
+        /**
+         * Remove a target
+         * @description Refused while a schedule uses it; archives on it stay.
+         */
+        delete: operations["deleteBackupTarget"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup/targets/{name}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test a target
+         * @description Writes, reads and deletes a test object.
+         */
+        post: operations["testBackupTarget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup/schedules/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview a schedule
+         * @description Validates a schedule and answers its next runs and the archives its retention keeps over a year, without saving.
+         */
+        post: operations["previewBackupSchedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup/schedules/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Add or replace a schedule
+         * @description Audited as backup.settings.
+         */
+        put: operations["saveBackupSchedule"];
+        post?: never;
+        /**
+         * Delete a schedule
+         * @description Its archives follow the retention for archives outside a schedule.
+         */
+        delete: operations["deleteBackupSchedule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup/schedules/{name}/{op}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run, pause or resume a schedule
+         * @description run answers 202 and backs up in the background.
+         */
+        post: operations["backupScheduleAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notification-channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Notification channels
+         * @description Channels of the caller's tenant (all in the global view); webhook URLs and passwords are never returned.
+         */
+        get: operations["listChannels"];
+        put?: never;
+        /**
+         * Add a notification channel
+         * @description Audited as notification.channel_add.
+         */
+        post: operations["addChannel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notification-channels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a channel
+         * @description Audited as notification.channel_delete.
+         */
+        delete: operations["deleteChannel"];
+        options?: never;
+        head?: never;
+        /**
+         * Switch a channel on or off
+         * @description Audited as notification.channel_enable or _disable.
+         */
+        patch: operations["setChannel"];
+        trace?: never;
+    };
+    "/api/v1/notification-channels/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a test notification
+         * @description A failed delivery answers 502 with the reason (tenant accounts without network details).
+         */
+        post: operations["testChannel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/directory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Directory groups and connections
+         * @description Groups with their blueprint, Google Workspace and SCIM state, console roles from groups.
+         */
+        get: operations["getDirectory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/directory/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * People of the directory
+         * @description At most 500, filtered by q (name, email, department).
+         */
+        get: operations["listDirectoryUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/directory/groups/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Map a group to a blueprint
+         * @description blueprint_id 0 removes the mapping; priority 0 to 10000 (default 100). Audited as directory.group_assign.
+         */
+        put: operations["assignGroup"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/directory/scim-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * New SCIM token
+         * @description The previous token stops working; the answer holds the token once.
+         */
+        post: operations["rotateSCIMToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/directory/google": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Configure Google Workspace sync
+         * @description Delegated admin email and the service account JSON key (empty keeps the stored key); syncs at once.
+         */
+        put: operations["configureGoogle"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/directory/google/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync Google Workspace now */
+        post: operations["syncGoogle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/network": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Network CA and certificates
+         * @description The latest 500 certificates of the caller's tenant.
+         */
+        get: operations["getNetwork"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/network/crl-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * New CRL download token
+         * @description For RADIUS servers fetching /network/crl.pem; shown once. Audited as network.crl_token.
+         */
+        post: operations["rotateCRLToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Agent releases and update policy
+         * @description Releases newest first with their spread in the fleet.
+         */
+        get: operations["getAgents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save the agent update policy
+         * @description delay 0 to 90 days, spread 0 to 720 hours, pilot tag a simple word. Audited as agent_updates.policy.
+         */
+        put: operations["saveUpdatePolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check for agent releases
+         * @description Fetches signed releases from the release repository.
+         */
+        post: operations["fetchAgentReleases"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/releases/{version}/{op}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or block a version
+         * @description Audited as agent_release.approve or .block.
+         */
+        post: operations["agentReleaseAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Own profile
+         * @description Console sessions only.
+         */
+        get: operations["getProfile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profile/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change the own password
+         * @description Local accounts; checks the current password with the login lockout; other sessions end. Audited as profile.password.
+         */
+        post: operations["changePassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profile/totp/qr.svg": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** QR code of the pending authenticator secret */
+        get: operations["totpQR"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profile/totp/{step}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace the authenticator app
+         * @description start (current password) answers a pending secret, confirm (code) activates it and ends other sessions, cancel drops it.
+         */
+        post: operations["profileTOTP"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profile/recovery-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * New recovery codes
+         * @description Replaces all recovery codes; shown once. Audited as profile.recovery_codes.
+         */
+        post: operations["newRecoveryCodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/glossary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Glossary
+         * @description Terms of the console and the device states, translated (lang de or en).
+         */
+        get: operations["getGlossary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3088,6 +3894,500 @@ export interface components {
             by: string;
             /** Format: date-time */
             at: string;
+        };
+        PasswordPolicy: {
+            min_length?: number;
+            upper?: boolean;
+            lower?: boolean;
+            digit?: boolean;
+            symbol?: boolean;
+            no_name?: boolean;
+        };
+        RoleGroup: {
+            group: string;
+            /** @enum {string} */
+            role: "admin" | "helpdesk" | "auditor";
+            tags?: string[];
+        };
+        RemoteShellSettings: {
+            enabled?: boolean;
+            helpdesk?: boolean;
+            allow_root?: boolean;
+            max_minutes?: number;
+            idle_minutes?: number;
+        };
+        OpsSettings: {
+            /** @enum {string} */
+            log_level: "debug" | "info" | "warn" | "error";
+            access_log: boolean;
+            /** @enum {string} */
+            audit_api_reads: "off" | "sensitive" | "all";
+            update_downloads: number;
+            max_checkins: number;
+            agent_proxy_protocol: string[] | null;
+            syslog: string;
+            syslog_ca: string;
+        };
+        SettingsInput: {
+            oidc_issuer?: string;
+            oidc_client_id?: string;
+            allowed_domain?: string;
+            local_login?: boolean;
+            stale_hours?: number;
+            webhook_url?: string;
+            company_name?: string;
+            console_allow?: string[];
+            console_block?: string[];
+            scim_allow?: string[];
+            notify_private_networks?: boolean;
+            password_policy?: components["schemas"]["PasswordPolicy"];
+            four_eyes?: boolean;
+            four_eyes_recovery?: boolean;
+            four_eyes_shell?: boolean;
+            require_mfa?: boolean;
+            mfa_acr?: string[];
+            /** @description Days per data type (retention_kinds); 0 keeps the audit log forever */
+            retention?: {
+                [key: string]: number;
+            };
+            role_groups?: components["schemas"]["RoleGroup"][];
+            geolocation?: boolean;
+            fallback_dns?: boolean;
+            remote_shell?: components["schemas"]["RemoteShellSettings"];
+            ops?: components["schemas"]["OpsSettings"];
+            /** @description New OIDC client secret; empty keeps the stored one */
+            oidc_client_secret?: string;
+            clear_secret?: boolean;
+            /** @description PNG, square, up to 256 KiB */
+            logo_png?: string;
+            remove_logo?: boolean;
+        };
+        RetentionKind: {
+            key: string;
+            days: number;
+            default: number;
+            min: number;
+            max: number;
+            forever: boolean;
+        };
+        Settings: {
+            oidc_issuer?: string;
+            oidc_client_id?: string;
+            allowed_domain?: string;
+            local_login: boolean;
+            stale_hours: number;
+            webhook_url?: string;
+            company_name?: string;
+            console_allow?: string[];
+            console_block?: string[];
+            scim_allow?: string[];
+            notify_private_networks?: boolean;
+            password_policy: components["schemas"]["PasswordPolicy"];
+            four_eyes?: boolean;
+            four_eyes_recovery?: boolean;
+            four_eyes_shell?: boolean;
+            require_mfa?: boolean;
+            mfa_acr?: string[];
+            /** @description Days per data type (retention_kinds); 0 keeps the audit log forever */
+            retention?: {
+                [key: string]: number;
+            };
+            role_groups?: components["schemas"]["RoleGroup"][];
+            geolocation?: boolean;
+            fallback_dns?: boolean;
+            remote_shell?: components["schemas"]["RemoteShellSettings"];
+            ops: components["schemas"]["OpsSettings"];
+            has_oidc_secret: boolean;
+            has_logo: boolean;
+            public_url: string;
+            redirect_uri: string;
+            client_ip: string;
+            /** @description Signing key of the compliance webhook; admins only */
+            webhook_secret?: string;
+            retention_kinds: components["schemas"]["RetentionKind"][];
+        };
+        ConsoleUser: {
+            /** @description Email (OIDC) or local:name */
+            login: string;
+            role: string;
+            disabled: boolean;
+            local: boolean;
+            /** Format: date-time */
+            last_login: string | null;
+            scope_tags: string[];
+            scope_groups: string[];
+            from_group: boolean;
+            tenant: string;
+            self: boolean;
+        };
+        ConsoleUserList: {
+            items: components["schemas"]["ConsoleUser"][];
+            local_login: boolean;
+            oidc: boolean;
+            four_eyes: boolean;
+        };
+        ConsoleUserInput: {
+            /** @enum {string} */
+            kind: "oidc" | "local";
+            login: string;
+            /** @enum {string} */
+            role: "admin" | "helpdesk" | "auditor";
+            reason?: string;
+        };
+        ConsoleUserPatch: {
+            /** @enum {string} */
+            role: "admin" | "helpdesk" | "auditor";
+            disabled?: boolean;
+            scope_tags?: string[];
+            scope_groups?: string[];
+            reason?: string;
+        };
+        Credentials: {
+            /** @description User, role, password, TOTP secret and otpauth URI; shown once */
+            credentials: string;
+        };
+        SharedObject: {
+            id: number;
+            name: string;
+            type: string;
+            shared: boolean;
+        };
+        SharedObjects: {
+            blueprints: components["schemas"]["SharedObject"][];
+            items: components["schemas"]["SharedObject"][];
+        };
+        TenantDetail: {
+            id: number;
+            name: string;
+            disabled: boolean;
+            company_name: string;
+            color: string;
+            has_logo: boolean;
+            /** Format: date-time */
+            created_at: string;
+        };
+        TenantPatch: {
+            name?: string;
+            disabled?: boolean;
+            company_name?: string;
+            /** @description #rrggbb or empty */
+            color?: string;
+            logo_png?: string;
+            remove_logo?: boolean;
+        };
+        KeyStatus: {
+            /** @enum {string} */
+            kind: "ca" | "netca" | "command" | "session" | "webhook";
+            active: string;
+            previous: string;
+            /** Format: date-time */
+            since: string | null;
+            done: number;
+            total: number;
+            restart: boolean;
+            location: string;
+        };
+        KeepRule: {
+            last?: number;
+            days?: number;
+            daily?: number;
+            weekly?: number;
+            monthly?: number;
+            yearly?: number;
+        };
+        BackupTarget: {
+            name: string;
+            /** @enum {string} */
+            kind: "local" | "s3" | "b2" | "sftp" | "webdav";
+            dir?: string;
+            endpoint?: string;
+            region?: string;
+            bucket?: string;
+            prefix?: string;
+            access_key?: string;
+            path_style?: boolean;
+            /** @enum {string} */
+            lock_mode?: "" | "GOVERNANCE" | "COMPLIANCE";
+            lock_days?: number;
+            host?: string;
+            port?: number;
+            user?: string;
+            host_key?: string;
+            has_secret: boolean;
+            has_key: boolean;
+        };
+        BackupTargetInput: {
+            /** @enum {string} */
+            kind: "local" | "s3" | "b2" | "sftp" | "webdav";
+            dir?: string;
+            endpoint?: string;
+            region?: string;
+            bucket?: string;
+            prefix?: string;
+            access_key?: string;
+            path_style?: boolean;
+            /** @enum {string} */
+            lock_mode?: "" | "GOVERNANCE" | "COMPLIANCE";
+            lock_days?: number;
+            host?: string;
+            port?: number;
+            user?: string;
+            host_key?: string;
+            /** @description Secret key or password; empty keeps the stored one while the target points at the same server */
+            secret?: string;
+            /** @description SFTP private key (PEM); empty keeps the stored one */
+            private_key?: string;
+        };
+        BackupScheduleInput: {
+            name?: string;
+            paused?: boolean;
+            /** @enum {string} */
+            kind: "interval" | "weekly" | "monthly" | "cron";
+            every?: number;
+            offset?: number;
+            days?: number[];
+            times?: string[];
+            day?: number;
+            cron?: string;
+            targets: string[];
+            keep: components["schemas"]["KeepRule"];
+        };
+        RetentionPreview: {
+            runs: number;
+            kept: number;
+            /** Format: date-time */
+            oldest: string | null;
+            dates: string[];
+        };
+        BackupSchedule: {
+            name: string;
+            paused?: boolean;
+            /** @enum {string} */
+            kind: "interval" | "weekly" | "monthly" | "cron";
+            every?: number;
+            offset?: number;
+            days?: number[];
+            times?: string[];
+            day?: number;
+            cron?: string;
+            targets: string[];
+            keep: components["schemas"]["KeepRule"];
+            /** Format: date-time */
+            since?: string;
+            next: string[];
+            preview: components["schemas"]["RetentionPreview"];
+        };
+        BackupRun: {
+            id: number;
+            name: string;
+            reason: string;
+            actor: string;
+            /** Format: date-time */
+            started_at: string;
+            size: number;
+            sha256: string;
+            targets: string[];
+            status: string;
+            error: string;
+            /** Format: date-time */
+            verified_at: string | null;
+            verify_error: string;
+            /** Format: date-time */
+            restore_tested_at: string | null;
+            restore_test_error: string;
+            /** Format: date-time */
+            deleted_at: string | null;
+        };
+        Backup: {
+            recipients: string[];
+            time_zone: string;
+            zone: string;
+            keep: components["schemas"]["KeepRule"];
+            targets: components["schemas"]["BackupTarget"][];
+            schedules: components["schemas"]["BackupSchedule"][];
+            history: components["schemas"]["BackupRun"][];
+            offsite: boolean;
+            locked: boolean;
+            rule_321: boolean;
+        };
+        BackupInput: {
+            /** @description age X25519 public keys (age1...) */
+            recipients: string[];
+            time_zone?: string;
+            keep: components["schemas"]["KeepRule"];
+        };
+        ChannelConfig: {
+            host?: string;
+            port?: number;
+            /** @enum {string} */
+            tls?: "starttls" | "tls";
+            user?: string;
+            from?: string;
+            to?: string[];
+        };
+        Channel: {
+            id: number;
+            name: string;
+            /** @enum {string} */
+            kind: "slack" | "discord" | "email" | "webhook";
+            target: string;
+            events: string[];
+            enabled: boolean;
+            global: boolean;
+            config: components["schemas"]["ChannelConfig"];
+            last_ok: boolean | null;
+            last_error: string;
+            last_event: string;
+            /** Format: date-time */
+            last_at: string | null;
+        };
+        ChannelList: {
+            items: components["schemas"]["Channel"][];
+            events: {
+                type: string;
+                label: string;
+            }[];
+            notify_private: boolean;
+            tenant_signing_key?: string;
+            tenant_id?: number;
+        };
+        ChannelInput: {
+            name: string;
+            /** @enum {string} */
+            kind: "slack" | "discord" | "email" | "webhook";
+            events?: string[];
+            /** @description Webhook URL (https), stored encrypted */
+            url?: string;
+            /** @description SMTP password, stored encrypted */
+            password?: string;
+            config?: components["schemas"]["ChannelConfig"];
+        };
+        DirectoryGroup: {
+            id: number;
+            external_id: string;
+            source: string;
+            name: string;
+            members: number;
+            blueprint_id: number | null;
+            priority: number | null;
+        };
+        Directory: {
+            groups: components["schemas"]["DirectoryGroup"][];
+            google: {
+                admin_email: string;
+                configured: boolean;
+                last_result: string;
+                /** Format: date-time */
+                last_sync: string | null;
+            };
+            scim: {
+                configured: boolean;
+                url: string;
+            };
+            role_groups: components["schemas"]["RoleGroup"][];
+        };
+        DirectoryUser: {
+            id: number;
+            external_id: string;
+            source: string;
+            user_name: string;
+            email: string;
+            display_name: string;
+            department: string;
+            title: string;
+            active: boolean;
+            groups: string[];
+            group_ids: number[];
+            /** Format: date-time */
+            updated_at: string;
+        };
+        NetworkCert: {
+            serial: string;
+            device_id: string;
+            hostname: string;
+            subject: string;
+            sans: string;
+            /** Format: date-time */
+            not_before: string;
+            /** Format: date-time */
+            not_after: string;
+            /** Format: date-time */
+            revoked_at: string | null;
+            reason: string;
+            /** @enum {string} */
+            state: "valid" | "expired" | "revoked";
+        };
+        Network: {
+            certs: components["schemas"]["NetworkCert"][];
+            crl_token_set: boolean;
+            crl_url: string;
+            ca_url: string;
+            ca_fingerprint: string;
+            ca_subject: string;
+            /** Format: date-time */
+            ca_not_after: string;
+        };
+        UpdatePolicy: {
+            auto: boolean;
+            delay_days: number;
+            pilot_tag: string;
+            spread_hours: number;
+        };
+        AgentRelease: {
+            version: string;
+            /** Format: date-time */
+            published_at: string;
+            signed: boolean;
+            /** Format: date-time */
+            approved_at: string | null;
+            approved_by: string | null;
+            blocked: boolean;
+            blocked_reason: string;
+            devices: number;
+            failed: number;
+            older: boolean;
+        };
+        Agents: {
+            policy: components["schemas"]["UpdatePolicy"];
+            releases: components["schemas"]["AgentRelease"][];
+            fleet: {
+                version: string;
+                devices: number;
+            }[];
+            latest: string;
+            outdated: {
+                id: string;
+                hostname: string;
+                version: string;
+                /** Format: date-time */
+                last_seen: string | null;
+            }[];
+            repo: string;
+        };
+        Profile: {
+            login: string;
+            role: string;
+            local: boolean;
+            name?: string;
+            password_min: number;
+            password_rules: components["schemas"]["PasswordPolicy"];
+            recovery_left: number;
+            totp_pending: boolean;
+        };
+        Token1: {
+            token: string;
+        };
+        Glossary: {
+            terms: {
+                id: string;
+                term: string;
+                text: string;
+                doc?: string;
+            }[];
+            states: {
+                [key: string]: string;
+            };
+            docs: string;
         };
     };
     responses: {
@@ -6517,6 +7817,1515 @@ export interface operations {
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Settings"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    saveSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                section: "general" | "network" | "security" | "remote_shell" | "sso" | "monitoring" | "branding" | "operations" | "retention";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Settings"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listUsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleUserList"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    addUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleUserInput"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Credentials"];
+                };
+            };
+            /** @description Waits for four eyes approval */
+            202: {
+                headers: {
+                    /** @description The approval */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalPending"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    updateUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Email or local:name */
+                login: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleUserPatch"];
+            };
+        };
+        responses: {
+            /** @description Waits for four eyes approval */
+            202: {
+                headers: {
+                    /** @description The approval */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalPending"];
+                };
+            };
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    resetUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Email or local:name */
+                login: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Credentials"];
+                };
+            };
+            /** @description Waits for four eyes approval */
+            202: {
+                headers: {
+                    /** @description The approval */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalPending"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    switchTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    tenant: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getSharedObjects: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedObjects"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    setSharedObjects: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    blueprints: number[];
+                    items: number[];
+                };
+            };
+        };
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantDetail"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    updateTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantPatch"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantDetail"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["KeyStatus"][];
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    keyRotation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: "ca" | "netca" | "command" | "session" | "webhook";
+                op: "rotate" | "finish";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    force?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message: string;
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Backup"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    saveBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackupInput"];
+            };
+        };
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    runBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    verifyBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    saveBackupTarget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Lower case letters, digits, underscore */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackupTargetInput"];
+            };
+        };
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deleteBackupTarget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Lower case letters, digits, underscore */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    testBackupTarget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Lower case letters, digits, underscore */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message: string;
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    previewBackupSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackupScheduleInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupSchedule"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    saveBackupSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Lower case letters, digits, underscore */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackupScheduleInput"];
+            };
+        };
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deleteBackupSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Lower case letters, digits, underscore */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    backupScheduleAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Lower case letters, digits, underscore */
+                name: string;
+                op: "run" | "pause" | "resume";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listChannels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelList"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    addChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChannelInput"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Created"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deleteChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    setChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    testChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getDirectory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Directory"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listDirectoryUsers: {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["DirectoryUser"][];
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    assignGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    blueprint_id: number;
+                    priority?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    rotateSCIMToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        token: string;
+                        url: string;
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    configureGoogle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    admin_email: string;
+                    service_account?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message: string;
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    syncGoogle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message: string;
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getNetwork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Network"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    rotateCRLToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Token1"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getAgents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Agents"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    saveUpdatePolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePolicy"];
+            };
+        };
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    fetchAgentReleases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        fetched: number;
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    agentReleaseAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version: string;
+                op: "approve" | "block";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    changePassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    current: string;
+                    new: string;
+                    repeat: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    totpQR: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SVG */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/svg+xml": unknown;
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    profileTOTP: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                step: "start" | "confirm" | "cancel";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    current?: string;
+                    code?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        secret: string;
+                        uri: string;
+                    };
+                };
+            };
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    newRecoveryCodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    current: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        codes: string[];
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getGlossary: {
+        parameters: {
+            query?: {
+                lang?: "de" | "en";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Glossary"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];

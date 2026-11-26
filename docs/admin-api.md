@@ -292,6 +292,28 @@ with the `audit` scope; opening such a stream is an audited read of the audit lo
 `inbox` (`pending` approvals, when the number changes). A stream ends after four minutes and
 the browser reconnects; each caller may hold five streams.
 
+### Settings and administration
+
+The settings area of the console app calls the same functions as the classic pages, so
+every guard holds through the API too:
+
+* `GET /api/v1/settings` and `PATCH /api/v1/settings/{section}` (global admins; auditors
+  read). A section saves only its own fields; left out fields keep their value. Secrets
+  (OIDC client secret, logo bytes) are never returned; `oidc_client_secret` sets one,
+  `clear_secret` removes it. The lockout guards of the console apply (own address,
+  local login only off with an OIDC admin, four eyes approval needs two admins).
+* `/api/v1/users`: add (local accounts answer their credentials once), change role, state
+  and scope, reset local credentials. Self demotion is refused, the last admin stays,
+  admin changes wait for approval (`202` with the approval) while four eyes approval is on.
+* `/api/v1/tenants/{id}` (name, state, branding), `/api/v1/tenants/shared`,
+  `POST /api/v1/tenants/switch` (super admin sessions, audited as `tenant.switch`).
+* `/api/v1/keys`, `/api/v1/backup` (targets, schedules with a preview, runs, verify),
+  `/api/v1/notification-channels`, `/api/v1/directory`, `/api/v1/network`,
+  `/api/v1/agents` and the own `/api/v1/profile` (console sessions only).
+
+Global pages (settings, keys, backup, directory, agents) refuse tenant accounts and
+accounts with a device scope, as the classic console does.
+
 ### Audit filters
 
 `q` searches actor, action, target and detail; `actor` is a part of the actor; `action` a

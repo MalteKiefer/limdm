@@ -65,7 +65,7 @@ export function FormSection({ title, description, children }: { title: ReactNode
         <h3 className="font-semibold">{title}</h3>
         {description && <p className="mt-1 text-[13px] text-muted">{description}</p>}
       </div>
-      <div className="flex max-w-xl flex-col gap-5">{children}</div>
+      <div className="flex max-w-xl min-w-0 flex-col gap-5">{children}</div>
     </section>
   )
 }

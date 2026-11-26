@@ -1,5 +1,5 @@
 // Tenant view: super admins switch between tenants and the global view.
-// The switch is the classic console's form endpoint; it changes the session.
+// The switch goes through the admin API (audited); it changes the session.
 import { useQuery } from '@tanstack/react-query'
 import { api, postForm, unwrap } from '../api/client'
 import { useMe } from '../api/me'
@@ -16,7 +16,7 @@ export function useTenants() {
 
 /** Switches the session to tenant id (0: all tenants) and reloads the app in that view. */
 export async function switchTenant(id: number) {
-  await postForm('/tenants/switch', { tenant: String(id) })
+  await unwrap(api.POST('/api/v1/tenants/switch', { body: { tenant: id } }))
   location.reload()
 }
 

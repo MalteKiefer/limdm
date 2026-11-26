@@ -159,7 +159,7 @@ func TestAppAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp0.Body.Close()
-	if resp0.StatusCode != http.StatusFound || resp0.Header.Get("Location") != "/login" {
+	if resp0.StatusCode != http.StatusFound || resp0.Header.Get("Location") != "/login?next=%2Fapp%2Fdevices" {
 		t.Fatalf("app without session: %d %s", resp0.StatusCode, resp0.Header.Get("Location"))
 	}
 	if code, body := call(admin, "GET", "/app/devices", "", nil); code != 200 || !strings.Contains(body, "<html") && !strings.Contains(body, "<!doctype") {

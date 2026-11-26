@@ -3,7 +3,6 @@ package server
 import (
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -543,7 +542,7 @@ func (s *Server) apiPackageDelete(w http.ResponseWriter, r *http.Request, c apiC
 }
 
 // apiPackageSettings saves the limits and the store through the console's
-// form logic (targetFromForm seals the S3 secret, keeps the stored one).
+// target logic (target seals the S3 secret, keeps the stored one).
 func (s *Server) apiPackageSettings(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	if !backupAdmin(c.sess()) {
 		problem(w, http.StatusForbidden, "the package store is managed by global administrators")
@@ -566,15 +565,10 @@ func (s *Server) apiPackageSettings(w http.ResponseWriter, r *http.Request, c ap
 			s.apiFail(w, invalid("s3", errors.New("the S3 store needs endpoint, bucket and access key")))
 			return
 		}
-		path := ""
-		if in.S3.PathStyle {
-			path = "on"
-		}
-		r.Form = url.Values{"endpoint": {in.S3.Endpoint}, "region": {in.S3.Region}, "bucket": {in.S3.Bucket}, "prefix": {in.S3.Prefix},
-			"access_key": {in.S3.AccessKey}, "path_style": {path}, "secret": {in.S3.Secret}}
-		t, err := s.targetFromForm(r, "packages", "s3", cur.S3)
+		t, err := s.target(targetInput{StoreTarget: StoreTarget{Name: "packages", Kind: "s3", Endpoint: in.S3.Endpoint, Region: in.S3.Region,
+			Bucket: in.S3.Bucket, Prefix: in.S3.Prefix, AccessKey: in.S3.AccessKey, PathStyle: in.S3.PathStyle}, Secret: in.S3.Secret}, cur.S3)
 		if err != nil {
-			s.apiFail(w, invalid("s3", err))
+			s.apiFail(w, err)
 			return
 		}
 		next.S3 = &t

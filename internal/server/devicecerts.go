@@ -255,19 +255,29 @@ func (s *Server) networkCRLDownload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) networkCRLToken(w http.ResponseWriter, r *http.Request, sess session) {
-	tok := "lmc_" + randToken(32)
-	doc, _ := json.Marshal(map[string]string{"token_sha256": fmt.Sprintf("%x", sha(tok))})
-	err := s.auditAction(r.Context(), sess.Email, "network.crl_token", "network_crl", "token rotated", func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO settings(key, value) VALUES ('network_crl', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
-		return err
-	})
+	tok, err := s.rotateCRLToken(r.Context(), sess)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
+	s.renderNetwork(w, r, sess, tok)
+}
+
+// rotateCRLToken replaces the bearer token of network CRL downloads and
+// returns the new one.
+func (s *Server) rotateCRLToken(ctx context.Context, sess session) (string, error) {
+	tok := "lmc_" + randToken(32)
+	doc, _ := json.Marshal(map[string]string{"token_sha256": fmt.Sprintf("%x", sha(tok))})
+	err := s.auditAction(ctx, sess.Email, "network.crl_token", "network_crl", "token rotated", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('network_crl', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
 	s.notify(notice{Type: "network.crl_token", Severity: "warning", Title: "Network CRL token rotated",
 		Text: sess.Email + " rotated the bearer token for network CRL downloads; RADIUS servers need the new token.", URL: s.cfg.PublicURL + "/network"})
-	s.renderNetwork(w, r, sess, tok)
+	return tok, nil
 }
 
 func (s *Server) networkPage(w http.ResponseWriter, r *http.Request, sess session) {

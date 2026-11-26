@@ -40,7 +40,7 @@ func (s *Server) webappRoutes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("GET /app/", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.session(w, r); !ok {
-			http.Redirect(w, r, "/login", http.StatusFound)
+			toLogin(w, r)
 			return
 		}
 		name := strings.TrimPrefix(r.URL.Path, "/app/")

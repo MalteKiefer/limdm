@@ -495,104 +495,128 @@ func (s *Server) agentsPage(w http.ResponseWriter, r *http.Request, sess session
 	s.renderAgents(w, r, sess, "", "")
 }
 
-func (s *Server) renderAgents(w http.ResponseWriter, r *http.Request, sess session, msg, errMsg string) {
-	ctx := r.Context()
-	pol, err := s.updatePolicy(ctx, s.db)
-	if err != nil {
-		s.fail(w, err)
-		return
+// outdatedDevice is a device behind the newest approved agent version.
+type outdatedDevice struct {
+	ID, Hostname, Version string
+	LastSeen              *time.Time
+}
+
+// agentsView is what the agents page shows; the admin API serves it too.
+type agentsView struct {
+	Policy   UpdatePolicy
+	Releases []releaseView // newest first
+	Fleet    []versionCount
+	Latest   string
+	Outdated []outdatedDevice
+}
+
+// agentsOverview reads the update policy, the releases with their spread
+// and the devices behind the newest approved version.
+func (s *Server) agentsOverview(ctx context.Context) (agentsView, error) {
+	var v agentsView
+	var err error
+	if v.Policy, err = s.updatePolicy(ctx, s.db); err != nil {
+		return v, err
 	}
 	rows, err := s.db.Query(ctx, `SELECT `+agentReleaseCols+`,
 		(SELECT count(*) FROM devices d WHERE NOT d.retired AND split_part(d.agent_version, '-', 1) = r.version),
 		(SELECT count(*) FROM devices d WHERE d.update_version = r.version AND d.update_state IN ('rolled_back','failed'))
 		FROM agent_releases r`)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return v, err
 	}
-	rels, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (releaseView, error) {
+	v.Releases, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (releaseView, error) {
 		var v releaseView
 		return v, row.Scan(&v.Version, &v.PublishedAt, &v.Sums, &v.SumsSig, &v.ApprovedAt, &v.ApprovedBy, &v.Blocked, &v.BlockedReason, &v.Devices, &v.Failed)
 	})
 	if err != nil {
-		s.fail(w, err)
-		return
+		return v, err
 	}
-	slices.SortFunc(rels, func(a, b releaseView) int { return api.CompareVersions(b.Version, a.Version) })
+	slices.SortFunc(v.Releases, func(a, b releaseView) int { return api.CompareVersions(b.Version, a.Version) })
 	rows, err = s.db.Query(ctx, `SELECT agent_version, count(*) FROM devices WHERE NOT retired GROUP BY 1 ORDER BY 2 DESC`)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return v, err
 	}
-	fleet, err := pgx.CollectRows(rows, pgx.RowToStructByPos[versionCount])
-	if err != nil {
-		s.fail(w, err)
-		return
+	if v.Fleet, err = pgx.CollectRows(rows, pgx.RowToStructByPos[versionCount]); err != nil {
+		return v, err
 	}
 	// devices behind the newest approved version (or the newest known one)
-	latest := ""
-	for _, rel := range rels {
-		if !rel.Blocked && (rel.ApprovedAt != nil || latest == "") {
+	for _, rel := range v.Releases {
+		if !rel.Blocked && (rel.ApprovedAt != nil || v.Latest == "") {
+			v.Latest = rel.Version
 			if rel.ApprovedAt != nil {
-				latest = rel.Version
 				break
 			}
-			latest = rel.Version
 		}
 	}
-	type outdatedDevice struct {
-		ID, Hostname, Version string
-		LastSeen              *time.Time
-	}
-	var outdated []outdatedDevice
-	if latest != "" {
+	if v.Latest != "" {
 		rows, err = s.db.Query(ctx, `SELECT id, hostname, agent_version, last_seen FROM devices WHERE NOT retired ORDER BY hostname`)
 		if err != nil {
-			s.fail(w, err)
-			return
+			return v, err
 		}
 		all, err := pgx.CollectRows(rows, pgx.RowToStructByPos[outdatedDevice])
 		if err != nil {
-			s.fail(w, err)
-			return
+			return v, err
 		}
 		for _, d := range all {
-			if api.NewerVersion(latest, d.Version) {
-				outdated = append(outdated, d)
+			if api.NewerVersion(v.Latest, d.Version) {
+				v.Outdated = append(v.Outdated, d)
 			}
 		}
 	}
-	current, older := splitOlder(rels, fleet)
-	if r.URL.Query().Get("older") == "1" {
-		current, older = rels, nil
+	return v, nil
+}
+
+func (s *Server) renderAgents(w http.ResponseWriter, r *http.Request, sess session, msg, errMsg string) {
+	v, err := s.agentsOverview(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
-	s.render(w, r, sess, "agents", map[string]any{"Policy": pol, "Releases": current, "Older": len(older), "ShowingAll": r.URL.Query().Get("older") == "1",
-		"Fleet": fleet, "Repo": s.cfg.ReleaseRepo, "Msg": msg, "Error": errMsg, "Latest": latest, "Outdated": outdated})
+	current, older := splitOlder(v.Releases, v.Fleet)
+	if r.URL.Query().Get("older") == "1" {
+		current, older = v.Releases, nil
+	}
+	s.render(w, r, sess, "agents", map[string]any{"Policy": v.Policy, "Releases": current, "Older": len(older), "ShowingAll": r.URL.Query().Get("older") == "1",
+		"Fleet": v.Fleet, "Repo": s.cfg.ReleaseRepo, "Msg": msg, "Error": errMsg, "Latest": v.Latest, "Outdated": v.Outdated})
 }
 
 func (s *Server) agentsPolicy(w http.ResponseWriter, r *http.Request, sess session) {
 	delay, err := strconv.Atoi(r.FormValue("delay_days"))
 	spread, serr := strconv.Atoi(r.FormValue("spread_hours"))
-	pol := UpdatePolicy{Auto: r.FormValue("auto") == "on", DelayDays: delay, SpreadHours: spread, PilotTag: strings.ToLower(strings.TrimSpace(r.FormValue("pilot_tag")))}
-	if err != nil || delay < 0 || delay > 90 || (pol.PilotTag != "" && (!identOK(pol.PilotTag) || len(pol.PilotTag) > 32)) {
-		s.renderAgents(w, r, sess, "", "The delay must be 0 to 90 days and the pilot tag a simple word.")
-		return
-	}
-	if serr != nil || spread < 0 || spread > 720 {
-		s.renderAgents(w, r, sess, "", "The rollout window must be 0 to 720 hours.")
-		return
-	}
-	doc, _ := json.Marshal(pol)
-	defer s.forgetRollout()
-	err = s.auditAction(r.Context(), sess.Email, "agent_updates.policy", "agent", string(doc), func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO settings(key, value) VALUES ('agent_updates', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
-		return err
-	})
 	if err != nil {
+		delay = -1
+	}
+	if serr != nil {
+		spread = -1
+	}
+	pol := UpdatePolicy{Auto: r.FormValue("auto") == "on", DelayDays: delay, SpreadHours: spread, PilotTag: r.FormValue("pilot_tag")}
+	if err := s.saveUpdatePolicy(r.Context(), sess, pol); err != nil {
+		if ue := (*userError)(nil); errors.As(err, &ue) {
+			s.renderAgents(w, r, sess, "", ue.Msg)
+			return
+		}
 		s.fail(w, err)
 		return
 	}
 	s.renderAgents(w, r, sess, "Settings saved and active.", "")
+}
+
+// saveUpdatePolicy validates and stores the agent update policy.
+func (s *Server) saveUpdatePolicy(ctx context.Context, sess session, pol UpdatePolicy) error {
+	pol.PilotTag = strings.ToLower(strings.TrimSpace(pol.PilotTag))
+	if pol.DelayDays < 0 || pol.DelayDays > 90 || (pol.PilotTag != "" && (!identOK(pol.PilotTag) || len(pol.PilotTag) > 32)) {
+		return &userError{http.StatusUnprocessableEntity, "The delay must be 0 to 90 days and the pilot tag a simple word."}
+	}
+	if pol.SpreadHours < 0 || pol.SpreadHours > 720 {
+		return &userError{http.StatusUnprocessableEntity, "The rollout window must be 0 to 720 hours."}
+	}
+	doc, _ := json.Marshal(pol)
+	defer s.forgetRollout()
+	return s.auditAction(ctx, sess.Email, "agent_updates.policy", "agent", string(doc), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO settings(key, value) VALUES ('agent_updates', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, string(doc))
+		return err
+	})
 }
 
 func (s *Server) agentsFetch(w http.ResponseWriter, r *http.Request, sess session) {
@@ -689,30 +713,39 @@ var (
 
 // agentsRelease approves, blocks or unblocks a version.
 func (s *Server) agentsRelease(w http.ResponseWriter, r *http.Request, sess session) {
-	version, op := r.PathValue("version"), r.PathValue("op")
+	err := s.releaseOp(r.Context(), sess, r.PathValue("version"), r.PathValue("op"))
+	var ue *userError
+	switch {
+	case errors.As(err, &ue) && ue.Status == http.StatusNotFound && ue.Msg == "not found":
+		http.NotFound(w, r)
+	case ue != nil:
+		s.renderAgents(w, r, sess, "", ue.Msg)
+	case err != nil:
+		s.fail(w, err)
+	default:
+		http.Redirect(w, r, "/agents", http.StatusSeeOther)
+	}
+}
+
+// releaseOp approves or blocks an agent version.
+func (s *Server) releaseOp(ctx context.Context, sess session, version, op string) error {
 	q := map[string]string{
 		"approve": `UPDATE agent_releases SET approved_at=now(), approved_by=$2, blocked=false, blocked_reason='' WHERE version=$1`,
 		"block":   `UPDATE agent_releases SET blocked=true, blocked_reason='blocked by ' || $2 WHERE version=$1`,
 	}[op]
 	if q == "" {
-		http.NotFound(w, r)
-		return
+		return &userError{http.StatusNotFound, "not found"}
 	}
 	defer s.forgetRollout()
-	err := s.auditAction(r.Context(), sess.Email, "agent_release."+op, version, "", func(tx pgx.Tx) error {
-		tag, err := tx.Exec(r.Context(), q, version, sess.Email)
+	err := s.auditAction(ctx, sess.Email, "agent_release."+op, version, "", func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, q, version, sess.Email)
 		if err == nil && tag.RowsAffected() == 0 {
 			err = errUnknownVersion
 		}
 		return err
 	})
 	if errors.Is(err, errUnknownVersion) {
-		s.renderAgents(w, r, sess, "", "Unknown version.")
-		return
+		return &userError{http.StatusNotFound, "Unknown version."}
 	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, "/agents", http.StatusSeeOther)
+	return err
 }

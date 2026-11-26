@@ -32,7 +32,8 @@ func (s *Server) appAPIRoutes(m *http.ServeMux) {
 	s.appInboxRoutes(m)
 	s.appActivityRoutes(m)
 	s.appReportsRoutes(m)
-	s.appConfigRoutes(m) // configuration area (app_config.go)
+	s.appConfigRoutes(m)   // configuration area (app_config.go)
+	s.appSettingsRoutes(m) // app_settings.go
 }
 
 // csrfHeader carries the session's CSRF token on every state changing

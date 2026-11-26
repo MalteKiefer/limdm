@@ -9,12 +9,12 @@ import { totp } from './totp'
 test('sign in and open the console app', async ({ page }) => {
   const { second } = JSON.parse(readFileSync(credsPath, 'utf8')) as { second: Creds }
   await page.goto('/app/devices')
-  await expect(page).toHaveURL(/\/login$/)
+  await expect(page).toHaveURL(/\/login\?next=%2Fapp%2Fdevices$/)
   await page.locator('input[name=username]').fill(second.user)
   await page.locator('input[name=password]').fill(second.password)
   await page.locator('input[name=totp]').fill(totp(second.secret))
   await page.locator('form[action="/login/local"] button').click()
-  await page.waitForURL((u) => !u.pathname.startsWith('/login'))
+  await page.waitForURL((u) => u.pathname === '/app/devices')
 
   const me = page.waitForResponse((r) => r.url().endsWith('/api/v1/me'))
   await page.goto('/app/')

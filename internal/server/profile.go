@@ -136,14 +136,6 @@ func (s *Server) renderProfile(w http.ResponseWriter, r *http.Request, sess sess
 		"DateFormats": formats, "DateFmt": requestDateFormat(r)})
 }
 
-func (s *Server) localName(w http.ResponseWriter, r *http.Request, sess session) (string, bool) {
-	name, ok := strings.CutPrefix(sess.Email, localPrefix)
-	if !ok {
-		s.renderProfile(w, r, sess, profileView{}, "", "OIDC accounts are managed by the identity provider.")
-	}
-	return name, ok
-}
-
 // checkCurrent verifies the current password, with the same lockout as the login.
 func (s *Server) checkCurrent(ctx context.Context, tx pgx.Tx, name, password string) error {
 	var hash string
@@ -173,124 +165,169 @@ func (s *Server) checkCurrent(ctx context.Context, tx pgx.Tx, name, password str
 }
 
 var (
-	errWrongPassword = errors.New("the current password is wrong")
-	errLocked        = errors.New("too many attempts, try again later")
+	errWrongPassword = &userError{http.StatusUnprocessableEntity, "the current password is wrong"}
+	errLocked        = &userError{http.StatusTooManyRequests, "too many attempts, try again later"}
+	errOIDCProfile   = &userError{http.StatusUnprocessableEntity, "OIDC accounts are managed by the identity provider."}
 )
 
-func (s *Server) profilePassword(w http.ResponseWriter, r *http.Request, sess session) {
-	name, ok := s.localName(w, r, sess)
+// profileName is the local account name of sess, or errOIDCProfile.
+func profileName(sess session) (string, error) {
+	name, ok := strings.CutPrefix(sess.Email, localPrefix)
 	if !ok {
+		return "", errOIDCProfile
+	}
+	return name, nil
+}
+
+// profileDone answers a profile form: the error or the note on the tab,
+// with a renewed session after a change that ended the others.
+func (s *Server) profileDone(w http.ResponseWriter, r *http.Request, sess session, v profileView, renew bool, msg string, err error) {
+	if err != nil {
+		s.renderProfile(w, r, sess, v, "", err.Error())
 		return
 	}
-	pw, again := r.FormValue("new"), r.FormValue("repeat")
+	if renew {
+		s.renewSession(w, r, sess) // other sessions of this account end
+	}
+	s.renderProfile(w, r, sess, v, msg, "")
+}
+
+func (s *Server) profilePassword(w http.ResponseWriter, r *http.Request, sess session) {
+	err := s.changePassword(r.Context(), sess, clientIP(r), r.FormValue("current"), r.FormValue("new"), r.FormValue("repeat"))
+	s.profileDone(w, r, sess, profileView{Tab: "password"}, true, "Password changed.", err)
+}
+
+// changePassword sets a new password of the local account of sess after
+// checking the current one. The caller renews the session.
+func (s *Server) changePassword(ctx context.Context, sess session, ip, current, pw, again string) error {
+	name, err := profileName(sess)
+	if err != nil {
+		return err
+	}
 	if msg := s.settings().Rules.Check(pw, name); msg != "" {
-		s.renderProfile(w, r, sess, profileView{Tab: "password"}, "", msg)
-		return
+		return &userError{http.StatusUnprocessableEntity, msg}
 	}
 	if pw != again {
-		s.renderProfile(w, r, sess, profileView{Tab: "password"}, "", "The new passwords do not match.")
-		return
+		return &userError{http.StatusUnprocessableEntity, "The new passwords do not match."}
 	}
-	ctx := r.Context()
-	err := s.auditAction(ctx, sess.Email, "profile.password", sess.Email, "password changed", func(tx pgx.Tx) error {
-		if err := s.checkCurrent(ctx, tx, name, r.FormValue("current")); err != nil {
+	err = s.auditAction(ctx, sess.Email, "profile.password", sess.Email, "password changed", func(tx pgx.Tx) error {
+		if err := s.checkCurrent(ctx, tx, name, current); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `UPDATE local_admins SET password_hash=$2, session_gen=session_gen+1 WHERE name=$1`, name, hashPassword(pw))
 		return err
 	})
-	if err != nil {
-		s.renderProfile(w, r, sess, profileView{Tab: "password"}, "", s.profileErr(ctx, sess, name, r, err))
-		return
-	}
-	s.renewSession(w, r, sess) // other sessions of this account end
-	s.renderProfile(w, r, sess, profileView{Tab: "password"}, "Password changed.", "")
+	return s.profileErr(ctx, sess, name, ip, current, err)
 }
 
 // profileErr records a failed password check outside the rolled back transaction.
-func (s *Server) profileErr(ctx context.Context, sess session, name string, r *http.Request, err error) string {
+func (s *Server) profileErr(ctx context.Context, sess session, name, ip, current string, err error) error {
 	if !errors.Is(err, errWrongPassword) {
-		return err.Error()
+		return err
 	}
 	_ = s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
-		err := s.checkCurrent(ctx, tx, name, r.FormValue("current"))
+		err := s.checkCurrent(ctx, tx, name, current)
 		if errors.Is(err, errWrongPassword) {
 			err = nil
 		}
-		return sess.Email, "profile.password_check_failed", sess.Email, clientIP(r), err
+		return sess.Email, "profile.password_check_failed", sess.Email, ip, err
 	})
-	return err.Error()
+	return err
 }
 
 // profileTOTP starts (secret generated, not active) or confirms a new TOTP secret.
 func (s *Server) profileTOTP(w http.ResponseWriter, r *http.Request, sess session) {
-	name, ok := s.localName(w, r, sess)
-	if !ok {
-		return
-	}
 	ctx := r.Context()
+	v := profileView{Tab: "authenticator"}
 	switch r.FormValue("step") {
 	case "start":
-		secret := newTOTPSecret()
-		err := s.auditAction(ctx, sess.Email, "profile.totp_start", sess.Email, "new TOTP secret pending", func(tx pgx.Tx) error {
-			if err := s.checkCurrent(ctx, tx, name, r.FormValue("current")); err != nil {
-				return err
-			}
-			_, err := tx.Exec(ctx, `UPDATE local_admins SET totp_pending=$2 WHERE name=$1`, name, secret)
-			return err
-		})
-		if err != nil {
-			s.renderProfile(w, r, sess, profileView{Tab: "authenticator"}, "", s.profileErr(ctx, sess, name, r, err))
-			return
-		}
-		s.renderProfile(w, r, sess, profileView{Tab: "authenticator", PendingSecret: secret}, "", "")
+		secret, err := s.startTOTP(ctx, sess, clientIP(r), r.FormValue("current"))
+		v.PendingSecret = secret
+		s.profileDone(w, r, sess, v, false, "", err)
 	case "confirm":
-		err := s.auditAction(ctx, sess.Email, "profile.totp", sess.Email, "TOTP secret replaced", func(tx pgx.Tx) error {
-			var pending *string
-			if err := tx.QueryRow(ctx, `SELECT totp_pending FROM local_admins WHERE name=$1 FOR UPDATE`, name).Scan(&pending); err != nil {
-				return err
-			}
-			if pending == nil {
-				return errors.New("no new secret pending")
-			}
-			step, ok := verifyTOTP(*pending, r.FormValue("code"), time.Now(), 0)
-			if !ok {
-				return errors.New("the code does not match the new secret")
-			}
-			_, err := tx.Exec(ctx, `UPDATE local_admins SET totp_secret=totp_pending, totp_pending=NULL, totp_last_step=$2,
-				session_gen=session_gen+1 WHERE name=$1`, name, step)
-			return err
-		})
-		if err != nil {
-			s.renderProfile(w, r, sess, profileView{Tab: "authenticator"}, "", err.Error())
-			return
-		}
-		s.renewSession(w, r, sess)
-		s.renderProfile(w, r, sess, profileView{Tab: "authenticator"}, "Authenticator app replaced.", "")
+		s.profileDone(w, r, sess, v, true, "Authenticator app replaced.", s.confirmTOTP(ctx, sess, r.FormValue("code")))
 	case "cancel":
-		if _, err := s.db.Exec(ctx, `UPDATE local_admins SET totp_pending=NULL WHERE name=$1`, name); err != nil {
-			s.fail(w, err)
-			return
-		}
-		s.renderProfile(w, r, sess, profileView{Tab: "authenticator"}, "", "")
+		s.profileDone(w, r, sess, v, false, "", s.cancelTOTP(ctx, sess))
 	default:
 		s.errorPage(w, r, sess, http.StatusBadRequest, "bad request")
 	}
 }
 
+// startTOTP checks the current password and stores a pending TOTP secret,
+// which becomes active once confirmTOTP sees a matching code.
+func (s *Server) startTOTP(ctx context.Context, sess session, ip, current string) (string, error) {
+	name, err := profileName(sess)
+	if err != nil {
+		return "", err
+	}
+	secret := newTOTPSecret()
+	err = s.auditAction(ctx, sess.Email, "profile.totp_start", sess.Email, "new TOTP secret pending", func(tx pgx.Tx) error {
+		if err := s.checkCurrent(ctx, tx, name, current); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE local_admins SET totp_pending=$2 WHERE name=$1`, name, secret)
+		return err
+	})
+	if err != nil {
+		return "", s.profileErr(ctx, sess, name, ip, current, err)
+	}
+	return secret, nil
+}
+
+// confirmTOTP activates the pending secret when code matches it. The
+// caller renews the session.
+func (s *Server) confirmTOTP(ctx context.Context, sess session, code string) error {
+	name, err := profileName(sess)
+	if err != nil {
+		return err
+	}
+	return s.auditAction(ctx, sess.Email, "profile.totp", sess.Email, "TOTP secret replaced", func(tx pgx.Tx) error {
+		var pending *string
+		if err := tx.QueryRow(ctx, `SELECT totp_pending FROM local_admins WHERE name=$1 FOR UPDATE`, name).Scan(&pending); err != nil {
+			return err
+		}
+		if pending == nil {
+			return &userError{http.StatusConflict, "no new secret pending"}
+		}
+		step, ok := verifyTOTP(*pending, code, time.Now(), 0)
+		if !ok {
+			return &userError{http.StatusUnprocessableEntity, "the code does not match the new secret"}
+		}
+		_, err := tx.Exec(ctx, `UPDATE local_admins SET totp_secret=totp_pending, totp_pending=NULL, totp_last_step=$2,
+			session_gen=session_gen+1 WHERE name=$1`, name, step)
+		return err
+	})
+}
+
+// cancelTOTP drops a pending TOTP secret.
+func (s *Server) cancelTOTP(ctx context.Context, sess session) error {
+	name, err := profileName(sess)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(ctx, `UPDATE local_admins SET totp_pending=NULL WHERE name=$1`, name)
+	return err
+}
+
 // profileRecovery replaces all recovery codes; they are shown once.
 func (s *Server) profileRecovery(w http.ResponseWriter, r *http.Request, sess session) {
-	name, ok := s.localName(w, r, sess)
-	if !ok {
-		return
+	codes, err := s.newRecoveryCodes(r.Context(), sess, clientIP(r), r.FormValue("current"))
+	s.profileDone(w, r, sess, profileView{Tab: "recovery", NewCodes: codes}, false, "", err)
+}
+
+// newRecoveryCodes checks the current password and replaces all recovery
+// codes of the local account of sess.
+func (s *Server) newRecoveryCodes(ctx context.Context, sess session, ip, current string) ([]string, error) {
+	name, err := profileName(sess)
+	if err != nil {
+		return nil, err
 	}
-	ctx := r.Context()
 	codes := make([]string, recoveryCount)
 	for i := range codes {
 		codes[i] = newRecoveryCode()
 	}
-	err := s.auditAction(ctx, sess.Email, "profile.recovery_codes", sess.Email, fmt.Sprintf("%d new recovery codes", recoveryCount), func(tx pgx.Tx) error {
-		if err := s.checkCurrent(ctx, tx, name, r.FormValue("current")); err != nil {
+	err = s.auditAction(ctx, sess.Email, "profile.recovery_codes", sess.Email, fmt.Sprintf("%d new recovery codes", recoveryCount), func(tx pgx.Tx) error {
+		if err := s.checkCurrent(ctx, tx, name, current); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM local_recovery_codes WHERE name=$1`, name); err != nil {
@@ -304,8 +341,7 @@ func (s *Server) profileRecovery(w http.ResponseWriter, r *http.Request, sess se
 		return nil
 	})
 	if err != nil {
-		s.renderProfile(w, r, sess, profileView{Tab: "recovery"}, "", s.profileErr(ctx, sess, name, r, err))
-		return
+		return nil, s.profileErr(ctx, sess, name, ip, current, err)
 	}
-	s.renderProfile(w, r, sess, profileView{Tab: "recovery", NewCodes: codes}, "", "")
+	return codes, nil
 }

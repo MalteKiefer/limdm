@@ -321,7 +321,8 @@ func (s *Server) renderLogin(w http.ResponseWriter, r *http.Request, msg string)
 	// double submit token against login CSRF
 	http.SetCookie(w, &http.Cookie{Name: loginCookie, Value: tok, Path: "/login", HttpOnly: true, Secure: true,
 		SameSite: http.SameSiteStrictMode, MaxAge: 600})
-	s.render(w, r, session{}, "login", map[string]any{"OIDC": s.oidc() != nil, "Local": s.localAllowed(), "LoginCSRF": tok, "Error": msg})
+	s.render(w, r, session{}, "login", map[string]any{"OIDC": s.oidc() != nil, "Local": s.localAllowed(), "LoginCSRF": tok, "Error": msg,
+		"Next": safeNext(r.FormValue("next"))})
 }
 
 func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
@@ -353,7 +354,7 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	_, gen := s.account(r.Context(), localPrefix+name)
 	s.setCookie(w, sessionCookie, s.seal(session{Email: localPrefix + name, Role: role, IAT: now, Last: now, Gen: gen}), maxSession)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, safeNext(r.FormValue("next")), http.StatusSeeOther)
 }
 
 var errLoginFailed = errors.New("invalid credentials")
@@ -483,7 +484,7 @@ func localAdd(ctx context.Context, tx pgx.Tx, name, role string) (string, error)
 	tag, err := tx.Exec(ctx, `INSERT INTO local_admins(name, role, password_hash, totp_secret) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
 		name, role, hashPassword(pw), secret)
 	if err == nil && tag.RowsAffected() == 0 {
-		err = errors.New("account exists already")
+		err = &userError{http.StatusConflict, "account exists already"}
 	}
 	if err != nil {
 		return "", err
@@ -498,7 +499,7 @@ func localReset(ctx context.Context, tx pgx.Tx, name string) (string, error) {
 	err := tx.QueryRow(ctx, `UPDATE local_admins SET password_hash=$2, totp_secret=$3, totp_last_step=0, session_gen=session_gen+1, failures=0, locked_until=NULL
 		WHERE name=$1 RETURNING role`, name, hashPassword(pw), secret).Scan(&role)
 	if errors.Is(err, pgx.ErrNoRows) {
-		err = errors.New("account not found")
+		err = &userError{http.StatusNotFound, "account not found"}
 	}
 	if err == nil {
 		_, err = tx.Exec(ctx, `DELETE FROM local_login_failures WHERE name=$1`, name)
