@@ -72,7 +72,7 @@ configuration in `.golangci.yml` (`nolintlint` is on: an exception is a
 | `internal/agent` | agent: enforcement, compliance checks, inventory, PAM, desktop socket, remote shell |
 | `packaging` | systemd and OpenRC units, package scripts, PAM config, desktop files, artwork |
 | `deploy` | Docker Compose, Caddy, CrowdSec, fail2ban |
-| `scripts` | `install-agent.sh`, `vendor-xterm.sh` |
+| `scripts` | `install-agent.sh`, `vendor-xterm.sh`, `vendor-swagger-ui.sh` |
 | `docs` | this documentation; console help links point here |
 
 ## Conventions
@@ -169,6 +169,23 @@ The script needs `npm`, fetches the exact versions pinned in it from the npm reg
 (integrity checked by npm), and writes `SHA256SUMS`. Later runs refuse files that differ
 from that file. Commit the directory. To update, change the versions in the script, delete
 `SHA256SUMS`, run it and review the diff.
+
+## Swagger UI
+
+The API reference at `/api/v1/docs` runs Swagger UI (`swagger-ui-dist`, Apache 2.0),
+vendored into `internal/server/web/static/vendor/swagger-ui` (bundle, stylesheet, `LICENSE`,
+`NOTICE`, `VERSION`, `SHA256SUMS`). The page itself is `internal/server/apidocs.html`, its
+initializer and LiMDM styles are in `internal/server/web/static/apidocs`.
+
+```sh
+scripts/vendor-swagger-ui.sh
+```
+
+It works like the xterm.js script: exact version pinned in the script, refuses files that
+differ from `SHA256SUMS`. Pick a release at least two weeks old. After changing
+`openapi.json`, run `npm run api` in `web` to regenerate `src/api/schema.d.ts`;
+`TestOpenAPIOperations` requires a declared tag, a summary, a security list and a unique
+operation id on every operation.
 
 ## Release
 
