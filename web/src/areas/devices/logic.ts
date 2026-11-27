@@ -130,3 +130,9 @@ export const protectiveAlarm = (type: string) => type === 'lock' || type === 'lo
 
 /** Accounts the helpdesk and admins may act on (the console hides the rest). */
 export const accountActionable = (a: { name: string; system?: boolean; source?: string }) => !a.system && a.name !== 'root' && a.source !== 'nss'
+
+/** Firewall rules whose match (tool, place, text), comment or service contains q, ignoring case. */
+export function filterRules<R extends { match: string; comment?: string; service?: string }>(rules: R[], q: string): R[] {
+  const s = q.trim().toLowerCase()
+  return s ? rules.filter((r) => [r.match, r.comment, r.service].some((v) => v?.toLowerCase().includes(s))) : rules
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { enrollConf, installCommand } from './enrolltext'
-import { accountActionable, badParamLine, connectionState, filterByName, firewallHealth, formatAttrs, mayCommand, orderNotices, parseAttrs, parseTags, pkgValue, statusTone, suggestUsername, updatesHealth, usedPct, userError } from './logic'
+import { accountActionable, badParamLine, connectionState, filterByName, filterRules, firewallHealth, formatAttrs, mayCommand, orderNotices, parseAttrs, parseTags, pkgValue, statusTone, suggestUsername, updatesHealth, usedPct, userError } from './logic'
 
 describe('enrollment texts', () => {
   it('prints the install command and enroll.conf', () => {
@@ -73,5 +73,16 @@ describe('devices logic', () => {
     expect(usedPct(0, 0)).toBe(0)
     expect(accountActionable({ name: 'root' })).toBe(false)
     expect(accountActionable({ name: 'jdoe', source: 'local' })).toBe(true)
+  })
+
+  it('filters firewall rules by text, place, comment and service', () => {
+    const rules = [
+      { match: 'ufw : ufw allow 8080/tcp', comment: 'web' },
+      { match: 'firewalld public: --zone=public --add-service=ssh', service: 'ssh' },
+    ]
+    expect(filterRules(rules, '')).toHaveLength(2)
+    expect(filterRules(rules, 'WEB')).toEqual([rules[0]])
+    expect(filterRules(rules, 'public')).toEqual([rules[1]])
+    expect(filterRules(rules, 'nope')).toEqual([])
   })
 })

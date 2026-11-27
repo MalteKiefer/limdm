@@ -104,7 +104,7 @@ test('device page: tabs, message, details, activity', async ({ page }) => {
     await expect(page).toHaveURL(tab === 'Übersicht' ? /\/devices\/e2e-ws1$/ : /tab=/)
   }
   // health cards of the overview: words, not only colours
-  await expect(page.getByText('Firewall', { exact: true })).toBeVisible()
+  await expect(page.getByRole('tabpanel').getByText('Firewall', { exact: true })).toBeVisible()
   await expect(page.getByText('Aktiv', { exact: true })).toBeVisible()
   await expect(page.getByText('Verbunden', { exact: true })).toBeVisible()
 
@@ -153,6 +153,37 @@ test('device page: tabs, message, details, activity', async ({ page }) => {
   await page.getByRole('dialog').getByLabel('Verzögerung in Minuten').fill('0')
   await expect(page.getByRole('dialog').getByRole('button', { name: 'Planen' })).toBeDisabled()
   await page.keyboard.press('Escape')
+})
+
+test('firewall tab: groups, system rules locked, discard asks twice for a risky rule, adopt', async ({ page }) => {
+  await page.goto('/app/devices/e2e-ws1?tab=firewall')
+  await expect(page.getByRole('heading', { name: 'Host Firewall' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Fremde Regeln 2' })).toBeVisible()
+  const system = page.getByRole('table', { name: 'Systemregeln' })
+  await expect(system.getByText('-A FORWARD -o docker0 -j ACCEPT')).toBeVisible()
+  await expect(system.getByRole('button')).toHaveCount(0) // no action on a system rule
+
+  // the filter narrows every group
+  await page.getByLabel('Regeln filtern').fill('8080')
+  await expect(page.getByRole('heading', { name: 'Fremde Regeln 1' })).toBeVisible()
+  await page.getByLabel('Regeln filtern').fill('')
+
+  // a rule that may cut SSH needs the second confirmation
+  await page.getByRole('button', { name: 'Verwerfen: ufw allow 22/tcp' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Regel verwerfen' })
+  await expect(dialog.getByText('ufw allow 22/tcp', { exact: true })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Verwerfen' })).toBeDisabled()
+  await dialog.getByLabel('Ich habe das Risiko verstanden', { exact: false }).check()
+  await expect(dialog.getByRole('button', { name: 'Verwerfen' })).toBeEnabled()
+  await dialog.getByRole('button', { name: 'Abbrechen' }).click()
+
+  // adopt into a new item of the device blueprint
+  await page.getByRole('button', { name: 'Übernehmen: ufw allow 8080/tcp' }).click()
+  const adopt = page.getByRole('dialog', { name: 'Regel übernehmen' })
+  await adopt.getByLabel('Firewall Element').selectOption('new')
+  await adopt.getByLabel('Name des neuen Elements').fill(`e2e firewall ${Date.now()}`)
+  await adopt.getByRole('button', { name: 'Übernehmen' }).click()
+  await expect(page.getByText('Regel übernommen')).toBeVisible()
 })
 
 test('phone width: cut off tabs show a hint that scrolls them', async ({ page }) => {
