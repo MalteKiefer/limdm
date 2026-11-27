@@ -32,10 +32,23 @@ test.beforeAll(() => {
   execFileSync('go', ['run', './scripts/e2eseed', join(import.meta.dirname, 'i18n.seed.sql')], { cwd: repo, stdio: 'inherit', env: { ...process.env, CGO_ENABLED: '0' } })
 })
 
-for (const [locale, want] of Object.entries(expected)) {
+// Two languages share one admin: sign ins count against the login limit of
+// the source address (10 in 5 minutes) that login.spec.ts still needs, and
+// each session keeps its own API rate limit.
+const sessions = new Map<number, ReturnType<typeof signIn>>()
+const session = (i: number) => {
+  const n = Math.floor(i / 2)
+  if (!sessions.has(n)) sessions.set(n, signIn(`e2ei18n${n}`))
+  return sessions.get(n)!
+}
+test.afterAll(async () => {
+  for (const s of sessions.values()) await (await s).dispose()
+})
+
+for (const [i, [locale, want]] of Object.entries(expected).entries()) {
   test(`console in ${locale}: no raw keys, no CSP errors, fits 390 px`, async ({ browser }) => {
     test.setTimeout(pages.length * 8_000)
-    const api = await signIn(`e2ei18n${locale}`)
+    const api = await session(i)
     const ctx = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'en-US', viewport: { width: 390, height: 844 }, storageState: await api.storageState() })
     const page = await ctx.newPage()
     const problems: string[] = []
@@ -66,6 +79,5 @@ for (const [locale, want] of Object.entries(expected)) {
     }
     expect(problems).toEqual([])
     await ctx.close()
-    await api.dispose()
   })
 }
