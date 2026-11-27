@@ -2,8 +2,16 @@
 Type=Application
 Name=LiMDM desktop helper
 Name[de]=LiMDM Desktop Helfer
+Name[fr]=Assistant de bureau LiMDM
+Name[es]=Asistente de escritorio LiMDM
+Name[it]=Assistente desktop LiMDM
+Name[ru]=Помощник LiMDM для рабочего стола
 Comment=Asks for what your IT department needs from you, such as a disk recovery key
 Comment[de]=Fragt nach dem, was Ihre IT von Ihnen benötigt, etwa einen Wiederherstellungsschlüssel
+Comment[fr]=Demande ce dont votre service informatique a besoin de votre part, comme une clé de récupération
+Comment[es]=Le pide lo que su departamento de TI necesita de usted, como una clave de recuperación
+Comment[it]=Chiede ciò di cui il tuo reparto IT ha bisogno da te, come una chiave di ripristino
+Comment[ru]=Запрашивает то, что нужно вашему ИТ-отделу, например ключ восстановления
 Exec=/usr/bin/limdm-desktop
 NoDisplay=true
 X-GNOME-Autostart-enabled=true

@@ -1,0 +1,648 @@
+# Italian translation of the LiMDM desktop app (packaging/limdm-desktop-ui).
+# Glossary: docs/i18n.md. Checked by TestPoFiles in internal/locale.
+msgid ""
+msgstr ""
+"Project-Id-Version: limdm-desktop-ui\n"
+"Language: it\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "never"
+msgstr "mai"
+
+msgid "Overview"
+msgstr "Panoramica"
+
+msgid "Software"
+msgstr "Software"
+
+msgid "Compliance"
+msgstr "Conformità"
+
+msgid "Blueprint"
+msgstr "Blueprint"
+
+msgid "Certificates"
+msgstr "Certificati"
+
+msgid "Disk Encryption"
+msgstr "Cifratura del disco"
+
+msgid "Agent Log"
+msgstr "Registro dell'agente"
+
+msgid "About"
+msgstr "Informazioni"
+
+msgid "Agent"
+msgstr "Agente"
+
+msgid "Compliance baseline"
+msgstr "Baseline di conformità"
+
+msgid "Software updates"
+msgstr "Aggiornamenti software"
+
+msgid "Firewall"
+msgstr "Firewall"
+
+msgid "Packages"
+msgstr "Pacchetti"
+
+msgid "Services"
+msgstr "Servizi"
+
+msgid "Files"
+msgstr "File"
+
+msgid "Users"
+msgstr "Utenti"
+
+msgid "OS versions"
+msgstr "Versioni del sistema operativo"
+
+msgid "Screen lock"
+msgstr "Blocco schermo"
+
+msgid "Privacy"
+msgstr "Privacy"
+
+msgid "Desktop login"
+msgstr "Accesso al desktop"
+
+msgid "Disk encryption"
+msgstr "Cifratura del disco"
+
+msgid "Package sources"
+msgstr "Sorgenti dei pacchetti"
+
+msgid "Flatpak"
+msgstr "Flatpak"
+
+msgid "polkit rules"
+msgstr "Regole polkit"
+
+msgid "sudo rules"
+msgstr "Regole sudo"
+
+msgid "SSH server"
+msgstr "Server SSH"
+
+msgid "DNS"
+msgstr "DNS"
+
+msgid "Time servers"
+msgstr "Server dell'ora"
+
+msgid "Proxy"
+msgstr "Proxy"
+
+msgid "Scripts"
+msgstr "Script"
+
+msgid "Boot loader"
+msgstr "Boot loader"
+
+msgid "Appearance: system"
+msgstr "Aspetto: sistema"
+
+msgid "Appearance: dark"
+msgstr "Aspetto: scuro"
+
+msgid "Appearance: light"
+msgstr "Aspetto: chiaro"
+
+msgid "Refresh"
+msgstr "Aggiorna"
+
+msgid "no answer"
+msgstr "nessuna risposta"
+
+msgid "Managed device"
+msgstr "Dispositivo gestito"
+
+msgid "Agent Not Reachable"
+msgstr "Agente non raggiungibile"
+
+msgid "The LiMDM agent on this device does not respond. IT has been informed when it comes back."
+msgstr "L'agente LiMDM di questo dispositivo non risponde. L'IT verrà informato quando tornerà attivo."
+
+msgid "Device Locked"
+msgstr "Dispositivo bloccato"
+
+msgid "IT locked this device."
+msgstr "L'IT ha bloccato questo dispositivo."
+
+msgid "No Connection to the Server"
+msgstr "Nessuna connessione al server"
+
+msgid "Action Needed"
+msgstr "Azione necessaria"
+
+msgid "Device Is Compliant"
+msgstr "Il dispositivo è conforme"
+
+msgid "All checks passed."
+msgstr "Tutti i controlli superati."
+
+msgid "Device"
+msgstr "Dispositivo"
+
+msgid "Name"
+msgstr "Nome"
+
+msgid "Managed by"
+msgstr "Gestito da"
+
+msgid "Sync Now"
+msgstr "Sincronizza ora"
+
+msgid "Last sync"
+msgstr "Ultima sincronizzazione"
+
+msgid "Needs Your Attention"
+msgstr "Richiede la tua attenzione"
+
+msgid "Disk recovery key missing"
+msgstr "Chiave di ripristino del disco mancante"
+
+msgid "IT needs a recovery key for your encrypted disk."
+msgstr "L'IT ha bisogno di una chiave di ripristino per il tuo disco cifrato."
+
+msgid "Failing"
+msgstr "Non superati"
+
+msgid "Exceptions"
+msgstr "Eccezioni"
+
+msgid "Not applicable"
+msgstr "Non applicabile"
+
+msgid "Passed"
+msgstr "Superati"
+
+msgid "No Checks Yet"
+msgstr "Nessun controllo per ora"
+
+msgid "Recovery Keys Stored"
+msgstr "Chiavi di ripristino depositate"
+
+msgid "IT needs a recovery key for this encrypted disk, so access can be restored if the passphrase is ever lost. Enter the passphrase you type when the computer starts; it stays unchanged."
+msgstr "L'IT ha bisogno di una chiave di ripristino per questo disco cifrato, così l'accesso può essere ripristinato se la passphrase viene persa. Inserisci la passphrase che digiti all'avvio del computer; resta invariata."
+
+msgid "Disk passphrase"
+msgstr "Passphrase del disco"
+
+msgid "Store Key"
+msgstr "Deposita la chiave"
+
+msgid "Only warnings and errors"
+msgstr "Solo avvisi ed errori"
+
+msgid "Latest entries of the agent and its watchdog, newest first."
+msgstr "Ultime voci dell'agente e del suo watchdog, le più recenti prima."
+
+msgid "Nothing Recorded"
+msgstr "Nessuna voce"
+
+msgid "Settings of Your Blueprint"
+msgstr "Impostazioni del tuo blueprint"
+
+msgid "Settings IT applies to this device through its blueprint. Secrets are hidden."
+msgstr "Impostazioni che l'IT applica a questo dispositivo tramite il suo blueprint. I segreti sono nascosti."
+
+msgid "Active"
+msgstr "Attivo"
+
+msgid "Not applied"
+msgstr "Non applicato"
+
+msgid "No Settings"
+msgstr "Nessuna impostazione"
+
+msgid "Trusted Certificates"
+msgstr "Certificati attendibili"
+
+msgid "CA certificates IT installed in the system trust store."
+msgstr "Certificati CA che l'IT ha installato nell'archivio attendibile del sistema."
+
+msgid "Subject"
+msgstr "Soggetto"
+
+msgid "Issuer"
+msgstr "Emittente"
+
+msgid "Valid from"
+msgstr "Valido dal"
+
+msgid "Valid until"
+msgstr "Valido fino al"
+
+msgid "No Certificates"
+msgstr "Nessun certificato"
+
+msgid "IT has not installed any certificates."
+msgstr "L'IT non ha installato alcun certificato."
+
+msgid "Device management for Linux"
+msgstr "Gestione dei dispositivi per Linux"
+
+msgid "Version"
+msgstr "Versione"
+
+msgid "Server"
+msgstr "Server"
+
+msgid "Device ID"
+msgstr "ID del dispositivo"
+
+msgid "Software is installed through this catalog. Other app stores are read only."
+msgstr "Il software si installa tramite questo catalogo. Gli altri store di app sono in sola lettura."
+
+msgid "Search apps"
+msgstr "Cerca app"
+
+msgid "All categories"
+msgstr "Tutte le categorie"
+
+msgid "Request another app"
+msgstr "Richiedi un'altra app"
+
+msgid "No Apps Yet"
+msgstr "Nessuna app per ora"
+
+msgid "IT has not published any apps for this device."
+msgstr "L'IT non ha pubblicato alcuna app per questo dispositivo."
+
+msgid "Installing…"
+msgstr "Installazione…"
+
+msgid "Removing…"
+msgstr "Rimozione…"
+
+msgid "Open"
+msgstr "Apri"
+
+msgid "Installed"
+msgstr "Installato"
+
+msgid "Remove"
+msgstr "Rimuovi"
+
+msgid "Installed by IT soon"
+msgstr "Presto installato dall'IT"
+
+msgid "Requested"
+msgstr "Richiesto"
+
+msgid "Request Again"
+msgstr "Richiedi di nuovo"
+
+msgid "Request"
+msgstr "Richiedi"
+
+msgid "Install"
+msgstr "Installa"
+
+msgid "Request sent to IT"
+msgstr "Richiesta inviata all'IT"
+
+msgid "Request %s"
+msgstr "Richiedi %s"
+
+msgid "IT decides on your request. The app installs by itself once approved."
+msgstr "L'IT decide sulla tua richiesta. L'app si installa da sola una volta approvata."
+
+msgid "Why do you need it? (optional)"
+msgstr "Perché ti serve? (facoltativo)"
+
+msgid "Cancel"
+msgstr "Annulla"
+
+msgid "Send Request"
+msgstr "Invia richiesta"
+
+msgid "waiting for IT"
+msgstr "in attesa dell'IT"
+
+msgid "approved"
+msgstr "approvata"
+
+msgid "declined"
+msgstr "rifiutata"
+
+msgid "My Requests"
+msgstr "Le mie richieste"
+
+msgid "Apps you asked IT to add. Approved apps appear in the catalog above."
+msgstr "App che hai chiesto all'IT di aggiungere. Le app approvate compaiono nel catalogo qui sopra."
+
+msgid "Request Another App"
+msgstr "Richiedi un'altra app"
+
+msgid "Search Flathub. IT decides on your request; the app installs by itself once approved."
+msgstr "Cerca su Flathub. L'IT decide sulla tua richiesta; l'app si installa da sola una volta approvata."
+
+msgid "e.g. Krita, Obsidian, Zotero"
+msgstr "ad es. Krita, Obsidian, Zotero"
+
+msgid "Find an App"
+msgstr "Trova un'app"
+
+msgid "Nothing Found"
+msgstr "Nessun risultato"
+
+msgid "The agent does not respond."
+msgstr "L'agente non risponde."
+
+msgid "Apps already in the catalog are not listed here."
+msgstr "Le app già presenti nel catalogo non sono elencate qui."
+
+msgid "IT reviews the app and adds it to the catalog for you."
+msgstr "L'IT valuta l'app e la aggiunge al catalogo per te."
+
+msgid "Sync started"
+msgstr "Sincronizzazione avviata"
+
+msgid "Recovery key stored. Your passphrase is unchanged."
+msgstr "Chiave di ripristino salvata. La passphrase resta invariata."
+
+msgid "Too many attempts. Try again later."
+msgstr "Troppi tentativi. Riprova più tardi."
+
+msgid "The passphrase was not accepted."
+msgstr "La passphrase non è stata accettata."
+
+msgid "OK"
+msgstr "OK"
+
+msgid "Close"
+msgstr "Chiudi"
+
+msgid "%d check failing"
+msgid_plural "%d checks failing"
+msgstr[0] "%d controllo non superato"
+msgstr[1] "%d controlli non superati"
+
+msgid "%d disk recovery key is stored with IT. Nothing to do."
+msgid_plural "%d disk recovery keys are stored with IT. Nothing to do."
+msgstr[0] "%d chiave di ripristino è depositata presso l'IT. Niente da fare."
+msgstr[1] "%d chiavi di ripristino sono depositate presso l'IT. Niente da fare."
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Admin rights only for centrally approved users"
+msgstr "Diritti di amministratore solo per utenti approvati centralmente"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Automatic updates are declared"
+msgstr "Gli aggiornamenti automatici sono dichiarati"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Boot loader is password protected"
+msgstr "Il boot loader è protetto da password"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Core dumps are restricted"
+msgstr "I core dump sono limitati"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Desktop login through the central identity provider"
+msgstr "Accesso al desktop tramite il provider di identità centrale"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Device key is held in the TPM"
+msgstr "La chiave del dispositivo è custodita nel TPM"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Disk encryption recovery keys are escrowed"
+msgstr "Le chiavi di ripristino della cifratura del disco sono depositate"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Full ASLR is enabled"
+msgstr "ASLR completo è attivo"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Host firewall is active"
+msgstr "Il firewall dell'host è attivo"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "ICMP redirects and source routing are disabled"
+msgstr "I redirect ICMP e il source routing sono disattivati"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "IP forwarding is disabled"
+msgstr "L'inoltro IP è disattivato"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Kernel log and pointers are restricted"
+msgstr "Il log e i puntatori del kernel sono limitati"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "LUKS volumes are bound to the TPM"
+msgstr "I volumi LUKS sono legati al TPM"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Mandatory access control is enabled (AppArmor/SELinux)"
+msgstr "Il controllo di accesso obbligatorio è attivo (AppArmor/SELinux)"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Mandatory access control is enforcing"
+msgstr "Il controllo di accesso obbligatorio è in modalità enforcing"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "No accounts with empty passwords"
+msgstr "Nessun account con password vuota"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "No pending reboot older than 7 days"
+msgstr "Nessun riavvio in sospeso da più di 7 giorni"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "No security update pending longer than allowed"
+msgstr "Nessun aggiornamento di sicurezza in sospeso oltre il consentito"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Only root has UID 0"
+msgstr "Solo root ha UID 0"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Operating system version is supported"
+msgstr "La versione del sistema operativo è supportata"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Password quality (minimum length 14)"
+msgstr "Qualità della password (lunghezza minima 14)"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "SSH allows keys only and no forwarding"
+msgstr "SSH consente solo chiavi e nessun inoltro"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "SSH offers no weak algorithms or host keys"
+msgstr "SSH non offre algoritmi o chiavi host deboli"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "SSH server is hardened"
+msgstr "Il server SSH è protetto"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Screen lock on idle is enforced"
+msgstr "Il blocco dello schermo per inattività è imposto"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Secure Boot is enabled"
+msgstr "Secure Boot è attivo"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Security updates are installed"
+msgstr "Gli aggiornamenti di sicurezza sono installati"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "System disk is encrypted"
+msgstr "Il disco di sistema è cifrato"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "System log is persistent"
+msgstr "Il log di sistema è persistente"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "TCP SYN cookies, martian logging, broadcast ICMP ignored"
+msgstr "Cookie TCP SYN, log dei pacchetti martian, ICMP broadcast ignorato"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Time synchronisation is active"
+msgstr "La sincronizzazione dell'ora è attiva"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "UDF is disabled"
+msgstr "UDF è disattivato"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "USB mass storage is blocked"
+msgstr "L'archiviazione di massa USB è bloccata"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Unused filesystems are disabled"
+msgstr "I file system inutilizzati sono disattivati"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Unused network protocols are disabled"
+msgstr "I protocolli di rete inutilizzati sono disattivati"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "auditd is active with LiMDM rules"
+msgstr "auditd è attivo con le regole LiMDM"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "osquery inventory source installed"
+msgstr "Sorgente di inventario osquery installata"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "ptrace is restricted"
+msgstr "ptrace è limitato"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "sudo logs and uses a PTY"
+msgstr "sudo registra e usa un PTY"
+
+#. error text of the agent
+msgid "bad request"
+msgstr "richiesta non valida"
+
+#. error text of the agent
+msgid "not allowed"
+msgstr "non consentito"
+
+#. error text of the agent
+msgid "not allowed from a remote session, use the device itself"
+msgstr "non consentito da una sessione remota, usa il dispositivo stesso"
+
+#. error text of the agent
+msgid "too many searches, wait a minute"
+msgstr "troppe ricerche, attendi un minuto"
+
+#. error text of the agent
+msgid "unknown user"
+msgstr "utente sconosciuto"
+
+#. error text of the agent
+msgid "no remote support session is running"
+msgstr "nessuna sessione di assistenza remota in corso"
+
+#. error text of the agent
+msgid "a check in was requested less than 30 seconds ago"
+msgstr "una sincronizzazione è stata richiesta meno di 30 secondi fa"
+
+#. error text of the agent
+msgid "no recovery key needed for this volume"
+msgstr "nessuna chiave di ripristino necessaria per questo volume"
+
+#. error text of the agent
+msgid "passphrase not accepted"
+msgstr "passphrase non accettata"
+
+#. error text of the agent
+msgid "a recovery key is being created for this volume"
+msgstr "è in corso la creazione di una chiave di ripristino per questo volume"
+
+#. error text of the agent
+msgid "too many attempts, try again later"
+msgstr "troppi tentativi, riprova più tardi"
+
+#. error text of the agent
+msgid "could not store the key, contact IT"
+msgstr "impossibile salvare la chiave, contatta l'IT"
+
+#. error text of the agent
+msgid "unknown operation"
+msgstr "operazione sconosciuta"
+
+#. error text of the agent
+msgid "no restart is scheduled"
+msgstr "nessun riavvio pianificato"
+
+#. error text of the agent
+msgid "the restart cannot be postponed any further"
+msgstr "il riavvio non può essere rimandato oltre"
+
+#. error text of the agent
+msgid "identity provider unreachable"
+msgstr "provider di identità non raggiungibile"
+
+#. error text of the agent
+msgid "provider does not support the device authorization grant"
+msgstr "il provider non supporta l'autorizzazione del dispositivo (device authorization grant)"
+
+#. error text of the agent
+msgid "not confirmed"
+msgstr "non confermato"
+
+#. error text of the agent
+msgid "invalid ID token"
+msgstr "token di identità non valido"
+
+#. error text of the agent
+msgid "email not verified"
+msgstr "e-mail non verificata"
+
+#. error text of the agent
+msgid "account does not match this user"
+msgstr "l'account non corrisponde a questo utente"
+
+#. error text of the agent
+msgid "account is not in the allowed domain"
+msgstr "l'account non appartiene al dominio consentito"
+
+#. error text of the agent
+msgid "the password contains invalid characters"
+msgstr "la password contiene caratteri non validi"
+
+#. error text of the agent
+msgid "the password must not contain the user name"
+msgstr "la password non deve contenere il nome utente"
+
+#. error text of the agent
+msgid "choose a password with at least 14 characters"
+msgstr "scegli una password di almeno 14 caratteri"
