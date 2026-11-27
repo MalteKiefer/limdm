@@ -2,6 +2,9 @@ package agent
 
 import (
 	"fmt"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -13,6 +16,77 @@ import (
 
 // nftFile is included by Alpine's /etc/nftables.nft at boot.
 var nftFile = "/etc/nftables.d/limdm.nft"
+
+// Boot: the file must be loaded at boot. Where the distribution's main
+// configuration includes /etc/nftables.d/*.nft and its nftables service is
+// enabled at boot, that does it. Otherwise LiMDM installs its own small
+// boot service, limdm-firewall, that loads only its file after nftables.
+// The agent never starts, restarts or reloads the nftables service and never
+// loads or edits the main configuration: both begin with flush ruleset and
+// would drop the tables of Docker, NetBird or CrowdSec at runtime.
+var (
+	nftMainConfs   = []string{"/etc/nftables.conf", "/etc/nftables.nft", "/etc/sysconfig/nftables.conf"}
+	nftEnabled     = []string{"/etc/systemd/system/sysinit.target.wants/nftables.service", "/etc/systemd/system/multi-user.target.wants/nftables.service", "/etc/runlevels/default/nftables", "/etc/runlevels/boot/nftables"}
+	nftUnitDir     = "/etc/systemd/system"
+	nftInitDir     = "/etc/init.d"
+	nftUnitEnabled = []string{"/etc/systemd/system/multi-user.target.wants/limdm-firewall.service", "/etc/runlevels/default/limdm-firewall"}
+)
+
+var nftIncludeRe = regexp.MustCompile(`(?m)^\s*include\s+"/etc/nftables\.d/\*(\.nft)?"`)
+
+// nftBootCovered: the main configuration includes nftables.d and the
+// nftables service starts at boot (read from files, no command).
+func nftBootCovered() bool {
+	included := false
+	for _, c := range nftMainConfs {
+		if nftIncludeRe.MatchString(readFile(c)) {
+			included = true
+		}
+	}
+	enabled := false
+	for _, e := range nftEnabled {
+		enabled = enabled || exists(e)
+	}
+	return included && enabled
+}
+
+// ensureNftBoot makes the LiMDM table load at boot, idempotently.
+func ensureNftBoot() error {
+	if nftBootCovered() {
+		return nil
+	}
+	nft, err := exec.LookPath("nft")
+	if err != nil {
+		return err
+	}
+	if systemd() {
+		unit := "[Unit]\nDescription=LiMDM host firewall table (only inet limdm)\nAfter=nftables.service\nDefaultDependencies=no\nBefore=network-pre.target\nWants=network-pre.target\n\n" +
+			"[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=" + nft + " -f " + nftFile + "\n\n[Install]\nWantedBy=multi-user.target\n"
+		changed, err := writeIfChanged(filepath.Join(nftUnitDir, "limdm-firewall.service"), unit, 0o644)
+		if err != nil {
+			return err
+		}
+		if changed {
+			if _, err := sh("systemctl", "daemon-reload"); err != nil {
+				return err
+			}
+		}
+		if !exists(nftUnitEnabled[0]) {
+			_, err = sh("systemctl", "enable", "limdm-firewall.service") // enable only: the table is loaded already
+		}
+		return err
+	}
+	script := "#!/sbin/openrc-run\n# Loads only LiMDM's table (inet limdm); written by the LiMDM agent.\ndescription=\"LiMDM host firewall table\"\n\n" +
+		"depend() {\n\tafter nftables\n}\n\nstart() {\n\tebegin \"Loading the LiMDM firewall table\"\n\t" + nft + " -f " + nftFile + "\n\teend $?\n}\n"
+	if _, err := writeIfChanged(filepath.Join(nftInitDir, "limdm-firewall"), script, 0o755); err != nil {
+		return err
+	}
+	if exists(nftUnitEnabled[1]) {
+		return nil
+	}
+	_, err = sh("rc-update", "add", "limdm-firewall", "default")
+	return err
+}
 
 // nftAddr is the match of a source or destination address.
 func nftAddr(dir, addr string) string {
@@ -83,12 +157,12 @@ func (a *Agent) syncNftables() error {
 	if err != nil {
 		return err
 	}
-	if _, err := sh("nft", "list", "table", "inet", "limdm"); err == nil && !changed {
-		return nil
+	if _, err := sh("nft", "list", "table", "inet", "limdm"); err != nil || changed {
+		// only LiMDM's table: the file deletes and recreates inet limdm
+		if _, err := sh("nft", "-f", nftFile); err != nil {
+			return err
+		}
+		a.event("firewall: nftables table inet limdm loaded")
 	}
-	if _, err := sh("nft", "-f", nftFile); err != nil {
-		return err
-	}
-	a.event("firewall: nftables table inet limdm loaded")
-	return nil
+	return ensureNftBoot()
 }

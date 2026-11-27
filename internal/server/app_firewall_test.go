@@ -170,6 +170,28 @@ func TestAppFirewall(t *testing.T) {
 	if json.Unmarshal([]byte(body), &doc); !doc.Rules[1].Kept || doc.Rules[0].Kept {
 		t.Fatalf("kept: %s", body)
 	}
+	// discard is declarative: a remove entry in a firewall item, never for a
+	// system rule, a rule with a risk only confirmed, and with four eyes on
+	// the item waits for approval instead of changing
+	rm := func(rule, body string) (int, string) {
+		return call(dashAdmin, "POST", "/api/v1/devices/d1/firewall/rules/"+rule+"/remove", body)
+	}
+	if code, body := rm(docker.ID, `{"item_id":`+itoa(res.ItemID)+`}`); code != 422 {
+		t.Fatalf("remove system rule: %d %s", code, body)
+	}
+	if code, body := rm(ssh.ID, `{"item_id":`+itoa(res.ItemID)+`}`); code != 422 || !strings.Contains(body, "confirm the risk") {
+		t.Fatalf("remove ssh rule unconfirmed: %d %s", code, body)
+	}
+	if code, body := rm(web.ID, `{"item_id":`+itoa(res.ItemID)+`}`); code != 202 || !strings.Contains(body, "approval_id") {
+		t.Fatalf("remove under four eyes: %d %s", code, body)
+	}
+	if code, body := rm(web.ID, `{"name":"rm new","blueprint_id":`+itoa(def)+`,"confirm":true}`); code != 409 || !strings.Contains(body, "existing firewall item") {
+		t.Fatalf("remove into a new item under four eyes: %d %s", code, body)
+	}
+	var payload2 string
+	if err := db.QueryRow(ctx, `SELECT payload::text FROM library_items WHERE id=$1`, res.ItemID).Scan(&payload2); err != nil || strings.Contains(payload2, `"remove"`) {
+		t.Fatalf("item changed before approval: %s %v", payload2, err)
+	}
 	var n int
 	if err := db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action IN ('firewall.adopt', 'firewall.keep') AND target='d1'`).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("audit %d %v", n, err)

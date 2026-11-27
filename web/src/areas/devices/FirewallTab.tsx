@@ -1,24 +1,28 @@
 // The firewall tab of the device page: the rules the host firewall holds
 // (reported by the agent), grouped managed, foreign and system, with three
-// actions per foreign rule: adopt into a firewall item, keep as an
-// exception, discard on the device (signed command, admins, four eyes).
+// actions per foreign rule, each written into a firewall item of the
+// library: adopt, keep as an exception, discard (the remove list: every
+// agent deletes the rule whenever it finds it, also after a reboot).
 import { BrickWall, Check, ShieldOff, Trash2 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, unwrap, type Schemas } from '../../api/client'
 import { useCan } from '../../api/me'
 import { Field } from '../../components/form'
-import { Confirm } from '../../components/settingsform'
 import { EmptyState, ErrorState, LoadingState, errorText } from '../../components/states'
 import { toast } from '../../components/toast'
 import { Badge, Card, Modal } from '../../components/ui'
 import { useT, type MessageKey } from '../../i18n'
 import { dateTime, fmt } from '../../i18n/format'
-import { useRun } from './actions'
 import type { DeviceDetail } from './api'
 import { filterRules } from './logic'
 
 type Rule = Schemas['DeviceFirewallRule']
+type Action = 'adopt' | 'keep' | 'remove'
+const titles: Record<Action, MessageKey> = { adopt: 'devices.fw.adoptTitle', keep: 'devices.fw.keepTitle', remove: 'devices.fw.discardTitle' }
+const bodies: Record<Action, MessageKey> = { adopt: 'devices.fw.adoptBody', keep: 'devices.fw.keepBody', remove: 'devices.fw.discardBody' }
+const labels: Record<Action, MessageKey> = { adopt: 'devices.fw.adopt', keep: 'devices.fw.keep', remove: 'devices.fw.discard' }
+const done: Record<Action, MessageKey> = { adopt: 'devices.fw.adopted', keep: 'devices.fw.kept', remove: 'devices.fw.removeSet' }
 const origins = ['foreign', 'managed', 'system'] as const
 
 const useFirewall = (id: string) => useQuery({ queryKey: ['devices', 'firewall', id], queryFn: () => unwrap(api.GET('/api/v1/devices/{id}/firewall', { params: { path: { id } } })) })
@@ -26,7 +30,7 @@ const useFirewall = (id: string) => useQuery({ queryKey: ['devices', 'firewall',
 function useRuleAction(id: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ rid, action, ...body }: { rid: string; action: 'adopt' | 'keep'; item_id?: number; name?: string; blueprint_id?: number; confirm?: boolean }) =>
+    mutationFn: ({ rid, action, ...body }: { rid: string; action: Action; item_id?: number; name?: string; blueprint_id?: number; confirm?: boolean; confirm_risk?: boolean }) =>
       unwrap(api.POST('/api/v1/devices/{id}/firewall/rules/{rid}/{action}', { params: { path: { id, rid, action } }, body })) as Promise<{ approval_id?: number }>,
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['devices'] }),
   })
@@ -43,11 +47,9 @@ export function FirewallTab({ d }: { d: DeviceDetail }) {
   const t = useT()
   const admin = useCan('admin')
   const fw = useFirewall(d.id)
-  const run = useRun({ id: d.id, hostname: d.hostname, detail: d })
   const act = useRuleAction(d.id)
   const [q, setQ] = useState('')
-  const [pick, setPick] = useState<{ rule: Rule; action: 'adopt' | 'keep' } | null>(null)
-  const [discard, setDiscard] = useState<Rule | null>(null)
+  const [pick, setPick] = useState<{ rule: Rule; action: Action } | null>(null)
   const [ack, setAck] = useState(false)
   const [item, setItem] = useState('')
   const [name, setName] = useState('')
@@ -71,8 +73,9 @@ export function FirewallTab({ d }: { d: DeviceDetail }) {
     )
   }
   const shown = filterRules(rules, q)
-  const fourEyes = d.four_eyes_commands.includes('firewall_remove_rule')
-  const openPick = (rule: Rule, action: 'adopt' | 'keep') => {
+  const risky = pick?.action === 'remove' && !!pick.rule.risk
+  const openPick = (rule: Rule, action: Action) => {
+    setAck(false)
     setItem(items[0] ? String(items[0].id) : 'new')
     setName('')
     setBp('')
@@ -81,12 +84,15 @@ export function FirewallTab({ d }: { d: DeviceDetail }) {
   }
   const savePick = () => {
     if (!pick) return
-    const body = item === 'new' ? { name: name.trim(), blueprint_id: Number(chosen), confirm: sure } : { item_id: Number(item) }
+    const body = {
+      ...(item === 'new' ? { name: name.trim(), blueprint_id: Number(chosen), confirm: sure } : { item_id: Number(item) }),
+      ...(pick.action === 'remove' ? { confirm_risk: ack } : {}),
+    }
     act.mutate(
       { rid: pick.rule.id, action: pick.action, ...body },
       {
         onSuccess: (r) => {
-          toast(r.approval_id ? t('devices.toast.approval') : t(pick.action === 'adopt' ? 'devices.fw.adopted' : 'devices.fw.kept'))
+          toast(r.approval_id ? t('devices.toast.approval') : t(done[pick.action]))
           setPick(null)
         },
         onError: (e) => toast(errorText(e), 'error'),
@@ -178,10 +184,7 @@ export function FirewallTab({ d }: { d: DeviceDetail }) {
                               className="btn btn-ghost text-bad"
                               title={t('devices.fw.discard')}
                               aria-label={`${t('devices.fw.discard')}: ${r.raw}`}
-                              onClick={() => {
-                                setAck(false)
-                                setDiscard(r)
-                              }}
+                              onClick={() => openPick(r, 'remove')}
                             >
                               <Trash2 size={14} aria-hidden />
                             </button>
@@ -201,21 +204,30 @@ export function FirewallTab({ d }: { d: DeviceDetail }) {
       <Modal
         open={!!pick}
         onClose={() => setPick(null)}
-        title={t(pick?.action === 'keep' ? 'devices.fw.keepTitle' : 'devices.fw.adoptTitle')}
-        description={t(pick?.action === 'keep' ? 'devices.fw.keepBody' : 'devices.fw.adoptBody')}
+        title={t(titles[pick?.action ?? 'adopt'])}
+        description={t(bodies[pick?.action ?? 'adopt'])}
         footer={
           <>
             <button type="button" className="btn" onClick={() => setPick(null)}>
               {t('common.cancel')}
             </button>
-            <button type="button" className="btn btn-primary" disabled={act.isPending || (item === 'new' && (!name.trim() || !target || (needsSure && !sure)))} onClick={savePick}>
-              {t(pick?.action === 'keep' ? 'devices.fw.keep' : 'devices.fw.adopt')}
+            <button type="button" className="btn btn-primary" disabled={act.isPending || (risky && !ack) || (item === 'new' && (!name.trim() || !target || (needsSure && !sure)))} onClick={savePick}>
+              {t(labels[pick?.action ?? 'adopt'])}
             </button>
           </>
         }
       >
         <div className="flex flex-col gap-3">
           {raw(pick?.rule.raw)}
+          {risky && pick?.rule.risk && (
+            <div className="flex flex-col gap-2 rounded border border-bad p-2">
+              <p className="text-body text-bad">{t(`devices.fw.riskBody.${pick.rule.risk}` as MessageKey)}</p>
+              <label className="flex items-center gap-2 text-body">
+                <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+                {t('devices.fw.riskAck')}
+              </label>
+            </div>
+          )}
           <Field label={t('devices.fw.item')}>
             {({ id }) => (
               <select id={id} className="field" value={item} onChange={(e) => setItem(e.target.value)}>
@@ -264,28 +276,6 @@ export function FirewallTab({ d }: { d: DeviceDetail }) {
           )}
         </div>
       </Modal>
-      <Confirm
-        open={!!discard}
-        onClose={() => setDiscard(null)}
-        title={t('devices.fw.discardTitle')}
-        body={t('devices.fw.discardBody', { host: d.hostname })}
-        confirm={t('devices.fw.discard')}
-        danger
-        reason={fourEyes}
-        busy={run.pending || (!!discard?.risk && !ack)}
-        onConfirm={(reason) => discard && run.run('firewall_remove_rule', { rule_id: discard.id, ...(discard.risk ? { confirm_risk: ack } : {}), ...(reason ? { reason } : {}) }, () => setDiscard(null))}
-      >
-        {raw(discard?.raw)}
-        {discard?.risk && (
-          <div className="flex flex-col gap-2 rounded border border-bad p-2">
-            <p className="text-body text-bad">{t(`devices.fw.riskBody.${discard.risk}` as MessageKey)}</p>
-            <label className="flex items-center gap-2 text-body">
-              <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-              {t('devices.fw.riskAck')}
-            </label>
-          </div>
-        )}
-      </Confirm>
     </div>
   )
 }

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -818,6 +819,51 @@ func removeArgs(r api.FirewallInvRule) (string, []string, error) {
 		return r.Source, append([]string{"-t", r.Table}, w...), nil
 	}
 	return "", nil, fmt.Errorf("unknown rule source %q", r.Source)
+}
+
+// enforceFirewallRemove deletes the foreign rules the declaration lists in
+// remove, in every cycle: a rule added again (at boot, by a reload of the
+// tool that owns it) goes again. It reads the firewall first and judges the
+// live rule like the inventory does, so rules of LiMDM, of container, VPN
+// and protection tools (bridge addresses included) and rules also listed in
+// keep stay, whatever the list says. Each removal is a runtime change of
+// that tool (ufw and firewalld write their permanent configuration too).
+func (a *Agent) enforceFirewallRemove(f api.Firewall) {
+	inv := a.collectFirewall()
+	reload := false
+	removed := 0
+	for _, r := range inv.Rules {
+		if !slices.Contains(f.Remove, r.Match) || slices.Contains(f.Keep, r.Match) {
+			continue
+		}
+		if err := api.RemovableRule(r, true); err != nil { // the risk was confirmed when the entry was saved
+			a.fwNotes = append(a.fwNotes, "left in place: "+r.Match+" ("+err.Error()+")")
+			continue
+		}
+		name, args, err := removeArgs(r)
+		if err == nil {
+			_, err = sh(name, args...)
+		}
+		if err != nil {
+			a.problem(api.TypeFirewall, "firewall: removing %s: %v", r.Match, err)
+			continue
+		}
+		reload = reload || r.Source == "firewalld"
+		removed++
+		a.fwNotes = append(a.fwNotes, "removed: "+r.Match)
+		a.event("firewall rule removed by policy: %s", r.Match)
+	}
+	if reload {
+		if _, err := sh("firewall-cmd", "--reload"); err != nil {
+			a.problem(api.TypeFirewall, "firewall: reload after removal: %v", err)
+		}
+	}
+	if removed > 0 {
+		a.sentFwHash = "" // report the new state at the next check in
+	}
+	if len(a.fwNotes) == 0 {
+		a.fwNotes = []string{fmt.Sprintf("remove list: %d rules, none present", len(f.Remove))}
+	}
 }
 
 // firewallRemoveRule deletes one foreign rule (command firewall_remove_rule).

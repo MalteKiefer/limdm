@@ -35,6 +35,10 @@ func (s *Server) itemNeedsApproval(it api.LibraryItem) bool {
 	if rootTypes[it.Type] {
 		return true
 	}
+	if it.Type == api.TypeFirewall { // a remove list deletes rules on every device that gets the item
+		var f api.Firewall
+		return json.Unmarshal(it.Payload, &f) != nil || len(f.Remove) > 0
+	}
 	if it.Type != api.TypeFiles {
 		return false
 	}

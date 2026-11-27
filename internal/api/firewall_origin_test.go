@@ -1,6 +1,9 @@
 package api
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestVPNAndLiMDMOrigins(t *testing.T) {
 	for _, c := range []struct {
@@ -27,5 +30,22 @@ func TestVPNAndLiMDMOrigins(t *testing.T) {
 	r := FirewallInvRule{Source: "nftables", Table: "ip nat", Chain: "POSTROUTING", Raw: "ip saddr 0.0.0.0/0 masquerade"}
 	if BridgeRule(r, ParseBridgeNets([]string{"172.18.0.0/16"})) {
 		t.Error("a wider network counted as the bridge")
+	}
+}
+
+func TestFirewallRemoveValidation(t *testing.T) {
+	ok := Declaration{Identifier: "f", Type: TypeFirewall, Payload: []byte(`{"remove":["nftables inet filter input: tcp dport 8443 accept"]}`)}
+	if err := ok.apply(&Policy{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []string{"nftables inet limdm_fw input: iif \"lo\" accept", "nftables ip netbird netbird-rt-fwd: iifname \"wt0\" drop", "iptables filter DOCKER-USER: -A DOCKER-USER -j RETURN"} {
+		bad := Declaration{Identifier: "f", Type: TypeFirewall, Payload: []byte(`{"remove":["` + strings.ReplaceAll(m, `"`, `\"`) + `"]}`)}
+		if bad.apply(&Policy{}) == nil {
+			t.Errorf("remove entry accepted: %s", m)
+		}
+	}
+	f, err := RemoveInto(Firewall{Keep: []string{"x"}}, FirewallInvRule{Source: "ufw", Origin: OriginForeign, Match: "x", Raw: "ufw allow 8080/tcp"}, false)
+	if err != nil || len(f.Keep) != 0 || len(f.Remove) != 1 {
+		t.Fatalf("remove into: %+v %v", f, err)
 	}
 }

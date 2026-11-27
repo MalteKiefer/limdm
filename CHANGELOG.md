@@ -11,7 +11,7 @@ change behavior they rely on.
 - **Breaking:** EAP-TLS device certificates take the DNS SAN from the device ID under the new network certificate domain (Settings, Network; empty leaves it out) and the email SAN only from directory verified addresses. RADIUS policies that matched the reported host name must match the new names (see `docs/network.md`).
 - CVE data feeds (Debian, Ubuntu, Arch, Alpine) are off by default. Switch each on under Settings, CVE data and watch disk and memory during the first import.
 - A firewall declaration without zones, outbound filtering or templates runs exactly the commands it ran before.
-- Agents up to 0.18 reject a firewall item that uses `keep`; update the agents before keeping foreign rules. Removing a rule on nftables or iptables hosts affects only the runtime ruleset.
+- Agents up to 0.18 reject a firewall item that uses `keep` or `remove` (0.19.0-rc builds reject `remove`); update the agents before keeping or discarding foreign rules. A rule in a `remove` list is deleted in every agent cycle, so it stays gone after a reboot; the agent never reloads the nftables service (that would flush Docker, NetBird and CrowdSec tables).
 
 ### Added
 - Update rings with waves, deferral, pause and resume and optional approval (`/api/v1/update-rings`, `/api/v1/update-waves`); devices get an update gate at check in.
@@ -40,7 +40,7 @@ change behavior they rely on.
 - Item editor preview of the computed host name for one device with a warning, and a host name card on the device page; agents report `hostname_info` and notes in the declaration status, including a warning when Postfix or Exim keeps another host name.
 - Template variables `.Serial`, `.MAC`, `.Vendor` and `.Model` for file, firewall and hostname templates.
 - Firewall inventory per device: the agent reports backend, default policies and every rule of ufw, firewalld, nftables or iptables (read only); the device page has a Firewall tab grouping managed, foreign and system rules (`GET /api/v1/devices/{id}/firewall`).
-- Foreign firewall rules can be adopted into a firewall library item (a new item goes into a blueprint the admin picks, with a second confirmation for the global default or a blueprint that reaches more devices), kept as an exception (`keep` in `com.limdm.firewall`) or discarded with the signed command `firewall_remove_rule` (admins, four eyes, a second confirmation when SSH or the server may be cut; `POST /api/v1/devices/{id}/firewall/rules/{rid}/{adopt|keep}`).
+- Foreign firewall rules can be adopted into a firewall library item (a new item goes into a blueprint the admin picks, with a second confirmation for the global default or a blueprint that reaches more devices), kept as an exception (`keep` in `com.limdm.firewall`) or discarded through the new `remove` list of `com.limdm.firewall`: every agent deletes a listed foreign rule in every cycle, so it stays gone after a reboot; rules of LiMDM, container, VPN and protection tools are never removed, and items with a `remove` list need four eyes approval when it is on (`POST /api/v1/devices/{id}/firewall/rules/{rid}/{adopt|keep|remove}`). The signed command `firewall_remove_rule` removes one rule at once (running ruleset only for nftables and iptables).
 
 ### Changed
 - Enrollment tokens default to 1 use and 1 day; every use is audited with the token it used.

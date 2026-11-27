@@ -814,4 +814,5 @@ var deCatalog = map[string]string{
 	// R3-F
 	"Firewall rule adopted":           "Firewall Regel übernommen",
 	"Firewall rule kept as exception": "Firewall Regel als Ausnahme behalten",
+	"Firewall rule set to be removed": "Firewall Regel zum Entfernen gesetzt",
 }

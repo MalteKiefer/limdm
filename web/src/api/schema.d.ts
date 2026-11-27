@@ -2961,8 +2961,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Adopt a foreign firewall rule into a firewall library item, or keep it as an exception there
-         * @description adopt adds the rule in the declaration format, keep adds its match to keep. item_id names an existing com.limdm.firewall item, saved through the library save (validation, signature, audit, four eyes). Without it a new item with name is created (enforce off) and assigned in blueprint_id, one of GET /api/v1/devices/{id}/firewall/targets, in one transaction with both audit entries: nothing is created when the assignment fails. A blueprint that is the global default or reaches more than one device needs confirm (422 on field confirm otherwise). Tenant accounts pick only blueprints of their tenant. System and managed rules are refused. Admins only.
+         * Adopt a foreign firewall rule into a firewall library item, keep it as an exception there, or list it to be removed
+         * @description adopt adds the rule in the declaration format, keep adds its match to keep, remove adds its match to remove: every agent that gets the item deletes the rule whenever it finds it, also after a reboot (a rule with a risk needs confirm_risk; an item with a remove list needs four eyes approval when it is on, and a new item is then refused with 409). item_id names an existing com.limdm.firewall item, saved through the library save (validation, signature, audit, four eyes). Without it a new item with name is created (enforce off) and assigned in blueprint_id, one of GET /api/v1/devices/{id}/firewall/targets, in one transaction with both audit entries: nothing is created when the assignment fails. A blueprint that is the global default or reaches more than one device needs confirm (422 on field confirm otherwise). Tenant accounts pick only blueprints of their tenant. System and managed rules are refused. Admins only.
          */
         post: operations["firewallRuleAction"];
         delete?: never;
@@ -10594,7 +10594,7 @@ export interface operations {
                 id: string;
                 /** @description rule id from the inventory */
                 rid: string;
-                action: "adopt" | "keep";
+                action: "adopt" | "keep" | "remove";
             };
             cookie?: never;
         };
@@ -10615,6 +10615,8 @@ export interface operations {
                     blueprint_id?: number;
                     /** @description confirms a blueprint that is the global default or reaches more than this device */
                     confirm?: boolean;
+                    /** @description remove: confirms a rule that may cut SSH or the server */
+                    confirm_risk?: boolean;
                 };
             };
         };

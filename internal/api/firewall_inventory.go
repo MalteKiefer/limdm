@@ -396,7 +396,7 @@ func AdoptInto(item Firewall, r FirewallInvRule, inv FirewallInventory) (Firewal
 		frag.Outbound.Policy = item.Outbound.Policy
 	}
 	out := mergeFirewall(item, frag)
-	out.Enforce, out.Template, out.Keep = item.Enforce, item.Template, item.Keep
+	out.Enforce, out.Template, out.Keep, out.Remove = item.Enforce, item.Template, item.Keep, item.Remove
 	return out, nil
 }
 
@@ -410,7 +410,56 @@ func KeepInto(item Firewall, r FirewallInvRule) (Firewall, error) {
 		return item, fmt.Errorf("at most %d exceptions per item", maxKeep)
 	}
 	item.Keep = union(item.Keep, []string{r.Match})
+	item.Remove = slices.DeleteFunc(slices.Clone(item.Remove), func(m string) bool { return m == r.Match })
 	return item, nil
+}
+
+// RemoveInto lists rule r in the item's remove list: every agent that gets
+// the item deletes the rule whenever it finds it. A rule that may cut SSH
+// or the server needs confirmRisk, as for the immediate removal.
+func RemoveInto(item Firewall, r FirewallInvRule, confirmRisk bool) (Firewall, error) {
+	if err := RemovableRule(r, confirmRisk); err != nil {
+		return item, err
+	}
+	if err := RemoveEntryError(r.Match); err != nil {
+		return item, err
+	}
+	if len(item.Remove) >= maxKeep {
+		return item, fmt.Errorf("at most %d rules to remove per item", maxKeep)
+	}
+	item.Remove = union(item.Remove, []string{r.Match})
+	item.Keep = slices.DeleteFunc(slices.Clone(item.Keep), func(m string) bool { return m == r.Match })
+	return item, nil
+}
+
+// RemoveEntryError refuses a remove entry that names a rule of LiMDM or of
+// a container, VPN or protection tool, judged from the entry's text alone
+// (the agent checks the live rule again, bridge addresses included).
+func RemoveEntryError(m string) error {
+	src, rest, _ := strings.Cut(m, " ")
+	place, raw, _ := strings.Cut(rest, ": ")
+	for _, tok := range strings.Fields(place) {
+		if strings.HasPrefix(tok, "limdm") {
+			return fmt.Errorf("rule of LiMDM itself, never removed: %q", m)
+		}
+	}
+	if SystemRule(FirewallInvRule{Source: src, Chain: place, Raw: raw}) {
+		return fmt.Errorf("rule of a container, virtualization, VPN or intrusion prevention tool, never removed: %q", m)
+	}
+	return nil
+}
+
+// validRemove checks the remove entries of a firewall declaration.
+func validRemove(list []string) error {
+	if err := validKeep(list); err != nil {
+		return errors.New(strings.Replace(err.Error(), "exception", "rule to remove", 1))
+	}
+	for _, m := range list {
+		if err := RemoveEntryError(m); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 const maxKeep = 500

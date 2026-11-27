@@ -185,6 +185,12 @@ type Firewall struct {
 	// (FirewallInvRule.Match). Nothing removes them; the console lists them
 	// as exceptions.
 	Keep []string `json:"keep,omitempty"`
+	// Remove lists rules that are not LiMDM's and must not be on the device
+	// (FirewallInvRule.Match). The agent deletes a matching foreign rule in
+	// every cycle, so it stays gone after a reboot or a reload of the tool
+	// that added it. Rules of LiMDM, of container, VPN and protection tools
+	// and rules also listed in Keep are never removed.
+	Remove []string `json:"remove,omitempty"`
 }
 
 // FirewallZone binds interfaces and source networks to a zone and opens

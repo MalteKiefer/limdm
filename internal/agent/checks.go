@@ -840,10 +840,7 @@ func (a *Agent) applyFirewall() error {
 				return err
 			}
 		}
-		if err := a.syncNftables(); err != nil {
-			return err
-		}
-		return svc("enable-now", "nftables")
+		return a.syncNftables() // never starts or reloads nftables: that would flush every other table
 	}
 	if a.host.family == "debian" {
 		// A hand written nftables ruleset (VPN clients such as NetBird add their own

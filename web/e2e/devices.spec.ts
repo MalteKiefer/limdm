@@ -3,7 +3,7 @@
 // the device page with tabs and dialogs; retire and delete; enrollment.
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator } from '@playwright/test'
 import { statePath } from './global-setup'
 
 test.use({ storageState: statePath, locale: 'de-DE' })
@@ -167,6 +167,19 @@ test('device page: containers and VMs, actions off by policy', async ({ page }) 
   await expect(page.getByText('Die Richtlinie des Geräts erlaubt keine Aktionen', { exact: false }).first()).toBeVisible()
 })
 
+// picks the global default blueprint for a new firewall item by its text
+// (other specs add blueprints, so never by position) and confirms its reach
+async function newItemOnDefault(dialog: Locator, name: string) {
+  await dialog.getByLabel('Firewall Element').selectOption('new')
+  await dialog.getByLabel('Name des neuen Elements').fill(name)
+  const bp = dialog.getByRole('combobox', { name: /^Blueprint/ })
+  const def = bp.locator('option', { hasText: /^default \(Standard der ganzen Installation\): \d+ Geräte$/ })
+  await expect(def).toHaveCount(1)
+  await bp.selectOption((await def.getAttribute('value')) ?? '')
+  await expect(dialog.getByText('Standard Blueprint der ganzen Installation', { exact: false })).toBeVisible()
+  await dialog.getByLabel('Ich will die Regel auf allen Geräten dieses Blueprints verwalten.').check()
+}
+
 test('firewall tab: groups, system rules locked, discard asks twice for a risky rule, adopt', async ({ page }) => {
   await page.goto('/app/devices/e2e-ws1?tab=firewall')
   await expect(page.getByRole('heading', { name: 'Host Firewall' })).toBeVisible()
@@ -180,10 +193,12 @@ test('firewall tab: groups, system rules locked, discard asks twice for a risky 
   await expect(page.getByRole('heading', { name: 'Fremde Regeln 1' })).toBeVisible()
   await page.getByLabel('Regeln filtern').fill('')
 
-  // a rule that may cut SSH needs the second confirmation
+  // discard writes the remove list of a firewall item; a rule that may cut SSH needs the second confirmation
   await page.getByRole('button', { name: 'Verwerfen: ufw allow 22/tcp' }).click()
   const dialog = page.getByRole('dialog', { name: 'Regel verwerfen' })
   await expect(dialog.getByText('ufw allow 22/tcp', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('auch nach einem Neustart', { exact: false })).toBeVisible()
+  await newItemOnDefault(dialog, `e2e remove ${Date.now()}`)
   await expect(dialog.getByRole('button', { name: 'Verwerfen' })).toBeDisabled()
   await dialog.getByLabel('Ich habe das Risiko verstanden', { exact: false }).check()
   await expect(dialog.getByRole('button', { name: 'Verwerfen' })).toBeEnabled()
@@ -193,15 +208,10 @@ test('firewall tab: groups, system rules locked, discard asks twice for a risky 
   await page.getByRole('button', { name: 'Übernehmen: ufw allow 8080/tcp' }).click()
   const adopt = page.getByRole('dialog', { name: 'Regel übernehmen' })
   await adopt.getByLabel('Firewall Element').selectOption('new')
-  await adopt.getByLabel('Name des neuen Elements').fill(`e2e firewall ${Date.now()}`)
+  await adopt.getByLabel('Name des neuen Elements').fill('x')
   // the device runs on the global default: nothing preselected, a second confirmation
   await expect(adopt.getByRole('button', { name: 'Übernehmen' })).toBeDisabled()
-  const bp = adopt.getByRole('combobox', { name: /^Blueprint/ })
-  await expect(bp.locator('option').nth(1)).toHaveText(/^default \(Standard der ganzen Installation\): \d+ Geräte$/)
-  await bp.selectOption({ index: 1 })
-  await expect(adopt.getByText('Standard Blueprint der ganzen Installation', { exact: false })).toBeVisible()
-  await expect(adopt.getByRole('button', { name: 'Übernehmen' })).toBeDisabled()
-  await adopt.getByLabel('Ich will die Regel auf allen Geräten dieses Blueprints verwalten.').check()
+  await newItemOnDefault(adopt, `e2e firewall ${Date.now()}`)
   await adopt.getByRole('button', { name: 'Übernehmen' }).click()
   await expect(page.getByText('Regel übernommen')).toBeVisible()
 })

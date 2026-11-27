@@ -25,6 +25,7 @@ import (
 func init() {
 	auditActions["firewall.adopt"] = "Firewall rule adopted"
 	auditActions["firewall.keep"] = "Firewall rule kept as exception"
+	auditActions["firewall.remove"] = "Firewall rule set to be removed"
 }
 
 func (s *Server) appFirewallRoutes(m *http.ServeMux) {
@@ -238,7 +239,7 @@ func (s *Server) firewallRemovePayload(r *http.Request, deviceID string) ([]byte
 // normal library save: validation, signature, audit and four eyes.
 func (s *Server) apiFirewallRuleAction(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	id, action := r.PathValue("id"), r.PathValue("action")
-	if action != "adopt" && action != "keep" {
+	if action != "adopt" && action != "keep" && action != "remove" {
 		problem(w, http.StatusNotFound, "unknown action")
 		return
 	}
@@ -255,6 +256,7 @@ func (s *Server) apiFirewallRuleAction(w http.ResponseWriter, r *http.Request, c
 		Name        string `json:"name"`
 		BlueprintID int64  `json:"blueprint_id"`
 		Confirm     bool   `json:"confirm"`
+		ConfirmRisk bool   `json:"confirm_risk"` // remove: a rule that may cut SSH or the server
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -294,10 +296,13 @@ func (s *Server) apiFirewallRuleAction(w http.ResponseWriter, r *http.Request, c
 		// enforce stays off: a new item never switches a firewall on
 		it.Description = "Rules adopted from device firewalls."
 	}
-	if action == "adopt" {
+	switch action {
+	case "adopt":
 		f, err = api.AdoptInto(f, fr, inv)
-	} else {
+	case "keep":
 		f, err = api.KeepInto(f, fr)
+	default: // remove: the agents delete the rule whenever they find it
+		f, err = api.RemoveInto(f, fr, body.ConfirmRisk)
 	}
 	if err != nil {
 		problemField(w, http.StatusUnprocessableEntity, "rule_id", err.Error())
@@ -446,7 +451,7 @@ func (s *Server) adoptIntoNewItem(ctx context.Context, actor, deviceID string, i
 	}
 	it.Payload = compact.Bytes()
 	if s.itemNeedsApproval(*it) {
-		return &userError{http.StatusConflict, "this item needs four eyes approval: adopt the rule into an existing firewall item"}
+		return &userError{http.StatusConflict, "four eyes approval is on: pick an existing firewall item, the change then waits for another administrator (a new item cannot be created and assigned under approval)"}
 	}
 	return pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
 		targets, err := firewallTargets(ctx, tx, deviceID)

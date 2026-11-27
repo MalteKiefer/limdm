@@ -737,9 +737,12 @@ server address cannot be resolved, nothing is changed.
   active nftables service and no ufw is reported instead of being overwritten.
 * Other families: firewalld (installed and enabled when missing); ports in the default zone,
   rules with a source as rich rules.
-* Alpine: nftables (installed and enabled when missing). The agent writes one table it owns,
-  `inet limdm`, to `/etc/nftables.d/limdm.nft` (loaded by the stock nftables service at boot)
-  and loads it atomically with `nft -f` whenever it changes or is missing. Input policy drop
+* Alpine: nftables (installed when missing). The agent writes one table it owns,
+  `inet limdm`, to `/etc/nftables.d/limdm.nft` and loads that file atomically with `nft -f`
+  whenever it changes or is missing. The file deletes and recreates only `inet limdm` and never
+  contains `flush ruleset`. The agent never starts, restarts or reloads the nftables service
+  and never loads or edits the main configuration (`/etc/nftables.conf`, `/etc/nftables.nft`):
+  both begin with `flush ruleset` and would drop the tables of Docker, NetBird or CrowdSec. Input policy drop
   with established traffic, loopback, ICMP and DHCP replies allowed, then the declared rules;
   output policy drop only with outbound deny. nftables was chosen over awall because it is the
   kernel's current firewall, needs no second policy language on top of iptables, and is what
@@ -801,20 +804,46 @@ On the **Firewall** tab of a device an admin decides per foreign rule:
   adopted; the tab says why.
 * **Exception**: the rule's `match` (tool, place and text without counters or handles) is
   added to `keep` of a firewall item. The rule stays and is listed as accepted.
-* **Discard**: the signed command `firewall_remove_rule` (admins, four eyes like other
-  destructive commands, confirm dialog with the raw rule) deletes exactly this rule. The agent
-  reads the firewall again and refuses when the rule changed, when it is managed or a system
-  rule, and when removing it may cut SSH (an inbound rule letting port 22 through while the
-  inbound policy is not accept) or the server (an outbound rule for the server's port while
-  the outbound policy is not accept) unless the admin confirmed that risk a second time. The
-  command uses `ufw --force delete`, `firewall-cmd --permanent --remove-…` plus `--reload`,
-  `nft delete rule … handle N` or `iptables -D`. Removals with nftables and iptables change
-  the running ruleset only: a rule loaded from `/etc/nftables.conf` or a saved iptables file
-  comes back at the next boot unless it is removed there too.
+* **Discard**: the rule's `match` is added to `remove` of a firewall item (the same dialog
+  as adopt: existing item or a new one in a picked blueprint, a second confirmation for a rule
+  that may cut SSH or the server). Every agent that gets the item deletes a matching foreign
+  rule in every cycle, so a rule that comes back at boot or with a reload of the tool that
+  added it goes again; the declaration status lists what was removed or left. Rules of LiMDM,
+  of container, VPN and protection tools (also by bridge address) and rules listed in `keep`
+  are never removed, even when listed: the server refuses such entries when the item is
+  saved, and the agent checks the live rule again. With four eyes approval on, saving an item
+  with a `remove` list waits for another administrator (a new item is refused then; pick an
+  existing one). The removal uses `ufw --force delete`, `firewall-cmd --permanent --remove-…`
+  plus `--reload`, `nft delete rule … handle N` or `iptables -D`.
+* The signed command `firewall_remove_rule` (API only, admins, four eyes) still removes one
+  rule at once; with nftables and iptables that changes the running ruleset only, so a rule
+  loaded at boot comes back unless it is also in a `remove` list.
 
-Adopt and exception are normal library saves (signature, version, audit, four eyes for the
-item) plus an audit entry `firewall.adopt` or `firewall.keep` on the device; the result of a
-discard shows in the device timeline.
+Adopt, exception and discard are normal library saves (signature, version, audit) plus an
+audit entry `firewall.adopt`, `firewall.keep` or `firewall.remove` on the device.
+
+#### After a reboot
+
+What LiMDM applies stays in force after a reboot on every backend, and the agent applies
+everything again at its start anyway:
+
+* ufw: rules and defaults live in ufw's own files (`/etc/ufw/user.rules`, `ufw.conf`);
+  `ufw --force enable` also enables it at boot.
+* firewalld: every change is made with `--permanent` and then `--reload`; the firewalld
+  service is enabled.
+* nftables (Alpine): `/etc/nftables.d/limdm.nft` is loaded at boot by the distribution's
+  nftables service when its main configuration includes `/etc/nftables.d/*.nft` and the
+  service is enabled (checked from the files, no command). Otherwise the agent installs its
+  own boot service `limdm-firewall` (systemd unit after `nftables.service`, or an OpenRC
+  script after `nftables`) that loads only LiMDM's file, and enables it without starting
+  anything. The main configuration is never edited.
+* Remove lists are enforced in every cycle, so rules restored at boot are removed again at
+  the agent's first cycle.
+
+On Debian 13 with Docker, NetBird and CrowdSec (nftables service with `flush ruleset` and
+`include "/etc/nftables.d/*.nft"`) the agent loads no ruleset at all: LiMDM's firewall there is
+ufw, and a host with an active nftables service and no ufw is reported, not overwritten. A
+remove list there deletes single foreign rules by handle at runtime, in every cycle.
 
 ### `com.limdm.ssh` (list), `com.limdm.banner`
 

@@ -387,7 +387,10 @@ and rules on addresses of the local container bridges in `bridge_nets`), its fie
 the raw text, `risk` (`ssh` or `server`), `kept` (listed in `keep` of the device's firewall
 declaration) and `adopt_error` when it cannot be adopted.
 
-`POST /api/v1/devices/{id}/firewall/rules/{rid}/adopt` and `.../keep` (admins) take
+`POST /api/v1/devices/{id}/firewall/rules/{rid}/adopt`, `.../keep` and `.../remove` (admins;
+remove adds the rule to the item's `remove` list, a rule with a `risk` needs
+`"confirm_risk": true`, and with four eyes approval on the save answers `202` with the
+approval or, for a new item, `409`) take
 `{"item_id": 12}` or `{"name": "Adopted rules", "blueprint_id": 4, "confirm": true}`. Adopt
 adds the rule to that `com.limdm.firewall` item in the declaration format, keep adds its
 `match` to `keep`. An existing item is a normal library save (validation, signature,
@@ -397,13 +400,15 @@ behind when the assignment fails. `GET /api/v1/devices/{id}/firewall/targets` li
 blueprints the caller may pick with the devices each reaches (`devices`, `global_default`,
 `device`): tenant accounts only those of their tenant, never the global default. A blueprint
 that is the global default or reaches more than one device answers `422` on `confirm`
-without `"confirm": true`. Every adopt and keep adds an audit entry `firewall.adopt` or
-`firewall.keep` on the device.
+without `"confirm": true`. Every adopt, keep and remove adds an audit entry `firewall.adopt`,
+`firewall.keep` or `firewall.remove` on the device.
 
 `firewall_remove_rule` (command, admins, four eyes) deletes one foreign rule on the device:
 `{"type": "firewall_remove_rule", "params": {"rule_id": "3f2a9c1d7e4b5a60"}}`. System and
 managed rules answer `422`; a rule with a `risk` needs `"confirm_risk": true`. The agent
-reads the firewall again and refuses the rule when it changed meanwhile.
+reads the firewall again and refuses the rule when it changed meanwhile. With nftables and
+iptables this changes the running ruleset only; the console's Discard writes a `remove` list
+entry instead, which outlasts a reboot.
 
 ### Library items and blueprints
 

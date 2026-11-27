@@ -132,6 +132,8 @@ var schemaHints = map[string]map[string]schemaHint{
 			"Jede Regel pro Gerät erzeugen, zum Beispiel {{.Attributes.office_net}}; mit der Vorschau prüfen.").sec("Template", "Vorlage"),
 		"keep": h("Exceptions", "Ausnahmen").d("Rules LiMDM did not add that stay on the device, as set in the firewall tab of a device. Nothing removes them.",
 			"Regeln, die nicht von LiMDM stammen und auf dem Gerät bleiben, wie im Firewall Reiter eines Geräts gesetzt. Nichts entfernt sie.").sec("Exceptions", "Ausnahmen"),
+		"remove": h("Rules to remove", "Zu entfernende Regeln").d("Rules LiMDM did not add that the agent deletes whenever it finds them, also after a reboot, as set with Discard in the firewall tab of a device. Rules of LiMDM, of container, VPN and protection tools and exceptions are never removed.",
+			"Regeln, die nicht von LiMDM stammen und die der Agent löscht, wann immer er sie findet, auch nach einem Neustart, wie mit Verwerfen im Firewall Reiter eines Geräts gesetzt. Regeln von LiMDM, von Container, VPN und Schutzwerkzeugen und Ausnahmen werden nie entfernt.").sec("Exceptions", "Ausnahmen"),
 	},
 	api.TypeOSVersion: {
 		"min": h("Minimum versions", "Mindestversionen").d("os-release ID as key (ubuntu, debian, fedora) and the minimum VERSION_ID as value.", "os-release ID als Schlüssel (ubuntu, debian, fedora) und die Mindest VERSION_ID als Wert."),

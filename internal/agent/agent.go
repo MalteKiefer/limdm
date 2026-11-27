@@ -139,6 +139,7 @@ type Agent struct {
 	declStatus []api.DeclarationStatus
 	users      []api.User
 	reasons    map[string][]string // declaration type -> why it is not active
+	fwNotes    []string            // what the firewall remove list did this cycle (firewall_inventory.go)
 
 	sentStatusHash, sentPkgHash string
 	sentFwHash                  string    // firewall inventory (firewall_inventory.go)
@@ -520,6 +521,10 @@ const eventRepeat = 6 * time.Hour
 
 func (a *Agent) event(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
+	// event texts carry device and server text (rule texts, file paths):
+	// one line each, so no forged log lines
+	msg = strings.ReplaceAll(msg, "\n", " ")
+	msg = strings.ReplaceAll(msg, "\r", " ")
 	a.log.Info(msg)
 	now := time.Now()
 	a.evMu.Lock()
@@ -650,6 +655,9 @@ func (a *Agent) declarationStatus() []api.DeclarationStatus {
 		}
 		if out[i].Type == api.TypeHostname {
 			out[i].Info = a.hostnameNotes()
+		}
+		if out[i].Type == api.TypeFirewall {
+			out[i].Info = a.fwNotes
 		}
 	}
 	return out
@@ -863,6 +871,10 @@ func (a *Agent) enforce() {
 		if err != nil {
 			a.problem(api.TypeFirewall, "firewall: %v", err)
 		}
+	}
+	a.fwNotes = nil
+	if len(p.Firewall.Remove) > 0 {
+		a.enforceFirewallRemove(p.Firewall)
 	}
 	if err := a.applyUsers(); err != nil {
 		a.problem(api.TypeLogin, "users: %v", err)
