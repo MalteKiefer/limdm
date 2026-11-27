@@ -38,8 +38,9 @@ export function outcome(status: string | undefined, elapsed: number): 'wait' | '
   return elapsed >= WAIT_LIMIT ? 'timeout' : 'wait'
 }
 
-/** The end state the agent appends to a workload result ("state: exited"). */
-export const resultState = (output = '') => /^state: (.+)$/m.exec(output)?.[1] ?? ''
+/** The end state the agent appends to a workload result ("state: exited"), on its own line or as the
+ * last " | " part of a one line result ("start docker web | <id> | state: running"). */
+export const resultState = (output = '') => /(?:^|\s\|\s)state: ([^|\n]+?)\s*$/m.exec(output)?.[1] ?? ''
 
 /** The agent's error: the last line of a failed result. */
 export const resultError = (output = '') => output.trim().split('\n').pop() ?? ''

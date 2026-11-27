@@ -46,6 +46,8 @@ describe('workloads logic', () => {
   it('reads the state and error of a result', () => {
     expect(resultState('stop docker web\nweb\nstate: exited')).toBe('exited')
     expect(resultState('state: running (not yet stopped after 30s)')).toBe('running (not yet stopped after 30s)')
+    expect(resultState('start docker docs-webserver-1 | 4be54a38 | state: running')).toBe('running')
+    expect(resultState('stop docker web | 4be5')).toBe('')
     expect(resultState('ok')).toBe('')
     expect(resultError('\nworkload control is not allowed')).toBe('workload control is not allowed')
   })
