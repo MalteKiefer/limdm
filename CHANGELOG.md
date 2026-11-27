@@ -4,6 +4,11 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## Unreleased
+
+### Security
+- The sign in return target only accepts pages of the console app (`/app/...`) and is rebuilt behind that prefix.
+
 ## 0.19.0 (2026-11-27)
 
 ### Upgrade notes
