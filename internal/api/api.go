@@ -809,6 +809,9 @@ type Package struct {
 	Name    string `json:"n"`
 	Version string `json:"v"`
 	Arch    string `json:"a,omitempty"`
+	// Source is the source package of a Debian package when it differs
+	// from Name: the security trackers list source packages.
+	Source string `json:"s,omitempty"`
 }
 
 // Refs maps a check to the frameworks it provides evidence for.

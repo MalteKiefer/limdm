@@ -89,4 +89,9 @@ func TestUpdateOutcome(t *testing.T) {
 	if l := parseApkVersion("Installed:                                Available:\nmusl-1.2.5-r8                           < 1.2.5-r9\n"); len(l) != 1 || l[0].Name != "musl" || l[0].Current != "1.2.5-r8" {
 		t.Fatal(l)
 	}
+	for _, c := range [][3]string{{"libssl3", "openssl", "openssl"}, {"libc6", "glibc (2.36-9+deb12u7)", "glibc"}, {"bash", "bash", ""}, {"vim", "", ""}} {
+		if got := sourceName(c[0], c[1]); got != c[2] {
+			t.Errorf("%s %q: %q", c[0], c[1], got)
+		}
+	}
 }

@@ -426,3 +426,13 @@ func matchRepo(patterns []string, origin string) bool {
 	}
 	return false
 }
+
+// sourceName is the source package of a Debian package ("openssl", or
+// "glibc (2.36-9)" as osquery shows it), empty when it is the package itself.
+func sourceName(name, source string) string {
+	source, _, _ = strings.Cut(strings.TrimSpace(source), " ")
+	if source == name {
+		return ""
+	}
+	return source
+}

@@ -428,7 +428,7 @@ func (s *Server) apiDevicePackages(w http.ResponseWriter, r *http.Request, c api
 	}
 	out := make([]pkg, len(list))
 	for i, p := range list {
-		out[i] = pkg(p)
+		out[i] = pkg{p.Name, p.Version, p.Arch}
 	}
 	writeJSON(w, listPage{Items: out})
 }

@@ -470,7 +470,7 @@ func (h *host) osqueryPackages() ([]api.Package, error) {
 	if !hasOsquery() || (h.family != "debian" && h.family != "fedora" && h.family != "suse") {
 		return nil, errors.New("osquery packages unavailable") // pacman and apk lists come from the native collector
 	}
-	q := "SELECT name, version, arch FROM deb_packages WHERE status LIKE '%installed'"
+	q := "SELECT name, version, arch, source FROM deb_packages WHERE status LIKE '%installed'"
 	if h.family != "debian" {
 		// with the epoch as rpm compares versions; gpg-pubkey entries are keys, not packages
 		q = "SELECT name, CASE WHEN epoch NOT IN ('', '0') THEN epoch || ':' ELSE '' END || version || '-' || release AS version," +
@@ -485,7 +485,7 @@ func (h *host) osqueryPackages() ([]api.Package, error) {
 	}
 	pkgs := make([]api.Package, 0, len(rows))
 	for _, r := range rows {
-		pkgs = append(pkgs, api.Package{Name: r["name"], Version: r["version"], Arch: r["arch"]})
+		pkgs = append(pkgs, api.Package{Name: r["name"], Version: r["version"], Arch: r["arch"], Source: sourceName(r["name"], r["source"])})
 	}
 	return pkgs, nil
 }

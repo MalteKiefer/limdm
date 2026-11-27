@@ -220,7 +220,7 @@ func (h *host) installedPackages() ([]api.Package, string, error) {
 	sum := sha256.New()
 	names := make(map[string]bool, len(pkgs))
 	for _, p := range pkgs {
-		fmt.Fprintf(sum, "%s=%s=%s\n", p.Name, p.Version, p.Arch)
+		fmt.Fprintf(sum, "%s=%s=%s=%s\n", p.Name, p.Version, p.Arch, p.Source)
 		names[p.Name] = true
 	}
 	h.pkgs = pkgCache{stamp: stamp, list: pkgs, hash: hex.EncodeToString(sum.Sum(nil)), names: names}
@@ -237,7 +237,7 @@ func (h *host) nativePackages() ([]api.Package, error) {
 		return parseApkInfo(run(time.Minute, "apk", "info", "-v"))
 	}
 	if h.family == "debian" {
-		out, err = run(time.Minute, "dpkg-query", "-W", "-f", "${db:Status-Abbrev}\t${Package}\t${Version}\t${Architecture}\n")
+		out, err = run(time.Minute, "dpkg-query", "-W", "-f", "${db:Status-Abbrev}\t${Package}\t${Version}\t${Architecture}\t${source:Package}\n")
 	} else {
 		out, err = run(time.Minute, "rpm", "-qa", "--qf", "ii \t%{NAME}\t%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}\t%|ARCH?{%{ARCH}}|\n")
 	}
@@ -247,8 +247,12 @@ func (h *host) nativePackages() ([]api.Package, error) {
 	var pkgs []api.Package
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Split(line, "\t")
-		if len(f) == 4 && strings.HasPrefix(f[0], "ii") && f[1] != "gpg-pubkey" {
-			pkgs = append(pkgs, api.Package{Name: f[1], Version: f[2], Arch: f[3]})
+		if len(f) >= 4 && strings.HasPrefix(f[0], "ii") && f[1] != "gpg-pubkey" {
+			p := api.Package{Name: f[1], Version: f[2], Arch: f[3]}
+			if len(f) > 4 {
+				p.Source = sourceName(p.Name, f[4])
+			}
+			pkgs = append(pkgs, p)
 		}
 	}
 	return pkgs, nil
