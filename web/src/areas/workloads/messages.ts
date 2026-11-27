@@ -38,6 +38,15 @@ export const de = {
   'workloads.kind.pct': 'Proxmox Container',
   'workloads.kind.qm': 'Proxmox VMs',
   'workloads.kind.libvirt': 'libvirt',
+  'workloads.sync': 'Synchronisieren',
+  'workloads.busy': '{action} wird ausgeführt …',
+  'workloads.done': '{action} von {name} ausgeführt, Zustand: {state}',
+  'workloads.synced': '{name} hat synchronisiert.',
+  'workloads.failed': '{action} von {name} fehlgeschlagen: {error}',
+  'workloads.timeout': '{action} von {name}: nach 3 Minuten keine Antwort des Geräts. Der Befehl bleibt in der Warteschlange, bis das Gerät ihn abholt.',
+  'workloads.refresh': 'Aktualisieren',
+  'workloads.refreshWait': 'Aktualisieren ({seconds} s)',
+  'workloads.asOf': 'Stand: {ago}',
 } satisfies Catalog
 
 export const en: Record<keyof typeof de, Msg> = {
@@ -77,4 +86,13 @@ export const en: Record<keyof typeof de, Msg> = {
   'workloads.kind.pct': 'Proxmox containers',
   'workloads.kind.qm': 'Proxmox VMs',
   'workloads.kind.libvirt': 'libvirt',
+  'workloads.sync': 'Sync',
+  'workloads.busy': '{action} in progress …',
+  'workloads.done': '{action} of {name} done, state: {state}',
+  'workloads.synced': '{name} has synced.',
+  'workloads.failed': '{action} of {name} failed: {error}',
+  'workloads.timeout': '{action} of {name}: no answer from the device after 3 minutes. The command stays queued until the device picks it up.',
+  'workloads.refresh': 'Refresh',
+  'workloads.refreshWait': 'Refresh ({seconds} s)',
+  'workloads.asOf': 'As of {ago}',
 }

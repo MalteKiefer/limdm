@@ -167,6 +167,54 @@ test('device page: containers and VMs, actions off by policy', async ({ page }) 
   await expect(page.getByText('Die Richtlinie des Geräts erlaubt keine Aktionen', { exact: false }).first()).toBeVisible()
 })
 
+test('device page: a workload action shows progress until the agent reports, refresh has a cooldown', async ({ page }) => {
+  // the agent is stubbed: the action is sent, then done with the new state
+  let state = 'running'
+  let syncWait = 0
+  const polls: Record<number, number> = {}
+  await page.route('**/api/v1/devices/e2e-ws1/workloads', (r) =>
+    r.fulfill({
+      json: {
+        reports: true,
+        updated_at: new Date().toISOString(),
+        checked_at: new Date().toISOString(),
+        sync_wait: syncWait,
+        control: { policy: true, allowed: true, four_eyes: false },
+        inventory: { tools: [{ kind: 'docker', version: '27.3.1' }], items: [{ kind: 'docker', id: 'a'.repeat(64), name: 'paperless-webserver-1', image: 'paperless-ngx:2.13', state }] },
+      },
+    }),
+  )
+  await page.route('**/api/v1/devices/e2e-ws1/commands', (r) => {
+    const sync = r.request().postDataJSON().type === 'sync'
+    if (sync) syncWait = 30
+    return r.fulfill({ status: 202, json: { id: sync ? 99002 : 99001, device_id: 'e2e-ws1', type: sync ? 'sync' : 'workload_action', status: 'pending' } })
+  })
+  await page.route(/\/api\/v1\/commands\/9900[12]$/, (r) => {
+    const id = Number(r.request().url().split('/').pop())
+    polls[id] = (polls[id] ?? 0) + 1
+    const done = polls[id] >= 2
+    if (done && id === 99001) state = 'exited'
+    return r.fulfill({ json: { id, device_id: 'e2e-ws1', status: done ? 'ok' : 'sent', output: id === 99001 ? 'stop docker paperless-webserver-1\nstate: exited' : 'ok' } })
+  })
+
+  await page.goto('/app/devices/e2e-ws1?tab=workloads')
+  const row = page.getByRole('row', { name: /paperless-webserver-1/ })
+  await row.getByRole('button', { name: 'Herunterfahren: paperless-webserver-1' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Herunterfahren' }).click()
+  await expect(row.getByRole('status')).toHaveText('Herunterfahren wird ausgeführt …')
+  await expect(row.getByRole('button', { name: 'Neu starten: paperless-webserver-1' })).toBeDisabled()
+  await expect(page.getByText('Herunterfahren von paperless-webserver-1 ausgeführt, Zustand: exited')).toBeVisible()
+  await expect(row.getByText('exited', { exact: true })).toBeVisible()
+  await expect(row.getByRole('status')).toHaveCount(0)
+  await expect(row.getByRole('button', { name: 'Starten: paperless-webserver-1' })).toBeEnabled()
+
+  // refresh asks the device to sync, then waits out the cooldown
+  await expect(page.getByText(/^Stand: /)).toBeVisible()
+  await page.getByRole('button', { name: 'Aktualisieren', exact: true }).click()
+  await expect(page.getByText('e2e-ws1 hat synchronisiert.')).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Aktualisieren \(\d+ s\)$/ })).toBeDisabled()
+})
+
 // picks the global default blueprint for a new firewall item by its text
 // (other specs add blueprints, so never by position) and confirms its reach
 async function newItemOnDefault(dialog: Locator, name: string) {
