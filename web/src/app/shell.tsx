@@ -3,7 +3,7 @@
 // the Outlet inside an error boundary, so a crashing page leaves the shell.
 import { Dialog } from '@base-ui/react/dialog'
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router'
-import { Bell, Bookmark, Building2, ChevronsUpDown, CircleHelp, Languages, LogOut, Menu as MenuIcon, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Rows3, Rows4, Search, Sun, UserRound, Users } from 'lucide-react'
+import { Bell, Bookmark, Braces, Building2, ChevronsUpDown, CircleHelp, Languages, LogOut, Menu as MenuIcon, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Rows3, Rows4, Search, Sun, UserRound, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useInboxCount, useLiveState, startLive } from '../api/live'
 import { useMe } from '../api/me'
@@ -179,6 +179,7 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         'sep',
         { label: t('user.profile'), icon: UserRound, onClick: () => void navigate({ to: '/profile' }) },
         { label: t('user.help'), icon: CircleHelp, onClick: () => void navigate({ to: '/help' }) },
+        { label: t('user.api'), icon: Braces, onClick: () => window.location.assign('/api/v1/docs') },
         { label: t('user.signOut'), icon: LogOut, onClick: () => void signOut() },
       ]}
     />
