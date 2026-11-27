@@ -64,7 +64,7 @@ the item is saved, and on the device before every read):
 * Custom roots (`roots`) are for applications that log elsewhere, for example
   `/opt/app/logs`. A root must be a clean absolute directory at least two levels deep: `/`
   and bare top level directories (`/etc`, `/home`, `/usr`, `/var`, `/opt` ...) are refused,
-  so are roots in a secret location. Name only directories that hold nothing but logs: the
+  so are roots in a secret location. A root must contain a path component `log` or `logs` (or one ending in `-log`, `_log`, `-logs`, `_logs`), for example `/opt/app/logs` or `/data/nginx-log`; wide roots such as `/var/lib` or `/var/backups` never pass. Name only directories that hold nothing but logs: the
   agent reads every declared file below them as root and ships it. Because a root widens
   what the agent reads, saving an item with `roots` needs four eyes approval when it is on,
   and the audit entry lists the roots. The server checks the rules when the item is saved,

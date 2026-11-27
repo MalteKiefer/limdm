@@ -23,7 +23,7 @@ change behavior they rely on.
 
 ### Security
 - Log file sources are limited to `/var/log/` and `/srv/<name>/log/`; the agent opens them without following links and refuses files or directories writable by others.
-- Custom log roots never reach credential stores of other services (TLS and VPN keys, Docker, Kubernetes, database and identity data, sudoers) or dot directories in home directories.
+- Custom log roots must name a log directory (a path component `log` or `logs`) and never reach credential stores of other services (TLS and VPN keys, Docker, Kubernetes, database and identity data, sudoers) or dot directories in home directories.
 - Custom log roots keep the same rules (no `/`, no bare top level directory, never in secret locations such as `/etc/shadow`, `/etc/ssh/`, `/root/`, `/home/*/.ssh`, `/boot`), are checked on save and on the agent, and saving an item with roots needs four eyes approval when it is on; the audit entry lists the roots.
 
 ## 0.20.2 (2026-11-27)

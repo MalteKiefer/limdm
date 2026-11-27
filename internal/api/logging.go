@@ -109,7 +109,8 @@ var logSecretPrefixes = []string{"/etc/shadow", "/etc/gshadow", "/etc/ssh/", "/r
 	"/etc/letsencrypt/", "/etc/pki/", "/etc/sudoers", "/etc/NetworkManager/system-connections/", "/etc/wireguard/",
 	"/etc/kubernetes/", "/etc/rancher/", "/etc/docker/", "/etc/containers/auth", "/etc/krb5.keytab", "/etc/ipsec",
 	"/var/lib/docker/", "/var/lib/containers/", "/var/lib/kubelet/", "/var/lib/postgresql/", "/var/lib/mysql/",
-	"/var/lib/sss/", "/var/lib/samba/private/", "/var/lib/polkit-1/", "/var/lib/systemd/credential"}
+	"/var/lib/sss/", "/var/lib/samba/private/", "/var/lib/polkit-1/", "/var/lib/systemd/credential",
+	"/var/backups/", "/var/lib/iwd/", "/var/lib/NetworkManager/", "/etc/security/", "/var/lib/sudo/"}
 
 // logSecret reports a path in a secret location (or the location itself).
 func logSecret(p string) bool {
@@ -130,9 +131,21 @@ func cleanAbs(p string) bool {
 
 // LogRootValid checks a custom root of file sources: a clean absolute
 // directory at least two levels deep (never "/" or a bare top level
-// directory such as /etc, /home or /opt), not in a secret location.
+// directory such as /etc, /home or /opt) that names itself a log
+// directory (a path component "log", "logs" or ending in "-log", "_log",
+// "-logs", "_logs"), not in a secret location. The log component turns the
+// root into an allowlist: a wide root such as /var/lib or /var/backups never
+// passes, the denylist stays as a second line.
 func LogRootValid(r string) bool {
-	return cleanAbs(r) && strings.Count(r, "/") >= 2 && !logSecret(r)
+	return cleanAbs(r) && strings.Count(r, "/") >= 2 && logComponent(r) && !logSecret(r)
+}
+
+func logComponent(r string) bool {
+	return slices.ContainsFunc(strings.Split(r, "/"), func(c string) bool {
+		c = strings.ToLower(c)
+		return c == "log" || c == "logs" || strings.HasSuffix(c, "-log") || strings.HasSuffix(c, "_log") ||
+			strings.HasSuffix(c, "-logs") || strings.HasSuffix(c, "_logs")
+	})
 }
 
 // LogFileAllowed reports whether a clean absolute path is a permitted log

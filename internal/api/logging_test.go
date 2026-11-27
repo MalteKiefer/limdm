@@ -66,7 +66,12 @@ func TestLogRootSecrets(t *testing.T) {
 			t.Errorf("%s accepted as a log root", r)
 		}
 	}
-	for _, r := range []string{"/opt/app/logs", "/home/u/app/logs", "/var/lib/app/log"} {
+	for _, r := range []string{"/var/lib", "/var/backups/log", "/opt/app", "/srv/data", "/etc/app/catalog"} {
+		if LogRootValid(r) {
+			t.Errorf("%s accepted as a log root", r)
+		}
+	}
+	for _, r := range []string{"/opt/app/logs", "/home/u/app/logs", "/var/lib/app/log", "/opt/gitlab/app_logs", "/data/nginx-log"} {
 		if !LogRootValid(r) {
 			t.Errorf("%s refused as a log root", r)
 		}
