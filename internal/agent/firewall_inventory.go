@@ -770,7 +770,7 @@ func removeArgs(r api.FirewallInvRule) (string, []string, error) {
 		return "ufw", append([]string{"--force", "delete"}, ufwWords(r.Raw)...), nil
 	case "firewalld":
 		place, opt, ok := strings.Cut(r.Raw, " ")
-		if !ok || !(strings.HasPrefix(place, "--zone=") || strings.HasPrefix(place, "--policy=")) || !strings.HasPrefix(opt, "--add-") {
+		if !ok || !strings.HasPrefix(place, "--zone=") && !strings.HasPrefix(place, "--policy=") || !strings.HasPrefix(opt, "--add-") {
 			return "", nil, errors.New("not a firewalld rule text")
 		}
 		return "firewall-cmd", []string{"--permanent", place, "--remove-" + strings.TrimPrefix(opt, "--add-")}, nil
