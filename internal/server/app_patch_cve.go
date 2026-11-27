@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/maltekiefer/limdm/internal/api"
 )
 
 // CVE data for Debian, Ubuntu, Arch and Alpine
@@ -45,6 +47,7 @@ const (
 	defaultUbuntuFeed = "https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip"
 	defaultArchFeed   = "https://security.archlinux.org/issues/all.json"
 	defaultAlpineFeed = "https://secdb.alpinelinux.org" // + /v3.20/main.json, /v3.20/community.json
+	defaultKEVFeed    = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 	defaultFeedMB     = 1024
 	feedTimeout       = 30 * time.Minute
 	cveFeedPeriod     = 24 * time.Hour
@@ -60,24 +63,27 @@ type CVEFeedSettings struct {
 	Ubuntu    bool   `json:"ubuntu"`
 	Arch      bool   `json:"arch"`
 	Alpine    bool   `json:"alpine"`
+	KEV       bool   `json:"kev"`                  // CISA Known Exploited Vulnerabilities (app_vulns.go)
 	DebianURL string `json:"debian_url,omitempty"` // empty: defaultDebianFeed
 	UbuntuURL string `json:"ubuntu_url,omitempty"` // empty: defaultUbuntuFeed
 	ArchURL   string `json:"arch_url,omitempty"`   // empty: defaultArchFeed
 	AlpineURL string `json:"alpine_url,omitempty"` // base URL of the secdb, empty: defaultAlpineFeed
+	KEVURL    string `json:"kev_url,omitempty"`    // empty: defaultKEVFeed
 	MaxMB     int    `json:"max_mb,omitempty"`     // download limit per feed, defaultFeedMB when 0
 }
 
 // cveDistros are the feeds in display order.
-var cveDistros = []string{"debian", "ubuntu", "arch", "alpine"}
+var cveDistros = []string{"debian", "ubuntu", "arch", "alpine", "kev"}
 
 func (c CVEFeedSettings) urls() map[string]string {
 	return map[string]string{"debian": firstNonEmpty(c.DebianURL, defaultDebianFeed), "ubuntu": firstNonEmpty(c.UbuntuURL, defaultUbuntuFeed),
-		"arch": firstNonEmpty(c.ArchURL, defaultArchFeed), "alpine": strings.TrimRight(firstNonEmpty(c.AlpineURL, defaultAlpineFeed), "/")}
+		"arch": firstNonEmpty(c.ArchURL, defaultArchFeed), "alpine": strings.TrimRight(firstNonEmpty(c.AlpineURL, defaultAlpineFeed), "/"),
+		"kev": firstNonEmpty(c.KEVURL, defaultKEVFeed)}
 }
 
 // enabled lists the feeds that are switched on.
 func (c CVEFeedSettings) enabled() []string {
-	on := map[string]bool{"debian": c.Debian, "ubuntu": c.Ubuntu, "arch": c.Arch, "alpine": c.Alpine}
+	on := map[string]bool{"debian": c.Debian, "ubuntu": c.Ubuntu, "arch": c.Arch, "alpine": c.Alpine, "kev": c.KEV}
 	var out []string
 	for _, d := range cveDistros {
 		if on[d] {
@@ -96,7 +102,7 @@ func (c CVEFeedSettings) limit() int64 {
 
 // validate checks a saved section; it returns the message of the problem.
 func (c CVEFeedSettings) validate() string {
-	for _, u := range []string{c.DebianURL, c.UbuntuURL, c.ArchURL, c.AlpineURL} {
+	for _, u := range []string{c.DebianURL, c.UbuntuURL, c.ArchURL, c.AlpineURL, c.KEVURL} {
 		if u == "" {
 			continue
 		}
@@ -224,6 +230,7 @@ func parseAlpineSecdb(r io.Reader, branch string, fn func(cveFix) error) error {
 
 type cveFix struct {
 	Release, Package, CVE, Fixed, Severity string
+	Vector                                 string // CVSS v3 vector where the source has one (Ubuntu OSV)
 }
 
 // debianUrgency maps the tracker's urgency to a severity; skip reports
@@ -328,10 +335,13 @@ func (o osvRecord) fixes() []cveFix {
 	if id == "" {
 		return nil
 	}
-	sev := ""
+	sev, vector := "", ""
 	for _, s := range o.Severity {
-		if s.Type == "Ubuntu" {
+		switch s.Type {
+		case "Ubuntu":
 			sev = strings.ToLower(s.Score)
+		case "CVSS_V3":
+			vector = s.Score
 		}
 	}
 	var out []cveFix
@@ -349,7 +359,7 @@ func (o osvRecord) fixes() []cveFix {
 			}
 		}
 		if fixed != "" {
-			out = append(out, cveFix{Release: parts[1], Package: a.Package.Name, CVE: id, Fixed: fixed, Severity: sev})
+			out = append(out, cveFix{Release: parts[1], Package: a.Package.Name, CVE: id, Fixed: fixed, Severity: sev, Vector: vector})
 		}
 	}
 	return out
@@ -482,7 +492,11 @@ func fetchFixes(ctx context.Context, distro, u string, releases []string, limit 
 // importFeed replaces the fixes of one distribution with a fresh download;
 // on failure the old data stays and the error is recorded.
 func (s *Server) importFeed(ctx context.Context, distro, u string, limit int64) error {
-	err := s.importFeedTx(ctx, distro, u, limit)
+	imp := s.importFeedTx
+	if distro == "kev" {
+		imp = s.importKEV // app_vulns.go
+	}
+	err := imp(ctx, distro, u, limit)
 	if err != nil {
 		_, _ = s.db.Exec(ctx, `INSERT INTO cve_feeds(distro, url, error, error_at) VALUES ($1, $2, $3, now())
 			ON CONFLICT (distro) DO UPDATE SET url=EXCLUDED.url, error=EXCLUDED.error, error_at=now()`, distro, u, truncate(err.Error(), 500))
@@ -501,6 +515,7 @@ func (s *Server) importFeedTx(ctx context.Context, distro, u string, limit int64
 	}
 	var batch [][]any
 	rows := 0
+	scores := map[string]string{} // CVE: CVSS v3 vector
 	flush := func() error {
 		if len(batch) == 0 {
 			return nil
@@ -528,6 +543,9 @@ func (s *Server) importFeedTx(ctx context.Context, distro, u string, limit int64
 	}
 	n, err := fetchFixes(ctx, distro, u, releases, limit, func(f cveFix) error {
 		rows++
+		if f.Vector != "" {
+			scores[f.CVE] = f.Vector
+		}
 		batch = append(batch, []any{truncate(f.Release, 32), truncate(f.Package, 200), f.CVE, truncate(f.Fixed, 200), truncate(f.Severity, 20)})
 		if len(batch) >= cveBatch {
 			return flush()
@@ -557,59 +575,92 @@ func (s *Server) importFeedTx(ctx context.Context, distro, u string, limit int64
 		distro, u, kept, n); err != nil {
 		return err
 	}
+	if err := storeScores(ctx, tx, distro, scores); err != nil { // app_vulns.go
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
-// matchDeviceCVEs compares the installed packages of a Debian or Ubuntu
-// device with the fixed versions of its release and stores the CVEs whose
-// fix is newer than the installed version. The binary package's version
-// stands for the source version (equal, or with a binNMU suffix).
+// matchDeviceCVEs records the vulnerabilities of a device: the CVEs of
+// its release whose fixed version is newer than the installed source
+// version (Debian, Ubuntu, Arch, Alpine security data) and the CVEs of the
+// pending updates its package manager names (dnf, zypper). Findings keep
+// their history (app_vulns.go): one that no longer matches is remediated
+// when its package changed or went away, and dropped when the package is
+// unchanged, because then the data was corrected and it never applied.
 func matchDeviceCVEs(ctx context.Context, tx pgx.Tx, id string) error {
 	var osID, version string
-	if err := tx.QueryRow(ctx, `SELECT coalesce(inventory->>'os_id', ''), coalesce(inventory->>'os_version', '') FROM devices WHERE id=$1`, id).Scan(&osID, &version); err != nil {
-		return err
-	}
-	distro, release, ok := cveRelease(osID, version)
-	if !ok {
-		_, err := tx.Exec(ctx, `DELETE FROM device_cves WHERE device_id=$1`, id)
-		return err
-	}
-	// the trackers list source packages (Debian, Ubuntu, Alpine origin) or
-	// package names and pkgbase (Arch): the source when the agent sent it,
-	// else the package name
-	rows, err := tx.Query(ctx, `SELECT p.name, p.version, f.cve, f.fixed, f.severity FROM device_packages p
-		JOIN cve_fixes f ON f.distro=$2 AND f.release=$3 AND (f.package = CASE WHEN p.source <> '' THEN p.source ELSE p.name END OR $2 = 'arch' AND f.package = p.name)
-		WHERE p.device_id=$1`, id, distro, release)
-	if err != nil {
+	var pendingRaw []byte
+	if err := tx.QueryRow(ctx, `SELECT coalesce(inventory->>'os_id', ''), coalesce(inventory->>'os_version', ''),
+		CASE WHEN jsonb_typeof(updates->'pending') = 'array' THEN updates->'pending' ELSE '[]' END FROM devices WHERE id=$1`, id).Scan(&osID, &version, &pendingRaw); err != nil {
 		return err
 	}
 	var pkgs, cves, inst, fixed, sevs []string
-	seen, cmp := map[string]bool{}, versionCompare(distro)
-	var name, ver, cve, fix, sev string
-	_, err = pgx.ForEachRow(rows, []any{&name, &ver, &cve, &fix, &sev}, func() error {
-		if cmp(ver, fix) < 0 && !seen[cve+" "+name] {
-			seen[cve+" "+name] = true
-			pkgs, cves, inst, fixed, sevs = append(pkgs, name), append(cves, cve), append(inst, ver), append(fixed, fix), append(sevs, sev)
+	seen := map[string]bool{}
+	add := func(pkg, cve, installed, fix, sev string) {
+		if !seen[cve+" "+pkg] {
+			seen[cve+" "+pkg] = true
+			pkgs, cves, inst, fixed, sevs = append(pkgs, pkg), append(cves, cve), append(inst, installed), append(fixed, fix), append(sevs, sev)
 		}
-		return nil
-	})
-	if err != nil {
+	}
+	if distro, release, ok := cveRelease(osID, version); ok {
+		// the trackers list source packages and versions (Debian, Ubuntu,
+		// Alpine origin) or package names and pkgbase (Arch): the source
+		// when the agent sent it, else the package itself. A Debian binary
+		// package can carry its own version (postgresql 17+278 built from
+		// postgresql-common 278), so the source version is compared.
+		rows, err := tx.Query(ctx, `SELECT p.name, p.version, CASE WHEN p.source_version <> '' THEN p.source_version ELSE p.version END, f.cve, f.fixed, f.severity
+			FROM device_packages p
+			JOIN cve_fixes f ON f.distro=$2 AND f.release=$3 AND (f.package = CASE WHEN p.source <> '' THEN p.source ELSE p.name END OR $2 = 'arch' AND f.package = p.name)
+			WHERE p.device_id=$1`, id, distro, release)
+		if err != nil {
+			return err
+		}
+		cmp := versionCompare(distro)
+		var name, ver, srcVer, cve, fix, sev string
+		if _, err := pgx.ForEachRow(rows, []any{&name, &ver, &srcVer, &cve, &fix, &sev}, func() error {
+			if cmp(srcVer, fix) < 0 {
+				add(name, cve, ver, fix, sev)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	var pending []api.PendingUpdate
+	if err := json.Unmarshal(pendingRaw, &pending); err != nil {
+		return fmt.Errorf("pending updates: %w", err)
+	}
+	for _, p := range pending {
+		for _, c := range p.CVEs {
+			if cveRe.MatchString(c) {
+				add(truncate(p.Name, 200), c, p.Current, p.Candidate, p.Severity)
+			}
+		}
+	}
+	// gone: dropped when the package is unchanged, else remediated
+	gone := `c.device_id=$1 AND c.remediated_at IS NULL AND (c.cve, c.package) NOT IN (SELECT u.c, u.p FROM unnest($2::text[], $3::text[]) u(c, p))`
+	if _, err := tx.Exec(ctx, `DELETE FROM device_cves c WHERE `+gone+`
+		AND EXISTS (SELECT 1 FROM device_packages p WHERE p.device_id = c.device_id AND p.name = c.package AND p.version = c.installed)`, id, cves, pkgs); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM device_cves WHERE device_id=$1`, id); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE device_cves c SET remediated_at = now() WHERE `+gone, id, cves, pkgs); err != nil {
 		return err
 	}
 	if len(pkgs) == 0 {
 		return nil
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO device_cves(device_id, package, cve, installed, fixed, severity)
-		SELECT $1, * FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[])`, id, pkgs, cves, inst, fixed, sevs)
+	_, err := tx.Exec(ctx, `INSERT INTO device_cves(device_id, package, cve, installed, fixed, severity)
+		SELECT $1, * FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
+		ON CONFLICT (device_id, cve, package) DO UPDATE SET installed = EXCLUDED.installed, fixed = EXCLUDED.fixed, severity = EXCLUDED.severity,
+			last_seen = now(), first_seen = CASE WHEN device_cves.remediated_at IS NULL THEN device_cves.first_seen ELSE now() END, remediated_at = NULL`,
+		id, pkgs, cves, inst, fixed, sevs)
 	return err
 }
 
-// matchAllCVEs refreshes the matches of every Debian and Ubuntu device.
+// matchAllCVEs refreshes the matches of every device.
 func (s *Server) matchAllCVEs(ctx context.Context) error {
-	ids, err := collect(ctx, s.db, pgx.RowTo[string], `SELECT id FROM devices WHERE NOT retired AND inventory->>'os_id' IN ('debian', 'ubuntu', 'arch', 'alpine')`)
+	ids, err := collect(ctx, s.db, pgx.RowTo[string], `SELECT id FROM devices WHERE NOT retired`)
 	if err != nil {
 		return err
 	}
@@ -625,16 +676,32 @@ func (s *Server) matchAllCVEs(ctx context.Context) error {
 // refresh action share it.
 var cveRunning atomic.Bool
 
-// refreshCVEFeeds imports both feeds and matches the devices again. A
-// feed that fails keeps its last data.
+// fleetDistros are the os_id values of the devices in service.
+func (s *Server) fleetDistros(ctx context.Context) ([]string, error) {
+	return collect(ctx, s.db, pgx.RowTo[string], `SELECT DISTINCT inventory->>'os_id' FROM devices WHERE NOT retired AND inventory->>'os_id' IS NOT NULL`)
+}
+
+// activeFeeds are the switched on feeds worth a download: a distribution
+// feed only while at least one device runs that distribution (the Ubuntu
+// export alone is far beyond 500 MB a day); the KEV list always.
+func activeFeeds(on, fleet []string) []string {
+	return slices.DeleteFunc(slices.Clone(on), func(d string) bool { return d != "kev" && !slices.Contains(fleet, d) })
+}
+
+// refreshCVEFeeds imports the active feeds and matches the devices again.
+// A feed that fails keeps its last data.
 func (s *Server) refreshCVEFeeds(ctx context.Context) error {
 	if !cveRunning.CompareAndSwap(false, true) {
 		return errors.New("an import is running")
 	}
 	defer cveRunning.Store(false)
 	set := s.settings().CVEFeeds
+	fleet, err := s.fleetDistros(ctx)
+	if err != nil {
+		return err
+	}
 	var errs []error
-	for _, d := range set.enabled() {
+	for _, d := range activeFeeds(set.enabled(), fleet) {
 		if err := s.importFeed(ctx, d, set.urls()[d], set.limit()); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", d, err))
 		}
@@ -643,16 +710,20 @@ func (s *Server) refreshCVEFeeds(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// cveFeedsDue reports whether the daily import should run: a switched on
+// cveFeedsDue reports whether the daily import should run: an active
 // feed was never imported, or its last import is a day old and its last
 // failure at least cveRetryAfter ago.
 func (s *Server) cveFeedsDue(ctx context.Context) (bool, error) {
-	on := s.settings().CVEFeeds.enabled()
+	fleet, err := s.fleetDistros(ctx)
+	if err != nil {
+		return false, err
+	}
+	on := activeFeeds(s.settings().CVEFeeds.enabled(), fleet)
 	if len(on) == 0 {
 		return false, nil
 	}
 	var due bool
-	err := s.db.QueryRow(ctx, `SELECT count(*) < cardinality($3::text[]) OR coalesce(bool_or(coalesce(fetched_at, 'epoch') < now() - make_interval(secs => $1)
+	err = s.db.QueryRow(ctx, `SELECT count(*) < cardinality($3::text[]) OR coalesce(bool_or(coalesce(fetched_at, 'epoch') < now() - make_interval(secs => $1)
 			AND coalesce(error_at, 'epoch') < now() - make_interval(secs => $2)), false)
 		FROM cve_feeds WHERE distro = ANY($3)`, cveFeedPeriod.Seconds(), cveRetryAfter.Seconds(), on).Scan(&due)
 	return due, err
@@ -663,6 +734,10 @@ func (s *Server) cveLoop(ctx context.Context) {
 	// starts within minutes, not at the next full hour
 	t := time.NewTicker(5 * time.Minute)
 	defer t.Stop()
+	// once per start: findings follow a changed matching after an upgrade
+	if err := s.matchAllCVEs(ctx); err != nil {
+		s.log.Error("cve match", "err", err)
+	}
 	for {
 		if len(s.settings().CVEFeeds.enabled()) > 0 {
 			if due, err := s.cveFeedsDue(ctx); err != nil {
@@ -690,10 +765,16 @@ type cveFeedState struct {
 	Bytes     int64      `json:"bytes"`
 	Error     string     `json:"error"`
 	ErrorAt   *time.Time `json:"error_at"`
+	Skipped   bool       `json:"skipped"` // switched on, but no device runs the distribution: not downloaded
 }
 
 func (s *Server) apiCVEFeeds(w http.ResponseWriter, r *http.Request, _ apiCaller) {
-	list, err := collect(r.Context(), s.db, pgx.RowToStructByPos[cveFeedState], `SELECT distro, false, url, fetched_at, rows, bytes, error, error_at FROM cve_feeds ORDER BY distro`)
+	list, err := collect(r.Context(), s.db, pgx.RowToStructByPos[cveFeedState], `SELECT distro, false, url, fetched_at, rows, bytes, error, error_at, false FROM cve_feeds ORDER BY distro`)
+	if err != nil {
+		s.apiFail(w, err)
+		return
+	}
+	fleet, err := s.fleetDistros(r.Context())
 	if err != nil {
 		s.apiFail(w, err)
 		return
@@ -705,8 +786,10 @@ func (s *Server) apiCVEFeeds(w http.ResponseWriter, r *http.Request, _ apiCaller
 		}
 	}
 	on := set.enabled()
+	active := activeFeeds(on, fleet)
 	for i := range list {
 		list[i].Enabled = slices.Contains(on, list[i].Distro)
+		list[i].Skipped = list[i].Enabled && !slices.Contains(active, list[i].Distro)
 	}
 	slices.SortFunc(list, func(a, b cveFeedState) int {
 		return slices.Index(cveDistros, a.Distro) - slices.Index(cveDistros, b.Distro)

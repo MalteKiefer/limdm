@@ -171,6 +171,16 @@ Why these sources:
   `VERSION_ID` 3.20.3 is `v3.20`, a development snapshot
   (`3.21_alpha…`) is `edge`. With no Alpine device the import records
   that as its error.
+* Feed cost: a distribution feed is downloaded only while at least one
+  device in service runs that distribution (`os_id`). A switched on feed
+  without such a device shows **no devices, skipped** in the feed state
+  and costs nothing; the Ubuntu export alone is far beyond 500 MB a day.
+* CISA KEV (optional, off by default): the Known Exploited
+  Vulnerabilities list,
+  `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json`,
+  a small JSON file imported with the same switch, URL, limit and state
+  as the distribution feeds. It marks known exploited CVEs on the
+  [Vulnerabilities](vulnerabilities.md) page.
 
 Limits and failures:
 
@@ -208,10 +218,20 @@ Matching:
   database), and both are matched. Older agents send no source package:
   their package name is used, which misses packages such as `libssl3`
   (source `openssl`) or `libcrypto3` (origin `openssl`).
-* The binary package's version stands for the source version (the same,
-  or with a binNMU suffix on Debian).
-* Matches are refreshed after each import and whenever a device sends a
-  new package list. They show in the fleet CVE view, as **Known
+* Versions: the trackers list fixed source versions, and a Debian binary
+  package can carry its own version (`postgresql` 17+278+deb13u1 is built
+  from `postgresql-common` 278+deb13u1). The agent reports the source
+  version when it differs (`dpkg-query ${source:Version}`, or the version
+  osquery shows after the source name) and the matching compares it.
+  Older agents send none: their binary version stands in, which can show
+  a CVE as open that is fixed. Once an upgraded agent reports the source
+  version, such a finding is dropped (not counted as remediated). Alpine
+  origin and Arch pkgbase versions are the package's own version.
+* Matches are refreshed after each import, once at every server start,
+  and whenever a device sends a new package list or update status; the
+  CVEs of pending dnf and zypper updates are recorded as findings too.
+  Each finding keeps its history, see [Vulnerabilities](vulnerabilities.md).
+  Open matches show in the fleet CVE view, as **Known
   vulnerabilities** on the device tab, and as CVEs on the pending updates
   of the same package.
 * Releases: Debian by `VERSION_ID` (10 buster to 14 forky), Ubuntu by

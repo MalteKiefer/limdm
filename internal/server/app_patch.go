@@ -603,7 +603,7 @@ func (s *Server) apiDeviceUpdates(w http.ResponseWriter, r *http.Request, c apiC
 	}
 	out.Status.Pending = nonNilSlice(out.Status.Pending)
 	out.Status.Runs = nonNilSlice(out.Status.Runs)
-	vulns, err := collect(ctx, s.db, pgx.RowToStructByPos[deviceCVE], `SELECT cve, package, installed, fixed, severity FROM device_cves WHERE device_id=$1
+	vulns, err := collect(ctx, s.db, pgx.RowToStructByPos[deviceCVE], `SELECT cve, package, installed, fixed, severity FROM device_cves WHERE device_id=$1 AND remediated_at IS NULL
 		ORDER BY CASE lower(severity) WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, cve DESC, package LIMIT 2000`, id)
 	if err != nil {
 		s.apiFail(w, err)
@@ -696,7 +696,7 @@ func (s *Server) apiUpdatesFleet(w http.ResponseWriter, r *http.Request, c apiCa
 		n := fmt.Sprint(len(args) + 1)
 		list, err := collect(ctx, s.db, pgx.RowToStructByPos[fleetDevice], `SELECT x.id, x.hostname, array_agg(DISTINCT x.pkg ORDER BY x.pkg) FROM (
 				SELECT d.id, d.hostname, p->>'name' AS pkg `+pending+` AND p->'cves' ? $`+n+`
-				UNION ALL SELECT d.id, d.hostname, c.package FROM device_cves c JOIN devices d ON d.id = c.device_id WHERE c.cve = $`+n+` AND NOT d.retired AND `+scope+`
+				UNION ALL SELECT d.id, d.hostname, c.package FROM device_cves c JOIN devices d ON d.id = c.device_id WHERE c.cve = $`+n+` AND c.remediated_at IS NULL AND NOT d.retired AND `+scope+`
 			) x GROUP BY x.id, x.hostname ORDER BY x.hostname LIMIT 500`, append(args, cve)...)
 		if err != nil {
 			s.apiFail(w, err)
@@ -726,7 +726,7 @@ func (s *Server) apiUpdatesFleet(w http.ResponseWriter, r *http.Request, c apiCa
 	rows, err := s.db.Query(ctx, `SELECT x.cve, count(DISTINCT x.dev)::int, array_agg(DISTINCT x.pkg), array_agg(DISTINCT x.sev) FROM (
 			SELECT cve, d.id AS dev, p->>'name' AS pkg, coalesce(p->>'severity', '') AS sev
 			`+strings.Replace(pending, "WHERE", "CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(p->'cves') = 'array' THEN p->'cves' ELSE '[]' END) cve WHERE", 1)+`
-			UNION ALL SELECT c.cve, d.id, c.package, c.severity FROM device_cves c JOIN devices d ON d.id = c.device_id WHERE NOT d.retired AND `+scope+`
+			UNION ALL SELECT c.cve, d.id, c.package, c.severity FROM device_cves c JOIN devices d ON d.id = c.device_id WHERE c.remediated_at IS NULL AND NOT d.retired AND `+scope+`
 		) x GROUP BY x.cve ORDER BY 2 DESC, 1 DESC LIMIT 500`, args...)
 	if err != nil {
 		s.apiFail(w, err)
@@ -773,7 +773,7 @@ func (s *Server) apiUpdatesFleet(w http.ResponseWriter, r *http.Request, c apiCa
 		st.Sources[sc.Source] = sc.N
 	}
 	if err := s.db.QueryRow(ctx, `SELECT count(*)::int `+pending+` AND (p->>'security')::bool AND jsonb_array_length(coalesce(p->'cves', '[]')) = 0
-		AND NOT EXISTS (SELECT 1 FROM device_cves c WHERE c.device_id = d.id AND c.package = p->>'name')`, args...).Scan(&st.NoCVEData); err != nil {
+		AND NOT EXISTS (SELECT 1 FROM device_cves c WHERE c.device_id = d.id AND c.package = p->>'name' AND c.remediated_at IS NULL)`, args...).Scan(&st.NoCVEData); err != nil {
 		s.apiFail(w, err)
 		return
 	}

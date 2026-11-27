@@ -481,7 +481,8 @@ func (h *host) osqueryPackages() ([]api.Package, error) {
 	}
 	pkgs := make([]api.Package, 0, len(rows))
 	for _, r := range rows {
-		pkgs = append(pkgs, api.Package{Name: r["name"], Version: r["version"], Arch: r["arch"], Source: sourceName(r["name"], r["source"])})
+		pkgs = append(pkgs, api.Package{Name: r["name"], Version: r["version"], Arch: r["arch"], Source: sourceName(r["name"], r["source"]),
+			SourceVersion: sourceVersion(r["version"], r["source"], "")})
 	}
 	return pkgs, nil
 }

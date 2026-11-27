@@ -436,3 +436,18 @@ func sourceName(name, source string) string {
 	}
 	return source
 }
+
+// sourceVersion is the version of a Debian package's source when it
+// differs from the package's own version: dpkg's ${source:Version}, or the
+// "(278+deb13u1)" osquery shows after the source name.
+func sourceVersion(version, source, srcVersion string) string {
+	if srcVersion == "" {
+		if _, v, ok := strings.Cut(strings.TrimSpace(source), " ("); ok {
+			srcVersion = strings.TrimSuffix(v, ")")
+		}
+	}
+	if srcVersion = strings.TrimSpace(srcVersion); srcVersion == version {
+		return ""
+	}
+	return srcVersion
+}

@@ -9,6 +9,7 @@ import { inboxArea } from '../areas/inbox/routes'
 import { reportsArea } from '../areas/reports/routes'
 import { settingsArea } from '../areas/settings/routes'
 import { updatesArea } from '../areas/updates/routes'
+import { vulnerabilitiesArea } from '../areas/vulnerabilities/routes'
 import { createRoute, lazyRouteComponent } from '@tanstack/react-router'
 import type { Area } from './area'
 
@@ -18,4 +19,4 @@ const devArea: Area = {
   routes: (shell) => [createRoute({ getParentRoute: () => shell, path: '/dev/components', component: lazyRouteComponent(() => import('./gallery'), 'Gallery') })],
 }
 
-export const areas: Area[] = [homeArea, inboxArea, devicesArea, complianceArea, configArea, updatesArea, activityArea, reportsArea, settingsArea, devArea]
+export const areas: Area[] = [homeArea, inboxArea, devicesArea, complianceArea, configArea, updatesArea, vulnerabilitiesArea, activityArea, reportsArea, settingsArea, devArea]

@@ -94,6 +94,13 @@ func TestUpdateOutcome(t *testing.T) {
 			t.Errorf("%s %q: %q", c[0], c[1], got)
 		}
 	}
+	// postgresql 17+278+deb13u1 is built from postgresql-common 278+deb13u1
+	for _, c := range [][4]string{{"17+278+deb13u1", "", "278+deb13u1", "278+deb13u1"}, {"17+278+deb13u1", "postgresql-common (278+deb13u1)", "", "278+deb13u1"},
+		{"2.36-9", "glibc", "2.36-9", ""}, {"3.0.1-1", "openssl", "", ""}} {
+		if got := sourceVersion(c[0], c[1], c[2]); got != c[3] {
+			t.Errorf("%q %q %q: %q", c[0], c[1], c[2], got)
+		}
+	}
 	if b := pacmanBase("%NAME%\nlib32-openssl\n\n%VERSION%\n1:3.4.0-1\n\n%BASE%\nlib32-openssl\n\n%DESC%\nx\n"); b != "lib32-openssl" {
 		t.Fatal(b)
 	}

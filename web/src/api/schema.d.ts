@@ -2902,7 +2902,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * State of the Debian, Ubuntu, Arch and Alpine security data imports
+         * State of the Debian, Ubuntu, Arch, Alpine and CISA KEV imports
          * @description Last successful import (time, fixes kept, bytes), last error. A failed import keeps the last data.
          */
         get: operations["getCVEFeeds"];
@@ -2928,6 +2928,100 @@ export interface paths {
          * @description Runs in the background; poll GET /api/v1/updates/cve-feeds. 409 while the feeds are off or an import runs.
          */
         post: operations["refreshCVEFeeds"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/vulnerabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * CVEs of the devices in scope
+         * @description One row per CVE, aggregated over the findings (CVE, package, device) of the devices in scope. format=csv exports up to 10000 rows.
+         */
+        get: operations["listVulnerabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/vulnerabilities/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Open CVEs by severity, findings by status, packages with the most open CVEs */
+        get: operations["getVulnerabilitySummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/vulnerabilities/{cve}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One CVE: packages, devices, fixed versions, sources, KEV entry, references, risk acceptances */
+        get: operations["getVulnerability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/vulnerabilities/{cve}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept the risk of a CVE
+         * @description Admin tokens, not read only. For every device of the tenant (global for a global admin) or one device and/or package, until the given day. Accepted findings count as accepted, not active, until the acceptance expires or is revoked. Audited as vulnerability.accept.
+         */
+        post: operations["acceptVulnerability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/vulnerabilities/{cve}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke the risk acceptances of a CVE
+         * @description Admin tokens, not read only. Revokes every active acceptance of the CVE the caller may change, or only acceptance_id. Audited as vulnerability.reopen.
+         */
+        post: operations["reopenVulnerability"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4963,7 +5057,7 @@ export interface components {
                 devices?: number;
             }[];
         };
-        /** @description Security data of Debian, Ubuntu, Arch and Alpine; every feed is off by default */
+        /** @description Security data of Debian, Ubuntu, Arch and Alpine and the CISA KEV list; every feed is off by default. A distribution feed is downloaded only while at least one device runs that distribution. */
         CVEFeedSettings: {
             /** @description import the Debian Security Tracker daily */
             debian?: boolean;
@@ -4983,10 +5077,14 @@ export interface components {
             alpine_url?: string;
             /** @description download limit per feed in MB, 1024 when 0 */
             max_mb?: number;
+            /** @description import the CISA Known Exploited Vulnerabilities list daily */
+            kev?: boolean;
+            /** @description https URL of the KEV JSON; empty is https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json */
+            kev_url?: string;
         };
         CVEFeedState: {
             /** @enum {string} */
-            distro?: "debian" | "ubuntu" | "arch" | "alpine";
+            distro?: "debian" | "ubuntu" | "arch" | "alpine" | "kev";
             url?: string;
             /** Format: date-time */
             fetched_at?: string | null;
@@ -4996,6 +5094,8 @@ export interface components {
             /** Format: date-time */
             error_at?: string | null;
             enabled?: boolean;
+            /** @description switched on, but no device runs the distribution: not downloaded */
+            skipped?: boolean;
         };
         FirewallInventoryRule: {
             /** @description identity of the rule now; a removal names it */
@@ -5067,6 +5167,150 @@ export interface components {
             global_default: boolean;
             /** @description the device's own effective blueprint */
             device: boolean;
+        };
+        /** @description One CVE across the devices in scope */
+        Vulnerability: {
+            cve?: string;
+            /**
+             * @description highest level the sources state; the CVSS score when none does
+             * @enum {string}
+             */
+            severity?: "critical" | "high" | "medium" | "low" | "unknown";
+            /** @description CVSS v3 base score where a source provides a vector (Ubuntu OSV) */
+            cvss?: number | null;
+            /** @description listed in the CISA Known Exploited Vulnerabilities catalog */
+            kev?: boolean;
+            packages?: string[];
+            /** Format: date-time */
+            first_detected?: string;
+            /** Format: date-time */
+            last_seen?: string;
+            /**
+             * Format: date-time
+             * @description when the last finding was remediated (status remediated)
+             */
+            remediated_at?: string | null;
+            /**
+             * @description active when any finding is, else accepted when any is, else remediated
+             * @enum {string}
+             */
+            status?: "active" | "accepted" | "remediated";
+            /** @description devices with an open finding (remediated: with a remediated one) */
+            devices?: number;
+            active_devices?: number;
+            accepted_devices?: number;
+            remediated_devices?: number;
+        };
+        VulnerabilityList: {
+            items?: components["schemas"]["Vulnerability"][];
+            total?: number;
+            next_cursor?: string;
+        };
+        VulnerabilitySummary: {
+            /** @description active CVEs per level */
+            severity?: {
+                [key: string]: number;
+            };
+            /** @description device and CVE pairs per status (active, accepted, remediated) */
+            findings?: {
+                [key: string]: number;
+            };
+            top_packages?: {
+                name?: string;
+                cves?: number;
+                devices?: number;
+            }[];
+            /** @description any CVE data feed is switched on */
+            feeds_enabled?: boolean;
+            /** @description os_id of the devices with findings */
+            os?: string[];
+            /** @description up to 500 devices with findings */
+            devices?: {
+                id?: string;
+                hostname?: string;
+            }[];
+        };
+        CVEAcceptance: {
+            id?: number;
+            /** @description null: every tenant */
+            tenant_id?: number | null;
+            /** @description empty: every device */
+            device_id?: string;
+            /** @description empty: every package */
+            package?: string;
+            reason?: string;
+            /** Format: date-time */
+            expires_at?: string;
+            created_by?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            revoked_at?: string | null;
+            revoked_by?: string;
+            /** @enum {string} */
+            state?: "active" | "expired" | "revoked";
+        };
+        VulnerabilityDetail: {
+            cve?: string;
+            /** @enum {string} */
+            severity?: "critical" | "high" | "medium" | "low" | "unknown";
+            cvss?: number | null;
+            vector?: string;
+            kev?: {
+                name?: string;
+                /** Format: date-time */
+                added?: string | null;
+                /** Format: date-time */
+                due?: string | null;
+                ransomware?: boolean;
+            } | null;
+            /** @enum {string} */
+            status?: "active" | "accepted" | "remediated";
+            /** Format: date-time */
+            first_detected?: string;
+            packages?: {
+                name?: string;
+                installed?: string[];
+                fixed?: string[];
+                devices?: number;
+            }[];
+            devices?: {
+                id?: string;
+                hostname?: string;
+                os?: string;
+                package?: string;
+                installed?: string;
+                fixed?: string;
+                /** @description as the source states it */
+                severity?: string;
+                /** Format: date-time */
+                first_detected?: string;
+                /** Format: date-time */
+                last_seen?: string;
+                /** Format: date-time */
+                remediated_at?: string | null;
+                /** @enum {string} */
+                status?: "active" | "accepted" | "remediated";
+            }[];
+            /** @description debian, ubuntu, arch, alpine, or package manager (advisories of pending dnf and zypper updates) */
+            sources?: string[];
+            references?: {
+                label?: string;
+                url?: string;
+            }[];
+            acceptances?: components["schemas"]["CVEAcceptance"][];
+        };
+        CVEAcceptanceInput: {
+            reason: string;
+            /**
+             * Format: date
+             * @description last day it applies, within the next year
+             */
+            expires: string;
+            /** @description only this device; required for an admin limited to tags */
+            device_id?: string;
+            /** @description only this package */
+            package?: string;
         };
     };
     responses: {
@@ -10558,6 +10802,174 @@ export interface operations {
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listVulnerabilities: {
+        parameters: {
+            query?: {
+                /** @description part of the CVE ID or a package name */
+                q?: string;
+                /** @description comma list of critical, high, medium, low, unknown */
+                severity?: string;
+                /** @description comma list of active, accepted, remediated, or all; active when empty */
+                status?: string;
+                /** @description only findings of this device */
+                device?: string;
+                /** @description only devices with this os_id (debian, ubuntu, fedora ...) */
+                os?: string;
+                /** @description only findings in this package */
+                package?: string;
+                /** @description first detected on or after */
+                from?: string;
+                /** @description first detected on or before */
+                to?: string;
+                /** @description only CVEs in the KEV catalog */
+                kev?: "true";
+                /** @description -severity when empty */
+                sort?: "severity" | "-severity" | "cvss" | "-cvss" | "first_detected" | "-first_detected" | "devices" | "-devices" | "cve" | "-cve";
+                limit?: components["parameters"]["limit"];
+                /** @description next_cursor of the previous page */
+                cursor?: components["parameters"]["cursor"];
+                /** @description CSV instead of JSON */
+                format?: "csv";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VulnerabilityList"];
+                    "text/csv": string;
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getVulnerabilitySummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VulnerabilitySummary"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getVulnerability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cve: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VulnerabilityDetail"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    acceptVulnerability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cve: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CVEAcceptanceInput"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Created"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            415: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    reopenVulnerability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cve: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    acceptance_id?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            415: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
         };

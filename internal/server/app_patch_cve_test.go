@@ -178,8 +178,12 @@ func TestCVEImportAndMatch(t *testing.T) {
 	if due, err := s.cveFeedsDue(ctx); err != nil || !due {
 		t.Fatalf("not due after two days: %v %v", due, err)
 	}
-	on.set.CVEFeeds.Arch = true // switched on, never imported
+	on.set.CVEFeeds.Arch = true // switched on, never imported, but no Arch device: skipped
 	db.Exec(ctx, `UPDATE cve_feeds SET fetched_at = now()`)
+	if due, err := s.cveFeedsDue(ctx); err != nil || due {
+		t.Fatalf("a feed without devices is due: %v %v", due, err)
+	}
+	db.Exec(ctx, `UPDATE devices SET inventory='{"os_id":"arch"}' WHERE id='d3'`)
 	if due, err := s.cveFeedsDue(ctx); err != nil || !due {
 		t.Fatalf("a new feed is not due: %v %v", due, err)
 	}
