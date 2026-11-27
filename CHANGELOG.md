@@ -4,6 +4,19 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.20.1 (2026-11-27)
+
+### Added
+- The Containers and VMs tab follows a start, stop or restart: a spinner in the row, then the new state or the agent's error, polling with backoff (2, 3, 5, 10 s) for at most 3 minutes and not while the page is hidden.
+- A Refresh button on the Containers and VMs tab asks the device to sync and shows when the inventory was last confirmed and the cooldown left; `checked_at` and `sync_wait` in `GET /api/v1/devices/{id}/workloads`.
+
+### Changed
+- After a workload action the agent waits up to 30 s for the end state, adds `state: ...` to the result and checks in at once; it reads the workload inventory at most every 15 s.
+- `sync` is accepted once per device and 30 s (429 with Retry-After); `workload_action` answers 409 while another action for the same workload or 5 actions in all wait for the device.
+
+### Fixed
+- The activity showed the raw key `devices.type.workload_action`; workload and firewall rule commands have labels, and a test checks every command type.
+
 ## 0.20.0 (2026-11-27)
 
 ### Upgrade notes
