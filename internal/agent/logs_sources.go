@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -376,16 +377,62 @@ func openLogFile(p string, roots []string) (*os.File, os.FileInfo, error) {
 	return f, fi, nil
 }
 
+// logPatternMax bounds the files one pattern or directory source reads.
+const logPatternMax = 200
+
+// rotatedLog matches rotated or compressed copies (syslog.1, x.log.2.gz,
+// x-20261127, x.log.xz): a pattern or directory reads the live files only,
+// the rotation of a live file is followed through its ".1" copy.
+var rotatedLog = regexp.MustCompile(`(\.[0-9]+|[-_.][0-9]{8}|\.(gz|xz|bz2|zst|zip|lz4))(\.(gz|xz|bz2|zst))?$`)
+
+// logFiles expands the file sources: plain paths as they are, patterns and
+// directories ("dir/" is "dir/*") to their current matches, without rotated
+// copies, at most logPatternMax per source. Every match passes openLogFile.
+func (c *logCollector) logFiles() []string {
+	var out []string
+	for _, f := range c.cfg.Files {
+		p, ok := api.LogFilePattern(f, c.cfg.Roots)
+		if !api.LogFileWild(p) {
+			out = append(out, f) // a plain path: openLogFile checks it
+			continue
+		}
+		if !ok {
+			continue
+		}
+		matches, err := filepath.Glob(p)
+		if err != nil {
+			continue
+		}
+		n := 0
+		for _, m := range matches {
+			if n == logPatternMax {
+				break
+			}
+			if rotatedLog.MatchString(filepath.Base(m)) {
+				continue
+			}
+			if fi, err := os.Lstat(m); err != nil || !fi.Mode().IsRegular() {
+				continue // directories, links and devices are never read
+			}
+			out = append(out, m)
+			n++
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
 func (c *logCollector) collectFiles() {
 	if c.st.Files == nil {
 		c.st.Files = map[string]fileCursor{}
 	}
+	files := c.logFiles()
 	for p := range c.st.Files {
-		if !slices.Contains(c.cfg.Files, p) {
+		if !slices.Contains(files, p) {
 			delete(c.st.Files, p)
 		}
 	}
-	for _, p := range c.cfg.Files {
+	for _, p := range files {
 		c.collectFile(p)
 	}
 }

@@ -159,11 +159,37 @@ func LogFileAllowed(p string, roots []string) bool {
 	switch {
 	case strings.HasPrefix(p, "/var/log/") && len(p) > len("/var/log/"):
 		return true
-	case len(parts) >= 5 && parts[1] == "srv" && parts[2] != "" && parts[3] == "log" && parts[4] != "":
+	case len(parts) >= 5 && parts[1] == "srv" && parts[2] != "" && (parts[3] == "log" || parts[3] == "logs") && parts[4] != "":
 		return true
 	}
 	return slices.ContainsFunc(roots, func(r string) bool { return LogRootValid(r) && strings.HasPrefix(p, r+"/") })
 }
+
+// LogFilePattern normalizes a file source: a path, a pattern with * and ?
+// (matching within one path component, as filepath.Glob does) or a
+// directory ending in "/" for every file directly in it. ok is false when
+// the pattern can name a file outside the allowed locations: every
+// wildcard component is replaced by a plain name and the result must pass
+// LogFileAllowed; the agent checks every match again (LogFileAllowed, the
+// real path, links and owners) before it opens it.
+func LogFilePattern(p string, roots []string) (string, bool) {
+	if strings.HasSuffix(p, "/") && len(p) > 1 {
+		p += "*"
+	}
+	if !strings.HasPrefix(p, "/") || p != path.Clean(p) || len(p) > 512 || !noControl(p, 512) || strings.ContainsAny(p, "[\\") {
+		return p, false
+	}
+	parts := strings.Split(p, "/")
+	for i, c := range parts {
+		if strings.ContainsAny(c, "*?") {
+			parts[i] = "x" // a wildcard cannot leave the allowed location: /var/*/x or /*/log/x fail here
+		}
+	}
+	return p, LogFileAllowed(strings.Join(parts, "/"), roots)
+}
+
+// LogFileWild reports a file source with wildcards.
+func LogFileWild(p string) bool { return strings.ContainsAny(p, "*?") }
 
 // LogGlob matches name against a pattern with * as the only wildcard.
 func LogGlob(pattern, name string) bool {
@@ -210,12 +236,8 @@ func (l Logging) validate() error {
 		}
 	}
 	for _, f := range l.Files {
-		if !cleanAbs(f) {
-			bad("files: %q must be a clean absolute path without wildcards", f)
-			continue
-		}
-		if !LogFileAllowed(f, l.Roots) {
-			bad("files: %q must be below /var/log/, /srv/<name>/log/ or one of roots", f)
+		if _, ok := LogFilePattern(f, l.Roots); !ok {
+			bad("files: %q must be a clean absolute path, pattern (* and ?) or directory ending in / below /var/log/, /srv/<name>/log(s)/ or one of roots", f)
 		}
 	}
 	for _, f := range []struct {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -282,5 +283,35 @@ func TestLogFileCustomRoot(t *testing.T) {
 	}
 	if lines, _ := readSegment(segs[0]); len(lines) != 1 || lines[0].Message != "from the custom root" {
 		t.Errorf("lines %+v", lines)
+	}
+}
+
+func TestLogFilePatterns(t *testing.T) {
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	root := filepath.Join(base, "app", "logs")
+	os.MkdirAll(filepath.Join(root, "sub"), 0o755)
+	for _, n := range []string{"a.log", "b.log", "b.log.1", "c.log.2.gz", "d.txt", "e-20261127"} {
+		os.WriteFile(filepath.Join(root, n), []byte("x\n"), 0o644)
+	}
+	os.Symlink(filepath.Join(root, "a.log"), filepath.Join(root, "link.log"))
+	files := func(src ...string) []string {
+		c := newLogCollector(filepath.Join(base, "spool"))
+		if err := c.configure(api.Logging{Enabled: true, Roots: []string{root}, Files: src, MinPriority: "debug"}); err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, f := range c.logFiles() {
+			got = append(got, filepath.Base(f))
+		}
+		return got
+	}
+	if got := files(root + "/*.log"); !slices.Equal(got, []string{"a.log", "b.log"}) {
+		t.Errorf("pattern: %v", got) // no rotated copies, no links
+	}
+	if got := files(root + "/"); !slices.Equal(got, []string{"a.log", "b.log", "d.txt"}) {
+		t.Errorf("directory: %v", got) // files only, no sub directories
+	}
+	if got := files(root+"/a.log", root+"/*.log"); !slices.Equal(got, []string{"a.log", "b.log"}) {
+		t.Errorf("duplicates: %v", got)
 	}
 }

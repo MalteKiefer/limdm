@@ -4,6 +4,11 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.21.2 (2026-11-27)
+
+### Added
+- Log file sources accept patterns with `*` and `?` (`/var/log/*.log`, `/srv/*/logs/*.log`) and directories ending in `/`; every match passes the same checks as a plain path, rotated and compressed copies are skipped, at most 200 files per entry. `/srv/<name>/logs/` is allowed like `/srv/<name>/log/`.
+
 ## 0.21.1 (2026-11-27)
 
 ### Security
