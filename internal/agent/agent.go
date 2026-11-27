@@ -466,6 +466,9 @@ func New(log *slog.Logger) (*Agent, error) {
 		return nil, err
 	}
 	a := &Agent{cfg: cfg, client: newClient(tc), host: h, log: log}
+	if exists(wipedFile) { // wiped, but the restart did not happen yet
+		go wipeReboot()
+	}
 	if b, err := os.ReadFile(stateFile); err == nil {
 		if err := json.Unmarshal(b, &a.state); err != nil {
 			log.Warn("state file unreadable, starting from defaults", "err", err)

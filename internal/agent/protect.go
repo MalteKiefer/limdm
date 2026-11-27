@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/maltekiefer/limdm/internal/api"
 )
@@ -21,7 +22,7 @@ import (
 // set again with the recovery key (see docs/disk-encryption.md).
 //
 // wipe: erases the LUKS headers (cryptsetup luksErase), which makes the data
-// unrecoverable, and powers off. Devices without LUKS are refused: there is
+// unrecoverable, and forces a restart two minutes later (see wipeReboot). Devices without LUKS are refused: there is
 // no fast way to guarantee deletion.
 
 const lostPrefix = "This device was reported lost and is locked by IT (LiMDM).\n"
@@ -174,8 +175,45 @@ func (a *Agent) wipe() (string, error) {
 		report = append(report, v.Path+": key slots erased, data unrecoverable")
 	}
 	a.event("device wiped")
-	// power off after the result was reported with the next check in
-	_, _ = sh("shutdown", "-h", "+2", "LiMDM: device wiped by IT")
+	// restart after the result was reported with the next check in
+	if len(report) > 0 {
+		_ = os.WriteFile(wipedFile, []byte(time.Now().UTC().Format(time.RFC3339)), 0o600)
+		go wipeReboot()
+	}
 	a.syncNow = true
 	return strings.Join(report, "\n"), errors.Join(errs...)
+}
+
+// wipedFile records when a wipe erased the disk; while it exists the agent
+// forces a restart (also when it starts again before the restart happened).
+const wipedFile = stateDir + "/wiped"
+
+// wipeRebootAfter leaves time to report the result.
+const wipeRebootAfter = 2 * time.Minute
+
+// wipeReboot restarts the device wipeRebootAfter after the wipe, whatever
+// blocks it: sleep is masked so the device cannot suspend meanwhile, the
+// deadline is checked against the wall clock (a device that slept through it
+// restarts right after waking up), inhibitors are ignored and, should systemd
+// refuse, the kernel is told to reboot directly. The disk is unreadable after
+// luksErase, so nothing worth a clean shutdown is lost.
+func wipeReboot() {
+	_, _ = sh("systemctl", "mask", "--runtime", "sleep.target", "suspend.target", "hibernate.target", "hybrid-sleep.target", "suspend-then-hibernate.target")
+	at := time.Now()
+	if b, err := os.ReadFile(wipedFile); err == nil {
+		if t, err := time.Parse(time.RFC3339, strings.TrimSpace(string(b))); err == nil {
+			at = t
+		}
+	}
+	deadline := at.Add(wipeRebootAfter)
+	// Round(0) drops the monotonic reading, which stands still during suspend
+	for time.Now().Round(0).Before(deadline) {
+		time.Sleep(5 * time.Second)
+	}
+	for _, args := range [][]string{{"systemctl", "reboot", "--force"}, {"systemctl", "reboot", "--force", "--force"}} {
+		if _, err := sh(args[0], args[1:]...); err == nil {
+			time.Sleep(30 * time.Second) // still running: the next way
+		}
+	}
+	_ = os.WriteFile("/proc/sysrq-trigger", []byte("b"), 0o200)
 }
