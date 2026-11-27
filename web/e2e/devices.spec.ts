@@ -164,6 +164,25 @@ test('phone width: cut off tabs show a hint that scrolls them', async ({ page })
   await expect(page.getByRole('button', { name: 'Weitere Einträge links' }).first()).toBeVisible()
 })
 
+test('shell transcript: replay in a read only terminal, plain text, downloads', async ({ page }) => {
+  await page.goto('/app/devices/e2e-ws1/shell/e2e-sh1')
+  await expect(page.getByRole('heading', { name: 'Mitschnitt' })).toBeVisible()
+  // the replay is an xterm with the canvas renderer
+  await expect(page.locator('.xterm canvas').first()).toBeVisible()
+  await expect.poll(async () => (await page.locator('.xterm').boundingBox())!.height).toBeLessThan(200) // sized to the content
+  await page.getByRole('radio', { name: 'Nur Text' }).click()
+  const text = page.locator('pre')
+  await expect(text).toContainText('malte@pc ~> ls\nDocuments  a.txt  b.txt\nmalte@pc ~> exit')
+  await expect(text).not.toContainText('(B')
+  await expect(text).not.toContainText('⏎')
+  const dl = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Rohdaten (.log)' }).click()
+  expect((await dl).suggestedFilename()).toBe('shell-e2e-sh1.log')
+  const dl2 = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Text (.txt)' }).click()
+  expect((await dl2).suggestedFilename()).toBe('shell-e2e-sh1.txt')
+})
+
 test('retire and delete a device', async ({ page }) => {
   await page.goto('/app/devices/e2e-srv1')
   await page.getByRole('button', { name: 'Aktionen für e2e-srv1' }).click()

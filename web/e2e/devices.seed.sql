@@ -21,5 +21,8 @@ VALUES
    '{}', now() - interval '9 days', '[]', 0, '0.17.0', now() - interval '60 days');
 INSERT INTO device_events(device_id, at, detail) VALUES ('e2e-ws1', now() - interval '5 minutes', 'checked in from the e2e seed');
 INSERT INTO compliance_changes(device_id, at, check_id, status) VALUES ('e2e-ws1', now() - interval '4 minutes', 'ssh.root', 'pass');
+-- an ended fish session (escape sequences, autosuggestion, missing newline marker)
+INSERT INTO shell_sessions(id, device_id, requested_by, local_user, created_at, connected_at, ended_at, end_reason, transcript)
+VALUES ('e2e-sh1', 'e2e-ws1', 'local:e2e', 'limdm-support', now() - interval '20 minutes', now() - interval '19 minutes', now() - interval '18 minutes', 'ended in the console', decode('1b5d303b7e071b5b3f32303034681b5b33326d6d616c74651b28421b5b6d407063201b5b33326d7e1b28421b5b6d3e201b5b4b6c1b5b39306d73202d6c611b28421b5b6d1b5b3544731b5b39306d202d6c611b28421b5b6d1b5b34441b5b4b0d0a1b5b3f323030346c1b5b30313b33346d446f63756d656e74731b5b306d2020612e7478742020622e7478740d0a1b5b326de28f8e1b28421b5b6d202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200d200d1b5b33326d6d616c74651b28421b5b6d407063201b5b33326d7e1b28421b5b6d3e20657869740d0a', 'hex'));
 INSERT INTO device_packages(device_id, name, version, arch) VALUES ('e2e-ws1', 'openssl', '3.0.2-0ubuntu1', 'amd64'), ('e2e-ws1', 'bash', '5.2.21', 'amd64'), ('e2e-ws2', 'openssl', '3.0.15-1', 'amd64');
 COMMIT;

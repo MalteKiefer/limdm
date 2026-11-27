@@ -3,17 +3,19 @@
 // origin, canvas renderer: no inline styles under the CSP), the transcript
 // for admins and auditors once it ended.
 import { Link, useParams } from '@tanstack/react-router'
-import { ArrowLeft, Terminal as TerminalIcon } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { ArrowLeft, Download, Terminal as TerminalIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { getCsrfToken } from '../../api/client'
-import { Card, PageHeader } from '../../components/ui'
+import { api, getCsrfToken, unwrap } from '../../api/client'
+import { saveBlob } from '../../components/download'
+import { Card, PageHeader, Segmented } from '../../components/ui'
 import { EmptyState, ErrorState, LoadingState, errorText } from '../../components/states'
 import { toast } from '../../components/toast'
 import { useT, type MessageKey } from '../../i18n'
 import { dateTime, fmt } from '../../i18n/format'
 import { useShellEnd, useShellSession } from './api'
 
-type Term = { open(el: HTMLElement): void; write(d: Uint8Array): void; onData(f: (d: string) => void): void; loadAddon(a: unknown): void; focus(): void; cols: number; rows: number; options: { disableStdin?: boolean } }
+type Term = { open(el: HTMLElement): void; write(d: Uint8Array, done?: () => void): void; resize(cols: number, rows: number): void; dispose(): void; buffer: { active: { baseY: number; cursorY: number } }; onData(f: (d: string) => void): void; loadAddon(a: unknown): void; focus(): void; cols: number; rows: number; options: { disableStdin?: boolean } }
 type XtermWindow = Window & { Terminal?: new (o: object) => Term; FitAddon?: { FitAddon: new () => { fit(): void } }; CanvasAddon?: { CanvasAddon: new () => unknown } }
 
 const base = '/static/vendor/xterm/'
@@ -85,11 +87,93 @@ export function ShellPage() {
               {x.truncated && ` (${t('devices.shell.truncated')})`}
             </dd>
           </dl>
-          {x.transcript ? <pre className="max-h-[60dvh] overflow-auto rounded-md bg-surface-2 p-3 font-mono text-meta whitespace-pre-wrap">{x.transcript}</pre> : <EmptyState compact icon={TerminalIcon} title={t('devices.shell.noOutput')} />}
+          {x.bytes > 0 ? <Transcript sid={sid} text={x.transcript ?? ''} /> : <EmptyState compact icon={TerminalIcon} title={t('devices.shell.noOutput')} />}
         </Card>
       )}
     </div>
   )
+}
+
+/**
+ * The recording of an ended session: replayed in a read only terminal (so
+ * redraws, colours and prompts look as they did), or as the server's plain
+ * text; both download. The raw bytes are fetched once (an audited read), not
+ * under a 'devices' key, so live updates do not read them again.
+ */
+function Transcript({ sid, text }: { sid: string; text: string }) {
+  const t = useT()
+  const [mode, setMode] = useState<'term' | 'text'>('term')
+  const raw = useQuery({
+    queryKey: ['shell-transcript', sid],
+    staleTime: Infinity,
+    queryFn: () => unwrap(api.GET('/api/v1/shell-sessions/{sid}/transcript', { params: { path: { sid } }, parseAs: 'arrayBuffer' })) as Promise<ArrayBuffer>,
+  })
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Segmented
+          label={t('devices.shell.view')}
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: 'term', label: t('devices.shell.viewTerm') },
+            { value: 'text', label: t('devices.shell.viewText') },
+          ]}
+        />
+        <span className="flex-1" />
+        <button type="button" className="btn" disabled={!raw.data} onClick={() => raw.data && saveBlob(new Blob([raw.data], { type: 'application/octet-stream' }), `shell-${sid}.log`)}>
+          <Download size={14} aria-hidden /> {t('devices.shell.downloadRaw')}
+        </button>
+        <button type="button" className="btn" onClick={() => saveBlob(new Blob([text], { type: 'text/plain;charset=utf-8' }), `shell-${sid}.txt`)}>
+          <Download size={14} aria-hidden /> {t('devices.shell.downloadText')}
+        </button>
+      </div>
+      {mode === 'text' ? (
+        <pre className="max-h-[60dvh] overflow-auto rounded-md bg-surface-2 p-3 font-mono text-meta whitespace-pre-wrap">{text}</pre>
+      ) : raw.error ? (
+        <ErrorState error={raw.error} onRetry={() => void raw.refetch()} />
+      ) : !raw.data ? (
+        <LoadingState rows={3} />
+      ) : (
+        <Replay data={raw.data} />
+      )}
+    </div>
+  )
+}
+
+/** Writes the recorded bytes into a terminal without input, as tall as the content (scrolls beyond 40 rows). */
+function Replay({ data }: { data: ArrayBuffer }) {
+  const t = useT()
+  const el = useRef<HTMLDivElement>(null)
+  const [missing, setMissing] = useState(false)
+  useEffect(() => {
+    let term: Term | undefined
+    let alive = true
+    loadXterm()
+      .then(() => {
+        const w = window as XtermWindow
+        if (!alive || !el.current || !w.Terminal) return
+        term = new w.Terminal({ disableStdin: true, cursorBlink: false, cursorInactiveStyle: 'none', convertEol: false, scrollback: 100_000, rows: 40 })
+        const fit = w.FitAddon ? new w.FitAddon.FitAddon() : null
+        if (fit) term.loadAddon(fit)
+        // the canvas renderer before open(): the DOM renderer would inject <style> elements (CSP)
+        if (w.CanvasAddon) term.loadAddon(new w.CanvasAddon.CanvasAddon())
+        term.open(el.current)
+        fit?.fit() // the width of the card
+        const tm = term
+        tm.write(new Uint8Array(data), () => {
+          // used lines: everything above the cursor plus its line
+          if (alive) tm.resize(tm.cols, Math.min(Math.max(tm.buffer.active.baseY + tm.buffer.active.cursorY + 1, 4), 40))
+        })
+      })
+      .catch(() => setMissing(true))
+    return () => {
+      alive = false
+      term?.dispose()
+    }
+  }, [data])
+  if (missing) return <p className="text-body text-muted">{t('devices.shell.missing')}</p>
+  return <div ref={el} className="w-full overflow-hidden rounded-md p-1" role="img" aria-label={t('devices.shell.replay')} />
 }
 
 function Terminal({ sid }: { sid: string }) {
@@ -107,8 +191,9 @@ function Terminal({ sid }: { sid: string }) {
         const term = new w.Terminal({ cursorBlink: true, convertEol: false, scrollback: 5000 })
         const fit = w.FitAddon ? new w.FitAddon.FitAddon() : null
         if (fit) term.loadAddon(fit)
-        term.open(el.current)
+        // the canvas renderer before open(): the DOM renderer would inject <style> elements (CSP)
         if (w.CanvasAddon) term.loadAddon(new w.CanvasAddon.CanvasAddon())
+        term.open(el.current)
         fit?.fit()
         const proto = location.protocol === 'https:' ? 'wss://' : 'ws://'
         ws = new WebSocket(`${proto}${location.host}/shell/${encodeURIComponent(sid)}/ws?csrf=${encodeURIComponent(getCsrfToken())}`)
