@@ -73,6 +73,19 @@ func workloadCmd(kind string) string {
 	return kind
 }
 
+// workloadsEvery coalesces inventories: check ins in quick succession (sync
+// now clicked again and again) read the tools at most once in this time.
+const workloadsEvery = 15 * time.Second
+
+// workloads is the inventory for a check in, read again only after
+// workloadsEvery or a workload action.
+func (a *Agent) workloads() *api.Workloads {
+	if a.wlAt.IsZero() || time.Since(a.wlAt) >= workloadsEvery {
+		a.wl, a.wlAt = collectWorkloads(), time.Now()
+	}
+	return a.wl
+}
+
 // collectWorkloads reads every installed tool; nil when there is none.
 func collectWorkloads() *api.Workloads {
 	w := &api.Workloads{Tools: []api.WorkloadTool{}, Items: []api.Workload{}}
@@ -522,6 +535,7 @@ func (a *Agent) workloadAction(c api.Command) (string, error) {
 	argv := workloadArgv(w)
 	out, err := run(6*time.Minute, argv[0], argv[1:]...)
 	a.event("workload %s %s (%s): %s, error=%v", w.Kind, it.Name, w.ID, w.Action, err)
+	a.wlAt = time.Time{} // the next check in reports the new state
 	res := strings.TrimSpace(fmt.Sprintf("%s %s %s\n%s", w.Action, w.Kind, it.Name, out))
 	if err == nil {
 		res += "\n" + settleWorkload(w)

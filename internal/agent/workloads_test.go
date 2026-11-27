@@ -198,6 +198,21 @@ func TestWorkloadActionGate(t *testing.T) {
 	}
 }
 
+func TestWorkloadsCoalesced(t *testing.T) {
+	calls := fakeWorkloads(t, func(k string) bool { return k == "docker" })
+	a := &Agent{}
+	reads := func() int {
+		return len(slices.DeleteFunc(slices.Clone(*calls), func(c string) bool { return !strings.HasPrefix(c, "docker version") }))
+	}
+	if a.workloads() == nil || a.workloads() == nil || reads() != 1 {
+		t.Fatalf("two check ins in a row read the tools %d times", reads())
+	}
+	a.wlAt = time.Now().Add(-workloadsEvery) // after the interval, or after an action
+	if a.workloads(); reads() != 2 {
+		t.Fatalf("not read again: %d", reads())
+	}
+}
+
 func TestSettleWorkload(t *testing.T) {
 	fakeWorkloads(t, func(k string) bool { return k == "docker" })
 	step, limit := workloadSettleStep, workloadSettle
