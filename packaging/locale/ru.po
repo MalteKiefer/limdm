@@ -22,7 +22,7 @@ msgid "Compliance"
 msgstr "Соответствие"
 
 msgid "Blueprint"
-msgstr "Blueprint"
+msgstr "Блупринт"
 
 msgid "Certificates"
 msgstr "Сертификаты"
@@ -43,10 +43,10 @@ msgid "Compliance baseline"
 msgstr "Базовые требования соответствия"
 
 msgid "Software updates"
-msgstr "Обновления программ"
+msgstr "Обновления ПО"
 
 msgid "Firewall"
-msgstr "Межсетевой экран"
+msgstr "Брандмауэр"
 
 msgid "Packages"
 msgstr "Пакеты"
@@ -208,10 +208,10 @@ msgid "Nothing Recorded"
 msgstr "Записей нет"
 
 msgid "Settings of Your Blueprint"
-msgstr "Настройки вашего blueprint"
+msgstr "Настройки вашего блупринта"
 
 msgid "Settings IT applies to this device through its blueprint. Secrets are hidden."
-msgstr "Настройки, которые ИТ-отдел применяет к этому устройству через его blueprint. Секреты скрыты."
+msgstr "Настройки, которые ИТ-отдел применяет к этому устройству через его блупринт. Секреты скрыты."
 
 msgid "Active"
 msgstr "Активно"
@@ -395,11 +395,11 @@ msgstr[2] "%d ключей восстановления хранятся в ИТ
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Admin rights only for centrally approved users"
-msgstr "Права администратора только у централизованно одобренных пользователей"
+msgstr "Права администратора только для централизованно одобренных пользователей"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Automatic updates are declared"
-msgstr "Автоматические обновления заданы"
+msgstr "Автоматические обновления задекларированы"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Boot loader is password protected"
@@ -411,7 +411,7 @@ msgstr "Дампы памяти ограничены"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Desktop login through the central identity provider"
-msgstr "Вход в систему через центральный поставщик удостоверений"
+msgstr "Вход на рабочий стол через центрального поставщика удостоверений"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Device key is held in the TPM"
@@ -419,7 +419,7 @@ msgstr "Ключ устройства хранится в TPM"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Disk encryption recovery keys are escrowed"
-msgstr "Ключи восстановления шифрования диска переданы на хранение"
+msgstr "Ключи восстановления шифрования дисков депонированы"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Full ASLR is enabled"
@@ -427,7 +427,7 @@ msgstr "Полная ASLR включена"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Host firewall is active"
-msgstr "Межсетевой экран узла активен"
+msgstr "Брандмауэр хоста активен"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "ICMP redirects and source routing are disabled"
@@ -435,11 +435,11 @@ msgstr "Перенаправления ICMP и маршрутизация от �
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "IP forwarding is disabled"
-msgstr "Пересылка IP отключена"
+msgstr "IP переадресация отключена"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Kernel log and pointers are restricted"
-msgstr "Доступ к журналу и указателям ядра ограничен"
+msgstr "Журнал ядра и указатели ограничены"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "LUKS volumes are bound to the TPM"
@@ -455,7 +455,7 @@ msgstr "Мандатное управление доступом в принуд
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "No accounts with empty passwords"
-msgstr "Нет учётных записей с пустым паролем"
+msgstr "Нет учётных записей с пустыми паролями"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "No pending reboot older than 7 days"
@@ -467,7 +467,7 @@ msgstr "Нет обновлений безопасности, ожидающих
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Only root has UID 0"
-msgstr "UID 0 только у root"
+msgstr "Только root имеет UID 0"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Operating system version is supported"
@@ -475,23 +475,23 @@ msgstr "Версия операционной системы поддержив�
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Password quality (minimum length 14)"
-msgstr "Качество пароля (минимальная длина 14)"
+msgstr "Качество паролей (минимальная длина 14)"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "SSH allows keys only and no forwarding"
-msgstr "SSH допускает только ключи и запрещает переадресацию"
+msgstr "SSH разрешает только ключи и без переадресации"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "SSH offers no weak algorithms or host keys"
-msgstr "SSH не предлагает слабых алгоритмов и ключей узла"
+msgstr "SSH не предлагает слабых алгоритмов и ключей хоста"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "SSH server is hardened"
-msgstr "SSH-сервер защищён"
+msgstr "Сервер SSH защищён"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Screen lock on idle is enforced"
-msgstr "Блокировка экрана при бездействии обязательна"
+msgstr "Блокировка экрана при бездействии обеспечена"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Secure Boot is enabled"
@@ -507,11 +507,11 @@ msgstr "Системный диск зашифрован"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "System log is persistent"
-msgstr "Системный журнал сохраняется постоянно"
+msgstr "Системный журнал хранится постоянно"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "TCP SYN cookies, martian logging, broadcast ICMP ignored"
-msgstr "TCP SYN cookies, журналирование «марсианских» пакетов, широковещательный ICMP игнорируется"
+msgstr "TCP SYN cookies, журналирование пакетов martian, широковещательный ICMP игнорируется"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Time synchronisation is active"
@@ -519,11 +519,11 @@ msgstr "Синхронизация времени активна"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "UDF is disabled"
-msgstr "UDF отключена"
+msgstr "UDF отключён"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "USB mass storage is blocked"
-msgstr "USB-накопители заблокированы"
+msgstr "Запоминающие устройства USB заблокированы"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Unused filesystems are disabled"

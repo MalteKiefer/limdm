@@ -13,7 +13,7 @@ msgid "never"
 msgstr "jamais"
 
 msgid "Overview"
-msgstr "Vue d'ensemble"
+msgstr "Vue d’ensemble"
 
 msgid "Software"
 msgstr "Logiciels"
@@ -46,7 +46,7 @@ msgid "Software updates"
 msgstr "Mises à jour logicielles"
 
 msgid "Firewall"
-msgstr "Pare-feu"
+msgstr "Pare feu"
 
 msgid "Packages"
 msgstr "Paquets"
@@ -64,7 +64,7 @@ msgid "OS versions"
 msgstr "Versions du système"
 
 msgid "Screen lock"
-msgstr "Verrouillage de l'écran"
+msgstr "Verrouillage de l’écran"
 
 msgid "Privacy"
 msgstr "Confidentialité"
@@ -256,7 +256,7 @@ msgid "Server"
 msgstr "Serveur"
 
 msgid "Device ID"
-msgstr "ID de l'appareil"
+msgstr "ID de l’appareil"
 
 msgid "Software is installed through this catalog. Other app stores are read only."
 msgstr "Les logiciels sont installés via ce catalogue. Les autres logithèques sont en lecture seule."
@@ -393,7 +393,7 @@ msgstr[1] "%d clés de récupération sont déposées auprès du service informa
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Admin rights only for centrally approved users"
-msgstr "Droits d'administration réservés aux utilisateurs approuvés centralement"
+msgstr "Droits d’administration uniquement pour les utilisateurs approuvés centralement"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Automatic updates are declared"
@@ -401,7 +401,7 @@ msgstr "Les mises à jour automatiques sont déclarées"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Boot loader is password protected"
-msgstr "Le chargeur d'amorçage est protégé par mot de passe"
+msgstr "Le chargeur d’amorçage est protégé par mot de passe"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Core dumps are restricted"
@@ -409,11 +409,11 @@ msgstr "Les core dumps sont restreints"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Desktop login through the central identity provider"
-msgstr "Connexion au bureau via le fournisseur d'identité central"
+msgstr "Connexion au bureau via le fournisseur d’identité central"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Device key is held in the TPM"
-msgstr "La clé de l'appareil est conservée dans le TPM"
+msgstr "La clé de l’appareil est conservée dans le TPM"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Disk encryption recovery keys are escrowed"
@@ -421,11 +421,11 @@ msgstr "Les clés de récupération du chiffrement de disque sont déposées"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Full ASLR is enabled"
-msgstr "L'ASLR complet est activé"
+msgstr "L’ASLR complet est activé"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Host firewall is active"
-msgstr "Le pare-feu de l'hôte est actif"
+msgstr "Le pare feu de l’hôte est actif"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "ICMP redirects and source routing are disabled"
@@ -437,7 +437,7 @@ msgstr "Le transfert IP est désactivé"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Kernel log and pointers are restricted"
-msgstr "Le journal et les pointeurs du noyau sont restreints"
+msgstr "Le journal du noyau et les pointeurs sont restreints"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "LUKS volumes are bound to the TPM"
@@ -445,15 +445,15 @@ msgstr "Les volumes LUKS sont liés au TPM"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Mandatory access control is enabled (AppArmor/SELinux)"
-msgstr "Le contrôle d'accès obligatoire est activé (AppArmor/SELinux)"
+msgstr "Le contrôle d’accès obligatoire est activé (AppArmor/SELinux)"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Mandatory access control is enforcing"
-msgstr "Le contrôle d'accès obligatoire est en mode strict"
+msgstr "Le contrôle d’accès obligatoire est en mode enforce"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "No accounts with empty passwords"
-msgstr "Aucun compte sans mot de passe"
+msgstr "Aucun compte avec mot de passe vide"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "No pending reboot older than 7 days"
@@ -461,27 +461,27 @@ msgstr "Aucun redémarrage en attente depuis plus de 7 jours"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "No security update pending longer than allowed"
-msgstr "Aucune mise à jour de sécurité en attente plus longtemps qu'autorisé"
+msgstr "Aucune mise à jour de sécurité en attente au delà du délai autorisé"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Only root has UID 0"
-msgstr "Seul root a l'UID 0"
+msgstr "Seul root a l’UID 0"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Operating system version is supported"
-msgstr "La version du système d'exploitation est prise en charge"
+msgstr "La version du système d’exploitation est prise en charge"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Password quality (minimum length 14)"
-msgstr "Qualité du mot de passe (longueur minimale 14)"
+msgstr "Qualité des mots de passe (longueur minimale 14)"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "SSH allows keys only and no forwarding"
-msgstr "SSH n'autorise que les clés et aucun transfert"
+msgstr "SSH n’autorise que les clés et aucune redirection"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "SSH offers no weak algorithms or host keys"
-msgstr "SSH ne propose aucun algorithme ni aucune clé d'hôte faible"
+msgstr "SSH ne propose ni algorithmes ni clés d’hôte faibles"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "SSH server is hardened"
@@ -489,7 +489,7 @@ msgstr "Le serveur SSH est renforcé"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Screen lock on idle is enforced"
-msgstr "Le verrouillage de l'écran en cas d'inactivité est imposé"
+msgstr "Le verrouillage de l’écran en cas d’inactivité est appliqué"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Secure Boot is enabled"
@@ -509,7 +509,7 @@ msgstr "Le journal système est persistant"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "TCP SYN cookies, martian logging, broadcast ICMP ignored"
-msgstr "Cookies TCP SYN, journalisation des paquets martiens, ICMP de diffusion ignoré"
+msgstr "Cookies TCP SYN, journalisation des paquets martiens, ICMP broadcast ignoré"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Time synchronisation is active"

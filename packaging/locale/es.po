@@ -61,7 +61,7 @@ msgid "Users"
 msgstr "Usuarios"
 
 msgid "OS versions"
-msgstr "Versiones del sistema operativo"
+msgstr "Versiones del SO"
 
 msgid "Screen lock"
 msgstr "Bloqueo de pantalla"
@@ -256,7 +256,7 @@ msgid "Server"
 msgstr "Servidor"
 
 msgid "Device ID"
-msgstr "ID del dispositivo"
+msgstr "ID de dispositivo"
 
 msgid "Software is installed through this catalog. Other app stores are read only."
 msgstr "El software se instala mediante este catálogo. Las demás tiendas de aplicaciones son de solo lectura."
@@ -409,7 +409,7 @@ msgstr "Los volcados de memoria están restringidos"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Desktop login through the central identity provider"
-msgstr "Inicio de sesión de escritorio mediante el proveedor de identidad central"
+msgstr "Inicio de sesión de escritorio a través del proveedor de identidad central"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Device key is held in the TPM"
@@ -421,23 +421,23 @@ msgstr "Las claves de recuperación del cifrado de disco están depositadas"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Full ASLR is enabled"
-msgstr "ASLR completo está activado"
+msgstr "ASLR completo está habilitado"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Host firewall is active"
-msgstr "El cortafuegos del equipo está activo"
+msgstr "El cortafuegos del host está activo"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "ICMP redirects and source routing are disabled"
-msgstr "Las redirecciones ICMP y el enrutamiento de origen están desactivados"
+msgstr "Las redirecciones ICMP y el enrutamiento de origen están deshabilitados"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "IP forwarding is disabled"
-msgstr "El reenvío IP está desactivado"
+msgstr "El reenvío IP está deshabilitado"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Kernel log and pointers are restricted"
-msgstr "El registro y los punteros del kernel están restringidos"
+msgstr "El registro del kernel y los punteros están restringidos"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "LUKS volumes are bound to the TPM"
@@ -445,19 +445,19 @@ msgstr "Los volúmenes LUKS están vinculados al TPM"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Mandatory access control is enabled (AppArmor/SELinux)"
-msgstr "El control de acceso obligatorio está activado (AppArmor/SELinux)"
+msgstr "El control de acceso obligatorio está habilitado (AppArmor/SELinux)"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Mandatory access control is enforcing"
-msgstr "El control de acceso obligatorio está en modo estricto"
+msgstr "El control de acceso obligatorio está en modo enforce"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "No accounts with empty passwords"
-msgstr "Ninguna cuenta con contraseña vacía"
+msgstr "No hay cuentas con contraseñas vacías"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "No pending reboot older than 7 days"
-msgstr "Ningún reinicio pendiente de más de 7 días"
+msgstr "No hay reinicio pendiente de más de 7 días"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "No security update pending longer than allowed"
@@ -469,15 +469,15 @@ msgstr "Solo root tiene UID 0"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Operating system version is supported"
-msgstr "La versión del sistema operativo tiene soporte"
+msgstr "La versión del sistema operativo es compatible"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Password quality (minimum length 14)"
-msgstr "Calidad de la contraseña (longitud mínima 14)"
+msgstr "Calidad de contraseña (longitud mínima 14)"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "SSH allows keys only and no forwarding"
-msgstr "SSH solo permite claves y ningún reenvío"
+msgstr "SSH permite solo claves y ningún reenvío"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "SSH offers no weak algorithms or host keys"
@@ -489,11 +489,11 @@ msgstr "El servidor SSH está reforzado"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Screen lock on idle is enforced"
-msgstr "El bloqueo de pantalla por inactividad es obligatorio"
+msgstr "El bloqueo de pantalla por inactividad está aplicado"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Secure Boot is enabled"
-msgstr "Secure Boot está activado"
+msgstr "Secure Boot está habilitado"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Security updates are installed"
@@ -509,7 +509,7 @@ msgstr "El registro del sistema es persistente"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "TCP SYN cookies, martian logging, broadcast ICMP ignored"
-msgstr "Cookies TCP SYN, registro de paquetes marcianos, ICMP de difusión ignorado"
+msgstr "TCP SYN cookies, registro de paquetes martian, ICMP broadcast ignorado"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Time synchronisation is active"
@@ -525,15 +525,15 @@ msgstr "El almacenamiento masivo USB está bloqueado"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Unused filesystems are disabled"
-msgstr "Los sistemas de archivos no utilizados están desactivados"
+msgstr "Los sistemas de archivos no usados están desactivados"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Unused network protocols are disabled"
-msgstr "Los protocolos de red no utilizados están desactivados"
+msgstr "Los protocolos de red no usados están desactivados"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "auditd is active with LiMDM rules"
-msgstr "auditd está activo con las reglas de LiMDM"
+msgstr "auditd está activo con reglas de LiMDM"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "osquery inventory source installed"

@@ -31,13 +31,13 @@ msgid "Disk Encryption"
 msgstr "Cifratura del disco"
 
 msgid "Agent Log"
-msgstr "Registro dell'agente"
+msgstr "Registro dell'agent"
 
 msgid "About"
 msgstr "Informazioni"
 
 msgid "Agent"
-msgstr "Agente"
+msgstr "Agent"
 
 msgid "Compliance baseline"
 msgstr "Baseline di conformità"
@@ -76,7 +76,7 @@ msgid "Disk encryption"
 msgstr "Cifratura del disco"
 
 msgid "Package sources"
-msgstr "Sorgenti dei pacchetti"
+msgstr "Origini dei pacchetti"
 
 msgid "Flatpak"
 msgstr "Flatpak"
@@ -94,7 +94,7 @@ msgid "DNS"
 msgstr "DNS"
 
 msgid "Time servers"
-msgstr "Server dell'ora"
+msgstr "Server dell’ora"
 
 msgid "Proxy"
 msgstr "Proxy"
@@ -124,10 +124,10 @@ msgid "Managed device"
 msgstr "Dispositivo gestito"
 
 msgid "Agent Not Reachable"
-msgstr "Agente non raggiungibile"
+msgstr "Agent non raggiungibile"
 
 msgid "The LiMDM agent on this device does not respond. IT has been informed when it comes back."
-msgstr "L'agente LiMDM di questo dispositivo non risponde. L'IT verrà informato quando tornerà attivo."
+msgstr "L'agent LiMDM di questo dispositivo non risponde. L'IT verrà informato quando tornerà attivo."
 
 msgid "Device Locked"
 msgstr "Dispositivo bloccato"
@@ -202,7 +202,7 @@ msgid "Only warnings and errors"
 msgstr "Solo avvisi ed errori"
 
 msgid "Latest entries of the agent and its watchdog, newest first."
-msgstr "Ultime voci dell'agente e del suo watchdog, le più recenti prima."
+msgstr "Ultime voci dell'agent e del suo watchdog, le più recenti prima."
 
 msgid "Nothing Recorded"
 msgstr "Nessuna voce"
@@ -256,7 +256,7 @@ msgid "Server"
 msgstr "Server"
 
 msgid "Device ID"
-msgstr "ID del dispositivo"
+msgstr "ID dispositivo"
 
 msgid "Software is installed through this catalog. Other app stores are read only."
 msgstr "Il software si installa tramite questo catalogo. Gli altri store di app sono in sola lettura."
@@ -355,7 +355,7 @@ msgid "Nothing Found"
 msgstr "Nessun risultato"
 
 msgid "The agent does not respond."
-msgstr "L'agente non risponde."
+msgstr "L'agent non risponde."
 
 msgid "Apps already in the catalog are not listed here."
 msgstr "Le app già presenti nel catalogo non sono elencate qui."
@@ -409,7 +409,7 @@ msgstr "I core dump sono limitati"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Desktop login through the central identity provider"
-msgstr "Accesso al desktop tramite il provider di identità centrale"
+msgstr "Accesso desktop tramite il provider di identità centrale"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Device key is held in the TPM"
@@ -417,39 +417,39 @@ msgstr "La chiave del dispositivo è custodita nel TPM"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Disk encryption recovery keys are escrowed"
-msgstr "Le chiavi di ripristino della cifratura del disco sono depositate"
+msgstr "Le chiavi di ripristino della crittografia del disco sono depositate"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Full ASLR is enabled"
-msgstr "ASLR completo è attivo"
+msgstr "ASLR completo è attivato"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Host firewall is active"
-msgstr "Il firewall dell'host è attivo"
+msgstr "Il firewall host è attivo"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "ICMP redirects and source routing are disabled"
-msgstr "I redirect ICMP e il source routing sono disattivati"
+msgstr "I reindirizzamenti ICMP e il source routing sono disattivati"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "IP forwarding is disabled"
-msgstr "L'inoltro IP è disattivato"
+msgstr "L’inoltro IP è disattivato"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Kernel log and pointers are restricted"
-msgstr "Il log e i puntatori del kernel sono limitati"
+msgstr "Il log del kernel e i puntatori sono limitati"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "LUKS volumes are bound to the TPM"
-msgstr "I volumi LUKS sono legati al TPM"
+msgstr "I volumi LUKS sono vincolati al TPM"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Mandatory access control is enabled (AppArmor/SELinux)"
-msgstr "Il controllo di accesso obbligatorio è attivo (AppArmor/SELinux)"
+msgstr "Il controllo di accesso obbligatorio è attivato (AppArmor/SELinux)"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Mandatory access control is enforcing"
-msgstr "Il controllo di accesso obbligatorio è in modalità enforcing"
+msgstr "Il controllo di accesso obbligatorio è in modalità enforce"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "No accounts with empty passwords"
@@ -489,11 +489,11 @@ msgstr "Il server SSH è protetto"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Screen lock on idle is enforced"
-msgstr "Il blocco dello schermo per inattività è imposto"
+msgstr "Il blocco schermo per inattività è applicato"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Secure Boot is enabled"
-msgstr "Secure Boot è attivo"
+msgstr "Secure Boot è attivato"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Security updates are installed"
@@ -509,11 +509,11 @@ msgstr "Il log di sistema è persistente"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "TCP SYN cookies, martian logging, broadcast ICMP ignored"
-msgstr "Cookie TCP SYN, log dei pacchetti martian, ICMP broadcast ignorato"
+msgstr "TCP SYN cookies, logging dei pacchetti martian, ICMP broadcast ignorati"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Time synchronisation is active"
-msgstr "La sincronizzazione dell'ora è attiva"
+msgstr "La sincronizzazione dell’ora è attiva"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "UDF is disabled"
@@ -521,11 +521,11 @@ msgstr "UDF è disattivato"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "USB mass storage is blocked"
-msgstr "L'archiviazione di massa USB è bloccata"
+msgstr "I dispositivi di archiviazione di massa USB sono bloccati"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Unused filesystems are disabled"
-msgstr "I file system inutilizzati sono disattivati"
+msgstr "I filesystem inutilizzati sono disattivati"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Unused network protocols are disabled"

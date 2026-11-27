@@ -43,7 +43,7 @@ msgid "Compliance baseline"
 msgstr "Compliance Basis"
 
 msgid "Software updates"
-msgstr "Softwareupdates"
+msgstr "Software Updates"
 
 msgid "Firewall"
 msgstr "Firewall"
@@ -61,7 +61,7 @@ msgid "Users"
 msgstr "Benutzer"
 
 msgid "OS versions"
-msgstr "Betriebssystemversionen"
+msgstr "OS Versionen"
 
 msgid "Screen lock"
 msgstr "Bildschirmsperre"
@@ -160,7 +160,7 @@ msgid "Sync Now"
 msgstr "Jetzt synchronisieren"
 
 msgid "Last sync"
-msgstr "Letzte Synchronisierung"
+msgstr "Letzter Check in"
 
 msgid "Needs Your Attention"
 msgstr "Ihre Mithilfe nötig"
@@ -364,7 +364,7 @@ msgid "IT reviews the app and adds it to the catalog for you."
 msgstr "Die IT prüft die App und nimmt sie für Sie in den Katalog auf."
 
 msgid "Sync started"
-msgstr "Synchronisierung gestartet"
+msgstr "Synchronisation gestartet"
 
 msgid "Recovery key stored. Your passphrase is unchanged."
 msgstr "Schlüssel hinterlegt. Ihre Passphrase bleibt unverändert."
@@ -393,7 +393,7 @@ msgstr[1] "%d Wiederherstellungsschlüssel sind bei der IT hinterlegt. Nichts zu
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Admin rights only for centrally approved users"
-msgstr "Adminrechte nur für zentral freigegebene Benutzer"
+msgstr "Adminrechte nur für zentral freigegebene Nutzer"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Automatic updates are declared"
@@ -409,7 +409,7 @@ msgstr "Core Dumps sind eingeschränkt"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Desktop login through the central identity provider"
-msgstr "Desktop Anmeldung über den zentralen Identity Provider"
+msgstr "Desktop Anmeldung über den zentralen Identitätsanbieter"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Device key is held in the TPM"
@@ -421,7 +421,7 @@ msgstr "Wiederherstellungsschlüssel der Festplattenverschlüsselung sind hinter
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Full ASLR is enabled"
-msgstr "Vollständiges ASLR ist aktiv"
+msgstr "Volles ASLR ist aktiv"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Host firewall is active"
@@ -429,11 +429,11 @@ msgstr "Host Firewall ist aktiv"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "ICMP redirects and source routing are disabled"
-msgstr "ICMP Redirects und Source Routing sind deaktiviert"
+msgstr "ICMP Redirects und Source Routing sind aus"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "IP forwarding is disabled"
-msgstr "IP Forwarding ist deaktiviert"
+msgstr "IP Weiterleitung ist aus"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Kernel log and pointers are restricted"
@@ -441,7 +441,7 @@ msgstr "Kernel Log und Zeiger sind eingeschränkt"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "LUKS volumes are bound to the TPM"
-msgstr "LUKS Laufwerke sind an das TPM gebunden"
+msgstr "LUKS Volumes sind an das TPM gebunden"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Mandatory access control is enabled (AppArmor/SELinux)"
@@ -449,7 +449,7 @@ msgstr "Mandatory Access Control ist aktiv (AppArmor/SELinux)"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Mandatory access control is enforcing"
-msgstr "Mandatory Access Control erzwingt die Regeln"
+msgstr "Mandatory Access Control erzwingt"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "No accounts with empty passwords"
@@ -461,7 +461,7 @@ msgstr "Kein ausstehender Neustart älter als 7 Tage"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "No security update pending longer than allowed"
-msgstr "Kein Sicherheitsupdate länger offen als erlaubt"
+msgstr "Kein Sicherheitsupdate länger als erlaubt ausstehend"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Only root has UID 0"
@@ -477,11 +477,11 @@ msgstr "Passwortqualität (Mindestlänge 14)"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "SSH allows keys only and no forwarding"
-msgstr "SSH erlaubt nur Schlüssel und kein Forwarding"
+msgstr "SSH erlaubt nur Schlüssel und keine Weiterleitung"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "SSH offers no weak algorithms or host keys"
-msgstr "SSH bietet keine schwachen Algorithmen oder Hostschlüssel an"
+msgstr "SSH bietet keine schwachen Algorithmen oder Hostschlüssel"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "SSH server is hardened"
@@ -489,7 +489,7 @@ msgstr "SSH Server ist gehärtet"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Screen lock on idle is enforced"
-msgstr "Bildschirmsperre bei Inaktivität ist erzwungen"
+msgstr "Bildschirmsperre bei Leerlauf ist erzwungen"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Secure Boot is enabled"
@@ -505,15 +505,15 @@ msgstr "Systemfestplatte ist verschlüsselt"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "System log is persistent"
-msgstr "Systemprotokoll ist persistent"
+msgstr "Systemlog ist dauerhaft"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "TCP SYN cookies, martian logging, broadcast ICMP ignored"
-msgstr "TCP SYN Cookies, Protokollierung von Martian Paketen, Broadcast ICMP ignoriert"
+msgstr "TCP SYN Cookies, Martian Logging, Broadcast ICMP ignoriert"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Time synchronisation is active"
-msgstr "Zeitsynchronisierung ist aktiv"
+msgstr "Zeitsynchronisation ist aktiv"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "UDF is disabled"
@@ -521,7 +521,7 @@ msgstr "UDF ist deaktiviert"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "USB mass storage is blocked"
-msgstr "USB Massenspeicher sind gesperrt"
+msgstr "USB Massenspeicher ist gesperrt"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Unused filesystems are disabled"
@@ -533,7 +533,7 @@ msgstr "Ungenutzte Netzwerkprotokolle sind deaktiviert"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "auditd is active with LiMDM rules"
-msgstr "auditd ist mit LiMDM Regeln aktiv"
+msgstr "auditd ist aktiv mit LiMDM Regeln"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "osquery inventory source installed"
@@ -573,7 +573,7 @@ msgstr "es läuft keine Fernwartung"
 
 #. error text of the agent
 msgid "a check in was requested less than 30 seconds ago"
-msgstr "eine Synchronisierung wurde vor weniger als 30 Sekunden angefordert"
+msgstr "ein Check in wurde vor weniger als 30 Sekunden angefordert"
 
 #. error text of the agent
 msgid "no recovery key needed for this volume"
