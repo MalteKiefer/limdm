@@ -4,6 +4,26 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.23.0 (unreleased date: 2026-11-27)
+
+### Added
+- French, Spanish, Italian and Russian next to German and English in the console, the server texts, e-mails, the GTK app, the tray, `limdm` and agent notifications. Russian has the one, few and many plural forms.
+- Console: the browser language picks the first language LiMDM speaks, else English; profile, user menu and command palette switch it. Catalogs of the four new languages load per area only when used.
+- Agent events carry a stable key and parameters (`internal/api/events.go`); the device timeline and the activity page show them in the reader's language, also for events of older agents.
+- Notification channels have a language (`config.lang`) for e-mail, Slack and Discord; webhooks stay English.
+- Device side catalogs: `internal/locale` (embedded JSON, used by `limdm`, `limdm-desktop`, notifications and the PAM prompt) and gettext `.po` files for the GTK app, installed to `/usr/share/limdm/locale/` by every package.
+- `docs/i18n.md`: how each part picks its language, where the texts live, the checks and one glossary of product terms per language.
+- Tests fail on a missing key in any language, wrong plural forms, changed printf verbs, hardcoded visible console text, and an audit action, command type or agent event without a label; Playwright walks the main pages in every language.
+
+### Changed
+- Problem Details of the admin API, check titles, audit action labels and the sign in and error pages follow the caller's language (`Content-Language` on problems). JSON fields, codes and exit codes stay language independent.
+- The evidence PDF falls back to English for Russian (built in WinAnsi fonts).
+- The GTK app uses gettext instead of English and German pairs; the tray and `limdm` follow `LC_ALL`, `LC_MESSAGES`, `LANG`, the system locale and `LANGUAGE`.
+
+### Fixed
+- The device timeline showed raw keys and English agent lines ("command.wipe command.wipe", "declarations updated (token …)"); it now shows translated labels and events.
+- Built in check titles read the same in the console, the GTK app and `limdm`.
+
 ## 0.22.0 (2026-11-27)
 
 ### Added
