@@ -220,7 +220,7 @@ func (h *host) installedPackages() ([]api.Package, string, error) {
 	sum := sha256.New()
 	names := make(map[string]bool, len(pkgs))
 	for _, p := range pkgs {
-		fmt.Fprintf(sum, "%s=%s=%s=%s\n", p.Name, p.Version, p.Arch, p.Source)
+		fmt.Fprintf(sum, "%s=%s=%s=%s=%s\n", p.Name, p.Version, p.Arch, p.Source, p.SourceVersion)
 		names[p.Name] = true
 	}
 	h.pkgs = pkgCache{stamp: stamp, list: pkgs, hash: hex.EncodeToString(sum.Sum(nil)), names: names}
@@ -245,7 +245,7 @@ func (h *host) nativePackages() ([]api.Package, error) {
 		return parseApkInfo(run(time.Minute, "apk", "info", "-v"))
 	}
 	if h.family == "debian" {
-		out, err = run(time.Minute, "dpkg-query", "-W", "-f", "${db:Status-Abbrev}\t${Package}\t${Version}\t${Architecture}\t${source:Package}\n")
+		out, err = run(time.Minute, "dpkg-query", "-W", "-f", "${db:Status-Abbrev}\t${Package}\t${Version}\t${Architecture}\t${source:Package}\t${source:Version}\n")
 	} else {
 		out, err = run(time.Minute, "rpm", "-qa", "--qf", "ii \t%{NAME}\t%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}\t%|ARCH?{%{ARCH}}|\n")
 	}
@@ -259,6 +259,9 @@ func (h *host) nativePackages() ([]api.Package, error) {
 			p := api.Package{Name: f[1], Version: f[2], Arch: f[3]}
 			if len(f) > 4 {
 				p.Source = sourceName(p.Name, f[4])
+			}
+			if len(f) > 5 {
+				p.SourceVersion = sourceVersion(p.Version, "", f[5])
 			}
 			pkgs = append(pkgs, p)
 		}

@@ -915,6 +915,10 @@ type Package struct {
 	// Source is the source package of a Debian package when it differs
 	// from Name: the security trackers list source packages.
 	Source string `json:"s,omitempty"`
+	// SourceVersion is the version of the source package when it differs
+	// from Version (Debian: postgresql 17+278+deb13u1 is built from
+	// postgresql-common 278+deb13u1); the trackers list source versions.
+	SourceVersion string `json:"sv,omitempty"`
 }
 
 // Refs maps a check to the frameworks it provides evidence for.
