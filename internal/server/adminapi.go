@@ -559,6 +559,9 @@ type apiDevice struct {
 	BlueprintID  *int64          `json:"blueprint_id,omitempty"`
 	EnrolledAt   *time.Time      `json:"enrolled_at,omitempty"`
 	Inventory    json.RawMessage `json:"inventory,omitempty"`
+
+	// custom attributes for file and firewall templates
+	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
 func toAPIDevice(d deviceRow) apiDevice {
@@ -614,7 +617,7 @@ func (s *Server) apiDevice(ctx context.Context, id string) (apiDevice, error) {
 	}
 	d := toAPIDevice(list[0])
 	var enrolled time.Time
-	err = s.db.QueryRow(ctx, `SELECT blueprint_id, enrolled_at, inventory FROM devices WHERE id=$1`, id).Scan(&d.BlueprintID, &enrolled, &d.Inventory)
+	err = s.db.QueryRow(ctx, `SELECT blueprint_id, enrolled_at, inventory, attributes FROM devices WHERE id=$1`, id).Scan(&d.BlueprintID, &enrolled, &d.Inventory, &d.Attributes)
 	d.EnrolledAt = &enrolled
 	return d, err
 }
@@ -643,9 +646,19 @@ func (s *Server) apiDevicePatch(w http.ResponseWriter, r *http.Request, c apiCal
 		BlueprintID json.RawMessage `json:"blueprint_id"`
 		Users       *[]api.User     `json:"users"`
 		PrimaryUser *string         `json:"primary_user"`
+
+		Attributes *map[string]string `json:"attributes"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
+	}
+	attrs := []byte("{}")
+	if body.Attributes != nil {
+		if err := api.ValidateAttributes(*body.Attributes); err != nil {
+			problemField(w, http.StatusUnprocessableEntity, "attributes", err.Error())
+			return
+		}
+		attrs, _ = json.Marshal(*body.Attributes)
 	}
 	users := []byte("[]") // a valid parameter even when users stay
 	if body.Users != nil {
@@ -720,12 +733,16 @@ func (s *Server) apiDevicePatch(w http.ResponseWriter, r *http.Request, c apiCal
 	if body.PrimaryUser != nil {
 		detail = append(detail, "primary_user="+strings.ToLower(strings.TrimSpace(*body.PrimaryUser)))
 	}
+	if body.Attributes != nil {
+		detail = append(detail, "attributes="+string(attrs))
+	}
 	err := s.auditAction(ctx, c.actor(), "device.assign", id, strings.Join(detail, " "), func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `UPDATE devices SET tags = CASE WHEN $2 THEN $3::text[] ELSE tags END,
 			blueprint_id = CASE WHEN $4 THEN $5::bigint ELSE blueprint_id END,
 			users = CASE WHEN $6 THEN $7::jsonb ELSE users END,
-			primary_user_id = CASE WHEN $8 THEN $9::bigint ELSE primary_user_id END WHERE id=$1`,
-			id, body.Tags != nil, tags, setBP, bpID, body.Users != nil, string(users), body.PrimaryUser != nil, primary)
+			primary_user_id = CASE WHEN $8 THEN $9::bigint ELSE primary_user_id END,
+			attributes = CASE WHEN $10 THEN $11::jsonb ELSE attributes END WHERE id=$1`,
+			id, body.Tags != nil, tags, setBP, bpID, body.Users != nil, string(users), body.PrimaryUser != nil, primary, body.Attributes != nil, string(attrs))
 		if err == nil && tag.RowsAffected() == 0 {
 			err = &userError{http.StatusNotFound, "device not found"}
 		}

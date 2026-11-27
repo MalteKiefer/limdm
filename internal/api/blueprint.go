@@ -335,13 +335,7 @@ func mergePayload(typ string, a, b json.RawMessage) (json.RawMessage, error) {
 		if err := errors.Join(json.Unmarshal(a, &x), json.Unmarshal(b, &y)); err != nil {
 			return nil, err
 		}
-		rules := slices.Clone(x.Rules)
-		for _, r := range y.Rules {
-			if !slices.Contains(rules, r) {
-				rules = append(rules, r)
-			}
-		}
-		out = Firewall{Enforce: x.Enforce || y.Enforce, Allow: union(x.Allow, y.Allow), Rules: rules}
+		out = mergeFirewall(x, y)
 	case TypeOSVersion:
 		var x, y osPayload
 		if err := errors.Join(json.Unmarshal(a, &x), json.Unmarshal(b, &y)); err != nil {

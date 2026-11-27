@@ -1441,6 +1441,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/config/library/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Render a files or firewall template for one device
+         * @description Admins. Validates the payload like a save, then renders its templates with the values of the device (an ID or hostname in the caller's scope). Nothing is saved. A render error comes back in error with the payload as the agent would get it.
+         */
+        post: operations["configItemRender"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/scripts/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Last run of a recurring script per device
+         * @description Role read. The latest result of the named recurring script on every device in the caller's scope that reported one, with the last lines of its output.
+         */
+        get: operations["configScriptResults"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/config/library/preview": {
         parameters: {
             query?: never;
@@ -2885,6 +2925,10 @@ export interface components {
             enrolled_at?: string;
             /** @description Inventory as reported by the agent (single device only) */
             inventory?: Record<string, never>;
+            /** @description Custom attributes for file and firewall templates (single device only) */
+            attributes?: {
+                [key: string]: string;
+            };
             /** @description Desktop environment, empty on servers */
             desktop: string;
             memory_mb: number;
@@ -2907,6 +2951,10 @@ export interface components {
             }[];
             /** @description Email of a directory person; empty clears it */
             primary_user?: string;
+            /** @description Custom attributes for templates ({{.Attributes.name}}), replacing all; names start with a letter (letters, digits, _), at most 50, values up to 1024 bytes */
+            attributes?: {
+                [key: string]: string;
+            };
         };
         CommandRequest: {
             /** @description A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create, package_hold, package_downgrade */
@@ -7487,6 +7535,89 @@ export interface operations {
             403: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
+        };
+    };
+    configItemRender: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    type: string;
+                    payload: Record<string, never>;
+                    /** @description device ID or hostname */
+                    device: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        payload: Record<string, never>;
+                        error?: string;
+                        vars: {
+                            hostname: string;
+                            id: string;
+                            tags: string[];
+                            tenant: string;
+                            primary_user: string;
+                            attributes: {
+                                [key: string]: string;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description Invalid payload or unknown device */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    configScriptResults: {
+        parameters: {
+            query: {
+                /** @description script name */
+                name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            device_id: string;
+                            hostname: string;
+                            exit_code: number;
+                            /** Format: date-time */
+                            start: string;
+                            /** Format: date-time */
+                            end: string;
+                            output: string;
+                        }[];
+                    };
+                };
+            };
         };
     };
     configItemPreview: {

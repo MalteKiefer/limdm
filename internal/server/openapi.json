@@ -4752,6 +4752,175 @@
         }
       }
     },
+    "/api/v1/config/library/render": {
+      "post": {
+        "operationId": "configItemRender",
+        "summary": "Render a files or firewall template for one device",
+        "description": "Admins. Validates the payload like a save, then renders its templates with the values of the device (an ID or hostname in the caller's scope). Nothing is saved. A render error comes back in error with the payload as the agent would get it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "type",
+                  "payload",
+                  "device"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "payload": {
+                    "type": "object"
+                  },
+                  "device": {
+                    "type": "string",
+                    "description": "device ID or hostname"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "payload",
+                    "vars"
+                  ],
+                  "properties": {
+                    "payload": {
+                      "type": "object"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "vars": {
+                      "type": "object",
+                      "required": [
+                        "hostname",
+                        "id",
+                        "tags",
+                        "tenant",
+                        "primary_user",
+                        "attributes"
+                      ],
+                      "properties": {
+                        "hostname": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "tags": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "tenant": {
+                          "type": "string"
+                        },
+                        "primary_user": {
+                          "type": "string"
+                        },
+                        "attributes": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid payload or unknown device"
+          }
+        }
+      }
+    },
+    "/api/v1/config/scripts/results": {
+      "get": {
+        "operationId": "configScriptResults",
+        "summary": "Last run of a recurring script per device",
+        "description": "Role read. The latest result of the named recurring script on every device in the caller's scope that reported one, with the last lines of its output.",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "script name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "device_id",
+                          "hostname",
+                          "exit_code",
+                          "start",
+                          "end",
+                          "output"
+                        ],
+                        "properties": {
+                          "device_id": {
+                            "type": "string"
+                          },
+                          "hostname": {
+                            "type": "string"
+                          },
+                          "exit_code": {
+                            "type": "integer"
+                          },
+                          "start": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "end": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "output": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/config/library/preview": {
       "post": {
         "operationId": "configItemPreview",
@@ -9401,6 +9570,13 @@
             "type": "object",
             "description": "Inventory as reported by the agent (single device only)"
           },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Custom attributes for file and firewall templates (single device only)"
+          },
           "desktop": {
             "type": "string",
             "description": "Desktop environment, empty on servers"
@@ -9491,6 +9667,13 @@
           "primary_user": {
             "type": "string",
             "description": "Email of a directory person; empty clears it"
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Custom attributes for templates ({{.Attributes.name}}), replacing all; names start with a letter (letters, digits, _), at most 50, values up to 1024 bytes"
           }
         }
       },

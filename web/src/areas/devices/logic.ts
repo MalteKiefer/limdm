@@ -44,6 +44,24 @@ export function parseTags(text: string): { tags: string[]; error?: string } {
   return { tags }
 }
 
+/** Custom attributes for templates: one name=value per line (api.ValidateAttributes). */
+export function parseAttrs(text: string): { attrs: Record<string, string>; error?: string } {
+  const attrs: Record<string, string> = {}
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue
+    const i = line.indexOf('=')
+    const k = line.slice(0, i).trim()
+    if (i < 0 || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(k) || k in attrs) return { attrs, error: line.trim() }
+    attrs[k] = line.slice(i + 1).trim()
+  }
+  return { attrs }
+}
+
+export const formatAttrs = (a: Record<string, string> = {}) =>
+  Object.entries(a)
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n')
+
 /** Script parameters: one NAME=value per line; the first bad line is returned. */
 export function badParamLine(text: string) {
   return text.split('\n').find((l) => l.trim() !== '' && !/^\s*[A-Za-z_][A-Za-z0-9_]*\s*=/.test(l))

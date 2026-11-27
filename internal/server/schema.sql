@@ -1006,3 +1006,6 @@ CREATE TABLE IF NOT EXISTS device_cves (
     PRIMARY KEY (device_id, cve, package)
 );
 CREATE INDEX IF NOT EXISTS device_cves_cve ON device_cves(cve);
+-- R3-E
+-- custom device attributes for file and firewall templates ({{.Attributes.name}})
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS attributes JSONB NOT NULL DEFAULT '{}';

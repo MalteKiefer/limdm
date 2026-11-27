@@ -17,6 +17,7 @@ import { Badge, Modal, PageHeader, Segmented } from '../../components/ui'
 import { useT } from '../../i18n'
 import { previewItem, useDeleteItem, useTemplate, useLibrary, usePackages, useSaveItem, useSchema, useTypes, type ItemInput } from './api'
 import { Impact, PreviewDiff, Versions } from './components'
+import { ScriptRuns, TemplatePreview, usesTemplate } from './templates'
 import { usePreview } from './usePreview'
 
 type Obj = Record<string, unknown>
@@ -218,6 +219,8 @@ function ItemEditor({ stored, type, prefill }: { stored?: ItemInput & { used_by:
               {panel === 'impact' ? <Impact preview={preview.data} busy={preview.busy} error={preview.error} /> : <PreviewDiff preview={preview.data} />}
             </div>
           </div>
+          {admin && usesTemplate(type, payload) && <TemplatePreview type={type} payload={payload} />}
+          {stored && type === 'com.limdm.scripts' && <ScriptRuns payload={stored.payload as Obj} />}
           {stored && admin && !stored.read_only && (
             <div className="card p-[var(--pad-card)]">
               <h2 className="font-semibold">{t('config.deleteItem')}</h2>

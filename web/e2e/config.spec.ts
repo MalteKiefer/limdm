@@ -3,6 +3,7 @@
 // rollback, a blueprint with a condition, the software catalog settings
 // and remotes, and a package upload. LIMDM_E2E_SHOTS=<dir> also saves
 // screenshots of the screens.
+import { execFileSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
@@ -138,6 +139,25 @@ test('software: store settings, a remote and a package upload', async ({ page })
   await expect(page.getByText(`Gespeichert: hello-${stamp}`)).toBeVisible()
   await page.goto('/app/config?tab=packages')
   await expect(page.getByRole('button', { name: `hello-${stamp} löschen` })).toBeDisabled()
+})
+
+test('files item: template preview for one device', async ({ page }) => {
+  const repo = join(import.meta.dirname, '..', '..')
+  execFileSync('go', ['run', './scripts/e2eseed', join(import.meta.dirname, 'devices.seed.sql')], { cwd: repo, stdio: 'inherit', env: { ...process.env, CGO_ENABLED: '0' } })
+  await page.goto('/app/config/library/new?type=com.limdm.files')
+  await page.getByRole('radio', { name: 'JSON' }).click()
+  await page.getByLabel('Einstellungen als JSON').fill(JSON.stringify({ files: [{ path: '/etc/motd', content: 'host {{.Hostname}} {{default "-" (index .Attributes "site")}}', mode: '0644', template: true }] }))
+  await page.getByRole('radio', { name: 'Formular' }).click()
+  const preview = page.getByRole('region', { name: 'Vorschau der Vorlage' })
+  await preview.getByLabel('Gerät (Hostname oder ID)').fill('e2e-ws1')
+  await preview.getByRole('button', { name: 'Erzeugen' }).click()
+  await expect(preview.getByText('host e2e-ws1 -')).toBeVisible()
+  await shoot(page, 'template-preview')
+  // a missing attribute is an error, and the device keeps what it has
+  await page.getByRole('radio', { name: 'JSON' }).click()
+  await page.getByLabel('Einstellungen als JSON').fill(JSON.stringify({ files: [{ path: '/etc/motd', content: '{{.Attributes.site}}', mode: '0644', template: true }] }))
+  await preview.getByRole('button', { name: 'Erzeugen' }).click()
+  await expect(preview.getByRole('alert')).toContainText('Nicht erzeugt')
 })
 
 test('dark theme of the main screen', async ({ page }) => {
