@@ -952,7 +952,7 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 	case "reboot", "shutdown":
 		out, err = a.powerAction(c.Type, c.Payload, c.CreatedAt)
 	case "lock":
-		a.notifyUsers("Device locked", a.company()+" locked this device. Sessions end and new sign ins are blocked until IT unlocks it.", "critical")
+		a.notifyUsers(urgent, "Device locked", "%s locked this device. Sessions end and new sign ins are blocked until IT unlocks it.", a.company())
 		out, err = a.lockDevice()
 		a.syncPasswordLocks()
 	case "unlock":
@@ -1273,9 +1273,9 @@ func (a *Agent) powerAction(typ, payload string, sent time.Time) (string, error)
 		}
 	}
 	m = powerDelay(m, sent, time.Now())
-	flag, word, title := "-r", "reboot", "Restart scheduled"
+	flag, word := "-r", "reboot"
 	if typ == "shutdown" {
-		flag, word, title = "-h", "shutdown", "Shutdown scheduled"
+		flag, word = "-h", "shutdown"
 	}
 	when, text := "now", "LiMDM: "+word+" requested by administrator now"
 	at := time.Now()
@@ -1283,7 +1283,11 @@ func (a *Agent) powerAction(typ, payload string, sent time.Time) (string, error)
 		at = at.Add(time.Duration(m) * time.Minute)
 		when, text = "+"+strconv.Itoa(m), fmt.Sprintf("LiMDM: %s requested by administrator in %d minutes", word, m)
 	}
-	a.notifyUsers(title, fmt.Sprintf("%s requested a %s at %s. Save your work.", a.company(), word, at.Format("15:04")), "critical")
+	if typ == "shutdown" {
+		a.notifyUsers(urgent, "Shutdown scheduled", "%s requested a shutdown at %s. Save your work.", a.company(), at.Format("15:04"))
+	} else {
+		a.notifyUsers(urgent, "Restart scheduled", "%s requested a restart at %s. Save your work.", a.company(), at.Format("15:04"))
+	}
 	return sh("shutdown", flag, when, text)
 }
 

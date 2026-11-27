@@ -4,8 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/maltekiefer/limdm/internal/agent"
@@ -89,6 +92,47 @@ func TestChecksSortedAndStrict(t *testing.T) {
 	}
 	if err := run("checks", []string{"--strict"}); !errors.Is(err, errChecksFailing) {
 		t.Fatalf("--strict: %v", err)
+	}
+}
+
+// stdout runs f and returns what it printed.
+func stdout(t *testing.T, f func() error) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	ferr := f()
+	os.Stdout = old
+	w.Close()
+	b, _ := io.ReadAll(r)
+	if ferr != nil {
+		t.Fatal(ferr)
+	}
+	return string(b)
+}
+
+// TestJSONIgnoresLanguage: machine readable output is the same in every
+// language, the table is translated.
+func TestJSONIgnoresLanguage(t *testing.T) {
+	list := []agent.DesktopCheck{{ID: "fw", Level: 1, Title: "Host firewall is active", Status: "fail"}}
+	fakeAgent(t, func(agent.DesktopRequest) agent.DesktopResponse {
+		return agent.DesktopResponse{Status: &agent.DesktopStatus{CheckList: list}}
+	})
+	t.Cleanup(func() { lang = "en" })
+	var outs []string
+	for _, l := range []string{"en", "de", "ru"} {
+		lang = l
+		outs = append(outs, stdout(t, func() error { return run("checks", []string{"--json"}) }))
+	}
+	if outs[0] != outs[1] || outs[0] != outs[2] || !strings.Contains(outs[0], `"title": "Host firewall is active"`) {
+		t.Fatalf("JSON differs by language:\n%s", strings.Join(outs, "\n"))
+	}
+	lang = "de"
+	if table := stdout(t, func() error { return run("checks", nil) }); !strings.Contains(table, "Host Firewall ist aktiv") || !strings.Contains(table, "PRÜFUNG") {
+		t.Fatalf("table not translated:\n%s", table)
 	}
 }
 
