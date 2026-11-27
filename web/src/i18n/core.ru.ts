@@ -34,6 +34,7 @@ export default {
   'user.compact': 'Компактный вид',
   'user.profile': 'Профиль',
   'user.help': 'Справка',
+  'user.api': 'Справочник API',
   'updates.nav': 'Обновления',
   'vulns.nav': 'Уязвимости',
   'logs.nav': 'Журналы',

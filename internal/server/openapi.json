@@ -10843,7 +10843,7 @@
       "get": {
         "operationId": "getGlossary",
         "summary": "Glossary",
-        "description": "Terms of the console and the device states, translated (lang de or en).",
+        "description": "Terms of the console and the device states, translated (lang de, en, fr, es, it or ru; default from the request).",
         "responses": {
           "200": {
             "description": "OK",

@@ -31,6 +31,7 @@ export default {
   'user.compact': 'Densità compatta',
   'user.profile': 'Profilo',
   'user.help': 'Guida',
+  'user.api': 'Riferimento API',
   'updates.nav': 'Aggiornamenti',
   'vulns.nav': 'Vulnerabilità',
   'logs.nav': 'Log',

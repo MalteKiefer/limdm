@@ -2734,7 +2734,7 @@ export interface paths {
         };
         /**
          * Glossary
-         * @description Terms of the console and the device states, translated (lang de or en).
+         * @description Terms of the console and the device states, translated (lang de, en, fr, es, it or ru; default from the request).
          */
         get: operations["getGlossary"];
         put?: never;
