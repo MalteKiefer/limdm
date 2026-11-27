@@ -9528,7 +9528,7 @@
     "/api/v1/updates/cve-feeds": {
       "get": {
         "operationId": "getCVEFeeds",
-        "summary": "State of the Debian, Ubuntu, Arch and Alpine security data imports",
+        "summary": "State of the Debian, Ubuntu, Arch, Alpine and CISA KEV imports",
         "description": "Last successful import (time, fixes kept, bytes), last error. A failed import keeps the last data.",
         "responses": {
           "200": {
@@ -9595,6 +9595,352 @@
             "$ref": "#/components/responses/Problem"
           },
           "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/vulnerabilities": {
+      "get": {
+        "operationId": "listVulnerabilities",
+        "summary": "CVEs of the devices in scope",
+        "description": "One row per CVE, aggregated over the findings (CVE, package, device) of the devices in scope. format=csv exports up to 10000 rows.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "part of the CVE ID or a package name"
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "comma list of critical, high, medium, low, unknown"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "comma list of active, accepted, remediated, or all; active when empty"
+          },
+          {
+            "name": "device",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "only findings of this device"
+          },
+          {
+            "name": "os",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "only devices with this os_id (debian, ubuntu, fedora ...)"
+          },
+          {
+            "name": "package",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "only findings in this package"
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "first detected on or after"
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "first detected on or before"
+          },
+          {
+            "name": "kev",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true"
+              ]
+            },
+            "description": "only CVEs in the KEV catalog"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "severity",
+                "-severity",
+                "cvss",
+                "-cvss",
+                "first_detected",
+                "-first_detected",
+                "devices",
+                "-devices",
+                "cve",
+                "-cve"
+              ]
+            },
+            "description": "-severity when empty"
+          },
+          {
+            "$ref": "#/components/parameters/limit"
+          },
+          {
+            "$ref": "#/components/parameters/cursor"
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "csv"
+              ]
+            },
+            "description": "CSV instead of JSON"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VulnerabilityList"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/vulnerabilities/summary": {
+      "get": {
+        "operationId": "getVulnerabilitySummary",
+        "summary": "Open CVEs by severity, findings by status, packages with the most open CVEs",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VulnerabilitySummary"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/vulnerabilities/{cve}": {
+      "get": {
+        "operationId": "getVulnerability",
+        "summary": "One CVE: packages, devices, fixed versions, sources, KEV entry, references, risk acceptances",
+        "parameters": [
+          {
+            "name": "cve",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^CVE-[0-9]{4}-[0-9]{4,7}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VulnerabilityDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/vulnerabilities/{cve}/accept": {
+      "post": {
+        "operationId": "acceptVulnerability",
+        "summary": "Accept the risk of a CVE",
+        "description": "Admin tokens, not read only. For every device of the tenant (global for a global admin) or one device and/or package, until the given day. Accepted findings count as accepted, not active, until the acceptance expires or is revoked. Audited as vulnerability.accept.",
+        "parameters": [
+          {
+            "name": "cve",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^CVE-[0-9]{4}-[0-9]{4,7}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CVEAcceptanceInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Created"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "415": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/vulnerabilities/{cve}/reopen": {
+      "post": {
+        "operationId": "reopenVulnerability",
+        "summary": "Revoke the risk acceptances of a CVE",
+        "description": "Admin tokens, not read only. Revokes every active acceptance of the CVE the caller may change, or only acceptance_id. Audited as vulnerability.reopen.",
+        "parameters": [
+          {
+            "name": "cve",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^CVE-[0-9]{4}-[0-9]{4,7}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "acceptance_id": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "415": {
             "$ref": "#/components/responses/Problem"
           },
           "401": {
@@ -17128,7 +17474,7 @@
       },
       "CVEFeedSettings": {
         "type": "object",
-        "description": "Security data of Debian, Ubuntu, Arch and Alpine; every feed is off by default",
+        "description": "Security data of Debian, Ubuntu, Arch and Alpine and the CISA KEV list; every feed is off by default. A distribution feed is downloaded only while at least one device runs that distribution.",
         "properties": {
           "debian": {
             "type": "boolean",
@@ -17167,6 +17513,14 @@
             "minimum": 0,
             "maximum": 4096,
             "description": "download limit per feed in MB, 1024 when 0"
+          },
+          "kev": {
+            "type": "boolean",
+            "description": "import the CISA Known Exploited Vulnerabilities list daily"
+          },
+          "kev_url": {
+            "type": "string",
+            "description": "https URL of the KEV JSON; empty is https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
           }
         }
       },
@@ -17179,7 +17533,8 @@
               "debian",
               "ubuntu",
               "arch",
-              "alpine"
+              "alpine",
+              "kev"
             ]
           },
           "url": {
@@ -17210,6 +17565,10 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "skipped": {
+            "type": "boolean",
+            "description": "switched on, but no device runs the distribution: not downloaded"
           }
         }
       },
@@ -17429,6 +17788,394 @@
           "device": {
             "type": "boolean",
             "description": "the device's own effective blueprint"
+          }
+        }
+      },
+      "Vulnerability": {
+        "type": "object",
+        "description": "One CVE across the devices in scope",
+        "properties": {
+          "cve": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "unknown"
+            ],
+            "description": "highest level the sources state; the CVSS score when none does"
+          },
+          "cvss": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "CVSS v3 base score where a source provides a vector (Ubuntu OSV)"
+          },
+          "kev": {
+            "type": "boolean",
+            "description": "listed in the CISA Known Exploited Vulnerabilities catalog"
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "first_detected": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "remediated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "when the last finding was remediated (status remediated)"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "accepted",
+              "remediated"
+            ],
+            "description": "active when any finding is, else accepted when any is, else remediated"
+          },
+          "devices": {
+            "type": "integer",
+            "description": "devices with an open finding (remediated: with a remediated one)"
+          },
+          "active_devices": {
+            "type": "integer"
+          },
+          "accepted_devices": {
+            "type": "integer"
+          },
+          "remediated_devices": {
+            "type": "integer"
+          }
+        }
+      },
+      "VulnerabilityList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Vulnerability"
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "VulnerabilitySummary": {
+        "type": "object",
+        "properties": {
+          "severity": {
+            "type": "object",
+            "description": "active CVEs per level",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "findings": {
+            "type": "object",
+            "description": "device and CVE pairs per status (active, accepted, remediated)",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "top_packages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "cves": {
+                  "type": "integer"
+                },
+                "devices": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "feeds_enabled": {
+            "type": "boolean",
+            "description": "any CVE data feed is switched on"
+          }
+        }
+      },
+      "CVEAcceptance": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "tenant_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "null: every tenant"
+          },
+          "device_id": {
+            "type": "string",
+            "description": "empty: every device"
+          },
+          "package": {
+            "type": "string",
+            "description": "empty: every package"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revoked_by": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "expired",
+              "revoked"
+            ]
+          }
+        }
+      },
+      "VulnerabilityDetail": {
+        "type": "object",
+        "properties": {
+          "cve": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "unknown"
+            ]
+          },
+          "cvss": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "vector": {
+            "type": "string"
+          },
+          "kev": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "added": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "due": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "ransomware": {
+                "type": "boolean"
+              }
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "accepted",
+              "remediated"
+            ]
+          },
+          "first_detected": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "installed": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "fixed": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "devices": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "devices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "hostname": {
+                  "type": "string"
+                },
+                "os": {
+                  "type": "string"
+                },
+                "package": {
+                  "type": "string"
+                },
+                "installed": {
+                  "type": "string"
+                },
+                "fixed": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string",
+                  "description": "as the source states it"
+                },
+                "first_detected": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "last_seen": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "remediated_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "accepted",
+                    "remediated"
+                  ]
+                }
+              }
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "debian, ubuntu, arch, alpine, or package manager (advisories of pending dnf and zypper updates)"
+          },
+          "references": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "acceptances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CVEAcceptance"
+            }
+          }
+        }
+      },
+      "CVEAcceptanceInput": {
+        "type": "object",
+        "required": [
+          "reason",
+          "expires"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "expires": {
+            "type": "string",
+            "format": "date",
+            "description": "last day it applies, within the next year"
+          },
+          "device_id": {
+            "type": "string",
+            "description": "only this device; required for an admin limited to tags"
+          },
+          "package": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "only this package"
           }
         }
       }

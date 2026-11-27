@@ -1086,11 +1086,13 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			s.failAPI(w, err)
 			return
 		}
+		pkgHash = req.PackagesHash
+	}
+	if req.Packages != nil || req.Status != nil { // pending updates name CVEs too (dnf, zypper)
 		if err := matchDeviceCVEs(ctx, tx, id); err != nil { // app_patch_cve.go
 			s.failAPI(w, err)
 			return
 		}
-		pkgHash = req.PackagesHash
 	}
 	needFirewall, err := storeFirewall(ctx, tx, id, req) // app_firewall.go
 	if err != nil {

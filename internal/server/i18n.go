@@ -815,4 +815,7 @@ var deCatalog = map[string]string{
 	"Firewall rule adopted":           "Firewall Regel übernommen",
 	"Firewall rule kept as exception": "Firewall Regel als Ausnahme behalten",
 	"Firewall rule set to be removed": "Firewall Regel zum Entfernen gesetzt",
+	// R4-V
+	"Vulnerability risk accepted": "Risiko einer Schwachstelle akzeptiert",
+	"Vulnerability reopened":      "Schwachstelle wieder geöffnet",
 }

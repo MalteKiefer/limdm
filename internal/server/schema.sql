@@ -1028,3 +1028,39 @@ CREATE TABLE IF NOT EXISTS device_firewall (
     hash       TEXT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- R4-V
+-- vulnerabilities (app_vulns.go): the source version of Debian packages,
+-- the history of each finding (first seen, last seen, remediated), CVSS
+-- scores from the Ubuntu OSV data, the CISA KEV list and risk acceptance
+-- per CVE (optionally one device or package; tenant NULL: every tenant)
+ALTER TABLE device_packages ADD COLUMN IF NOT EXISTS source_version TEXT NOT NULL DEFAULT '';
+ALTER TABLE device_cves ADD COLUMN IF NOT EXISTS first_seen TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE device_cves ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE device_cves ADD COLUMN IF NOT EXISTS remediated_at TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS cve_scores (
+    cve    TEXT PRIMARY KEY,
+    cvss   NUMERIC(3,1) NOT NULL,
+    vector TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cve_kev (
+    cve        TEXT PRIMARY KEY,
+    name       TEXT NOT NULL DEFAULT '',
+    added      DATE,
+    due        DATE,
+    ransomware BOOLEAN NOT NULL DEFAULT false
+);
+CREATE TABLE IF NOT EXISTS cve_acceptances (
+    id         BIGSERIAL PRIMARY KEY,
+    tenant_id  BIGINT REFERENCES tenants(id) ON DELETE CASCADE,
+    cve        TEXT NOT NULL,
+    device_id  TEXT NOT NULL DEFAULT '',
+    package    TEXT NOT NULL DEFAULT '',
+    reason     TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at TIMESTAMPTZ,
+    revoked_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS cve_acceptances_cve ON cve_acceptances(cve) WHERE revoked_at IS NULL;
