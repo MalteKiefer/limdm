@@ -32,7 +32,13 @@ func safeNext(v string) string {
 			return defaultNext
 		}
 	}
-	return u.RequestURI()
+	// a path on this host: always "/" plus the checked path and query
+	return "/" + strings.TrimPrefix(u.RequestURI(), "/")
+}
+
+// oneLine keeps a value from a request on one log line.
+func oneLine(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", " ")
 }
 
 // toLogin sends a request without a session to the sign in page; a page

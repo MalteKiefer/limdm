@@ -101,8 +101,14 @@ func TestNotificationFormats(t *testing.T) {
 	inj.Title = "x\r\nBcc: victim@example.com"
 	m := string(emailMessage("mdm@example.com", []string{"it@example.com"}, inj))
 	head, _, _ := strings.Cut(m, "\r\n\r\n")
-	if strings.Contains(head, "\r\nBcc:") || !strings.Contains(head, "Subject: =?utf-8?") {
+	if strings.Contains(head, "\r\nBcc:") || !strings.Contains(head, "\r\nSubject: [LiMDM] x Bcc: victim@example.com\r\n") {
 		t.Fatalf("header injection possible:\n%s", head)
+	}
+	// addresses are written by net/mail, never raw: a forged recipient stays out
+	m = string(emailMessage("LiMDM <mdm@example.com>", []string{"it@example.com\r\nBcc: victim@example.com"}, n))
+	head, _, _ = strings.Cut(m, "\r\n\r\n")
+	if strings.Contains(head, "victim") || !strings.Contains(head, "From: \"LiMDM\" <mdm@example.com>\r\n") {
+		t.Fatalf("address headers:\n%s", head)
 	}
 }
 

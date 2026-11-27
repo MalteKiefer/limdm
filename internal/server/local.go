@@ -348,7 +348,7 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	role, err := s.checkLocal(r.Context(), name, r.FormValue("password"), r.FormValue("totp"), clientIP(r), rateKey(r))
 	if err != nil {
-		s.log.Warn("local login failed", "user", name, "remote", clientIP(r), "err", err)
+		s.log.Warn("local login failed", "user", oneLine(name), "remote", oneLine(clientIP(r)), "err", oneLine(err.Error()))
 		s.renderLogin(w, r, "Sign in failed.")
 		return
 	}
