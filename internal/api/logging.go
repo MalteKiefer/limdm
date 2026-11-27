@@ -104,7 +104,12 @@ var (
 // must never reach other files. logSecretPrefixes are refused anywhere, as
 // a second line.
 var logSecretPrefixes = []string{"/etc/shadow", "/etc/gshadow", "/etc/ssh/", "/root/", "/etc/ssl/private/", "/var/lib/limdm/",
-	"/etc/limdm/", "/proc/", "/sys/", "/dev/", "/run/", "/boot/"}
+	"/etc/limdm/", "/proc/", "/sys/", "/dev/", "/run/", "/boot/",
+	// keys, tokens and credentials of other services
+	"/etc/letsencrypt/", "/etc/pki/", "/etc/sudoers", "/etc/NetworkManager/system-connections/", "/etc/wireguard/",
+	"/etc/kubernetes/", "/etc/rancher/", "/etc/docker/", "/etc/containers/auth", "/etc/krb5.keytab", "/etc/ipsec",
+	"/var/lib/docker/", "/var/lib/containers/", "/var/lib/kubelet/", "/var/lib/postgresql/", "/var/lib/mysql/",
+	"/var/lib/sss/", "/var/lib/samba/private/", "/var/lib/polkit-1/", "/var/lib/systemd/credential"}
 
 // logSecret reports a path in a secret location (or the location itself).
 func logSecret(p string) bool {
@@ -114,7 +119,9 @@ func logSecret(p string) bool {
 		}
 	}
 	parts := strings.Split(p, "/") // "", first, ...
-	return len(parts) >= 3 && parts[1] == "home" && slices.Contains(parts[3:], ".ssh")
+	// dot directories and files in home directories hold keys, tokens and
+	// browser profiles (.ssh, .gnupg, .config, .aws, .kube, ...)
+	return len(parts) >= 3 && parts[1] == "home" && slices.ContainsFunc(parts[3:], func(c string) bool { return strings.HasPrefix(c, ".") })
 }
 
 func cleanAbs(p string) bool {

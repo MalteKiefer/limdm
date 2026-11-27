@@ -59,6 +59,20 @@ func TestLogRoots(t *testing.T) {
 	}
 }
 
+func TestLogRootSecrets(t *testing.T) {
+	for _, r := range []string{"/etc/letsencrypt/live", "/etc/pki/tls", "/var/lib/docker/containers", "/var/lib/postgresql/17",
+		"/etc/NetworkManager/system-connections", "/home/u/.config/app", "/home/u/.aws", "/etc/wireguard/x"} {
+		if LogRootValid(r) {
+			t.Errorf("%s accepted as a log root", r)
+		}
+	}
+	for _, r := range []string{"/opt/app/logs", "/home/u/app/logs", "/var/lib/app/log"} {
+		if !LogRootValid(r) {
+			t.Errorf("%s refused as a log root", r)
+		}
+	}
+}
+
 func TestLogFileAllowed(t *testing.T) {
 	for p, ok := range map[string]bool{
 		"/var/log/syslog": true, "/var/log/nginx/error.log": true, "/srv/paperless/log/app.log": true,
