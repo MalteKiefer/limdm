@@ -2,7 +2,7 @@
 // security updates and CVEs, and the installed versions of a package.
 // Rules per source live in the com.limdm.updates declaration (configuration).
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import { CheckCheck, Layers, Pause, PackageCheck, PackageSearch, Pencil, Play, Plus, ShieldCheck, Trash2, Waves } from 'lucide-react'
+import { CheckCheck, Layers, RefreshCw, Pause, PackageCheck, PackageSearch, Pencil, Play, Plus, ShieldCheck, Trash2, Waves } from 'lucide-react'
 import { useState } from 'react'
 import { useCan } from '../../api/me'
 import { BlueprintSelect } from '../../components/blueprintselect'
@@ -13,8 +13,8 @@ import { EmptyState, ErrorState, LoadingState, errorText } from '../../component
 import { toast } from '../../components/toast'
 import { Badge, Card, Modal, PageHeader, Switch } from '../../components/ui'
 import { useT } from '../../i18n'
-import { dateTime, fmt } from '../../i18n/format'
-import { useCVEDevices, useFleet, useRingAction, useRingDelete, useRingSave, useRings, useVersions, useWaveStart, type Ring, type RingInput } from './api'
+import { ago, bytes, dateTime, fmt } from '../../i18n/format'
+import { useCVEDevices, useFeeds, useFeedsRefresh, useFleet, useRingAction, useRingDelete, useRingSave, useRings, useVersions, useWaveStart, type Ring, type RingInput } from './api'
 import { approvable, severityTone, splitList } from './logic'
 import { mono, SourceLabel, Table } from './parts'
 
@@ -366,6 +366,7 @@ function Security({ cve, setCve }: { cve?: string; setCve: (c?: string) => void 
           </Card>
         ))}
       </div>
+      <Feeds />
       <Card title={t('updates.cves.title')} sub={t('updates.cves.sub')}>
         {f.cves?.length ? (
           <Table
@@ -472,6 +473,70 @@ function Versions({ pkg, setPkg }: { pkg?: string; setPkg: (p?: string) => void 
           empty={t('updates.versions.none', { name: pkg })}
         />
       )}
+    </Card>
+  )
+}
+
+/** State of the Debian and Ubuntu security data imports with "refresh now". */
+function Feeds() {
+  const t = useT()
+  const admin = useCan('admin')
+  const feeds = useFeeds()
+  const refresh = useFeedsRefresh()
+  if (feeds.error) return <ErrorState error={feeds.error} />
+  if (!feeds.data) return <LoadingState rows={2} />
+  const { enabled, running, items } = feeds.data
+  return (
+    <Card
+      title={t('updates.feeds.state')}
+      sub={enabled ? t('updates.feeds.stateSub') : t('updates.feeds.off')}
+      action={
+        admin && (
+          <div className="flex flex-wrap gap-2">
+            <Link to="/settings" search={{ s: 'cve' } as never} className="btn">
+              {t('updates.feeds.settings')}
+            </Link>
+            <button
+              type="button"
+              className="btn"
+              disabled={!enabled || running || refresh.isPending}
+              onClick={() => refresh.mutate(undefined, { onSuccess: () => toast(t('updates.feeds.started')), onError: (e) => toast(errorText(e), 'error') })}
+            >
+              <RefreshCw size={14} aria-hidden /> {running ? t('updates.feeds.running') : t('updates.feeds.refresh')}
+            </button>
+          </div>
+        )
+      }
+    >
+      <Table
+        caption={t('updates.feeds.state')}
+        cols={[{ label: t('updates.feeds.source') }, { label: t('updates.feeds.fetched') }, { label: t('updates.feeds.rows'), className: 'text-right' }, { label: t('updates.feeds.error') }]}
+        rows={(items ?? []).map((f) => ({
+          key: f.distro!,
+          cells: [
+            <span>
+              {t(`updates.feeds.distro.${f.distro ?? 'debian'}`)} <span className="block font-mono text-[11.5px] break-all text-muted">{f.url}</span>
+            </span>,
+            f.fetched_at ? (
+              <span title={dateTime(f.fetched_at)}>
+                {ago(f.fetched_at)} <span className="text-muted">({bytes(f.bytes ?? 0)})</span>
+              </span>
+            ) : (
+              <span className="text-muted">{t('updates.feeds.never')}</span>
+            ),
+            fmt(f.rows ?? 0),
+            f.error ? (
+              <span className="text-bad">
+                {f.error_at ? `${dateTime(f.error_at)}: ` : ''}
+                {f.error}
+              </span>
+            ) : (
+              <span className="text-muted">{t('updates.no')}</span>
+            ),
+          ],
+        }))}
+        empty=""
+      />
     </Card>
   )
 }

@@ -64,3 +64,21 @@ test('versions: installed versions of a package', async ({ page }) => {
   await expect(page).toHaveURL(/pkg=openssl/)
   await expect(page.getByRole('table', { name: 'Installierte Versionen' }).getByText('1:3.2.2-1.fc41')).toBeVisible()
 })
+
+test('cve data: settings form, feed state and CVEs matched for Ubuntu', async ({ page }) => {
+  // the form only, never switched on here: that would download from the internet
+  await page.goto('/app/settings?s=cve')
+  await expect(page.getByRole('heading', { name: 'CVE Daten' })).toBeVisible()
+  await page.getByLabel('Adresse Debian Security Tracker (JSON)').fill('http://mirror.example/json')
+  await page.getByRole('button', { name: 'Speichern' }).click()
+  await expect(page.getByText('Nur https Adressen.')).toBeVisible()
+
+  await page.goto('/app/updates?tab=security')
+  const feeds = page.getByRole('table', { name: 'CVE Daten für Debian und Ubuntu' })
+  await expect(feeds.getByRole('row', { name: /Ubuntu \(OSV\)/ }).getByText('42')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Jetzt aktualisieren' })).toBeDisabled()
+  await page.getByRole('table', { name: 'Offene CVEs' }).getByRole('button', { name: 'CVE-2024-6387' }).click()
+  await page.getByRole('table', { name: 'Geräte mit CVE-2024-6387' }).getByRole('link', { name: 'e2e-up2' }).click()
+  await expect(page.getByRole('table', { name: 'Bekannte Schwachstellen' }).getByText('1:9.6p1-3ubuntu13.3')).toBeVisible()
+  await expect(page.getByRole('table', { name: 'Ausstehende Updates' }).getByText('CVE-2024-6387')).toBeVisible()
+})

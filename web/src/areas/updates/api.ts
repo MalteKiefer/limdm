@@ -106,3 +106,11 @@ export function useWaveStart() {
     onSuccess: done,
   })
 }
+
+/** State of the Debian and Ubuntu security data imports; polled while one runs. */
+export const useFeeds = () => useQuery({ queryKey: ['updates', 'feeds'], queryFn: () => unwrap(api.GET('/api/v1/updates/cve-feeds')), refetchInterval: (q) => (q.state.data?.running ? 5000 : false) })
+
+export function useFeedsRefresh() {
+  const done = useDone()
+  return useMutation({ mutationFn: () => unwrap(api.POST('/api/v1/updates/cve-feeds/refresh')), onSuccess: done })
+}

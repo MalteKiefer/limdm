@@ -34,7 +34,7 @@ const ringLoopPeriod = 5 * time.Minute
 func init() {
 	for a, l := range map[string]string{"update_ring.save": "Update ring saved", "update_ring.delete": "Update ring deleted",
 		"update_ring.pause": "Update ring paused", "update_ring.resume": "Update ring resumed", "update_ring.approve": "Update ring approved",
-		"update_wave.start": "Update wave started", "update_ring.wave": "Update wave reached ring"} {
+		"update_wave.start": "Update wave started", "update_ring.wave": "Update wave reached ring", "cve_feeds.refresh": "CVE data import started"} {
 		auditActions[a] = l
 	}
 }
@@ -49,6 +49,8 @@ func (s *Server) appPatchRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/devices/{id}/updates", s.need("read", s.apiDeviceUpdates))
 	m.HandleFunc("GET /api/v1/updates/fleet", s.need("read", s.apiUpdatesFleet))
 	m.HandleFunc("GET /api/v1/updates/package-versions", s.need("read", s.apiPackageVersions))
+	m.HandleFunc("GET /api/v1/updates/cve-feeds", s.need("read", s.apiCVEFeeds))
+	m.HandleFunc("POST /api/v1/updates/cve-feeds/refresh", s.need("admin", s.apiCVEFeedsRefresh))
 }
 
 type updateRing struct {
@@ -562,10 +564,21 @@ func (s *Server) apiUpdateWaveStart(w http.ResponseWriter, r *http.Request, c ap
 	writeJSONStatus(w, http.StatusCreated, wave)
 }
 
+type deviceCVE struct {
+	CVE       string `json:"cve"`
+	Package   string `json:"package"`
+	Installed string `json:"installed"`
+	Fixed     string `json:"fixed"`
+	Severity  string `json:"severity"`
+}
+
 type deviceUpdates struct {
-	Ring    *updateRing      `json:"ring"`
-	Status  api.UpdateStatus `json:"status"`
-	Reports bool             `json:"reports"` // the agent sends an update status (older agents do not)
+	Ring *updateRing `json:"ring"`
+	// Vulnerabilities are the CVEs matched from the Debian and Ubuntu
+	// security data (app_patch_cve.go).
+	Vulnerabilities []deviceCVE      `json:"vulnerabilities"`
+	Status          api.UpdateStatus `json:"status"`
+	Reports         bool             `json:"reports"` // the agent sends an update status (older agents do not)
 }
 
 func (s *Server) apiDeviceUpdates(w http.ResponseWriter, r *http.Request, c apiCaller) {
@@ -590,6 +603,14 @@ func (s *Server) apiDeviceUpdates(w http.ResponseWriter, r *http.Request, c apiC
 	}
 	out.Status.Pending = nonNilSlice(out.Status.Pending)
 	out.Status.Runs = nonNilSlice(out.Status.Runs)
+	vulns, err := collect(ctx, s.db, pgx.RowToStructByPos[deviceCVE], `SELECT cve, package, installed, fixed, severity FROM device_cves WHERE device_id=$1
+		ORDER BY CASE lower(severity) WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, cve DESC, package LIMIT 2000`, id)
+	if err != nil {
+		s.apiFail(w, err)
+		return
+	}
+	out.Vulnerabilities = nonNilSlice(vulns)
+	annotatePending(out.Status.Pending, vulns)
 	if ring != nil {
 		rg, err := collectOne(ctx, s.db, pgx.RowToStructByPos[updateRing], `SELECT `+ringCols+`, 0 FROM update_rings r WHERE r.id=$1`, *ring)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -637,8 +658,26 @@ func maxSeverity(list []string) string {
 	return best
 }
 
+// severityRank orders the severities of Red Hat, Fedora and SUSE
+// advisories, Debian urgencies and Ubuntu priorities.
 func severityRank(s string) int {
-	return map[string]int{"low": 1, "moderate": 2, "important": 3, "critical": 4}[strings.ToLower(s)]
+	return map[string]int{"low": 1, "moderate": 2, "medium": 2, "important": 3, "high": 3, "critical": 4}[strings.ToLower(s)]
+}
+
+// annotatePending adds the CVEs matched from the Debian and Ubuntu data to
+// the pending updates of the same package (apt reports none itself).
+func annotatePending(pending []api.PendingUpdate, vulns []deviceCVE) {
+	for i := range pending {
+		p := &pending[i]
+		for _, v := range vulns {
+			if v.Package == p.Name && !slices.Contains(p.CVEs, v.CVE) && len(p.CVEs) < 50 {
+				p.CVEs = append(p.CVEs, v.CVE)
+				if severityRank(v.Severity) > severityRank(p.Severity) {
+					p.Severity = v.Severity
+				}
+			}
+		}
+	}
 }
 
 // apiUpdatesFleet summarises the pending updates the devices in scope
@@ -654,8 +693,11 @@ func (s *Server) apiUpdatesFleet(w http.ResponseWriter, r *http.Request, c apiCa
 			problemField(w, http.StatusBadRequest, "cve", "cve: CVE-YYYY-NNNN")
 			return
 		}
-		list, err := collect(ctx, s.db, pgx.RowToStructByPos[fleetDevice], `SELECT d.id, d.hostname, array_agg(DISTINCT p->>'name' ORDER BY p->>'name') `+pending+`
-			AND p->'cves' ? $`+fmt.Sprint(len(args)+1)+` GROUP BY d.id, d.hostname ORDER BY d.hostname LIMIT 500`, append(args, cve)...)
+		n := fmt.Sprint(len(args) + 1)
+		list, err := collect(ctx, s.db, pgx.RowToStructByPos[fleetDevice], `SELECT x.id, x.hostname, array_agg(DISTINCT x.pkg ORDER BY x.pkg) FROM (
+				SELECT d.id, d.hostname, p->>'name' AS pkg `+pending+` AND p->'cves' ? $`+n+`
+				UNION ALL SELECT d.id, d.hostname, c.package FROM device_cves c JOIN devices d ON d.id = c.device_id WHERE c.cve = $`+n+` AND NOT d.retired AND `+scope+`
+			) x GROUP BY x.id, x.hostname ORDER BY x.hostname LIMIT 500`, append(args, cve)...)
 		if err != nil {
 			s.apiFail(w, err)
 			return
@@ -680,9 +722,12 @@ func (s *Server) apiUpdatesFleet(w http.ResponseWriter, r *http.Request, c apiCa
 		s.apiFail(w, err)
 		return
 	}
-	rows, err := s.db.Query(ctx, `SELECT cve, count(DISTINCT d.id)::int, array_agg(DISTINCT p->>'name'), array_agg(DISTINCT coalesce(p->>'severity', ''))
-		`+strings.Replace(pending, "WHERE", "CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(p->'cves') = 'array' THEN p->'cves' ELSE '[]' END) cve WHERE", 1)+`
-		GROUP BY cve ORDER BY 2 DESC, 1 DESC LIMIT 500`, args...)
+	// CVEs of pending updates (dnf, zypper) and matched from the Debian and Ubuntu data
+	rows, err := s.db.Query(ctx, `SELECT x.cve, count(DISTINCT x.dev)::int, array_agg(DISTINCT x.pkg), array_agg(DISTINCT x.sev) FROM (
+			SELECT cve, d.id AS dev, p->>'name' AS pkg, coalesce(p->>'severity', '') AS sev
+			`+strings.Replace(pending, "WHERE", "CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(p->'cves') = 'array' THEN p->'cves' ELSE '[]' END) cve WHERE", 1)+`
+			UNION ALL SELECT c.cve, d.id, c.package, c.severity FROM device_cves c JOIN devices d ON d.id = c.device_id WHERE NOT d.retired AND `+scope+`
+		) x GROUP BY x.cve ORDER BY 2 DESC, 1 DESC LIMIT 500`, args...)
 	if err != nil {
 		s.apiFail(w, err)
 		return
@@ -727,7 +772,8 @@ func (s *Server) apiUpdatesFleet(w http.ResponseWriter, r *http.Request, c apiCa
 	for _, sc := range counts {
 		st.Sources[sc.Source] = sc.N
 	}
-	if err := s.db.QueryRow(ctx, `SELECT count(*)::int `+pending+` AND (p->>'security')::bool AND jsonb_array_length(coalesce(p->'cves', '[]')) = 0`, args...).Scan(&st.NoCVEData); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT count(*)::int `+pending+` AND (p->>'security')::bool AND jsonb_array_length(coalesce(p->'cves', '[]')) = 0
+		AND NOT EXISTS (SELECT 1 FROM device_cves c WHERE c.device_id = d.id AND c.package = p->>'name')`, args...).Scan(&st.NoCVEData); err != nil {
 		s.apiFail(w, err)
 		return
 	}

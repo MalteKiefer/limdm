@@ -7,7 +7,7 @@ import { errorText } from '../../components/states'
 
 export type Settings = Schemas['Settings']
 export type SettingsInput = Schemas['SettingsInput']
-export type Section = 'general' | 'network' | 'security' | 'remote_shell' | 'sso' | 'monitoring' | 'branding' | 'operations' | 'retention'
+export type Section = 'general' | 'network' | 'security' | 'remote_shell' | 'sso' | 'monitoring' | 'branding' | 'operations' | 'retention' | 'cve_feeds'
 
 export const useSettings = () => useQuery({ queryKey: ['settings', 'server'], queryFn: () => unwrap(api.GET('/api/v1/settings')) })
 

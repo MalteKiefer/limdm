@@ -122,7 +122,8 @@ and CVE IDs where the advisories have them:
   --category security` with severity and the CVE IDs of their issue
   list (patches appear as entries of their own).
 * Debian and Ubuntu: apt knows whether a candidate comes from a security
-  archive, not which CVEs it fixes: security yes or no, no CVE IDs.
+  archive, not which CVEs it fixes. CVE IDs and severity come from the
+  server side import below.
 * Arch and Alpine: no security information; every pending update counts
   as a security update for the checks.
 
@@ -137,10 +138,51 @@ highest severity and the devices each one affects, and the pending
 updates per package. **Package versions** lists the installed versions of
 one package across the fleet.
 
-The CVE data is what the devices' package managers already know; the
-server downloads nothing. CVEs without a fix available, and CVE IDs on
-Debian and Ubuntu, are not shown (a server side import of the Debian
-security tracker or Ubuntu OVAL data is not part of LiMDM yet).
+For Fedora, RHEL and SUSE the CVE data is what the devices' package
+managers already know. For Debian and Ubuntu it comes from the import
+below. CVEs without a fix available are not shown.
+
+## Debian and Ubuntu CVEs
+
+apt does not know which CVEs an update fixes. With **Settings, CVE data**
+switched on (off by default, it downloads from third parties), the
+leading server instance imports the distributions' security data once a
+day and matches it against the package versions the devices already
+report. Nothing is requested on the devices.
+
+| Distribution | Source (default URL) | What is kept |
+|---|---|---|
+| Debian 10 to 14 | Debian Security Tracker JSON, `https://security-tracker.debian.org/tracker/data/json` | resolved CVEs per release (codename), source package, fixed version, urgency (`low`, `medium`, `high`); `unimportant` and end of life entries are left out |
+| Ubuntu | OSV export by Canonical, `https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip` | `UBUNTU-CVE` records per release (`24.04`, ...), source package, fixed version, Ubuntu priority; Ubuntu Pro releases are left out |
+
+Why OSV for Ubuntu: Canonical maintains it, it is JSON with one record per
+CVE, plain fixed versions per release and the Ubuntu priority. OVAL is
+XML per release and the USN database has no priorities.
+
+* The URLs and the download limit per feed (1024 MB when empty) are
+  settings, so a mirror works. Downloads have a 30 minute timeout; the
+  Debian JSON is parsed as a stream, the Ubuntu zip goes to a temporary
+  file and each record (at most 4 MB) is read on its own.
+* A failed import (unreachable, too large, no data) keeps the last data
+  and records the error; **Updates, Security** shows the age of each
+  feed, the last error and **Refresh now** (admins; audited as
+  `cve_feeds.refresh`). After a failure the next attempt is six hours
+  later.
+* Matching: the agent reports the source package of every Debian package
+  (`dpkg-query ${source:Package}` or osquery). A device matches when the
+  installed version is older than the fixed version of its release,
+  compared with dpkg's rules (epoch, `~` before everything, letters
+  before other characters, digit runs as numbers). The binary package's
+  version stands for the source version (the same, or with a binNMU
+  suffix). Older agents send no source package: their binary package
+  name is used, which misses packages such as `libssl3` (source
+  `openssl`).
+* Matches are refreshed after each import and whenever a device sends a
+  new package list. They show in the fleet CVE view, as **Known
+  vulnerabilities** on the device tab, and as CVEs on the pending updates
+  of the same package.
+* Releases: Debian by `VERSION_ID` (10 buster to 14 forky), Ubuntu by
+  `VERSION_ID`. Derivatives (Linux Mint, Raspberry Pi OS) are not matched.
 
 ## Compliance
 

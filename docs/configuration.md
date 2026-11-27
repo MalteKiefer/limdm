@@ -218,6 +218,14 @@ that missed the change notification loads it on reconnect):
 
 The environment variables of the same name are only the values until the first save here.
 
+### CVE data
+
+Daily import of the Debian Security Tracker and the Ubuntu OSV data on the leading
+instance, off by default (it downloads from third parties): on or off, the two URLs
+(empty: the public ones; https only) and the download limit per feed in MB (1024 when
+empty, at most 4096). Section `cve_feeds` of `PATCH /api/v1/settings/{section}`. Details
+in [patching.md](patching.md#debian-and-ubuntu-cves).
+
 ### Backup
 
 Targets (local directory, S3 with Object Lock, Backblaze B2, SFTP, WebDAV) with a connection test,

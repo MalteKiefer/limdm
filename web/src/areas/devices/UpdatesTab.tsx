@@ -12,7 +12,7 @@ import { Badge, Card } from '../../components/ui'
 import { useT } from '../../i18n'
 import { dateTime } from '../../i18n/format'
 import { useDeviceUpdates } from '../updates/api'
-import { sortPending } from '../updates/logic'
+import { severityTone, sortPending } from '../updates/logic'
 import { mono, RunBadge, SecurityTag, SourceLabel, Table } from '../updates/parts'
 import { useRun } from './actions'
 import type { DeviceDetail } from './api'
@@ -30,7 +30,7 @@ export function UpdatesTab({ d }: { d: DeviceDetail }) {
   const [version, setVersion] = useState('')
   if (u.error) return <ErrorState error={u.error} onRetry={() => void u.refetch()} />
   if (!u.data) return <LoadingState rows={6} />
-  const { ring, status, reports } = u.data
+  const { ring, status, reports, vulnerabilities } = u.data
   const pending = sortPending(status?.pending ?? [])
   const fourEyes = d.four_eyes_commands.includes('package_downgrade')
   const os = pending.filter((p) => p.source !== 'flatpak' && !p.patch)
@@ -140,6 +140,27 @@ export function UpdatesTab({ d }: { d: DeviceDetail }) {
           </EmptyState>
         )}
       </Card>
+      {!!vulnerabilities?.length && (
+        <Card title={t('updates.dev.vulns')} sub={t('updates.dev.vulnsSub')}>
+          <Table
+            caption={t('updates.dev.vulns')}
+            cols={[{ label: 'CVE' }, { label: t('updates.severity') }, { label: t('updates.package') }, { label: t('updates.dev.current') }, { label: t('updates.dev.fixed') }]}
+            rows={vulnerabilities.map((v) => ({
+              key: `${v.cve}-${v.package}`,
+              cells: [
+                <Link to="/updates" search={{ tab: 'security', cve: v.cve } as never} className="font-mono text-[12.5px] text-accent hover:underline">
+                  {v.cve}
+                </Link>,
+                v.severity ? <Badge tone={severityTone(v.severity)}>{v.severity}</Badge> : <span className="text-muted">{t('updates.unknown')}</span>,
+                mono(v.package),
+                mono(v.installed),
+                mono(v.fixed),
+              ],
+            }))}
+            empty=""
+          />
+        </Card>
+      )}
       {admin && (
         <Card title={t('updates.dev.rollback')} sub={t('updates.dev.rollbackSub')}>
           <div className="flex flex-wrap items-end gap-2">

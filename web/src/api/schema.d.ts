@@ -2800,6 +2800,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/updates/cve-feeds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * State of the Debian and Ubuntu security data imports
+         * @description Last successful import (time, fixes kept, bytes), last error. A failed import keeps the last data.
+         */
+        get: operations["getCVEFeeds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/updates/cve-feeds/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import the Debian and Ubuntu security data now (admin); audited as cve_feeds.refresh
+         * @description Runs in the background; poll GET /api/v1/updates/cve-feeds. 409 while the feeds are off or an import runs.
+         */
+        post: operations["refreshCVEFeeds"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4108,6 +4148,7 @@ export interface components {
             /** @description PNG, square, up to 256 KiB */
             logo_png?: string;
             remove_logo?: boolean;
+            cve_feeds?: components["schemas"]["CVEFeedSettings"];
         };
         RetentionKind: {
             key: string;
@@ -4152,6 +4193,7 @@ export interface components {
             /** @description Signing key of the compliance webhook; admins only */
             webhook_secret?: string;
             retention_kinds: components["schemas"]["RetentionKind"][];
+            cve_feeds?: components["schemas"]["CVEFeedSettings"];
         };
         ConsoleUser: {
             /** @description Email (OIDC) or local:name */
@@ -4634,6 +4676,14 @@ export interface components {
                 /** Format: date-time */
                 security_since?: string | null;
             };
+            /** @description CVEs matched from the Debian and Ubuntu security data: the installed version is older than the fixed one */
+            vulnerabilities?: {
+                cve?: string;
+                package?: string;
+                installed?: string;
+                fixed?: string;
+                severity?: string;
+            }[];
         };
         UpdatesFleet: {
             reporting?: number;
@@ -4657,6 +4707,29 @@ export interface components {
                 severity?: string;
                 devices?: number;
             }[];
+        };
+        /** @description Debian and Ubuntu security data, off by default */
+        CVEFeedSettings: {
+            /** @description import daily (leader) and allow refresh now */
+            enabled?: boolean;
+            /** @description https URL of the Debian Security Tracker JSON; empty is https://security-tracker.debian.org/tracker/data/json */
+            debian_url?: string;
+            /** @description https URL of the Ubuntu OSV export (zip); empty is https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip */
+            ubuntu_url?: string;
+            /** @description download limit per feed in MB, 1024 when 0 */
+            max_mb?: number;
+        };
+        CVEFeedState: {
+            /** @enum {string} */
+            distro?: "debian" | "ubuntu";
+            url?: string;
+            /** Format: date-time */
+            fetched_at?: string | null;
+            rows?: number;
+            bytes?: number;
+            error?: string;
+            /** Format: date-time */
+            error_at?: string | null;
         };
     };
     responses: {
@@ -8170,7 +8243,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                section: "general" | "network" | "security" | "remote_shell" | "sso" | "monitoring" | "branding" | "operations" | "retention";
+                section: "general" | "network" | "security" | "remote_shell" | "sso" | "monitoring" | "branding" | "operations" | "retention" | "cve_feeds";
             };
             cookie?: never;
         };
@@ -9900,6 +9973,61 @@ export interface operations {
             400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getCVEFeeds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        enabled?: boolean;
+                        running?: boolean;
+                        items?: components["schemas"]["CVEFeedState"][];
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    refreshCVEFeeds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        running?: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
         };

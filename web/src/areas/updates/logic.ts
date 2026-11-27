@@ -20,7 +20,7 @@ export function sortPending(list: Pending[]): Pending[] {
 }
 
 export function severityRank(s?: string): number {
-  return { low: 1, moderate: 2, important: 3, critical: 4 }[(s ?? '').toLowerCase()] ?? 0
+  return { low: 1, moderate: 2, medium: 2, important: 3, high: 3, critical: 4 }[(s ?? '').toLowerCase()] ?? 0
 }
 
 /** Badge tone of an advisory severity. */

@@ -963,3 +963,35 @@ CREATE TABLE IF NOT EXISTS update_waves (
 );
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS update_ring_id BIGINT REFERENCES update_rings(id) ON DELETE SET NULL;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS updates JSONB;
+-- Debian and Ubuntu security data (app_patch_cve.go): fixed versions per
+-- distribution, release, source package and CVE, the state of each feed,
+-- and the CVEs matched against the installed packages of each device
+ALTER TABLE device_packages ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS cve_fixes (
+    distro   TEXT NOT NULL,
+    release  TEXT NOT NULL,
+    package  TEXT NOT NULL,
+    cve      TEXT NOT NULL,
+    fixed    TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (distro, release, package, cve)
+);
+CREATE TABLE IF NOT EXISTS cve_feeds (
+    distro     TEXT PRIMARY KEY,
+    url        TEXT NOT NULL DEFAULT '',
+    fetched_at TIMESTAMPTZ,
+    rows       INT NOT NULL DEFAULT 0,
+    bytes      BIGINT NOT NULL DEFAULT 0,
+    error      TEXT NOT NULL DEFAULT '',
+    error_at   TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS device_cves (
+    device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    cve       TEXT NOT NULL,
+    package   TEXT NOT NULL,
+    installed TEXT NOT NULL,
+    fixed     TEXT NOT NULL,
+    severity  TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (device_id, cve, package)
+);
+CREATE INDEX IF NOT EXISTS device_cves_cve ON device_cves(cve);

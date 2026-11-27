@@ -796,4 +796,5 @@ var deCatalog = map[string]string{
 	"Update wave started":                            "Updatewelle gestartet",
 	"Update wave reached ring":                       "Updatewelle hat Ring erreicht",
 	"No security update pending longer than allowed": "Kein Sicherheitsupdate länger als erlaubt ausstehend",
+	"CVE data import started":                        "Import der CVE Daten gestartet",
 }

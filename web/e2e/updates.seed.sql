@@ -10,4 +10,11 @@ VALUES
                 {"name":"code","current":"1.94","candidate":"1.95","origin":"code","source":"third_party"}],
      "runs":[{"source":"os_security","at":"2026-11-25T02:10:00Z","result":"no_updates","detail":"Nothing to do."}]}');
 INSERT INTO device_packages(device_id, name, version, arch) VALUES ('e2e-up1', 'openssl', '1:3.2.2-1.fc41', 'x86_64');
+-- an Ubuntu device with a CVE matched from the security data, and the feed state
+INSERT INTO devices(id, cert_serial, cert_not_after, hostname, inventory, tags, last_seen, checks, failing, agent_version, enrolled_at, updates)
+VALUES ('e2e-up2', 'u2', now() + interval '300 days', 'e2e-up2', '{"os_id":"ubuntu","os_name":"Ubuntu 24.04 LTS","os_version":"24.04"}', '{}', now(), '[]', 0, '0.19.0', now() - interval '5 days',
+   '{"pending":[{"name":"openssh-server","current":"1:9.6p1-3ubuntu13","candidate":"1:9.6p1-3ubuntu13.3","origin":"Ubuntu","source":"os_all","security":true}]}');
+INSERT INTO device_cves(device_id, cve, package, installed, fixed, severity) VALUES ('e2e-up2', 'CVE-2024-6387', 'openssh-server', '1:9.6p1-3ubuntu13', '1:9.6p1-3ubuntu13.3', 'high');
+INSERT INTO cve_feeds(distro, url, fetched_at, rows, bytes) VALUES ('ubuntu', 'https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip', now() - interval '3 hours', 42, 1048576)
+  ON CONFLICT (distro) DO UPDATE SET fetched_at = EXCLUDED.fetched_at, rows = EXCLUDED.rows, error = '';
 COMMIT;

@@ -74,6 +74,7 @@ type Settings struct {
 	FallbackDNS bool                `json:"fallback_dns,omitempty"`
 	RemoteShell RemoteShellSettings `json:"remote_shell,omitzero"`
 	Ops         OpsSettings         `json:"ops"`
+	CVEFeeds    CVEFeedSettings     `json:"cve_feeds"` // Debian and Ubuntu security data (app_patch_cve.go)
 }
 
 // OpsSettings are the runtime operations of every instance (Settings,
@@ -457,7 +458,7 @@ func consoleAllowed(rt *runtimeState, ip string) bool {
 // ---- settings page ----
 
 // settingsSections are the sections saveSettings accepts.
-var settingsSections = []string{"general", "sso", "monitoring", "network", "branding", "security", "remote_shell", "operations", "retention"}
+var settingsSections = []string{"general", "sso", "monitoring", "network", "branding", "security", "remote_shell", "operations", "retention", "cve_feeds"}
 
 // saveSettings stores the fields of one settings section taken from in and
 // makes them active. The console form and the admin API both call it, so
@@ -537,6 +538,12 @@ func (s *Server) saveSettings(ctx context.Context, sess session, ip, section str
 			set.Retention[k.Key] = in.retentionDays(k.Key)
 		}
 		set.AuditRetentionDays = 0 // replaced by Retention["audit"]
+	case "cve_feeds":
+		in.CVEFeeds.DebianURL, in.CVEFeeds.UbuntuURL = strings.TrimSpace(in.CVEFeeds.DebianURL), strings.TrimSpace(in.CVEFeeds.UbuntuURL)
+		if msg := in.CVEFeeds.validate(); msg != "" {
+			return reject(in, msg)
+		}
+		set.CVEFeeds = in.CVEFeeds
 	}
 	// never lock the admin who saves out of the console
 	if rt, err := (&Server{}).netsOnly(set); err == nil && !consoleAllowed(rt, ip) {
@@ -569,7 +576,8 @@ func (s *Server) saveSettings(ctx context.Context, sess session, ip, section str
 		set.CompanyName, len(set.Logo), set.ConsoleAllow, set.ConsoleBlock, set.Rules,
 		set.FourEyes, set.FourEyesRecovery, set.FourEyesShell, set.RequireMFA, set.MFAACR, set.AuditRetentionDays, set.RoleGroups, set.Geolocation, set.FallbackDNS) + fmt.Sprintf(" remote_shell=%+v retention=%v scim_allow=%q notify_private=%v", set.RemoteShell, set.Retention, set.SCIMAllow, set.NotifyPrivate) +
 		fmt.Sprintf(" log_level=%s access_log=%v audit_api_reads=%s update_downloads=%d max_checkins=%d agent_proxy_protocol=%q syslog=%q syslog_ca_bytes=%d",
-			set.Ops.LogLevel, set.Ops.AccessLog, set.Ops.AuditAPIReads, set.Ops.UpdateDownloads, set.Ops.MaxCheckins, set.Ops.AgentProxyFrom, set.Ops.Syslog, len(set.Ops.SyslogCA))
+			set.Ops.LogLevel, set.Ops.AccessLog, set.Ops.AuditAPIReads, set.Ops.UpdateDownloads, set.Ops.MaxCheckins, set.Ops.AgentProxyFrom, set.Ops.Syslog, len(set.Ops.SyslogCA)) +
+		fmt.Sprintf(" cve_feeds=%+v", set.CVEFeeds)
 	err = s.auditAction(ctx, sess.Email, "settings.save", "server", detail, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()
 			RETURNING updated_at`, string(doc)).Scan(&at)

@@ -6186,7 +6186,8 @@
                 "monitoring",
                 "branding",
                 "operations",
-                "retention"
+                "retention",
+                "cve_feeds"
               ]
             },
             "description": ""
@@ -9133,6 +9134,90 @@
             "$ref": "#/components/responses/Problem"
           },
           "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/updates/cve-feeds": {
+      "get": {
+        "operationId": "getCVEFeeds",
+        "summary": "State of the Debian and Ubuntu security data imports",
+        "description": "Last successful import (time, fixes kept, bytes), last error. A failed import keeps the last data.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "running": {
+                      "type": "boolean"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CVEFeedState"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/updates/cve-feeds/refresh": {
+      "post": {
+        "operationId": "refreshCVEFeeds",
+        "summary": "Import the Debian and Ubuntu security data now (admin); audited as cve_feeds.refresh",
+        "description": "Runs in the background; poll GET /api/v1/updates/cve-feeds. 409 while the feeds are off or an import runs.",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "running": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
             "$ref": "#/components/responses/Problem"
           },
           "401": {
@@ -14084,6 +14169,9 @@
           },
           "remove_logo": {
             "type": "boolean"
+          },
+          "cve_feeds": {
+            "$ref": "#/components/schemas/CVEFeedSettings"
           }
         },
         "required": []
@@ -14234,6 +14322,9 @@
             "items": {
               "$ref": "#/components/schemas/RetentionKind"
             }
+          },
+          "cve_feeds": {
+            "$ref": "#/components/schemas/CVEFeedSettings"
           }
         },
         "required": [
@@ -16063,6 +16154,30 @@
                 "format": "date-time"
               }
             }
+          },
+          "vulnerabilities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "cve": {
+                  "type": "string"
+                },
+                "package": {
+                  "type": "string"
+                },
+                "installed": {
+                  "type": "string"
+                },
+                "fixed": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "CVEs matched from the Debian and Ubuntu security data: the installed version is older than the fixed one"
           }
         }
       },
@@ -16133,6 +16248,68 @@
                 }
               }
             }
+          }
+        }
+      },
+      "CVEFeedSettings": {
+        "type": "object",
+        "description": "Debian and Ubuntu security data, off by default",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "import daily (leader) and allow refresh now"
+          },
+          "debian_url": {
+            "type": "string",
+            "description": "https URL of the Debian Security Tracker JSON; empty is https://security-tracker.debian.org/tracker/data/json"
+          },
+          "ubuntu_url": {
+            "type": "string",
+            "description": "https URL of the Ubuntu OSV export (zip); empty is https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip"
+          },
+          "max_mb": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4096,
+            "description": "download limit per feed in MB, 1024 when 0"
+          }
+        }
+      },
+      "CVEFeedState": {
+        "type": "object",
+        "properties": {
+          "distro": {
+            "type": "string",
+            "enum": [
+              "debian",
+              "ubuntu"
+            ]
+          },
+          "url": {
+            "type": "string"
+          },
+          "fetched_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "rows": {
+            "type": "integer"
+          },
+          "bytes": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "error_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           }
         }
       }

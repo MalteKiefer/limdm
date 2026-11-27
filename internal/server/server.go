@@ -450,7 +450,7 @@ func (s *Server) Close() {
 func (s *Server) Background(ctx context.Context) {
 	for name, loop := range map[string]func(context.Context){"google sync": s.googleSyncLoop, "history": s.historyLoop,
 		"catalog icons": s.iconLoop, "syslog": s.syslogLoop, "reseal": s.resealLoop, "backup": s.backupLoop,
-		"reports": s.reportLoop, "update rings": s.ringLoop} {
+		"reports": s.reportLoop, "update rings": s.ringLoop, "cve feeds": s.cveLoop} {
 		go s.background(ctx, name, loop, true)
 	}
 	// every instance serves agent packages from its own release directory
@@ -1001,6 +1001,10 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Packages != nil {
 		if err := savePackages(ctx, tx, id, req.Packages, truncate(req.PackagesHash, 128)); err != nil {
+			s.failAPI(w, err)
+			return
+		}
+		if err := matchDeviceCVEs(ctx, tx, id); err != nil { // app_patch_cve.go
 			s.failAPI(w, err)
 			return
 		}

@@ -219,9 +219,11 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `POST /api/v1/update-rings`, `PUT /api/v1/update-rings/{id}` | admin | `{"name", "position", "deferral_days", "wave_days", "require_approval", "all_devices", "tags", "groups", "blueprints"}` | `200` the ring; `422` names the field; audited as `update_ring.save` |
 | `DELETE /api/v1/update-rings/{id}`, `POST /api/v1/update-rings/{id}/{action}` | admin | `action` `pause`, `resume`, `approve` | `204` or the ring; audited as `update_ring.delete` and `update_ring.<action>` |
 | `POST /api/v1/update-waves` | admin | | `201` the new wave of the caller's tenant (the default tenant in the global view); `409` without rings; audited as `update_wave.start` |
-| `GET /api/v1/devices/{id}/updates` | read | | `200` ring, pending updates with versions, security flag, severity and CVEs, last run per source |
+| `GET /api/v1/devices/{id}/updates` | read | | `200` ring, pending updates with versions, security flag, severity and CVEs, last run per source, CVEs matched from the Debian and Ubuntu data (`vulnerabilities`) |
 | `GET /api/v1/updates/fleet` | read | `cve` | `200` devices with security and pending updates, open CVEs with severity and devices, pending updates per package; with `cve` the devices it affects |
 | `GET /api/v1/updates/package-versions` | read | `name` | `200` installed versions of the package with device counts |
+| `GET /api/v1/updates/cve-feeds` | read | | `200` Debian and Ubuntu security data: on or off, import running, per feed URL, last import, entries, bytes, last error; see [Patch management](patching.md#debian-and-ubuntu-cves) |
+| `POST /api/v1/updates/cve-feeds/refresh` | admin | | `202`, the import runs in the background; `409` while switched off or running; audited as `cve_feeds.refresh` |
 | `GET /api/v1/stats/annotations` | audit | `days` | `200` key rotations, approved agent releases, blueprint changes and failed backups per day, for the history charts |
 | `GET /api/v1/report-schedules` | audit | | `200` own schedules (admins: all of the tenant view) and the channels a schedule may use |
 | `POST /api/v1/report-schedules` | admin or auditor person, not a token | `{"view_id", "cadence", "channels", "emails"}` | `200` schedule of a saved report (list `reports`); audited as `report.schedule`; see [Scheduled reports](#scheduled-reports) |
