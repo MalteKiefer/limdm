@@ -9151,7 +9151,7 @@
     "/api/v1/updates/cve-feeds": {
       "get": {
         "operationId": "getCVEFeeds",
-        "summary": "State of the Debian and Ubuntu security data imports",
+        "summary": "State of the Debian, Ubuntu, Arch and Alpine security data imports",
         "description": "Last successful import (time, fixes kept, bytes), last error. A failed import keeps the last data.",
         "responses": {
           "200": {
@@ -9196,7 +9196,7 @@
     "/api/v1/updates/cve-feeds/refresh": {
       "post": {
         "operationId": "refreshCVEFeeds",
-        "summary": "Import the Debian and Ubuntu security data now (admin); audited as cve_feeds.refresh",
+        "summary": "Import the switched on security data feeds now (admin); audited as cve_feeds.refresh",
         "description": "Runs in the background; poll GET /api/v1/updates/cve-feeds. 409 while the feeds are off or an import runs.",
         "responses": {
           "202": {
@@ -16253,11 +16253,23 @@
       },
       "CVEFeedSettings": {
         "type": "object",
-        "description": "Debian and Ubuntu security data, off by default",
+        "description": "Security data of Debian, Ubuntu, Arch and Alpine; every feed is off by default",
         "properties": {
-          "enabled": {
+          "debian": {
             "type": "boolean",
-            "description": "import daily (leader) and allow refresh now"
+            "description": "import the Debian Security Tracker daily"
+          },
+          "ubuntu": {
+            "type": "boolean",
+            "description": "import the Ubuntu OSV export daily"
+          },
+          "arch": {
+            "type": "boolean",
+            "description": "import the Arch Security Tracker daily"
+          },
+          "alpine": {
+            "type": "boolean",
+            "description": "import the Alpine secdb of the branches the Alpine devices run daily"
           },
           "debian_url": {
             "type": "string",
@@ -16266,6 +16278,14 @@
           "ubuntu_url": {
             "type": "string",
             "description": "https URL of the Ubuntu OSV export (zip); empty is https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip"
+          },
+          "arch_url": {
+            "type": "string",
+            "description": "https URL of the Arch tracker's AVG list; empty is https://security.archlinux.org/issues/all.json"
+          },
+          "alpine_url": {
+            "type": "string",
+            "description": "https base URL of the Alpine secdb (…/v3.20/main.json); empty is https://secdb.alpinelinux.org"
           },
           "max_mb": {
             "type": "integer",
@@ -16282,7 +16302,9 @@
             "type": "string",
             "enum": [
               "debian",
-              "ubuntu"
+              "ubuntu",
+              "arch",
+              "alpine"
             ]
           },
           "url": {
@@ -16310,6 +16332,9 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "enabled": {
+            "type": "boolean"
           }
         }
       }

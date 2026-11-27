@@ -515,7 +515,7 @@ function Feeds() {
           key: f.distro!,
           cells: [
             <span>
-              {t(`updates.feeds.distro.${f.distro ?? 'debian'}`)} <span className="block font-mono text-[11.5px] break-all text-muted">{f.url}</span>
+              {t(`updates.feeds.distro.${f.distro ?? 'debian'}`)} {!f.enabled && <Badge tone="off">{t('updates.feeds.disabled')}</Badge>} <span className="block font-mono text-[11.5px] break-all text-muted">{f.url}</span>
             </span>,
             f.fetched_at ? (
               <span title={dateTime(f.fetched_at)}>

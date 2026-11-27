@@ -2808,7 +2808,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * State of the Debian and Ubuntu security data imports
+         * State of the Debian, Ubuntu, Arch and Alpine security data imports
          * @description Last successful import (time, fixes kept, bytes), last error. A failed import keeps the last data.
          */
         get: operations["getCVEFeeds"];
@@ -2830,7 +2830,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Import the Debian and Ubuntu security data now (admin); audited as cve_feeds.refresh
+         * Import the switched on security data feeds now (admin); audited as cve_feeds.refresh
          * @description Runs in the background; poll GET /api/v1/updates/cve-feeds. 409 while the feeds are off or an import runs.
          */
         post: operations["refreshCVEFeeds"];
@@ -4708,20 +4708,30 @@ export interface components {
                 devices?: number;
             }[];
         };
-        /** @description Debian and Ubuntu security data, off by default */
+        /** @description Security data of Debian, Ubuntu, Arch and Alpine; every feed is off by default */
         CVEFeedSettings: {
-            /** @description import daily (leader) and allow refresh now */
-            enabled?: boolean;
+            /** @description import the Debian Security Tracker daily */
+            debian?: boolean;
+            /** @description import the Ubuntu OSV export daily */
+            ubuntu?: boolean;
+            /** @description import the Arch Security Tracker daily */
+            arch?: boolean;
+            /** @description import the Alpine secdb of the branches the Alpine devices run daily */
+            alpine?: boolean;
             /** @description https URL of the Debian Security Tracker JSON; empty is https://security-tracker.debian.org/tracker/data/json */
             debian_url?: string;
             /** @description https URL of the Ubuntu OSV export (zip); empty is https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip */
             ubuntu_url?: string;
+            /** @description https URL of the Arch tracker's AVG list; empty is https://security.archlinux.org/issues/all.json */
+            arch_url?: string;
+            /** @description https base URL of the Alpine secdb (…/v3.20/main.json); empty is https://secdb.alpinelinux.org */
+            alpine_url?: string;
             /** @description download limit per feed in MB, 1024 when 0 */
             max_mb?: number;
         };
         CVEFeedState: {
             /** @enum {string} */
-            distro?: "debian" | "ubuntu";
+            distro?: "debian" | "ubuntu" | "arch" | "alpine";
             url?: string;
             /** Format: date-time */
             fetched_at?: string | null;
@@ -4730,6 +4740,7 @@ export interface components {
             error?: string;
             /** Format: date-time */
             error_at?: string | null;
+            enabled?: boolean;
         };
     };
     responses: {

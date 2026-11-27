@@ -164,6 +164,13 @@ func TestCVEImportAndMatch(t *testing.T) {
 	if code != 200 || !strings.Contains(body, `"rows":2`) || !strings.Contains(body, "HTTP 404") || !strings.Contains(body, `"enabled":false`) {
 		t.Fatalf("feeds: %d %s", code, body)
 	}
+	off := s.rt.Load()
+	if due, err := s.cveFeedsDue(ctx); err != nil || due {
+		t.Fatalf("due while every feed is off: %v %v", due, err)
+	}
+	on := *off
+	on.set.CVEFeeds = CVEFeedSettings{Debian: true, Ubuntu: true}
+	s.rt.Store(&on)
 	if due, err := s.cveFeedsDue(ctx); err != nil || due {
 		t.Fatalf("due right after an import: %v %v", due, err)
 	}
@@ -171,6 +178,12 @@ func TestCVEImportAndMatch(t *testing.T) {
 	if due, err := s.cveFeedsDue(ctx); err != nil || !due {
 		t.Fatalf("not due after two days: %v %v", due, err)
 	}
+	on.set.CVEFeeds.Arch = true // switched on, never imported
+	db.Exec(ctx, `UPDATE cve_feeds SET fetched_at = now()`)
+	if due, err := s.cveFeedsDue(ctx); err != nil || !due {
+		t.Fatalf("a new feed is not due: %v %v", due, err)
+	}
+	s.rt.Store(off)
 	if code, _ := call(dashAdmin, "POST", "/api/v1/updates/cve-feeds/refresh", ``); code != 409 {
 		t.Fatalf("refresh while off: %d", code)
 	}

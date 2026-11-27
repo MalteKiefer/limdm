@@ -125,7 +125,8 @@ and CVE IDs where the advisories have them:
   archive, not which CVEs it fixes. CVE IDs and severity come from the
   server side import below.
 * Arch and Alpine: no security information; every pending update counts
-  as a security update for the checks.
+  as a security update for the checks. CVE IDs come from the server side
+  import below.
 
 The device tab **Updates** shows the ring, the last run per source, the
 pending list and the rollback actions.
@@ -139,50 +140,83 @@ updates per package. **Package versions** lists the installed versions of
 one package across the fleet.
 
 For Fedora, RHEL and SUSE the CVE data is what the devices' package
-managers already know. For Debian and Ubuntu it comes from the import
-below. CVEs without a fix available are not shown.
+managers already know. For Debian, Ubuntu, Arch and Alpine it comes from
+the import below. CVEs without a fix available are not shown.
 
-## Debian and Ubuntu CVEs
+## CVE data for Debian, Ubuntu, Arch and Alpine
 
-apt does not know which CVEs an update fixes. With **Settings, CVE data**
-switched on (off by default, it downloads from third parties), the
-leading server instance imports the distributions' security data once a
-day and matches it against the package versions the devices already
-report. Nothing is requested on the devices.
+apt, pacman and apk do not know which CVEs an update fixes. With a feed
+switched on under **Settings, CVE data** (each feed is off by default, it
+downloads from third parties), the leading server instance imports the
+distribution's security data once a day and matches it against the
+package versions the devices already report. Nothing is requested on the
+devices.
 
 | Distribution | Source (default URL) | What is kept |
 |---|---|---|
 | Debian 10 to 14 | Debian Security Tracker JSON, `https://security-tracker.debian.org/tracker/data/json` | resolved CVEs per release (codename), source package, fixed version, urgency (`low`, `medium`, `high`); `unimportant` and end of life entries are left out |
 | Ubuntu | OSV export by Canonical, `https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip` | `UBUNTU-CVE` records per release (`24.04`, ...), source package, fixed version, Ubuntu priority; Ubuntu Pro releases are left out |
+| Arch | Arch Security Tracker, list of AVGs, `https://security.archlinux.org/issues/all.json` | groups with status `Fixed`: every package and CVE of the group, fixed version, severity (`Unknown` is left empty); no release dimension (rolling) |
+| Alpine | secdb, `https://secdb.alpinelinux.org` + `/<branch>/main.json` and `/community.json` | `secfixes` per branch: origin package, fixed version, CVE IDs (`0`, never affected, is left out); no severity |
 
-Why OSV for Ubuntu: Canonical maintains it, it is JSON with one record per
-CVE, plain fixed versions per release and the Ubuntu priority. OVAL is
-XML per release and the USN database has no priorities.
+Why these sources:
 
-* The URLs and the download limit per feed (1024 MB when empty) are
-  settings, so a mirror works. Downloads have a 30 minute timeout; the
-  Debian JSON is parsed as a stream, the Ubuntu zip goes to a temporary
-  file and each record (at most 4 MB) is read on its own.
+* Ubuntu: OSV is maintained by Canonical, JSON with one record per CVE,
+  plain fixed versions per release and the Ubuntu priority. OVAL is XML
+  per release and the USN database has no priorities.
+* Arch: the AVG list (`issues/all.json`) holds packages, fixed version,
+  severity and CVEs in one record. The ASA advisories do not list the
+  fixed version per package.
+* Alpine: only the branches the Alpine devices report are downloaded:
+  `VERSION_ID` 3.20.3 is `v3.20`, a development snapshot
+  (`3.21_alpha…`) is `edge`. With no Alpine device the import records
+  that as its error.
+
+Limits and failures:
+
+* The URLs (https only; for Alpine the secdb base address) and the
+  download limit per feed (1024 MB when empty, all Alpine files of one
+  import together) are settings, so a mirror works. Downloads have a 30
+  minute timeout; the Debian and Arch JSON are parsed as streams, the
+  Ubuntu zip goes to a temporary file and each record (at most 4 MB) is
+  read on its own.
 * A failed import (unreachable, too large, no data) keeps the last data
-  and records the error; **Updates, Security** shows the age of each
-  feed, the last error and **Refresh now** (admins; audited as
+  and records the error; **Updates, Security** shows each feed, whether
+  it is on, the age of its data, the last error and **Refresh now**
+  (admins, imports the switched on feeds; audited as
   `cve_feeds.refresh`). After a failure the next attempt is six hours
-  later.
-* Matching: the agent reports the source package of every Debian package
-  (`dpkg-query ${source:Package}` or osquery). A device matches when the
-  installed version is older than the fixed version of its release,
-  compared with dpkg's rules (epoch, `~` before everything, letters
-  before other characters, digit runs as numbers). The binary package's
-  version stands for the source version (the same, or with a binNMU
-  suffix). Older agents send no source package: their binary package
-  name is used, which misses packages such as `libssl3` (source
-  `openssl`).
+  later. Switching a feed off stops its imports; its last data stays.
+
+Matching:
+
+* A device matches when its installed version is older than the fixed
+  version of its release, compared with the package manager's own rules:
+  * Debian and Ubuntu: dpkg (epoch, `~` before everything, letters
+    before other characters, digit runs as numbers);
+  * Arch: pacman's `vercmp` (epoch, pkgver segments split at
+    separators, numeric segments newer than alpha ones, a trailing alpha
+    segment older than the end, pkgrel only when both versions have one);
+  * Alpine: apk (digits, an optional letter, `_alpha`, `_beta`, `_pre`,
+    `_rc` before the release, `_cvs`, `_svn`, `_git`, `_hg`, `_p` after
+    it, then `-rN`).
+* Package names: Debian and Ubuntu track source packages, so the agent
+  reports the source package of every Debian package
+  (`dpkg-query ${source:Package}` or osquery). Alpine tracks origin
+  packages: the agent reads them from `apk list -I` (`apk info -v` as
+  fallback, without origin). Arch tracks package names; the agent also
+  reports the pkgbase of split packages (`%BASE%` in pacman's local
+  database), and both are matched. Older agents send no source package:
+  their package name is used, which misses packages such as `libssl3`
+  (source `openssl`) or `libcrypto3` (origin `openssl`).
+* The binary package's version stands for the source version (the same,
+  or with a binNMU suffix on Debian).
 * Matches are refreshed after each import and whenever a device sends a
   new package list. They show in the fleet CVE view, as **Known
   vulnerabilities** on the device tab, and as CVEs on the pending updates
   of the same package.
 * Releases: Debian by `VERSION_ID` (10 buster to 14 forky), Ubuntu by
-  `VERSION_ID`. Derivatives (Linux Mint, Raspberry Pi OS) are not matched.
+  `VERSION_ID`, Alpine by branch, Arch without. Derivatives (Linux Mint,
+  Raspberry Pi OS, Manjaro, postmarketOS) are not matched.
 
 ## Compliance
 
