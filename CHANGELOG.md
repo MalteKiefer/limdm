@@ -4,6 +4,11 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.20.2 (2026-11-27)
+
+### Fixed
+- The toast after a container or VM action showed "state: unknown": the end state is read from the one line result the agent reports (`... | state: running`).
+
 ## 0.20.1 (2026-11-27)
 
 ### Added
