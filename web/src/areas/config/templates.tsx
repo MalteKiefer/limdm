@@ -10,17 +10,24 @@ import { EmptyState, ErrorState, LoadingState, errorText } from '../../component
 import { Badge } from '../../components/ui'
 import { useT } from '../../i18n'
 import { ago, dateTime } from '../../i18n/format'
+import { HostnameResult, type HostnamePreviewData } from './hostname'
 
 type Obj = Record<string, unknown>
 
-/** Whether a payload uses templates (files[].template or template). */
+/** Whether a payload uses templates (files[].template or template); a host name item always has a preview. */
 export function usesTemplate(type: string, payload: Obj) {
+  if (type === 'com.limdm.hostname') return true
   if (type === 'com.limdm.firewall') return payload.template === true
   if (type === 'com.limdm.files') return Array.isArray(payload.files) && payload.files.some((f) => (f as Obj | null)?.template === true)
   return false
 }
 
-type Rendered = { payload: Obj; error?: string; vars: { hostname: string; tags: string[]; attributes: Record<string, string> } }
+type Rendered = {
+  payload: Obj
+  error?: string
+  vars: { hostname: string; tags: string[]; attributes: Record<string, string> }
+  hostname?: HostnamePreviewData
+}
 
 export function TemplatePreview({ type, payload }: { type: string; payload: Obj }) {
   const t = useT()
@@ -46,9 +53,9 @@ export function TemplatePreview({ type, payload }: { type: string; payload: Obj 
   return (
     <section className="card p-[var(--pad-card)]" aria-labelledby={`${id}-h`}>
       <h2 id={`${id}-h`} className="font-semibold">
-        {t('config.tplPreview')}
+        {t(type === 'com.limdm.hostname' ? 'config.hnPreview' : 'config.tplPreview')}
       </h2>
-      <p className="mb-3 text-meta text-muted">{t('config.tplPreviewHelp')}</p>
+      <p className="mb-3 text-meta text-muted">{t(type === 'com.limdm.hostname' ? 'config.hnPreviewHelp' : 'config.tplPreviewHelp')}</p>
       <label htmlFor={`${id}-d`} className="mb-1 block text-body font-medium">
         {t('config.tplDevice')}
       </label>
@@ -104,7 +111,9 @@ export function TemplatePreview({ type, payload }: { type: string; payload: Obj 
                   .join(', ') || '–'}
               </dd>
             </dl>
-            {type === 'com.limdm.files' ? (
+            {state.data.hostname ? (
+              <HostnameResult data={state.data.hostname} />
+            ) : type === 'com.limdm.files' ? (
               files.map((f) => (
                 <div key={String(f.path)} className="mb-2">
                   <div className="flex items-center gap-2 font-mono text-meta">

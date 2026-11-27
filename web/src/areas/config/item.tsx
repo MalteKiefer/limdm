@@ -17,6 +17,7 @@ import { Badge, Modal, PageHeader, Segmented } from '../../components/ui'
 import { useT } from '../../i18n'
 import { previewItem, useDeleteItem, useTemplate, useLibrary, usePackages, useSaveItem, useSchema, useTypes, type ItemInput } from './api'
 import { Impact, PreviewDiff, Versions } from './components'
+import { HostnameWarning } from './hostname'
 import { ScriptRuns, TemplatePreview, usesTemplate } from './templates'
 import { usePreview } from './usePreview'
 
@@ -207,6 +208,7 @@ function ItemEditor({ stored, type, prefill }: { stored?: ItemInput & { used_by:
           )}
         </fieldset>
         <aside className="flex flex-col gap-[var(--gap)] xl:sticky xl:top-[72px] xl:self-start" aria-label={t('config.review')}>
+          {type === 'com.limdm.hostname' && <HostnameWarning />}
           <div className="card">
             <div className="flex border-b border-line px-2" role="tablist" aria-label={t('config.review')}>
               {(['impact', 'diff'] as const).map((p) => (

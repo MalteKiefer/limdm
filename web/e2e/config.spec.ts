@@ -30,10 +30,10 @@ async function shoot(page: Page, name: string) {
 }
 
 test('every declaration type has a form without JSON', async ({ page }) => {
-  test.setTimeout(180_000) // 33 page loads; CI runners are slower than 30 s allows
+  test.setTimeout(180_000) // 34 page loads; CI runners are slower than 30 s allows
   await page.goto('/app/config?tab=library')
   const types = await page.evaluate(async () => ((await (await fetch('/api/v1/schemas?lang=de')).json()).items as { type: string }[]).map((x) => x.type))
-  expect(types.length).toBe(33)
+  expect(types.length).toBe(34)
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(e.message))
   for (const type of types) {
@@ -44,6 +44,12 @@ test('every declaration type has a form without JSON', async ({ page }) => {
     await expect(page.locator('fieldset.card').first()).toBeVisible()
   }
   expect(errors).toEqual([])
+})
+
+test('host name item: warning and preview', async ({ page }) => {
+  await page.goto('/app/config/library/new?type=com.limdm.hostname')
+  await expect(page.getByRole('note').filter({ hasText: 'Ein neuer Hostname kann Dienste stören' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Vorschau des Hostnamens' })).toBeVisible()
 })
 
 test('library item: type picker, form, review, versions and rollback', async ({ page }) => {

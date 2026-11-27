@@ -17,6 +17,7 @@ import { useDetail, type DeviceDetail } from './api'
 import { checkTone, connectionState, firewallHealth, orderNotices, protectiveAlarm, updatesHealth, usedPct } from './logic'
 import { ActivityTab, InventoryTab, SoftwareTab } from './tabs'
 import { UpdatesTab } from './UpdatesTab'
+import { HostnameCard } from './HostnameCard'
 
 const tabs = ['overview', 'compliance', 'config', 'software', 'updates', 'inventory', 'activity'] as const
 type Tab = (typeof tabs)[number]
@@ -566,7 +567,7 @@ function Config({ d }: { d: DeviceDetail }) {
                     </td>
                     <td className="py-1.5 pr-3 font-mono text-meta">{x.identifier}</td>
                     <td className="py-1.5 pr-3 font-mono text-meta text-muted">{x.type}</td>
-                    <td className="py-1.5 text-muted">{x.reasons.join('; ') || '–'}</td>
+                    <td className="py-1.5 text-muted">{[...x.reasons, ...(x.info ?? [])].join('; ') || '–'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -576,6 +577,7 @@ function Config({ d }: { d: DeviceDetail }) {
           <EmptyState compact icon={Layers} title={t('devices.cfg.noDecls')} action={bpLink} />
         )}
       </Card>
+      <HostnameCard d={d} />
       {certs.length > 0 && (
         <Card title={t('devices.cfg.certs')} sub={t('devices.cfg.certsSub')} id="dv-certs">
           <div className="overflow-x-auto">
