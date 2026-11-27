@@ -181,6 +181,10 @@ type Firewall struct {
 	// (TemplateVars). A payload still marked when it reaches the agent could
 	// not be rendered; the agent then leaves the firewall as it is.
 	Template bool `json:"template,omitempty"`
+	// Keep lists rules that are not LiMDM's but accepted on the device
+	// (FirewallInvRule.Match). Nothing removes them; the console lists them
+	// as exceptions.
+	Keep []string `json:"keep,omitempty"`
 }
 
 // FirewallZone binds interfaces and source networks to a zone and opens
@@ -957,7 +961,7 @@ type Command struct {
 // CommandTypes are the one off actions an admin can send.
 var CommandTypes = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "script", "lost", "found", "wipe", "allow_uninstall", "message", "app_install", "app_remove",
 	"user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete", "software_remove", "diagnostics",
-	"package_hold", "package_downgrade", "workload_action"}
+	"package_hold", "package_downgrade", "workload_action", "firewall_remove_rule"}
 
 // PollResponse answers the agent's frequent poll (POST /api/v1/poll).
 type PollResponse struct {
@@ -1063,22 +1067,26 @@ type CommandResult struct {
 }
 
 type CheckinRequest struct {
-	AgentVersion      string          `json:"agent_version"`
-	Arch              string          `json:"arch"`
-	DeclarationsToken string          `json:"declarations_token"`
-	Status            *Status         `json:"status,omitempty"`
-	StatusHash        string          `json:"status_hash"`
-	Packages          []Package       `json:"packages,omitempty"`
-	PackagesHash      string          `json:"packages_hash"`
-	Results           []CommandResult `json:"results,omitempty"`
-	Metrics           *Metrics        `json:"metrics,omitempty"`       // sent every check in, outside the status hash
-	RecoveryKeys      []RecoveryKey   `json:"recovery_keys,omitempty"` // new LUKS recovery keys to escrow
-	BrandingHash      string          `json:"branding_hash,omitempty"`
-	UpdateResult      *UpdateResult   `json:"update_result,omitempty"` // outcome of the last agent update
-	Events            []string        `json:"events,omitempty"`
-	CatalogHash       string          `json:"catalog_hash,omitempty"`
-	AppRequests       []AppRequest    `json:"app_requests,omitempty"`   // self service requests of users
-	ScriptResults     []ScriptResult  `json:"script_results,omitempty"` // runs of recurring scripts
+	AgentVersion      string    `json:"agent_version"`
+	Arch              string    `json:"arch"`
+	DeclarationsToken string    `json:"declarations_token"`
+	Status            *Status   `json:"status,omitempty"`
+	StatusHash        string    `json:"status_hash"`
+	Packages          []Package `json:"packages,omitempty"`
+	PackagesHash      string    `json:"packages_hash"`
+	// Firewall is the host firewall inventory, sent when FirewallHash
+	// changed (like Packages).
+	Firewall      *FirewallInventory `json:"firewall,omitempty"`
+	FirewallHash  string             `json:"firewall_hash,omitempty"`
+	Results       []CommandResult    `json:"results,omitempty"`
+	Metrics       *Metrics           `json:"metrics,omitempty"`       // sent every check in, outside the status hash
+	RecoveryKeys  []RecoveryKey      `json:"recovery_keys,omitempty"` // new LUKS recovery keys to escrow
+	BrandingHash  string             `json:"branding_hash,omitempty"`
+	UpdateResult  *UpdateResult      `json:"update_result,omitempty"` // outcome of the last agent update
+	Events        []string           `json:"events,omitempty"`
+	CatalogHash   string             `json:"catalog_hash,omitempty"`
+	AppRequests   []AppRequest       `json:"app_requests,omitempty"`   // self service requests of users
+	ScriptResults []ScriptResult     `json:"script_results,omitempty"` // runs of recurring scripts
 	// CommandKey is the command key the agent has pinned (hex), so the
 	// console can show how far a key rotation has reached the fleet.
 	CommandKey string `json:"command_key,omitempty"`
@@ -1112,6 +1120,7 @@ type CheckinResponse struct {
 	Commands          []Command     `json:"commands,omitempty"`
 	NeedStatus        bool          `json:"need_status"`
 	NeedPackages      bool          `json:"need_packages"`
+	NeedFirewall      bool          `json:"need_firewall,omitempty"`
 	AgentUpdate       *AgentUpdate  `json:"agent_update,omitempty"`
 	ServerTime        time.Time     `json:"server_time"`
 	// RecoveryRotate carries escrowed keys the agent should replace (after

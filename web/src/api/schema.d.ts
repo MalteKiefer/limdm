@@ -2934,6 +2934,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/devices/{id}/firewall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Firewall inventory of a device: backend, default policies and every rule grouped managed, foreign and system */
+        get: operations["getDeviceFirewall"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/firewall/rules/{rid}/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adopt a foreign firewall rule into a firewall library item, or keep it as an exception there
+         * @description adopt adds the rule in the declaration format, keep adds its match to keep. item_id names an existing com.limdm.firewall item; without it a new item with name is created (enforce off) and assigned in the device's blueprint. Both go through the library save (validation, signature, audit, four eyes). System and managed rules are refused. Admins only.
+         */
+        post: operations["firewallRuleAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3011,9 +3048,9 @@ export interface components {
             };
         };
         CommandRequest: {
-            /** @description A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create, package_hold, package_downgrade, workload_action */
+            /** @description A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create, package_hold, package_downgrade, workload_action, firewall_remove_rule */
             type: string;
-            /** @description The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove), name and release (package_hold), name and version (package_downgrade), kind, id and action (workload_action: start, stop or restart of a workload of the last inventory). true is sent as on; reason (wipe, lost, script, package_downgrade, workload_action stop and restart: the reason shown to the approving admin when four eyes approval is on). */
+            /** @description The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove), name and release (package_hold), name and version (package_downgrade), kind, id and action (workload_action: start, stop or restart of a workload of the last inventory), rule_id and confirm_risk (firewall_remove_rule: a foreign rule of the inventory; confirm_risk for a rule that may cut SSH or the server). true is sent as on; reason (wipe, lost, script, package_downgrade, firewall_remove_rule, workload_action stop and restart: the reason shown to the approving admin when four eyes approval is on). */
             params?: {
                 [key: string]: string | number | boolean;
             };
@@ -4939,6 +4976,64 @@ export interface components {
             /** Format: date-time */
             error_at?: string | null;
             enabled?: boolean;
+        };
+        FirewallInventoryRule: {
+            /** @description identity of the rule now; a removal names it */
+            id: string;
+            /** @description stable text of the rule (tool, place, raw text without counters); keep entries store it */
+            match: string;
+            /** @description tool it was read with: ufw, firewalld, nftables, iptables, ip6tables */
+            source: string;
+            /** @enum {string} */
+            origin: "managed" | "foreign" | "system";
+            table?: string;
+            chain?: string;
+            /** @description firewalld zone or policy */
+            zone?: string;
+            /** @description in, out or forward */
+            direction?: string;
+            action?: string;
+            proto?: string;
+            port?: string;
+            service?: string;
+            from?: string;
+            to?: string;
+            iface?: string;
+            comment?: string;
+            /** @description the rule as the tool shows it */
+            raw: string;
+            /** @description nftables rule handle */
+            handle?: string;
+            /** @description ssh or server: removing it may cut remote access; a removal needs confirm_risk */
+            risk?: string;
+        };
+        DeviceFirewallRule: components["schemas"]["FirewallInventoryRule"] & {
+            /** @description listed in keep of the device's firewall declaration */
+            kept: boolean;
+            /** @description why the rule cannot be adopted */
+            adopt_error?: string;
+        };
+        DeviceFirewall: {
+            /** @description the agent reported a firewall inventory */
+            reports: boolean;
+            /** Format: date-time */
+            updated_at: string | null;
+            /** @description a firewall declaration applies to the device */
+            managed: boolean;
+            inventory: {
+                /** @description ufw, firewalld, nftables, iptables; empty when none was found */
+                backend: string;
+                active: boolean;
+                default_zone?: string;
+                policy: {
+                    in?: string;
+                    out?: string;
+                    forward?: string;
+                };
+                truncated?: boolean;
+                errors?: string[];
+            };
+            rules: components["schemas"]["DeviceFirewallRule"][];
         };
     };
     responses: {
@@ -10432,6 +10527,89 @@ export interface operations {
             409: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
+        };
+    };
+    getDeviceFirewall: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceFirewall"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    firewallRuleAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                /** @description rule id from the inventory */
+                rid: string;
+                action: "adopt" | "keep";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: int64
+                     * @description existing firewall item; 0 or missing creates one
+                     */
+                    item_id?: number;
+                    /** @description name of the new item */
+                    name?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: int64 */
+                        item_id: number;
+                        item_name: string;
+                        created: boolean;
+                    };
+                };
+            };
+            /** @description Four eyes: the save waits for another admin */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: int64 */
+                        approval_id?: number;
+                        status?: string;
+                    };
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
         };
     };
 }

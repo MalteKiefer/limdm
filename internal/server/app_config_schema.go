@@ -130,6 +130,8 @@ var schemaHints = map[string]map[string]schemaHint{
 		"outbound.allow[].port": h("Port", "Port").d("For example 443/tcp, empty is any.", "Zum Beispiel 443/tcp, leer ist beliebig."),
 		"template": h("Template", "Vorlage").d("Render every rule per device, for example {{.Attributes.office_net}}; check it with the preview.",
 			"Jede Regel pro Gerät erzeugen, zum Beispiel {{.Attributes.office_net}}; mit der Vorschau prüfen.").sec("Template", "Vorlage"),
+		"keep": h("Exceptions", "Ausnahmen").d("Rules LiMDM did not add that stay on the device, as set in the firewall tab of a device. Nothing removes them.",
+			"Regeln, die nicht von LiMDM stammen und auf dem Gerät bleiben, wie im Firewall Reiter eines Geräts gesetzt. Nichts entfernt sie.").sec("Exceptions", "Ausnahmen"),
 	},
 	api.TypeOSVersion: {
 		"min": h("Minimum versions", "Mindestversionen").d("os-release ID as key (ubuntu, debian, fedora) and the minimum VERSION_ID as value.", "os-release ID als Schlüssel (ubuntu, debian, fedora) und die Mindest VERSION_ID als Wert."),

@@ -811,4 +811,7 @@ var deCatalog = map[string]string{
 	// R3-H
 	"Host name": "Hostname",
 	"Host name from reverse DNS, DNS, the serial number, a template or a fixed name, with /etc/hosts and /etc/mailname.": "Hostname aus Reverse DNS, DNS, Seriennummer, Vorlage oder festem Namen, mit /etc/hosts und /etc/mailname.",
+	// R3-F
+	"Firewall rule adopted":           "Firewall Regel übernommen",
+	"Firewall rule kept as exception": "Firewall Regel als Ausnahme behalten",
 }

@@ -47,7 +47,7 @@ func (s *Server) needsApproval(typ, payload string) bool {
 	if typ == "workload_action" {
 		return s.workloadNeedsApproval(payload)
 	}
-	return s.settings().FourEyes && (typ == "wipe" || typ == "lost" || typ == "script" || typ == "package_downgrade")
+	return s.settings().FourEyes && (typ == "wipe" || typ == "lost" || typ == "script" || typ == "package_downgrade" || typ == "firewall_remove_rule")
 }
 
 // requestApproval stores a request, audits and announces it, and returns its ID.

@@ -1092,6 +1092,11 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 		}
 		pkgHash = req.PackagesHash
 	}
+	needFirewall, err := storeFirewall(ctx, tx, id, req) // app_firewall.go
+	if err != nil {
+		s.failAPI(w, err)
+		return
+	}
 	var notices []notice // sent after the commit
 	var refused []api.CommandResult
 	for _, res := range req.Results {
@@ -1142,7 +1147,7 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := api.CheckinResponse{ServerTime: time.Now().UTC(),
-		NeedStatus: statusHash != req.StatusHash, NeedPackages: pkgHash != req.PackagesHash, FallbackDNS: s.settings().FallbackDNS}
+		NeedStatus: statusHash != req.StatusHash, NeedPackages: pkgHash != req.PackagesHash, NeedFirewall: needFirewall, FallbackDNS: s.settings().FallbackDNS}
 	if err := s.keyCheckin(ctx, tx, id, r, req, &resp); err != nil {
 		s.failAPI(w, err)
 		return

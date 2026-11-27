@@ -346,7 +346,7 @@ strings, numbers or booleans; `true` is sent as a checked box.
 | Types | Roles |
 |---|---|
 | `sync`, `update`, `reboot`, `shutdown`, `lock`, `unlock`, `message`, `user_password`, `user_lock`, `user_unlock`, `diagnostics` | admin, helpdesk |
-| `script`, `lost`, `found`, `wipe`, `allow_uninstall`, `app_install`, `app_remove`, `user_create`, `user_admin`, `user_delete`, `software_remove`, `package_hold`, `package_downgrade` | admin |
+| `script`, `lost`, `found`, `wipe`, `allow_uninstall`, `app_install`, `app_remove`, `user_create`, `user_admin`, `user_delete`, `software_remove`, `package_hold`, `package_downgrade`, `firewall_remove_rule` | admin |
 | `workload_action` | admin; helpdesk when Settings, Approvals allow it |
 
 Fields: `minutes` (reboot, shutdown: 0 to 1440, default 1), `confirm` and `message` (lost,
@@ -355,7 +355,8 @@ wipe: `confirm` is the host name), `title` and `text` (message), `payload` (scri
 commands), `kind`, `name`, `installation` (software_remove), `name` and `release` (package_hold),
 `name` and `version` (package_downgrade, see [Patch management](patching.md#rollback)), `kind`, `id` and
 `action` (workload_action: a workload of the device's last inventory, `409` when the device's policy
-does not allow it, see [Containers and VMs](workloads.md)), `reason` (shown with an
+does not allow it, see [Containers and VMs](workloads.md)), `rule_id` and
+`confirm_risk` (firewall_remove_rule, see [Firewall inventory](#firewall-inventory)), `reason` (shown with an
 approval request, up to 500 characters). A type the token's role may not send answers `403`
 and is audited as `api.denied`; other rule violations answer `422`. A retired device answers
 `409`.
@@ -369,12 +370,33 @@ answers `422`, while the first is still running `409`. Poll
 `sent` are still open; commands expire after 7 days). The payload is never returned, since
 it can hold a password.
 
-With four eyes approval on (Settings, Security), wipe, lost mode, scripts and package downgrades do not run:
+With four eyes approval on (Settings, Security), wipe, lost mode, scripts, package downgrades and firewall rule removals do not run:
 the answer is `202` with `{"approval_id": 12, "status": "pending"}` (`ApprovalPending` in the
 OpenAPI document, `Location: /api/v1/approvals/{id}`) instead of a command, and another
 admin decides under **Approvals** in the console (`params.reason` is shown there) or through
 `POST /api/v1/approvals/{id}/approve`. Neither the requesting token nor the person who created
 it can approve; once approved, the command is queued with the token as creator.
+
+### Firewall inventory
+
+`GET /api/v1/devices/{id}/firewall` (read, device scope) returns the latest firewall
+inventory the agent reported: `backend` (ufw, firewalld, nftables, iptables), `active`,
+`policy` (`in`, `out`, `forward`) and `rules`, each with `origin` `managed` (added by LiMDM),
+`foreign` or `system` (Docker, Podman, libvirt, Kubernetes, fail2ban, CrowdSec), its fields,
+the raw text, `risk` (`ssh` or `server`), `kept` (listed in `keep` of the device's firewall
+declaration) and `adopt_error` when it cannot be adopted.
+
+`POST /api/v1/devices/{id}/firewall/rules/{rid}/adopt` and `.../keep` (admins) take
+`{"item_id": 12}` or `{"name": "Adopted rules"}`. Adopt adds the rule to that
+`com.limdm.firewall` item in the declaration format, keep adds its `match` to `keep`; a new
+item (enforce off) is assigned in the device's blueprint. Both are a normal library save
+(validation, signature, version, audit, four eyes) plus an audit entry `firewall.adopt` or
+`firewall.keep` on the device.
+
+`firewall_remove_rule` (command, admins, four eyes) deletes one foreign rule on the device:
+`{"type": "firewall_remove_rule", "params": {"rule_id": "3f2a9c1d7e4b5a60"}}`. System and
+managed rules answer `422`; a rule with a `risk` needs `"confirm_risk": true`. The agent
+reads the firewall again and refuses the rule when it changed meanwhile.
 
 ### Library items and blueprints
 
