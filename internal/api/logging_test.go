@@ -18,6 +18,9 @@ func TestLoggingValidate(t *testing.T) {
 		`{"files": ["var/log/x"]}`,
 		`{"files": ["/var/log/../etc/shadow"]}`,
 		`{"files": ["/proc/kmsg"]}`,
+		`{"files": ["/etc/shadow"]}`,
+		`{"files": ["/home/a/app.log"]}`,
+		`{"files": ["/srv/log/x"]}`,
 		`{"files": ["/var/log/*.log"]}`,
 		`{"include": ["("]}`,
 		`{"units": ["a b"]}`,
@@ -33,6 +36,18 @@ func TestLoggingValidate(t *testing.T) {
 	r, mb, buf, prio := (Logging{MinPriority: "err"}).Limits()
 	if r != 20 || mb != 100 || buf != 32 || prio != 3 {
 		t.Errorf("limits %d %d %d %d", r, mb, buf, prio)
+	}
+}
+
+func TestLogFileAllowed(t *testing.T) {
+	for p, ok := range map[string]bool{
+		"/var/log/syslog": true, "/var/log/nginx/error.log": true, "/srv/paperless/log/app.log": true,
+		"/var/log": false, "/var/log/": false, "/var/logs/x": false, "/srv/app/data/x.log": false, "/srv/log/x": false,
+		"/etc/shadow": false, "/root/x.log": false, "/home/u/.ssh/id_ed25519": false, "/var/log/../../etc/shadow": false, "var/log/x": false,
+	} {
+		if LogFileAllowed(p) != ok {
+			t.Errorf("%s: want %v", p, ok)
+		}
 	}
 }
 

@@ -9,11 +9,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/maltekiefer/limdm/internal/api"
 )
@@ -308,11 +311,69 @@ func containerLogs(kind string, ct logContainer, since time.Time) ([]api.LogLine
 
 // ---- files ----
 
+// The agent reads files as root, so a file source must not reach other
+// files: the path and its real location (symbolic links of the directories
+// resolved) must be below an allowed root (api.LogFileAllowed), the file is
+// opened without following a link in its last component, it must be the
+// same file as the real path names, and neither the file nor its directory
+// may be writable by group or others unless root owns it, so an
+// unprivileged user cannot swap in a link or another file.
+
+// logPathAllowed is api.LogFileAllowed (tests allow their own directory).
+var logPathAllowed = api.LogFileAllowed
+
 func inode(fi os.FileInfo) uint64 {
 	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
 		return st.Ino
 	}
 	return 0
+}
+
+// safeOwner: not writable by group or others, unless root owns it.
+func safeOwner(fi os.FileInfo) bool {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	return ok && (st.Uid == 0 || fi.Mode().Perm()&0o022 == 0)
+}
+
+// openLogFile opens a declared log file read only after the checks above.
+func openLogFile(p string) (*os.File, os.FileInfo, error) {
+	if !logPathAllowed(p) {
+		return nil, nil, fmt.Errorf("%s: not an allowed log file location", p)
+	}
+	dir, err := filepath.EvalSymlinks(filepath.Dir(p))
+	if err != nil {
+		return nil, nil, err
+	}
+	real := filepath.Join(dir, filepath.Base(p))
+	if !logPathAllowed(real) {
+		return nil, nil, fmt.Errorf("%s: resolves to %s, outside the allowed log locations", p, real)
+	}
+	dfi, err := os.Stat(dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !safeOwner(dfi) {
+		return nil, nil, fmt.Errorf("%s: writable by group or others and not owned by root", dir)
+	}
+	fd, err := unix.Open(real, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NOCTTY|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", real, err) // a link as last component: ELOOP
+	}
+	f := os.NewFile(uintptr(fd), real)
+	fi, err := f.Stat()
+	if err == nil && (!fi.Mode().IsRegular() || !safeOwner(fi)) {
+		err = fmt.Errorf("%s: not a regular file, or writable by group or others and not owned by root", real)
+	}
+	if err == nil { // the file opened is the one the real path names now
+		if lfi, lerr := os.Lstat(real); lerr != nil || !os.SameFile(fi, lfi) {
+			err = fmt.Errorf("%s: changed while it was opened", real)
+		}
+	}
+	if err != nil {
+		f.Close()
+		return nil, nil, err
+	}
+	return f, fi, nil
 }
 
 func (c *logCollector) collectFiles() {
@@ -325,42 +386,46 @@ func (c *logCollector) collectFiles() {
 		}
 	}
 	for _, p := range c.cfg.Files {
-		fi, err := os.Stat(p)
-		if err != nil || !fi.Mode().IsRegular() {
-			continue
-		}
-		ino := inode(fi)
-		cur, ok := c.st.Files[p]
-		if !ok {
-			c.st.Files[p] = fileCursor{ino, fi.Size()} // new: from the current end on
-			continue
-		}
-		if cur.Inode != ino {
-			// rotated: read the rest of the old file when it was renamed to .1
-			if old, err := os.Stat(p + ".1"); err == nil && inode(old) == cur.Inode {
-				if lines, _, err := readFileFrom(p+".1", p, cur, true); err == nil {
-					_ = c.add(lines)
-				}
-			}
-			cur = fileCursor{Inode: ino}
-		} else if fi.Size() < cur.Offset {
-			cur.Offset = 0 // truncated in place (copytruncate)
-		}
-		lines, off, err := readFileFrom(p, p, cur, false)
-		if err == nil && c.add(lines) == nil {
-			c.st.Files[p] = fileCursor{ino, off}
-		}
+		c.collectFile(p)
 	}
 }
 
-// readFileFrom reads complete lines from offset (at most 4 MiB and
-// logPassMax lines); with final the last line counts without a newline.
-func readFileFrom(path, unit string, cur fileCursor, final bool) ([]api.LogLine, int64, error) {
-	f, err := os.Open(path)
+func (c *logCollector) collectFile(p string) {
+	f, fi, err := openLogFile(p)
 	if err != nil {
-		return nil, cur.Offset, err
+		return
 	}
 	defer f.Close()
+	ino := inode(fi)
+	cur, ok := c.st.Files[p]
+	if !ok {
+		c.st.Files[p] = fileCursor{ino, fi.Size()} // new: from the current end on
+		return
+	}
+	if cur.Inode != ino {
+		// rotated: read the rest of the old file when it was renamed to .1
+		if old, ofi, err := openLogFile(p + ".1"); err == nil {
+			if inode(ofi) == cur.Inode {
+				if lines, _, err := readFileFrom(old, p, cur, true); err == nil {
+					_ = c.add(lines)
+				}
+			}
+			old.Close()
+		}
+		cur = fileCursor{Inode: ino}
+	} else if fi.Size() < cur.Offset {
+		cur.Offset = 0 // truncated in place (copytruncate)
+	}
+	lines, off, err := readFileFrom(f, p, cur, false)
+	if err == nil && c.add(lines) == nil {
+		c.st.Files[p] = fileCursor{ino, off}
+	}
+}
+
+// readFileFrom reads complete lines of an opened file from offset (at most
+// 4 MiB and logPassMax lines); with final the last line counts without a
+// newline.
+func readFileFrom(f *os.File, unit string, cur fileCursor, final bool) ([]api.LogLine, int64, error) {
 	if _, err := f.Seek(cur.Offset, io.SeekStart); err != nil {
 		return nil, cur.Offset, err
 	}

@@ -93,6 +93,38 @@ var (
 	logLabelRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,127}=[^\x00-\x1f]{0,256}$`)
 )
 
+// Log files may only live below these roots (after symbolic links are
+// resolved, on the agent): /var/log/ and /srv/<name>/log/. The agent reads
+// them as root, so a path elsewhere, or a link planted in a log directory,
+// must never reach other files. logSecretPrefixes are refused anywhere, as
+// a second line.
+var logSecretPrefixes = []string{"/etc/shadow", "/etc/gshadow", "/etc/ssh/", "/root/", "/etc/ssl/private/", "/var/lib/limdm/",
+	"/etc/limdm/", "/proc/", "/sys/", "/dev/", "/run/"}
+
+// LogFileAllowed reports whether a clean absolute path is a permitted log
+// file location.
+func LogFileAllowed(p string) bool {
+	if p != path.Clean(p) || !strings.HasPrefix(p, "/") {
+		return false
+	}
+	for _, s := range logSecretPrefixes {
+		if p == strings.TrimSuffix(s, "/") || strings.HasPrefix(p, s) {
+			return false
+		}
+	}
+	parts := strings.Split(p, "/") // "", first, ...
+	if len(parts) >= 3 && parts[1] == "home" && slices.Contains(parts[3:], ".ssh") {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(p, "/var/log/") && len(p) > len("/var/log/"):
+		return true
+	case len(parts) >= 5 && parts[1] == "srv" && parts[2] != "" && parts[3] == "log" && parts[4] != "":
+		return true
+	}
+	return false
+}
+
 // LogGlob matches name against a pattern with * as the only wildcard.
 func LogGlob(pattern, name string) bool {
 	ok, err := path.Match(strings.ReplaceAll(pattern, "[", `\[`), name)
@@ -134,10 +166,8 @@ func (l Logging) validate() error {
 			bad("files: %q must be a clean absolute path without wildcards", f)
 			continue
 		}
-		for _, p := range []string{"/proc/", "/sys/", "/dev/", "/run/", "/var/lib/limdm/", "/etc/limdm/"} {
-			if strings.HasPrefix(f+"/", p) {
-				bad("files: %q is not a log file location", f)
-			}
+		if !LogFileAllowed(f) {
+			bad("files: %q must be below /var/log/ or /srv/<name>/log/", f)
 		}
 	}
 	for _, f := range []struct {

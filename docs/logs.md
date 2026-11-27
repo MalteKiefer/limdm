@@ -52,6 +52,25 @@ files ────┘                                                      │
   bounded in time (30 s) and output, so a busy production host (Docker, Postfix) only sees
   a few short tool calls every 30 seconds.
 
+### File sources
+
+The agent reads files as root, so a file source is held to these rules (on the server when
+the item is saved, and on the device before every read):
+
+* Only below `/var/log/` or `/srv/<name>/log/`, clean absolute paths without wildcards.
+  Secret locations are refused anywhere (`/etc/shadow`, `/etc/gshadow`, `/etc/ssh/`,
+  `/root/`, `/home/*/.ssh`, `/etc/ssl/private/`, `/var/lib/limdm/`, `/etc/limdm/`, `/proc`,
+  `/sys`, `/dev`, `/run`).
+* Symbolic links of the directories are resolved and the real path must still be in an
+  allowed root; the file itself is opened with `O_NOFOLLOW` (a link as the file is refused,
+  also one pointing inside the root), and the opened file must be the file the real path
+  names (same device and inode), so it cannot be swapped between the checks and the read.
+* Neither the file nor its directory may be writable by group or others unless root owns
+  it (`/var/log` owned by root with group write, as on Ubuntu, is fine). A log directory of
+  a service user that others can write to is refused: make it `0755` or move the log.
+* A refused file is skipped silently on the device (no lines, no error loop); check the
+  path and the modes when a file source stays empty.
+
 ### Filters, masking and limits
 
 * `include` and `exclude` are regular expressions on the message.

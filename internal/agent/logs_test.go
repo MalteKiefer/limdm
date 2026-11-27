@@ -69,8 +69,16 @@ func TestContainerLogs(t *testing.T) {
 	}
 }
 
+// allowRoot lets the tests read below dir, as /var/log/ is in production.
+func allowRoot(t *testing.T, dir string) {
+	old := logPathAllowed
+	logPathAllowed = func(p string) bool { return strings.HasPrefix(p, dir+"/") }
+	t.Cleanup(func() { logPathAllowed = old })
+}
+
 func TestLogFilesRotation(t *testing.T) {
-	dir := t.TempDir()
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	allowRoot(t, dir)
 	p := filepath.Join(dir, "app.log")
 	write := func(name, s string) {
 		f, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
@@ -186,5 +194,53 @@ func TestLogSpoolBoundAndShip(t *testing.T) {
 	}
 	if !ownLine(api.LogLine{Unit: "limdm-agent.service"}) || ownLine(api.LogLine{Unit: "postfix.service"}) {
 		t.Error("own lines")
+	}
+}
+
+func TestLogFileOpenRefusals(t *testing.T) {
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	root := filepath.Join(base, "log")
+	secret := filepath.Join(base, "shadow") // outside the allowed root
+	os.MkdirAll(root, 0o755)
+	os.WriteFile(secret, []byte("root:$6$hash:::\n"), 0o600)
+	os.WriteFile(filepath.Join(root, "ok.log"), []byte("fine\n"), 0o644)
+	allowRoot(t, root)
+	if f, _, err := openLogFile(filepath.Join(root, "ok.log")); err != nil {
+		t.Fatalf("plain file: %v", err)
+	} else {
+		f.Close()
+	}
+	// a link as the file, and a link as a directory, leading out of the root
+	os.Symlink(secret, filepath.Join(root, "app.log"))
+	os.Symlink(base, filepath.Join(root, "sub"))
+	for _, p := range []string{filepath.Join(root, "app.log"), filepath.Join(root, "sub", "shadow"), secret} {
+		if f, _, err := openLogFile(p); err == nil {
+			f.Close()
+			t.Errorf("%s opened", p)
+		}
+	}
+	// a link inside the root is refused too (no link as last component)
+	os.Symlink(filepath.Join(root, "ok.log"), filepath.Join(root, "alias.log"))
+	if _, _, err := openLogFile(filepath.Join(root, "alias.log")); err == nil {
+		t.Error("link followed")
+	}
+	// a directory others can write to (not owned by root)
+	open := filepath.Join(root, "open")
+	os.Mkdir(open, 0o755)
+	os.Chmod(open, 0o777)
+	os.WriteFile(filepath.Join(open, "x.log"), []byte("x\n"), 0o644)
+	if _, _, err := openLogFile(filepath.Join(open, "x.log")); err == nil || !strings.Contains(err.Error(), "writable") {
+		t.Errorf("world writable directory: %v", err)
+	}
+	// a file others can write to
+	os.WriteFile(filepath.Join(root, "w.log"), []byte("x\n"), 0o644)
+	os.Chmod(filepath.Join(root, "w.log"), 0o666)
+	if _, _, err := openLogFile(filepath.Join(root, "w.log")); err == nil {
+		t.Error("world writable file opened")
+	}
+	// the real check: outside /var/log/ and /srv/<name>/log/
+	logPathAllowed = api.LogFileAllowed
+	if _, _, err := openLogFile(filepath.Join(root, "ok.log")); err == nil {
+		t.Error("path outside the allowlist opened")
 	}
 }
