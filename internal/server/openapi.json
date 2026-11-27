@@ -6453,7 +6453,8 @@
                 "operations",
                 "retention",
                 "enrollment",
-                "cve_feeds"
+                "cve_feeds",
+                "logs"
               ]
             },
             "description": ""

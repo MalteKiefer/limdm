@@ -16,6 +16,7 @@ const people = () => import('./people')
 const ops = () => import('./ops')
 const fleet = () => import('./fleet')
 const cve = () => import('./cvefeeds')
+const logs = () => import('../logs/settings')
 
 const views: Record<SectionId, ComponentType> = {
   general: mod(server, 'General'),
@@ -38,6 +39,7 @@ const views: Record<SectionId, ComponentType> = {
   network: mod(fleet, 'Network'),
   agents: mod(fleet, 'Agents'),
   cve: mod(cve, 'CVEFeeds'),
+  logs: mod(logs, 'LogSettings'),
 }
 
 /** The sections the signed in user may open, in navigation order. */

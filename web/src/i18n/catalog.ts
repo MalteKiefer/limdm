@@ -6,6 +6,7 @@ import * as config from '../areas/config/messages'
 import * as devices from '../areas/devices/messages'
 import * as home from '../areas/home/messages'
 import * as inbox from '../areas/inbox/messages'
+import * as logs from '../areas/logs/messages'
 import * as reports from '../areas/reports/messages'
 import * as settings from '../areas/settings/messages'
 import * as updates from '../areas/updates/messages'
@@ -14,7 +15,7 @@ import * as workloads from '../areas/workloads/messages'
 import * as core from './core'
 import type { Catalog } from './types'
 
-const parts = [core, home, inbox, devices, compliance, config, activity, reports, settings, updates, vulns, workloads]
+const parts = [core, home, inbox, devices, compliance, config, activity, reports, settings, updates, vulns, workloads, logs]
 
 type DE = typeof core.de &
   typeof home.de &
@@ -27,7 +28,8 @@ type DE = typeof core.de &
   typeof settings.de &
   typeof updates.de &
   typeof vulns.de &
-  typeof workloads.de
+  typeof workloads.de &
+  typeof logs.de
 
 export type MessageKey = keyof DE & string
 

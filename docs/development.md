@@ -145,7 +145,7 @@ Rules the checks enforce:
 * Translations: German and English for every text, one catalog per area
   (`src/areas/<area>/messages.ts`) plus `src/i18n/core.ts`; the lint step fails on a key
   missing in one language. The language follows the browser until the user picks one.
-* Bundle budget (gzip): first load 290 KB (the catalogs of all areas load up front), a lazy
+* Bundle budget (gzip): first load 300 KB (the catalogs of all areas load up front), a lazy
   chunk 120 KB, ECharts 220 KB, CSS 20 KB, a font 100 KB.
 * Shared building blocks live in `src/components` (settings forms, blueprint picker, badges,
   downloads, data grid); an area imports another area's code only through its routes.
