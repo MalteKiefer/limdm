@@ -28,7 +28,11 @@ ISO/IEC 27001:2022 Annex A.
   updates and CVEs per device and fleet wide (Debian, Ubuntu, Arch and Alpine security data,
   dnf and zypper advisories), package hold and downgrade.
 * **Host firewall** on ufw, firewalld and nftables (Alpine) with zones and optional outbound
-  filtering.
+  filtering, and a read only inventory of every rule on the device: adopt, keep or discard
+  foreign rules.
+* **Containers and VMs** (Docker, Podman, LXC, LXD, Incus, Proxmox, libvirt) per device, with
+  start, shut down and restart behind a policy switch.
+* **Host names** from reverse DNS, DNS, the serial number, a template or a fixed name.
 * **Compliance** with automatic remediation, grace periods, automatic lock, custom checks,
   risk exceptions, compliance history and CSV evidence for auditors.
 * **Device commands** for lock and unlock, lost mode, wipe, restart, scripts, updates,

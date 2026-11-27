@@ -11,6 +11,7 @@ change behavior they rely on.
 - **Breaking:** EAP-TLS device certificates take the DNS SAN from the device ID under the new network certificate domain (Settings, Network; empty leaves it out) and the email SAN only from directory verified addresses. RADIUS policies that matched the reported host name must match the new names (see `docs/network.md`).
 - CVE data feeds (Debian, Ubuntu, Arch, Alpine) are off by default. Switch each on under Settings, CVE data and watch disk and memory during the first import.
 - A firewall declaration without zones, outbound filtering or templates runs exactly the commands it ran before.
+- Agents up to 0.18 reject a firewall item that uses `keep`; update the agents before keeping foreign rules. Removing a rule on nftables or iptables hosts affects only the runtime ruleset.
 
 ### Added
 - Update rings with waves, deferral, pause and resume and optional approval (`/api/v1/update-rings`, `/api/v1/update-waves`); devices get an update gate at check in.
@@ -33,6 +34,14 @@ change behavior they rely on.
 - Tab bars show a fade and arrow buttons where tabs are cut off.
 - `limdm checks --strict` exits with code 2 when a check fails; checks are listed failing first, then by level and ID.
 
+- Containers and VMs tab on the device page: Docker, Podman, LXC, LXD, Incus, Proxmox (pct, qm) and libvirt workloads with tool versions, a read only inventory per device and a fleet list (`GET /api/v1/devices/{id}/workloads`, `GET /api/v1/workloads`).
+- Start, shut down and restart of containers and VMs (`workload_action`), off by default: needs `workload_control` in `com.limdm.agent` and the admin role (helpdesk when Settings, Approvals allow it), optional four eyes for stop and restart; graceful shutdown only, audited.
+- `com.limdm.hostname` declaration: sets the host name from reverse DNS (forward confirmed), DNS, the DMI serial, a device template or a fixed name, with `/etc/hosts`, `/etc/mailname` and a pretty name; names from DNS apply only when stable over two check ins and at most hourly.
+- Item editor preview of the computed host name for one device with a warning, and a host name card on the device page; agents report `hostname_info` and notes in the declaration status, including a warning when Postfix or Exim keeps another host name.
+- Template variables `.Serial`, `.MAC`, `.Vendor` and `.Model` for file, firewall and hostname templates.
+- Firewall inventory per device: the agent reports backend, default policies and every rule of ufw, firewalld, nftables or iptables (read only); the device page has a Firewall tab grouping managed, foreign and system rules (`GET /api/v1/devices/{id}/firewall`).
+- Foreign firewall rules can be adopted into a firewall library item, kept as an exception (`keep` in `com.limdm.firewall`) or discarded with the signed command `firewall_remove_rule` (admins, four eyes, a second confirmation when SSH or the server may be cut; `POST /api/v1/devices/{id}/firewall/rules/{rid}/{adopt|keep}`).
+
 ### Changed
 - Enrollment tokens default to 1 use and 1 day; every use is audited with the token it used.
 - Flatpak is its own update source: mode `all` without rules still updates it, `security` does not.
@@ -43,6 +52,7 @@ change behavior they rely on.
 - The bulk action bar is fixed to the bottom of the content column, keeps the last row visible and scrolls its actions sideways on phones.
 - The tray shows the device state by badge shape (check mark, exclamation mark, cross) and in its tooltip, not by color alone, with a symbolic logo for light and dark panels.
 - "Check In Now" is "Sync Now" in the tray, desktop app and CLI; the desktop app and the CLI say Blueprint (`limdm blueprint`, `limdm profiles` stays as an alias).
+- Rules of Docker, Podman, libvirt, Kubernetes, fail2ban and CrowdSec are system rules in the firewall inventory: shown, never adopted, kept or removed.
 
 ### Fixed
 - An update run without changes is reported as "no updates", not "installed"; unattended-upgrade mail noise is filtered.
