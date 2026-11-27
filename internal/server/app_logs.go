@@ -597,6 +597,9 @@ type logAlert struct {
 	LastCount     *int       `json:"last_count"`
 	LastFiredAt   *time.Time `json:"last_fired_at"`
 	Tenant        *int64     `json:"-"`
+	ScopeTags     []string   `json:"-"` // device scope of the account that saved it
+	ScopeGroups   []string   `json:"-"`
+	Global        bool       `json:"-"` // saved by an unscoped global account
 }
 
 func (a logAlert) validate() error {
@@ -616,11 +619,11 @@ func (a logAlert) validate() error {
 	return err
 }
 
-const logAlertCols = `id, name, query, threshold, window_minutes, severity, enabled, created_by, last_count, last_fired_at, tenant_id`
+const logAlertCols = `id, name, query, threshold, window_minutes, severity, enabled, created_by, last_count, last_fired_at, tenant_id, scope_tags, scope_groups, global`
 
 func scanLogAlert(row pgx.CollectableRow) (logAlert, error) {
 	var a logAlert
-	return a, row.Scan(&a.ID, &a.Name, &a.Query, &a.Threshold, &a.WindowMinutes, &a.Severity, &a.Enabled, &a.CreatedBy, &a.LastCount, &a.LastFiredAt, &a.Tenant)
+	return a, row.Scan(&a.ID, &a.Name, &a.Query, &a.Threshold, &a.WindowMinutes, &a.Severity, &a.Enabled, &a.CreatedBy, &a.LastCount, &a.LastFiredAt, &a.Tenant, &a.ScopeTags, &a.ScopeGroups, &a.Global)
 }
 
 func (s *Server) apiLogAlerts(w http.ResponseWriter, r *http.Request, c apiCaller) {
@@ -683,15 +686,21 @@ func (s *Server) apiLogAlertSave(w http.ResponseWriter, r *http.Request, c apiCa
 		}
 		a.ID = cur.ID
 	}
-	detail := fmt.Sprintf("name=%q query=%q threshold=%d window=%d severity=%s enabled=%v", a.Name, a.Query, a.Threshold, a.WindowMinutes, a.Severity, a.Enabled)
+	// the rule counts with the scope of the account that saves it, now and later
+	tags, groups := nonNil(sess.Tags), nonNil(sess.Groups)
+	global := sess.Super && sess.Tenant == 0 && !sess.scoped()
+	detail := fmt.Sprintf("name=%q query=%q threshold=%d window=%d severity=%s enabled=%v scope_tags=%q scope_groups=%q global=%v",
+		a.Name, a.Query, a.Threshold, a.WindowMinutes, a.Severity, a.Enabled, tags, groups, global)
 	err := s.auditAction(ctx, c.actor(), "logs.alert_save", a.Name, detail, func(tx pgx.Tx) error {
 		if a.ID != 0 {
-			_, err := tx.Exec(ctx, `UPDATE log_alerts SET name=$2, query=$3, threshold=$4, window_minutes=$5, severity=$6, enabled=$7 WHERE id=$1`,
-				a.ID, a.Name, a.Query, a.Threshold, a.WindowMinutes, a.Severity, a.Enabled)
+			_, err := tx.Exec(ctx, `UPDATE log_alerts SET name=$2, query=$3, threshold=$4, window_minutes=$5, severity=$6, enabled=$7,
+				scope_tags=$8, scope_groups=$9, global=$10, created_by=$11 WHERE id=$1`,
+				a.ID, a.Name, a.Query, a.Threshold, a.WindowMinutes, a.Severity, a.Enabled, tags, groups, global, c.actor())
 			return err
 		}
-		return tx.QueryRow(ctx, `INSERT INTO log_alerts(tenant_id, name, query, threshold, window_minutes, severity, enabled, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`, tenant, a.Name, a.Query, a.Threshold, a.WindowMinutes, a.Severity, a.Enabled, c.actor()).Scan(&a.ID)
+		return tx.QueryRow(ctx, `INSERT INTO log_alerts(tenant_id, name, query, threshold, window_minutes, severity, enabled, created_by, scope_tags, scope_groups, global)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`, tenant, a.Name, a.Query, a.Threshold, a.WindowMinutes, a.Severity, a.Enabled, c.actor(),
+			tags, groups, global).Scan(&a.ID)
 	})
 	if err != nil {
 		s.apiFail(w, err)
@@ -720,19 +729,29 @@ func (s *Server) apiLogAlertDelete(w http.ResponseWriter, r *http.Request, c api
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// alertSession is the scope an alert rule counts in: its tenant, or every
-// device for a rule of a global administrator.
+// alertSession is the scope an alert rule counts in: the tenant and device
+// scope of the account that saved it. It reads with the auditor role, so
+// scopeCond applies its stored tags and groups (admin sessions are never
+// scoped); the whole installation only for a rule of an unscoped global
+// account. A rule without tenant that is not global matches nothing.
 func alertSession(a logAlert) session {
-	if a.Tenant == nil {
-		return session{Email: "logs", Role: "admin", Super: true}
+	sess := session{Email: a.CreatedBy, Role: "auditor", Tags: a.ScopeTags, Groups: a.ScopeGroups}
+	switch {
+	case a.Tenant != nil:
+		sess.Tenant = *a.Tenant
+	case a.Global:
+		sess.Super = true
+	default:
+		sess.Tenant = -1 // no tenant has this ID
 	}
-	return session{Email: "logs", Role: "admin", Tenant: *a.Tenant}
+	return sess
 }
 
-// countAlert counts the lines that match a rule in its window up to now.
-func (s *Server) countAlert(ctx context.Context, a logAlert, now time.Time) (int, error) {
+// countAlert counts the lines that match a rule in its window up to now,
+// within the scope of sess.
+func (s *Server) countAlert(ctx context.Context, a logAlert, sess session, now time.Time) (int, error) {
 	v := url.Values{"q": {a.Query}, "from": {now.Add(-time.Duration(a.WindowMinutes) * time.Minute).Format(time.RFC3339)}, "to": {now.Format(time.RFC3339)}}
-	f, err := s.parseLogFilter(apiCaller{Role: "admin", Sess: ptr(alertSession(a))}, v, now)
+	f, err := s.parseLogFilter(apiCaller{Role: sess.Role, Sess: &sess}, v, now)
 	if err != nil {
 		return 0, err
 	}
@@ -743,8 +762,6 @@ func (s *Server) countAlert(ctx context.Context, a logAlert, now time.Time) (int
 	})
 	return n, err
 }
-
-func ptr[T any](v T) *T { return &v }
 
 func (s *Server) alertNotice(a logAlert, n int, test bool) notice {
 	title := "Log alert: " + a.Name
@@ -768,7 +785,9 @@ func (s *Server) apiLogAlertTest(w http.ResponseWriter, r *http.Request, c apiCa
 		s.apiFail(w, err)
 		return
 	}
-	n, err := s.countAlert(r.Context(), a, time.Now())
+	sess := c.sess() // the caller's own scope, not the rule's
+	sess.Role = "auditor"
+	n, err := s.countAlert(r.Context(), a, sess, time.Now())
 	if err != nil {
 		s.apiFail(w, err)
 		return
@@ -790,7 +809,7 @@ func (s *Server) evalLogAlerts(ctx context.Context, now time.Time) error {
 	}
 	var errs []error
 	for _, a := range list {
-		n, err := s.countAlert(ctx, a, now)
+		n, err := s.countAlert(ctx, a, alertSession(a), now)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("alert %d: %w", a.ID, err))
 			continue

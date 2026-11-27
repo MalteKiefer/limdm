@@ -1143,5 +1143,10 @@ CREATE TABLE IF NOT EXISTS log_alerts (
     created_by     TEXT NOT NULL,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_count     INT,
-    last_fired_at  TIMESTAMPTZ
+    last_fired_at  TIMESTAMPTZ,
+    -- the device scope of the account that saved the rule: it counts only
+    -- the devices that account sees (whole installation only with global)
+    scope_tags     TEXT[] NOT NULL DEFAULT '{}',
+    scope_groups   TEXT[] NOT NULL DEFAULT '{}',
+    global         BOOLEAN NOT NULL DEFAULT false
 );

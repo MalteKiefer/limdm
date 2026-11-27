@@ -290,6 +290,40 @@ func TestLogs(t *testing.T) {
 		t.Fatal("alert did not fire")
 	}
 
+	// alert scope: a rule counts only the devices of the account that saved it
+	if _, _, err := s.storeLogLines(ctx, "d3", 1, 7, []api.LogLine{line("journald", "x.service", "scope probe refused", "s1", 3, now.Add(-time.Minute))}, now); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO log_alerts(tenant_id, name, query, threshold, window_minutes, created_by, scope_tags)
+		VALUES (1, 'scoped', '"scope probe"', 1, 60, 'audit@firma.de', '{prod}'), (NULL, 'orphan', '"scope probe"', 1, 60, 'x', '{}')`)
+	code, body = call(tenant2, "POST", "/api/v1/logs/alerts", `{"name":"tenant two","query":"refused","threshold":10,"window_minutes":60,"enabled":true}`)
+	var t2alert logAlert
+	if json.Unmarshal([]byte(body), &t2alert); code != 200 {
+		t.Fatalf("tenant alert: %d %s", code, body)
+	}
+	if err := s.evalLogAlerts(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	rows, _ := db.Query(ctx, `SELECT name, coalesce(last_count, -1) FROM log_alerts`)
+	for rows.Next() {
+		var n string
+		var c int
+		rows.Scan(&n, &c)
+		counts[n] = c
+	}
+	rows.Close()
+	if counts["scoped"] != 0 || counts["orphan"] != 0 || counts["tenant two"] != 1 || counts["MX down"] != 1 {
+		t.Fatalf("alert scope: %v", counts)
+	}
+	// the test button counts with the caller's scope: the global admin sees every tenant
+	if code, body := call(tenant2, "POST", "/api/v1/logs/alerts/"+strconv.FormatInt(t2alert.ID, 10)+"/test", ""); code != 200 || !strings.Contains(body, `"count":1`) {
+		t.Fatalf("tenant test: %d %s", code, body)
+	}
+	if code, body := call(dashAdmin, "POST", "/api/v1/logs/alerts/"+strconv.FormatInt(t2alert.ID, 10)+"/test", ""); code != 200 || !strings.Contains(body, `"count":3`) {
+		t.Fatalf("global test: %d %s", code, body)
+	}
+
 	// partitions: an old day is archived (encrypted, verified), then dropped, then restored
 	store := &memStore{m: map[string][]byte{}}
 	logTargetHook = func(string) blobStore { return store }
