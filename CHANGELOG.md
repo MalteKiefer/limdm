@@ -15,6 +15,9 @@ change behavior they rely on.
 - OpenAPI document: tags with descriptions, per operation security, Problem Details responses for 401 and 403, request body examples, warnings on operations that act on devices or delete data; title "LiMDM Admin API". Paths, operationIds and schemas are unchanged.
 - `/api/v1/docs` allows `data:` and `blob:` images for that page only; the console CSP is unchanged.
 
+### Fixed
+- Wipe forces the restart: sleep is blocked after `luksErase`, a device that slept through the two minutes restarts as soon as it wakes up, inhibitors are ignored, and the agent falls back to `systemctl reboot --force --force` and `/proc/sysrq-trigger`. The device restarts instead of powering off.
+
 ## 0.21.2 (2026-11-27)
 
 ### Added
