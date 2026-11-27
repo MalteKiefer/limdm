@@ -35,9 +35,9 @@ const deviceLockUsers = stateDir + "/device-lock-users.json"
 // login shell.
 func peopleAccounts() []string { return parsePeople(readFile("/etc/passwd")) }
 
-func parsePeople(passwd string) []string {
+func parsePeople(accountDB string) []string {
 	var users []string
-	for _, l := range strings.Split(passwd, "\n") {
+	for _, l := range strings.Split(accountDB, "\n") {
 		f := strings.Split(l, ":")
 		if len(f) < 7 {
 			continue
