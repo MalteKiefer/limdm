@@ -54,6 +54,11 @@ type Settings struct {
 	FourEyes         bool `json:"four_eyes,omitempty"`
 	FourEyesRecovery bool `json:"four_eyes_recovery,omitempty"`
 	FourEyesShell    bool `json:"four_eyes_shell,omitempty"` // remote shell sessions
+	// FourEyesWorkloads: stopping and restarting containers and VMs needs
+	// approval; WorkloadsHelpdesk lets the helpdesk role send workload
+	// actions (app_workloads.go).
+	FourEyesWorkloads bool `json:"four_eyes_workloads,omitempty"`
+	WorkloadsHelpdesk bool `json:"workloads_helpdesk,omitempty"`
 	// RequireMFA refuses OIDC sign ins whose id token shows no second factor
 	// (amr), or, with MFAACR set, whose acr is not one of these values.
 	RequireMFA bool     `json:"require_mfa,omitempty"`
@@ -526,6 +531,7 @@ func (s *Server) saveSettings(ctx context.Context, sess session, ip, section str
 		set.FourEyes = in.FourEyes
 		set.FourEyesRecovery = set.FourEyes && in.FourEyesRecovery
 		set.FourEyesShell = set.FourEyes && in.FourEyesShell
+		set.FourEyesWorkloads, set.WorkloadsHelpdesk = set.FourEyes && in.FourEyesWorkloads, in.WorkloadsHelpdesk
 		set.Geolocation, set.FallbackDNS = in.Geolocation, in.FallbackDNS
 		if set.FourEyes && !cur.FourEyes {
 			n, err := s.activeAdmins(ctx)
@@ -592,7 +598,8 @@ func (s *Server) saveSettings(ctx context.Context, sess session, ip, section str
 		fmt.Sprintf(" enrollment=%+v", set.Enroll.withDefaults()) +
 		fmt.Sprintf(" log_level=%s access_log=%v audit_api_reads=%s update_downloads=%d max_checkins=%d agent_proxy_protocol=%q syslog=%q syslog_ca_bytes=%d",
 			set.Ops.LogLevel, set.Ops.AccessLog, set.Ops.AuditAPIReads, set.Ops.UpdateDownloads, set.Ops.MaxCheckins, set.Ops.AgentProxyFrom, set.Ops.Syslog, len(set.Ops.SyslogCA)) +
-		fmt.Sprintf(" cve_feeds=%+v", set.CVEFeeds)
+		fmt.Sprintf(" cve_feeds=%+v", set.CVEFeeds) +
+		fmt.Sprintf(" four_eyes_workloads=%v workloads_helpdesk=%v", set.FourEyesWorkloads, set.WorkloadsHelpdesk)
 	err = s.auditAction(ctx, sess.Email, "settings.save", "server", detail, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()
 			RETURNING updated_at`, string(doc)).Scan(&at)

@@ -155,6 +155,18 @@ test('device page: tabs, message, details, activity', async ({ page }) => {
   await page.keyboard.press('Escape')
 })
 
+test('device page: containers and VMs, actions off by policy', async ({ page }) => {
+  await page.goto('/app/devices/e2e-ws1?tab=workloads')
+  await expect(page.getByText('Docker 27.3.1')).toBeVisible()
+  const row = page.getByRole('row', { name: /paperless-webserver-1/ })
+  await expect(row.getByText('running', { exact: true })).toBeVisible()
+  await expect(row.getByText('paperless-ngx:2.13')).toBeVisible()
+  // the default policy allows no action: disabled, with the reason
+  await expect(row.getByRole('button', { name: 'Herunterfahren: paperless-webserver-1' })).toBeDisabled()
+  await expect(page.getByRole('row', { name: /win11/ }).getByRole('button', { name: 'Starten: win11' })).toBeDisabled()
+  await expect(page.getByText('Die Richtlinie des Geräts erlaubt keine Aktionen', { exact: false }).first()).toBeVisible()
+})
+
 test('phone width: cut off tabs show a hint that scrolls them', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 })
   await page.goto('/app/devices/e2e-ws1')

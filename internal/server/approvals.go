@@ -41,8 +41,12 @@ type commandApproval struct {
 	Payload string `json:"payload"`
 }
 
-// needsApproval: commands four eyes approval covers.
-func (s *Server) needsApproval(typ string) bool {
+// needsApproval: commands four eyes approval covers; workload actions by
+// their payload (stop and restart, app_workloads.go).
+func (s *Server) needsApproval(typ, payload string) bool {
+	if typ == "workload_action" {
+		return s.workloadNeedsApproval(payload)
+	}
 	return s.settings().FourEyes && (typ == "wipe" || typ == "lost" || typ == "script" || typ == "package_downgrade")
 }
 

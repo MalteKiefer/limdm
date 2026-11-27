@@ -566,15 +566,6 @@ const shellPolicyOff = "remote shells are not allowed by this device's policy: s
 // policyAllowsShell reports whether the resolved policy of a device allows
 // remote shell sessions (com.limdm.agent remote_shell). The agent checks again.
 func (s *Server) policyAllowsShell(ctx context.Context, id string) (bool, error) {
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback(ctx) // read only
-	res, err := resolveDevice(ctx, tx, id)
-	if err != nil {
-		return false, err
-	}
-	pol, _ := api.Compose(res.Decls)
-	return pol.RemoteShell, nil
+	pol, err := devicePolicy(ctx, s, id)
+	return pol.RemoteShell, err
 }

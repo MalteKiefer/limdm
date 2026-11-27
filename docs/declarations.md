@@ -28,6 +28,8 @@ Console: **Agent**.
 |---|---|---|
 | `checkin_seconds` | number | required, 30 to 86400; how often the agent checks in |
 | `offline_lock_hours` | number | 0 or absent: off; at most 8760. Locks the device after this many hours without server contact, see [desktop-login.md](desktop-login.md#offline-lock) |
+| `remote_shell` | boolean | devices accept remote shell sessions, see [remote-shell.md](remote-shell.md) |
+| `workload_control` | boolean | default off; the console may start, shut down and restart containers and VMs, see [workloads.md](workloads.md) |
 
 The default library item "Agent check in every 5 minutes" sets 300 seconds.
 

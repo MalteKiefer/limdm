@@ -367,7 +367,7 @@ func (s *Server) apiDeviceDetail(w http.ResponseWriter, r *http.Request, c apiCa
 		AllowRoot: set.RemoteShell.AllowRoot, Max: maxM, Idle: idleM, FourEyes: set.FourEyesShell, Policy: shellPolicy}
 	d.FourEyesCommands = []string{}
 	for _, t := range []string{"wipe", "lost", "script", "package_downgrade"} {
-		if s.needsApproval(t) {
+		if s.needsApproval(t, "") {
 			d.FourEyesCommands = append(d.FourEyesCommands, t)
 		}
 	}

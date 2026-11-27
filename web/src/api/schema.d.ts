@@ -2823,6 +2823,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/devices/{id}/workloads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Containers and VMs of a device, tool versions and whether workload actions are allowed */
+        get: operations["getDeviceWorkloads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workloads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Containers and VMs of the fleet in the caller's scope, at most 2000 */
+        get: operations["listWorkloads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/updates/fleet": {
         parameters: {
             query?: never;
@@ -2977,9 +3011,9 @@ export interface components {
             };
         };
         CommandRequest: {
-            /** @description A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create, package_hold, package_downgrade */
+            /** @description A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create, package_hold, package_downgrade, workload_action */
             type: string;
-            /** @description The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove), name and release (package_hold), name and version (package_downgrade). true is sent as on; reason (wipe, lost, script, package_downgrade: the reason shown to the approving admin when four eyes approval is on). */
+            /** @description The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove), name and release (package_hold), name and version (package_downgrade), kind, id and action (workload_action: start, stop or restart of a workload of the last inventory). true is sent as on; reason (wipe, lost, script, package_downgrade, workload_action stop and restart: the reason shown to the approving admin when four eyes approval is on). */
             params?: {
                 [key: string]: string | number | boolean;
             };
@@ -4206,6 +4240,10 @@ export interface components {
             four_eyes?: boolean;
             four_eyes_recovery?: boolean;
             four_eyes_shell?: boolean;
+            /** @description Stopping and restarting containers and VMs waits for a second admin (needs four_eyes) */
+            four_eyes_workloads?: boolean;
+            /** @description The helpdesk role may start, stop and restart containers and VMs */
+            workloads_helpdesk?: boolean;
             require_mfa?: boolean;
             mfa_acr?: string[];
             /** @description Days per data type (retention_kinds); 0 keeps the audit log forever */
@@ -4252,6 +4290,10 @@ export interface components {
             four_eyes?: boolean;
             four_eyes_recovery?: boolean;
             four_eyes_shell?: boolean;
+            /** @description Stopping and restarting containers and VMs waits for a second admin (needs four_eyes) */
+            four_eyes_workloads?: boolean;
+            /** @description The helpdesk role may start, stop and restart containers and VMs */
+            workloads_helpdesk?: boolean;
             require_mfa?: boolean;
             mfa_acr?: string[];
             /** @description Days per data type (retention_kinds); 0 keeps the audit log forever */
@@ -4757,6 +4799,66 @@ export interface components {
             count?: number;
             detail?: string;
             wave?: number;
+        };
+        WorkloadTool: {
+            kind?: string;
+            version?: string;
+        };
+        Workload: {
+            /** @enum {string} */
+            kind?: "docker" | "podman" | "lxc" | "lxd" | "incus" | "pct" | "qm" | "libvirt";
+            /** @description Container ID, VMID or name: what workload_action takes */
+            id?: string;
+            name?: string;
+            /** @description container or vm */
+            type?: string;
+            /** @description Image reference or OS template */
+            image?: string;
+            image_id?: string;
+            /** @description The tool's state in lower case, for example running, exited, stopped, paused, shut off */
+            state?: string;
+            /** Format: date-time */
+            created?: string;
+            /** Format: date-time */
+            started?: string;
+            /** @description Restart policy or autostart */
+            restart?: string;
+            ports?: string[];
+            project?: string;
+            service?: string;
+            cpus?: number;
+            memory_mb?: number;
+        };
+        Workloads: {
+            tools?: components["schemas"]["WorkloadTool"][];
+            items?: components["schemas"]["Workload"][];
+            errors?: string[];
+            truncated?: boolean;
+        };
+        DeviceWorkloads: {
+            /** @description The device has reported workloads */
+            reports?: boolean;
+            /**
+             * Format: date-time
+             * @description When the inventory last changed
+             */
+            updated_at?: string | null;
+            inventory?: components["schemas"]["Workloads"];
+            control?: {
+                /** @description The device's policy allows workload actions (com.limdm.agent workload_control) */
+                policy?: boolean;
+                /** @description The caller's role may send workload actions */
+                allowed?: boolean;
+                /** @description Stop and restart wait for a second admin */
+                four_eyes?: boolean;
+            };
+        };
+        FleetWorkloads: {
+            items?: {
+                device_id?: string;
+                hostname?: string;
+                workload?: components["schemas"]["Workload"];
+            }[];
         };
         DeviceUpdates: {
             ring?: components["schemas"]["UpdateRing"] | null;
@@ -10125,6 +10227,64 @@ export interface operations {
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getDeviceWorkloads: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceWorkloads"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listWorkloads: {
+        parameters: {
+            query?: {
+                kind?: "docker" | "podman" | "lxc" | "lxd" | "incus" | "pct" | "qm" | "libvirt";
+                /** @description Exact state, for example running or exited */
+                state?: string;
+                /** @description Part of the image reference or OS template, case insensitive */
+                image?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetWorkloads"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
         };

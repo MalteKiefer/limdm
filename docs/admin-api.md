@@ -221,6 +221,8 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `DELETE /api/v1/update-rings/{id}`, `POST /api/v1/update-rings/{id}/{action}` | admin | `action` `pause`, `resume`, `approve` | `204` or the ring; audited as `update_ring.delete` and `update_ring.<action>` |
 | `POST /api/v1/update-waves` | admin | | `201` the new wave of the caller's tenant (the default tenant in the global view); `409` without rings; audited as `update_wave.start` |
 | `GET /api/v1/devices/{id}/updates` | read | | `200` ring, pending updates with versions, security flag, severity and CVEs, last run per source, CVEs matched from the Debian and Ubuntu data (`vulnerabilities`) |
+| `GET /api/v1/devices/{id}/workloads` | read | | `200` containers and VMs of the device, tool versions, read errors, when the inventory last changed, and `control` (policy allows actions, caller may send them, four eyes for stop and restart); see [Containers and VMs](workloads.md) |
+| `GET /api/v1/workloads` | read | `kind`, `state`, `image` | `200` containers and VMs of the fleet in the caller's scope with device and host name, at most 2000 |
 | `GET /api/v1/updates/fleet` | read | `cve` | `200` devices with security and pending updates, open CVEs with severity and devices, pending updates per package; with `cve` the devices it affects |
 | `GET /api/v1/updates/package-versions` | read | `name` | `200` installed versions of the package with device counts |
 | `GET /api/v1/updates/cve-feeds` | read | | `200` Debian, Ubuntu, Arch and Alpine security data: any feed on, import running, per feed on or off, URL, last import, entries, bytes, last error; see [Patch management](patching.md#cve-data-for-debian-ubuntu-arch-and-alpine) |
@@ -345,12 +347,15 @@ strings, numbers or booleans; `true` is sent as a checked box.
 |---|---|
 | `sync`, `update`, `reboot`, `shutdown`, `lock`, `unlock`, `message`, `user_password`, `user_lock`, `user_unlock`, `diagnostics` | admin, helpdesk |
 | `script`, `lost`, `found`, `wipe`, `allow_uninstall`, `app_install`, `app_remove`, `user_create`, `user_admin`, `user_delete`, `software_remove`, `package_hold`, `package_downgrade` | admin |
+| `workload_action` | admin; helpdesk when Settings, Approvals allow it |
 
 Fields: `minutes` (reboot, shutdown: 0 to 1440, default 1), `confirm` and `message` (lost,
 wipe: `confirm` is the host name), `title` and `text` (message), `payload` (script), `app`
 (app_install, app_remove), `username`, `full_name`, `password`, `admin`, `keep_home` (user
 commands), `kind`, `name`, `installation` (software_remove), `name` and `release` (package_hold),
-`name` and `version` (package_downgrade, see [Patch management](patching.md#rollback)), `reason` (shown with an
+`name` and `version` (package_downgrade, see [Patch management](patching.md#rollback)), `kind`, `id` and
+`action` (workload_action: a workload of the device's last inventory, `409` when the device's policy
+does not allow it, see [Containers and VMs](workloads.md)), `reason` (shown with an
 approval request, up to 500 characters). A type the token's role may not send answers `403`
 and is audited as `api.denied`; other rule violations answer `422`. A retired device answers
 `409`.

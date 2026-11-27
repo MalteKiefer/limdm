@@ -305,14 +305,14 @@ func (s *Server) bulkAction(r *http.Request, sess session, ids []string, action 
 			}
 		}
 	case "command":
-		if typ == "lost" || typ == "wipe" {
-			return 0, &userError{http.StatusBadRequest, "lost mode and wipe are sent to one device at a time"}
+		if typ == "lost" || typ == "wipe" || typ == "workload_action" {
+			return 0, &userError{http.StatusBadRequest, "lost mode, wipe and workload actions are sent to one device at a time"}
 		}
 		payload, code, msg := s.commandPayload(r, sess, ids[0], typ)
 		if code != 0 {
 			return 0, &userError{code, msg}
 		}
-		if s.needsApproval(typ) { // bulk scripts: one four eyes request per device
+		if s.needsApproval(typ, payload) { // bulk scripts: one four eyes request per device
 			for _, id := range ids {
 				if _, err := s.requestApproval(ctx, sess, "command", id, commandApproval{Type: typ, Payload: payload}, strings.TrimSpace(r.FormValue("reason"))); err != nil {
 					return 0, err
@@ -444,7 +444,7 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 	if !slices.Contains(api.CommandTypes, typ) || len(payload) > 64<<10 {
 		return "", http.StatusBadRequest, "invalid command"
 	}
-	if sess.Role != "admin" && !slices.Contains(helpdeskCommands, typ) {
+	if sess.Role != "admin" && !slices.Contains(helpdeskCommands, typ) && (typ != "workload_action" || !s.mayControlWorkloads(sess.Role)) {
 		return "", http.StatusForbidden, "this action requires the admin role"
 	}
 	switch {
@@ -507,6 +507,8 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		}
 		b, _ := json.Marshal(u) //nolint:gosec // signed command payload over mTLS, cleared from the database once applied
 		payload = string(b)
+	case typ == "workload_action": // app_workloads.go
+		return s.workloadCommandPayload(r, id)
 	case typ == "package_hold" || typ == "package_downgrade": // R3-P, app_patch.go
 		var b []byte
 		var err error

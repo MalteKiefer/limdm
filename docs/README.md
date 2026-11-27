@@ -33,6 +33,7 @@ The documents for LiMDM 0.18 and the unreleased changes in the changelog. Start 
 | [network.md](network.md) | WLAN, 802.1X, WireGuard and OpenVPN profiles, EAP-TLS certificates, CRL |
 | [disk-encryption.md](disk-encryption.md) | LUKS recovery keys, escrow, rotation, TPM 2.0, lost devices |
 | [remote-shell.md](remote-shell.md) | Audited remote support shell |
+| [workloads.md](workloads.md) | Containers and VMs per device (Docker, Podman, LXC, LXD, Incus, Proxmox, libvirt), start, shut down, restart |
 
 ## Devices
 

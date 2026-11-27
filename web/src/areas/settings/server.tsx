@@ -362,8 +362,8 @@ export function Approvals() {
           <SectionHead title={t('settings.nav.approvals')} sub={t('settings.approvals.sub')} />
           <SettingsForm
             readOnly={ro}
-            schema={z.object({ four_eyes: z.boolean(), four_eyes_recovery: z.boolean(), four_eyes_shell: z.boolean() })}
-            values={{ four_eyes: !!s.four_eyes, four_eyes_recovery: !!s.four_eyes_recovery, four_eyes_shell: !!s.four_eyes_shell }}
+            schema={z.object({ four_eyes: z.boolean(), four_eyes_recovery: z.boolean(), four_eyes_shell: z.boolean(), four_eyes_workloads: z.boolean(), workloads_helpdesk: z.boolean() })}
+            values={{ four_eyes: !!s.four_eyes, four_eyes_recovery: !!s.four_eyes_recovery, four_eyes_shell: !!s.four_eyes_shell, four_eyes_workloads: !!s.four_eyes_workloads, workloads_helpdesk: !!s.workloads_helpdesk }}
             onSave={(v) => save('security', v)}
           >
             {(f) => {
@@ -373,9 +373,11 @@ export function Approvals() {
                   <Toggle form={f} name="four_eyes" label={t('settings.approvals.toggle')} help={t('settings.approvals.twoAdmins')} />
                   <Toggle form={f} name="four_eyes_recovery" label={t('settings.approvals.recovery')} disabled={!on} />
                   <Toggle form={f} name="four_eyes_shell" label={t('settings.approvals.shell')} disabled={!on} />
+                  <Toggle form={f} name="four_eyes_workloads" label={t('settings.approvals.workloads')} disabled={!on} />
                   <a className="text-body text-accent underline-offset-2 hover:underline" href="/app/inbox">
                     {t('settings.approvals.inbox')}
                   </a>
+                  <Toggle form={f} name="workloads_helpdesk" label={t('settings.approvals.workloadsHelpdesk')} help={t('settings.approvals.workloadsHelpdeskHelp')} />
                 </FormSection>
               )
             }}
