@@ -13,7 +13,7 @@ import { useT, type MessageKey } from '../../i18n'
 import { useSaveSection, useSettings, type Section, type Settings, type SettingsInput } from './api'
 import { Facts, ListField, SectionHead, SelectField, SettingsForm, TextField, Toggle } from '../../components/settingsform'
 import { badNet, fileBase64, isPEM, isSyslog, lines, parseRoleGroups, roleGroupsText, unlines } from './logic'
-import { blobURL } from '../../lib/blob'
+import { FilePreview } from '../../lib/blob'
 
 
 /** Loads the settings once and hands them to a section. */
@@ -73,7 +73,7 @@ export function General() {
 
 function Branding({ s, save, ro }: { s: Settings; save: (section: Section, body: SettingsInput) => Promise<unknown>; ro: boolean }) {
   const t = useT()
-  const [logo, setLogo] = useState<{ b64: string; url: string } | null>(null)
+  const [logo, setLogo] = useState<{ b64: string; file: Blob } | null>(null)
   const [remove, setRemove] = useState(false)
   const [v, setV] = useState(0) // reloads the logo preview after a save
   return (
@@ -94,7 +94,11 @@ function Branding({ s, save, ro }: { s: Settings; save: (section: Section, body:
           <Field label={t('settings.branding.logo')} help={t('settings.branding.logoHelp')}>
             {({ id, describedBy }) => (
               <div className="flex flex-wrap items-center gap-3">
-                {(logo || (s.has_logo && !remove)) && <img src={blobURL(logo?.url) ?? `/branding/logo.png?v=${v}`} alt={t('settings.branding.preview')} className="size-14 rounded-md border border-line bg-surface-2 object-contain" />}
+                {logo ? (
+                  <FilePreview file={logo.file} label={t('settings.branding.preview')} className="size-14 rounded-md border border-line bg-surface-2 object-contain" />
+                ) : (
+                  s.has_logo && !remove && <img src={`/branding/logo.png?v=${v}`} alt={t('settings.branding.preview')} className="size-14 rounded-md border border-line bg-surface-2 object-contain" />
+                )}
                 <label className="btn cursor-pointer">
                   <ImageUp size={14} aria-hidden /> {t('settings.branding.choose')}
                   <input
@@ -107,7 +111,7 @@ function Branding({ s, save, ro }: { s: Settings; save: (section: Section, body:
                       const file = e.target.files?.[0]
                       if (!file) return
                       void fileBase64(file).then((b64) => {
-                        setLogo({ b64, url: URL.createObjectURL(file) })
+                        setLogo({ b64, file })
                         setRemove(false)
                         f.setValue('logo', file.name, { shouldDirty: true })
                       })

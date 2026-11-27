@@ -33,6 +33,21 @@ test('a section form validates, saves and keeps the value', async ({ page }) => 
   expect(csp).toEqual([])
 })
 
+// a 1x1 PNG
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64')
+
+test('the logo preview is drawn from the picked file, within the CSP', async ({ page }) => {
+  const csp: string[] = []
+  page.on('console', (m) => /Content Security Policy/i.test(m.text()) && csp.push(m.text()))
+  await page.goto('/app/settings?s=general')
+  await page.getByLabel('PNG auswählen').setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: png })
+  const preview = page.getByRole('img', { name: 'Vorschau des Logos' })
+  await expect(preview).toBeVisible()
+  expect(await preview.evaluate((e) => e.tagName)).toBe('CANVAS')
+  await expect.poll(() => preview.evaluate((e) => (e as HTMLCanvasElement).width)).toBe(1)
+  expect(csp).toEqual([])
+})
+
 test('a network list rejects what is no address', async ({ page }) => {
   await page.goto('/app/settings?s=access')
   const allow = page.getByLabel('Erlaubte Netze', { exact: true })
