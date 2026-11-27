@@ -33,3 +33,6 @@ release.key
 # backup archives and age identities (docs/backup.md)
 *.lbk
 *.agekey
+
+# Python bytecode of the desktop app
+__pycache__/

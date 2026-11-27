@@ -26,12 +26,13 @@ import (
 
 const usage = `usage: limdm COMMAND [options]
 
-  info                          device, agent, compliance, profiles, certificates
-  checks                        compliance checks of this device
-  profiles                      configuration in force (declarations)
+  info                          device, agent, compliance, blueprint, certificates
+  checks [--strict]             compliance checks of this device, failing first;
+                                --strict exits with 2 when a check fails
+  blueprint [-v]                settings of the blueprint in force (declarations)
   certificates                  managed certificates
   log [-n 50]                   latest entries of the agent log
-  sync                          check in with the server now
+  sync                          sync with the server now
 
   software list                 the company catalog and what is installed
   software install APP          install an app of the catalog
@@ -50,7 +51,7 @@ const usage = `usage: limdm COMMAND [options]
 
   version
 
-Add --json to info, checks, profiles, certificates, log and software list
+Add --json to info, checks, blueprint, certificates, log and software list
 for machine readable output.`
 
 var socket = "/run/limdm/agent.sock" // tests point it elsewhere
@@ -62,6 +63,9 @@ func main() {
 	}
 	if err := run(os.Args[1], os.Args[2:]); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
+		if errors.Is(err, errChecksFailing) {
+			os.Exit(2)
+		}
 		os.Exit(1)
 	}
 }
@@ -75,8 +79,8 @@ func run(cmd string, args []string) error {
 		return info(args)
 	case "checks":
 		return checks(args)
-	case "profiles":
-		return profiles(args)
+	case "blueprint", "profiles": // profiles: name before 0.19
+		return blueprint(args)
 	case "certificates", "certs":
 		return certificates(args)
 	case "log":
@@ -85,7 +89,7 @@ func run(cmd string, args []string) error {
 		if _, err := call(agent.DesktopRequest{Op: "sync"}); err != nil {
 			return err
 		}
-		fmt.Println("check in requested")
+		fmt.Println("sync requested")
 		return nil
 	case "software", "apps":
 		if len(args) == 0 {
@@ -201,9 +205,9 @@ func info(args []string) error {
 		fmt.Fprintf(w, "Server\t%s\n", st.Server)
 		fmt.Fprintf(w, "Agent\t%s\n", st.Version)
 		row(w, "Inventory", sys.Inventory)
-		fmt.Fprintf(w, "Last check in\t%s\n", when(st.LastCheckin))
+		fmt.Fprintf(w, "Last sync\t%s\n", when(st.LastCheckin))
 		if st.CheckinEvery > 0 {
-			fmt.Fprintf(w, "Check in every\t%s (and at once when IT sends a command)\n", time.Duration(st.CheckinEvery)*time.Second)
+			fmt.Fprintf(w, "Sync every\t%s (and at once when IT sends a command)\n", time.Duration(st.CheckinEvery)*time.Second)
 		}
 		if st.LastError != "" {
 			fmt.Fprintf(w, "Last error\t%s\n", st.LastError)
@@ -248,7 +252,7 @@ func info(args []string) error {
 	for _, v := range resp.Need {
 		fmt.Fprintf(w, "Action needed\trecovery key for %s (run: limdm recovery-key)\n", v.Device)
 	}
-	fmt.Fprintf(w, "Profiles\t%d in force (limdm profiles)\n", len(resp.Profiles))
+	fmt.Fprintf(w, "Blueprint\t%d settings in force (limdm blueprint)\n", len(resp.Profiles))
 	fmt.Fprintf(w, "Certificates\t%d managed (limdm certificates)\n", len(resp.Certs))
 	if s, err := call(agent.DesktopRequest{Op: "sso-status"}); err == nil && s.SSO != nil && s.SSO.Managed {
 		fmt.Fprintf(w, "Company account\t%s\n", ssoLine(s.SSO))
@@ -263,8 +267,35 @@ func row(w io.Writer, label, value string) {
 	}
 }
 
+// errChecksFailing makes limdm checks --strict exit with 2.
+var errChecksFailing = errors.New("compliance checks failing")
+
+// sortChecks puts failing checks first, then exceptions, not applicable and
+// passed ones, each by level and ID.
+func sortChecks(list []agent.DesktopCheck) {
+	rank := map[string]int{"fail": 0, "excepted": 1, "na": 2, "pass": 3}
+	slices.SortStableFunc(list, func(a, b agent.DesktopCheck) int {
+		ra, oka := rank[a.Status]
+		rb, okb := rank[b.Status]
+		if !oka {
+			ra = 4
+		}
+		if !okb {
+			rb = 4
+		}
+		if ra != rb {
+			return ra - rb
+		}
+		if a.Level != b.Level {
+			return a.Level - b.Level
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+}
+
 func checks(args []string) error {
-	_, asJSON := jsonFlag(args)
+	rest, asJSON := jsonFlag(args)
+	strict := slices.Contains(rest, "--strict") || slices.Contains(rest, "-strict")
 	resp, err := call(agent.DesktopRequest{Op: "info"})
 	if err != nil {
 		return err
@@ -273,22 +304,31 @@ func checks(args []string) error {
 	if resp.Status != nil {
 		list = resp.Status.CheckList
 	}
+	sortChecks(list)
+	failing := slices.ContainsFunc(list, func(c agent.DesktopCheck) bool { return c.Status == "fail" })
 	if asJSON {
-		return printJSON(list)
-	}
-	if len(list) == 0 {
+		err = printJSON(list)
+	} else if len(list) == 0 {
 		fmt.Println("no compliance checks declared for this device")
-		return nil
+	} else {
+		w := table()
+		fmt.Fprintln(w, "STATUS\tLEVEL\tID\tCHECK\tDETAIL")
+		for _, c := range list {
+			level := "-"
+			if c.Level > 0 {
+				level = fmt.Sprint(c.Level)
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", strings.ToUpper(c.Status), level, c.ID, c.Title, c.Detail)
+		}
+		err = w.Flush()
 	}
-	w := table()
-	fmt.Fprintln(w, "STATUS\tCHECK\tDETAIL")
-	for _, c := range list {
-		fmt.Fprintf(w, "%s\t%s\t%s\n", strings.ToUpper(c.Status), c.Title, c.Detail)
+	if err == nil && strict && failing {
+		return errChecksFailing
 	}
-	return w.Flush()
+	return err
 }
 
-func profiles(args []string) error {
+func blueprint(args []string) error {
 	rest, asJSON := jsonFlag(args)
 	resp, err := call(agent.DesktopRequest{Op: "info"})
 	if err != nil {
@@ -616,7 +656,7 @@ func recoveryKey() error {
 		if _, err := call(agent.DesktopRequest{Op: "escrow", UUID: v.UUID, Passphrase: string(pw)}); err != nil {
 			return fmt.Errorf("%s: %w", v.Device, err)
 		}
-		fmt.Printf("recovery key for %s created; it reaches IT with the next check in\n", v.Device)
+		fmt.Printf("recovery key for %s created; it reaches IT with the next sync\n", v.Device)
 	}
 	return nil
 }

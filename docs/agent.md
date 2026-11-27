@@ -290,11 +290,14 @@ one instance per user.
 
 ### Tray
 
-The tray icon is the LiMDM logo with a status dot: green (compliant), amber (checks
-failing), red (no contact to the server or locked). The menu names who manages the device,
-shows the state and the last check in, and offers **Open LiMDM…**, **Install Software…**,
+The tray icon is the symbolic LiMDM logo (dark shield on a white fill, readable on light
+and dark panels) with a status badge whose shape carries the state, not only its color:
+a check mark (compliant), an exclamation mark (checks failing, remote support running) or a
+cross (no contact to the server, agent not reachable, locked). The tooltip and the first
+menu line say the same in words. The menu names who manages the device,
+shows the state and the last sync, and offers **Open LiMDM…**, **Install Software…**,
 **Compliance…**, **Set Up Recovery Key…** and **Confirm Company Account…** when needed,
-**Check In Now** (at most every 30 seconds) and **Agent Log…**; the agent version is at the
+**Sync Now** (at most every 30 seconds) and **Agent Log…**; the agent version is at the
 bottom and in the tooltip. While IT runs a remote shell it shows **IT remote support
 session running**. The tray uses StatusNotifierItem: sway with waybar, KDE Plasma, Xfce,
 Cinnamon and Ubuntu show it; stock GNOME needs the AppIndicator extension.
@@ -306,16 +309,18 @@ style of GNOME Settings (GTK 4, libadwaita 1.4) with these pages:
 
 | Page | |
 |---|---|
-| Overview | state, who manages the device, last check in, **Check In Now**, open tasks such as a missing recovery key |
+| Overview | state, who manages the device, last sync, **Sync Now**, open tasks such as a missing recovery key |
 | Software | the company catalog: install, remove or request apps ([software.md](software.md)) |
 | Compliance | every check with its result, grouped by failing, exceptions, not applicable and passed |
-| Profiles | every declaration in force with its settings, secrets masked |
+| Blueprint | every setting (declaration) of the blueprint in force, secrets masked |
 | Certificates | CA certificates IT installed, with subject, issuer, validity and fingerprint |
 | Disk Encryption | store a recovery key with the disk passphrase |
 | Agent Log | journal entries of the agent and its watchdog, optionally only warnings and errors |
 | About | versions and server |
 
-It shows the company logo, or the LiMDM logo, and follows the system's light or dark style;
+The window reloads the device state every minute. It rebuilds the visible page only when
+the data changed, and never while the user types in it or a field holds text not sent yet
+(the disk passphrase); the software search keeps its text. It shows the company logo, or the LiMDM logo, and follows the system's light or dark style;
 the button next to the logo switches between system, dark and light. Without GTK 4 and
 libadwaita 1.4 (Ubuntu 22.04) the tray falls back to simple dialogs.
 
@@ -349,12 +354,12 @@ the user also has an active local session (root is always allowed).
 
 | Command | |
 |---|---|
-| `limdm info` (alias `status`) | everything about this device and the agent: manager, system, hardware, server, check in, declarations, updates, locks, compliance, recovery keys, company account, remote support session |
-| `limdm checks` | every compliance check with its result |
-| `limdm profiles` | declarations in force (secrets masked) |
+| `limdm info` (alias `status`) | everything about this device and the agent: manager, system, hardware, server, sync, declarations, updates, locks, compliance, recovery keys, company account, remote support session |
+| `limdm checks [--strict]` | every compliance check with its result, level and ID: failing first, then exceptions, not applicable and passed, each by level and ID. `--strict` exits with code 2 when a check fails (1 stays for errors), for scripts and login checks |
+| `limdm blueprint [-v]` (old name `profiles`) | settings of the blueprint in force (secrets masked); `-v` adds each setting's payload |
 | `limdm certificates` (alias `certs`) | CA certificates IT installed |
 | `limdm log [-n 50]` | latest entries of the agent log |
-| `limdm sync` | check in now |
+| `limdm sync` | sync with the server now |
 | `limdm software list` (alias `limdm software`, `limdm apps`, `ls`) | catalog apps with mode and state |
 | `limdm software install APP`, `limdm software remove APP` | install or remove an app the catalog offers (ID or name) |
 | `limdm software request APP [--note TEXT]` | ask IT for a catalog app in request mode |
@@ -367,7 +372,7 @@ the user also has an active local session (root is always allowed).
 | `limdm support end` | end the remote support session IT opened ([remote-shell.md](remote-shell.md)) |
 | `limdm version` | agent version |
 
-`--json` prints `info`, `checks`, `profiles`, `certificates`, `log` and `software list` as
+`--json` prints `info`, `checks`, `blueprint`, `certificates`, `log` and `software list` as
 JSON. The agent decides as for the app: only catalog apps install, and only in the modes the
 catalog allows.
 

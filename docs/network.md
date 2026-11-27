@@ -85,7 +85,7 @@ the signed declaration over the mTLS channel. They are masked:
   secret. A rollback takes the secrets of the current item (matched by profile name); a
   restored deleted item or a changed profile shape needs the secrets entered again;
 * in admin API answers (`/api/v1/library-items`); a `PUT` with the mask keeps the stored value;
-* in the desktop app and in `limdm profiles`, like every other secret.
+* in the desktop app and in `limdm blueprint`, like every other secret.
 
 On the device they are stored in the root only keyfiles, as NetworkManager requires.
 

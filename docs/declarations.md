@@ -479,7 +479,7 @@ of a profile: `name`, `type`, `auto_connect`, `ssid`, `hidden`, `security`, `psk
 `openvpn` (`content`). EAP pins a CA of a certificates item (`ca_cert`) and the server domain.
 EAP-TLS uses a device certificate the server issues from its network CA. Secrets are masked
 in the console, the audit log, the version history, the admin API, the desktop app and
-`limdm profiles`. Every field with its limits, the device side and the CRL for the RADIUS
+`limdm blueprint`. Every field with its limits, the device side and the CRL for the RADIUS
 server: [Network profiles](network.md).
 
 ### `com.limdm.printers`
