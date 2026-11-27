@@ -204,7 +204,8 @@ func TestWorkloadsCoalesced(t *testing.T) {
 	reads := func() int {
 		return len(slices.DeleteFunc(slices.Clone(*calls), func(c string) bool { return !strings.HasPrefix(c, "docker version") }))
 	}
-	if a.workloads() == nil || a.workloads() == nil || reads() != 1 {
+	first := a.workloads()
+	if first == nil || a.workloads() != first || reads() != 1 {
 		t.Fatalf("two check ins in a row read the tools %d times", reads())
 	}
 	a.wlAt = time.Now().Add(-workloadsEvery) // after the interval, or after an action
