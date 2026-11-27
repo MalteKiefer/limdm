@@ -140,6 +140,13 @@ device:mail unit:postfix* prio<=err "connection refused" -healthcheck /timeout a
 | `field.NAME:value` | an extra field, e.g. `field._PID:1234` or `field.compose_project:paperless` |
 | `-term` | negation |
 
+Search times measured with 5,000,000 lines of 2000 devices over seven days (PostgreSQL 19 on
+a laptop, through the API): newest 200 lines 45 ms, a phrase over 24 hours 76 ms and over 7 days
+236 ms, a rare word over 7 days 32 ms, unit and priority 46 ms, a regular expression over 24
+hours 150 ms, one device over 7 days 2 ms, histogram of 24 hours 118 ms, histogram of a phrase
+over 7 days 404 ms. Reproduce with `LIMDM_TEST_LOG_LINES=1 go test -run TestLogSearchVolume -v
+./internal/server` on a test database.
+
 Every search runs read only under a statement timeout of 20 seconds; a search that takes
 longer asks for a narrower range or filter. The page shows a histogram of lines per time
 bucket and priority (click a bar to zoom), the result list with virtual scrolling, the
@@ -155,7 +162,10 @@ An alert rule is a query, a threshold and a window: when at least *threshold* li
 matched in the last *window* minutes, a `logs.alert` notification goes to the channels
 that subscribed to it (Settings, Notifications), at most once per window. **Test** counts
 now and sends a test notification. Rules belong to the tenant that created them and count
-only its devices; rules of global administrators count the whole installation.
+only the devices of the account that saved it (its tenant and device scope, stored with the
+rule); only a rule saved by an unscoped global administrator counts the whole installation.
+**Test** counts with the scope of whoever clicks it. Notifications name the rule, the query
+and the count, never the text of the lines.
 
 ### Access
 

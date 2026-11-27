@@ -27,6 +27,8 @@ the label, webhooks receive the code.
 | `user.role_change` | Console user role changed | the role of a console user changed (and who approved it) | warning |
 | `approval.request` | Four eyes approval requested | a [four eyes approval](security.md#four-eyes-approval) was requested | warning |
 | `audit.broken` | Audit log verification failed | the daily verification found the audit hash chain broken | critical |
+| `logs.alert` | Log alert rule matched | a log alert rule reached its threshold ([logs.md](logs.md#alert-rules)) | as the rule sets |
+| `logs.guard` | Log store full or archive failed | the disk guard refuses new log lines, or an archive run failed ([logs.md](logs.md)) | critical, warning |
 | `network.crl_token` | Network CRL token rotated | an admin rotated the bearer token for network CRL downloads | warning |
 | `keys.rotate` | Key rotation started or finished | a key rotation (device CA, network CA, command key, session key) was started or finished, or the webhook signing secret was rotated ([keys.md](keys.md)) | warning |
 
