@@ -204,6 +204,12 @@ func TestRemoteShellIntegration(t *testing.T) {
 // remote shells.
 func allowShellPolicy(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
+	setAgentPolicy(t, db, "remote_shell")
+}
+
+// setAgentPolicy switches on a boolean of the agent item in the library.
+func setAgentPolicy(t *testing.T, db *pgxpool.Pool, key string) {
+	t.Helper()
 	ctx := context.Background()
 	var id int64
 	var name string
@@ -215,7 +221,7 @@ func allowShellPolicy(t *testing.T, db *pgxpool.Pool) {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		t.Fatal(err)
 	}
-	p["remote_shell"] = true
+	p[key] = true
 	raw, _ = json.Marshal(p)
 	if _, err := db.Exec(ctx, `UPDATE library_items SET payload=$2, signature=$3 WHERE id=$1`, id, raw, signItem(name, api.TypeAgent, raw)); err != nil {
 		t.Fatal(err)

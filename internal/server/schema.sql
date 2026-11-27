@@ -1012,3 +1012,11 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS attributes JSONB NOT NULL DEFAULT '
 -- R3-D
 -- the device timeline reads the audit entries of one device
 CREATE INDEX IF NOT EXISTS audit_log_target ON audit_log(target, id);
+-- R3-W
+-- the latest container and VM inventory of each device (app_workloads.go)
+CREATE TABLE IF NOT EXISTS device_workloads (
+    device_id  TEXT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+    inventory  JSONB NOT NULL,
+    hash       TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

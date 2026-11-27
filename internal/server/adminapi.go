@@ -825,11 +825,14 @@ func (s *Server) apiCommandCreate(w http.ResponseWriter, r *http.Request, c apiC
 	case http.StatusForbidden:
 		s.deny(w, r, c, msg)
 		return
+	case http.StatusConflict, http.StatusInternalServerError:
+		problem(w, code, msg)
+		return
 	default:
 		problemField(w, http.StatusUnprocessableEntity, "params", msg)
 		return
 	}
-	if s.needsApproval(body.Type) { // four eyes: an admin decides in the console
+	if s.needsApproval(body.Type, payload) { // four eyes: an admin decides in the console
 		aid, err := s.requestApproval(ctx, c.sess(), "command", id, commandApproval{Type: body.Type, Payload: payload}, strings.TrimSpace(form.Get("reason")))
 		if err != nil {
 			problemField(w, http.StatusUnprocessableEntity, "params.reason", err.Error())

@@ -1067,6 +1067,10 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			s.failAPI(w, err)
 			return
 		}
+		if err := storeWorkloads(ctx, tx, id, st.Workloads); err != nil { // app_workloads.go
+			s.failAPI(w, err)
+			return
+		}
 		statusHash = req.StatusHash
 	}
 	if err := recordMetrics(ctx, tx, id, req.Metrics); err != nil {
