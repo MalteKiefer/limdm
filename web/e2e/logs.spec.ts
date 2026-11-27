@@ -15,8 +15,8 @@ test.beforeAll(() => {
 
 test('search, filter, detail and export', async ({ page }) => {
   await page.goto('/app/logs')
-  await expect(page.getByRole('heading', { name: 'Logs', level: 1 })).toBeVisible()
-  await expect(page.getByRole('navigation').getByRole('link', { name: 'Logs' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Logs', level: 1, exact: true })).toBeVisible()
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Logs', exact: true })).toBeVisible()
   const grid = page.getByRole('table', { name: 'Logzeilen' })
   await expect(grid.getByText('WARNING slow consumer queue')).toBeVisible()
   await expect(grid.getByText(/Connection refused$/)).toBeVisible()
@@ -84,7 +84,7 @@ test('alert rules: create, test, delete', async ({ page }) => {
 
 test('settings section', async ({ page }) => {
   await page.goto('/app/settings?s=logs')
-  await expect(page.getByRole('heading', { name: 'Logs', level: 2 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Logs', level: 2, exact: true })).toBeVisible()
   const days = page.getByLabel('Tage auf dem Server')
   const want = (await days.inputValue()) === '14' ? '15' : '14'
   await days.fill(want)
@@ -94,4 +94,10 @@ test('settings section', async ({ page }) => {
   await expect(page.getByLabel('Tage auf dem Server')).toHaveValue(want)
   await expect(page.getByText('Zustand des Logspeichers')).toBeVisible()
   await expect(page.getByText('Archivschlüssel', { exact: true })).toBeVisible()
+})
+
+test('library item form: custom log directories with the root warning', async ({ page }) => {
+  await page.goto('/app/config/library/new?type=com.limdm.logging')
+  await expect(page.getByText('Eigene Logverzeichnisse').first()).toBeVisible()
+  await expect(page.getByText(/liest Dateien unter diesen Verzeichnissen als root/).first()).toBeVisible()
 })
