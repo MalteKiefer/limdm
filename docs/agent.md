@@ -79,10 +79,16 @@ dependencies, and the agent installs any missing tool itself.
 
 ## Enrollment tokens
 
-**Enrollment** in the console creates tokens with a note, an optional blueprint, a number of
-uses (1 to 10000) and a validity (1 to 90 days). The token is shown once. The page shows the
-commands below with the token filled in. **Revoke** ends a token at once (audit
-`token.revoke`); devices already enrolled with it are not affected. With multi tenancy a
+**Add device** in the console creates tokens with a note, an optional blueprint, a number of
+uses and a validity in days. The token is shown once. The page shows the commands below with
+the token filled in and lists the active tokens with their uses left. **Revoke** ends a
+token at once (audit `token.revoke`); devices already enrolled with it are not affected.
+
+A token is a bearer secret: whoever holds it can enroll any machine. The hard limits are 500
+uses and 30 days; **Settings**, **Enrollment** lowers them and sets the defaults of a new
+token (1 use, 1 day). Tokens created before these limits were cut down to them once. Every
+use is audited as `device.enroll` with the first 12 hex digits of the token's hash, its note
+and the uses left. With multi tenancy a
 token enrolls into the tenant it was created in, and tokens of a disabled tenant stop
 working ([tenants.md](tenants.md)).
 
@@ -143,6 +149,11 @@ Lines starting with `#` are comments. Both `allow_*` values are stored in
 `/etc/limdm/agent.json` and cannot be switched on from the server later; enroll again to
 change them.
 
+`allow_scripts` is no protection against administrators: whoever can deploy declarations
+(repositories, packages, sudo rules, local users, artifacts) can run code as root on the
+device without it. Four eyes approval, signed commands and declarations, and the audit log
+are the controls for that ([security.md](security.md#known-limitations-of-the-agent)).
+
 Then install the package by any means (your own apt or dnf mirror, the release files, or the
 install script without `LIMDM_TOKEN`). The agent enrolls
 
@@ -192,7 +203,36 @@ falls back to native inventory when osquery is missing.
 The agent fetches the device CA over TLS, accepts it only when its SHA-256 matches the
 fingerprint, creates a P-256 key locally and sends only a certificate signing request with
 the token. The key never leaves the device (`/etc/limdm/device.pem`, 0600). From then on
-every connection is mTLS with TLS 1.3, pinned to that CA. Certificates last 90 days and
+every connection is mTLS with TLS 1.3, pinned to that CA.
+
+### TPM bound device key
+
+With a TPM 2.0 (`/dev/tpmrm0`) the agent creates the key inside the TPM instead, where it
+cannot be exported (`fixedTPM`, `fixedParent`); `device.pem` then holds only a reference
+(PEM block `LIMDM TPM KEY`) next to the certificate. The enrollment proves it to the server
+in two rounds:
+
+1. The agent certifies the key with an attestation key (AK, a restricted signing key of the
+   TPM, `TPM2_Certify`) and sends the public parts of key, AK and endorsement key (EK) with the
+   CSR. The server checks the signature and the key's attributes, and that the key is the
+   one of the CSR.
+2. The server answers with a credential encrypted to the EK for this AK
+   (`TPM2_MakeCredential`); only the same TPM can decrypt it (`TPM2_ActivateCredential`). The
+   agent sends the request again with the credential; only then the token is used and the
+   certificate issued.
+
+The server records the device as **TPM bound** (device page, **Device key** fact), pins the
+AK and keeps the SHA-256 of the EK public area. A renewal creates a new key in the TPM and
+stays TPM bound when the pinned AK certifies it. Without a TPM, or when a TPM command fails,
+the agent uses a file key as before. **Settings**, **Enrollment**, **Require TPM bound key**
+(all tenants) or the tenant's own setting refuses enrollments without it; devices enrolled
+earlier keep working and renew as before. The compliance check `agent.tpm_key` (level 2)
+reports whether the key is in the TPM.
+
+Limits: the EK certificate is not checked against the TPM vendors' roots, so a software TPM
+passes the attestation; the recorded EK fingerprint ties the device to one TPM. Clearing the
+TPM destroys the key; enroll the device again. Tested with unit and integration tests and
+software built TPM structures; not yet verified on real TPM hardware or swtpm. Certificates last 90 days and
 rotate automatically 30 days before they expire, or earlier when the server asks (device CA
 rotation, [keys.md](keys.md)).
 

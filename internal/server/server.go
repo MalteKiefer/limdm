@@ -752,6 +752,50 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	reject := func() {
+		s.limit.allow(tokKey, 20, 5*time.Minute) // counts the failure
+		s.limit.allow(src, 200, 5*time.Minute)
+		s.log.Warn("enroll rejected", "remote", clientIP(r))
+		problem(w, http.StatusForbidden, "invalid or expired token")
+	}
+	// a TPM bound key: evidence checked, then two rounds (tpmattest.go)
+	var tpmBound bool
+	if ev := req.TPM; ev != nil {
+		csr, err := parseCSR(req.CSR)
+		if err != nil {
+			problem(w, http.StatusBadRequest, "invalid certificate signing request")
+			return
+		}
+		akName, err := verifyTPMEvidence(ev, csr.PublicKey, nil)
+		if err != nil {
+			problem(w, http.StatusBadRequest, "invalid TPM evidence: "+err.Error())
+			return
+		}
+		if len(ev.Activated) == 0 {
+			var ok bool
+			if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM enroll_tokens WHERE token_hash=$1 AND uses_left > 0 AND expires_at > now()
+				AND tenant_id IN (SELECT id FROM tenants WHERE NOT disabled))`, th).Scan(&ok); err != nil {
+				s.failAPI(w, err)
+				return
+			}
+			if !ok {
+				reject()
+				return
+			}
+			ch, err := s.tpmChallenge(th, req.CSR, ev, akName, time.Now())
+			if err != nil {
+				problem(w, http.StatusBadRequest, "invalid TPM evidence: "+err.Error())
+				return
+			}
+			writeJSON(w, api.EnrollResponse{TPMChallenge: ch})
+			return
+		}
+		if !s.tpmActivated(th, req.CSR, ev, time.Now()) {
+			problem(w, http.StatusForbidden, "TPM credential activation failed")
+			return
+		}
+		tpmBound = true
+	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		s.failAPI(w, err)
@@ -760,15 +804,26 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(ctx)
 	var blueprintID *int64
 	var tenantID int64 // the device joins the tenant of its token
+	var requireTPM bool
+	var usesLeft int
+	var note string
 	err = tx.QueryRow(ctx, `UPDATE enroll_tokens SET uses_left = uses_left - 1
 		WHERE token_hash=$1 AND uses_left > 0 AND expires_at > now()
-		AND tenant_id IN (SELECT id FROM tenants WHERE NOT disabled) RETURNING blueprint_id, tenant_id`, th).Scan(&blueprintID, &tenantID)
+		AND tenant_id IN (SELECT id FROM tenants WHERE NOT disabled)
+		RETURNING blueprint_id, tenant_id, uses_left, note, (SELECT require_tpm FROM tenants WHERE id=tenant_id)`, th).Scan(&blueprintID, &tenantID, &usesLeft, &note, &requireTPM)
 	if err != nil {
-		s.limit.allow(tokKey, 20, 5*time.Minute) // counts the failure
-		s.limit.allow(src, 200, 5*time.Minute)
-		s.log.Warn("enroll rejected", "remote", clientIP(r))
-		problem(w, http.StatusForbidden, "invalid or expired token")
+		reject()
 		return
+	}
+	if (requireTPM || s.settings().Enroll.RequireTPM) && !tpmBound {
+		s.log.Warn("enroll rejected: no TPM bound key", "remote", clientIP(r))
+		problem(w, http.StatusForbidden, "this enrollment needs a TPM bound key")
+		return
+	}
+	var tpmAK []byte
+	var ekSum string
+	if tpmBound {
+		tpmAK, ekSum = req.TPM.AKPublic, ekFingerprint(req.TPM)
 	}
 	id := hex.EncodeToString(sha(randToken(32))[:16])
 	cert, serial, notAfter, err := s.ca.signCSR(req.CSR, id)
@@ -776,12 +831,14 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid certificate signing request")
 		return
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, machine_id, blueprint_id, tenant_id, users_sig) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-		id, serial, notAfter, truncate(req.Hostname, 255), truncate(req.MachineID, 64), blueprintID, tenantID, signData(api.UsersSigned(id, nil, 0))); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, machine_id, blueprint_id, tenant_id, users_sig, tpm_bound, tpm_ak, tpm_ek_sha256)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		id, serial, notAfter, truncate(req.Hostname, 255), truncate(req.MachineID, 64), blueprintID, tenantID, signData(api.UsersSigned(id, nil, 0)), tpmBound, tpmAK, ekSum); err != nil {
 		s.failAPI(w, err)
 		return
 	}
-	if err := audit(ctx, tx, "device:"+id, "device.enroll", id, truncate(req.Hostname, 255)+" cert "+serial); err != nil {
+	if err := audit(ctx, tx, "device:"+id, "device.enroll", id, fmt.Sprintf("%s cert %s token %s (%q) uses left %d tpm_bound=%v ek=%.16s",
+		truncate(req.Hostname, 255), serial, hex.EncodeToString(th)[:12], note, usesLeft, tpmBound, ekSum)); err != nil {
 		s.failAPI(w, err)
 		return
 	}
@@ -812,7 +869,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 	s.notifyDevice(id, []notice{{Type: "device.enrolled", Severity: "info", Title: "Device enrolled: " + truncate(req.Hostname, 80),
 		Text: "A new device joined the fleet.", Hostname: truncate(req.Hostname, 255)}})
-	writeJSON(w, api.EnrollResponse{DeviceID: id, Cert: cert})
+	writeJSON(w, api.EnrollResponse{DeviceID: id, Cert: cert, TPMBound: tpmBound})
 }
 
 func (s *Server) renew(w http.ResponseWriter, r *http.Request) {
@@ -822,21 +879,42 @@ func (s *Server) renew(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "bad request")
 		return
 	}
+	// a device enrolled with a TPM bound key stays bound when the new key is
+	// certified by the attestation key pinned at enrollment
+	var pinned []byte
+	var requireTPM bool
+	if err := s.db.QueryRow(r.Context(), `SELECT d.tpm_ak, t.require_tpm FROM devices d JOIN tenants t ON t.id=d.tenant_id WHERE d.id=$1`, id).Scan(&pinned, &requireTPM); err != nil {
+		s.failAPI(w, err)
+		return
+	}
+	bound := false
+	if req.TPM != nil && pinned != nil {
+		if csr, err := parseCSR(req.CSR); err == nil {
+			_, verr := verifyTPMEvidence(req.TPM, csr.PublicKey, pinned)
+			if bound = verr == nil; !bound {
+				s.log.Warn("renewal: TPM evidence refused", "device", id, "err", verr)
+			}
+		}
+	}
+	if (requireTPM || s.settings().Enroll.RequireTPM) && pinned != nil && !bound {
+		problem(w, http.StatusForbidden, "this device needs a TPM bound key")
+		return
+	}
 	cert, serial, notAfter, err := s.ca.signCSR(req.CSR, id)
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid certificate signing request")
 		return
 	}
-	err = s.auditAction(r.Context(), "device:"+id, "device.cert_renew", id, serial, func(tx pgx.Tx) error {
+	err = s.auditAction(r.Context(), "device:"+id, "device.cert_renew", id, fmt.Sprintf("%s tpm_bound=%v", serial, bound), func(tx pgx.Tx) error {
 		// the current certificate stays valid until the new one is used once
-		_, err := tx.Exec(r.Context(), `UPDATE devices SET pending_serial=$2, pending_not_after=$3 WHERE id=$1`, id, serial, notAfter)
+		_, err := tx.Exec(r.Context(), `UPDATE devices SET pending_serial=$2, pending_not_after=$3, tpm_bound=$4 WHERE id=$1`, id, serial, notAfter, bound)
 		return err
 	})
 	if err != nil {
 		s.failAPI(w, err)
 		return
 	}
-	writeJSON(w, api.EnrollResponse{DeviceID: id, Cert: cert})
+	writeJSON(w, api.EnrollResponse{DeviceID: id, Cert: cert, TPMBound: bound})
 }
 
 func countFailing(checks []api.CheckResult) int {

@@ -24,7 +24,7 @@ German, British, US) follows the account across devices.
 | Configuration | `/app/config` | blueprints, library items, software catalog, uploaded packages, with version history, preview and rollback |
 | Activity | `/app/activity` | audit log with filters and chain verification |
 | Reports | `/app/reports` | exports and scheduled reports |
-| Settings | `/app/settings` | sign in, security, users, tenants, API tokens, notifications, backup, retention, operations, directory, network certificates, agents |
+| Settings | `/app/settings` | sign in, security, enrollment limits and TPM requirement, users, tenants, API tokens, notifications, backup, retention, operations, directory, network certificates, agents |
 | Profile, Help | `/app/profile`, `/app/help` | password, authenticator app, recovery codes; glossary and roles |
 
 Areas a role cannot use are hidden from its navigation, and the API answers 403

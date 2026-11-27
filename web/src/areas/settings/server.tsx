@@ -30,6 +30,7 @@ function WithSettings({ children }: { children: (s: Settings, save: (section: Se
     branding: useSaveSection('branding'),
     operations: useSaveSection('operations'),
     retention: useSaveSection('retention'),
+    enrollment: useSaveSection('enrollment'),
   }
   if (q.isPending) return <LoadingState rows={6} />
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
@@ -162,6 +163,47 @@ export function Access() {
           </SettingsForm>
         </>
       )}
+    </WithSettings>
+  )
+}
+
+/** Limits of new enrollment tokens and the TPM requirement. */
+export function Enrollment() {
+  const t = useT()
+  return (
+    <WithSettings>
+      {(s, save, ro) => {
+        const e = s.enrollment
+        const n = (max: number) => z.number({ message: t('settings.err.number') }).int().min(1, t('settings.enroll.range', { max })).max(max, t('settings.enroll.range', { max }))
+        return (
+          <>
+            <SectionHead title={t('settings.nav.enroll')} sub={t('settings.enroll.sub')} />
+            <SettingsForm
+              readOnly={ro}
+              schema={z
+                .object({ max_uses: n(500), max_days: n(30), default_uses: n(500), default_days: n(30), require_tpm: z.boolean() })
+                .refine((v) => v.default_uses <= v.max_uses, { path: ['default_uses'], message: t('settings.enroll.aboveMax') })
+                .refine((v) => v.default_days <= v.max_days, { path: ['default_days'], message: t('settings.enroll.aboveMax') })}
+              values={{ max_uses: e.max_uses, max_days: e.max_days, default_uses: e.default_uses, default_days: e.default_days, require_tpm: e.require_tpm }}
+              onSave={(v) => save('enrollment', { enrollment: v })}
+            >
+              {(f) => (
+                <>
+                  <FormSection title={t('settings.enroll.tokens')} description={t('settings.enroll.tokensHelp')}>
+                    <TextField form={f} name="max_uses" type="number" label={t('settings.enroll.maxUses')} help={t('settings.enroll.range', { max: 500 })} required />
+                    <TextField form={f} name="max_days" type="number" label={t('settings.enroll.maxDays')} help={t('settings.enroll.range', { max: 30 })} required />
+                    <TextField form={f} name="default_uses" type="number" label={t('settings.enroll.defaultUses')} required />
+                    <TextField form={f} name="default_days" type="number" label={t('settings.enroll.defaultDays')} required />
+                  </FormSection>
+                  <FormSection title={t('settings.enroll.tpm')} description={t('settings.enroll.tpmHelp')}>
+                    <Toggle form={f} name="require_tpm" label={t('settings.enroll.requireTpm')} help={t('settings.enroll.requireTpmHelp')} />
+                  </FormSection>
+                </>
+              )}
+            </SettingsForm>
+          </>
+        )
+      }}
     </WithSettings>
   )
 }

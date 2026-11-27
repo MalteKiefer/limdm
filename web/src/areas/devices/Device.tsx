@@ -355,6 +355,9 @@ function Overview({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
           </Fact>
           <Fact label={t('devices.sys.enrolled')}>{d.enrolled_at ? dateTime(d.enrolled_at) : ''}</Fact>
           <Fact label={t('devices.sys.cert')}>{t('devices.sys.certVal', { at: dateTime(d.cert_expires) })}</Fact>
+          <Fact label={t('devices.sys.key')}>
+            {d.tpm_bound ? <span title={`EK SHA-256 ${d.tpm_ek_sha256}`}>{t('devices.sys.keyTpm')}</span> : t('devices.sys.keyFile')}
+          </Fact>
         </dl>
       </Card>
     </div>

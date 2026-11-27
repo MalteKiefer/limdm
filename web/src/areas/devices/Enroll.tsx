@@ -36,17 +36,20 @@ export function EnrollPage() {
   const revoke = useTokenRevoke()
   const [note, setNote] = useState('')
   const [bp, setBp] = useState('0')
-  const [uses, setUses] = useState('1')
-  const [days, setDays] = useState('7')
+  const [uses, setUses] = useState<string>()
+  const [days, setDays] = useState<string>()
   const [token, setToken] = useState('')
   const [err, setErr] = useState<string>()
   const [revoking, setRevoking] = useState<string | null>(null)
   if (info.error) return <ErrorState error={info.error} onRetry={() => void info.refetch()} />
   if (!info.data) return <LoadingState rows={6} />
   const i = info.data
+  const lim = i.limits
   const shown = token || '<token>'
-  const badUses = !(Number(uses) >= 1 && Number(uses) <= 10000)
-  const badDays = !(Number(days) >= 1 && Number(days) <= 90)
+  const usesV = uses ?? String(lim.default_uses)
+  const daysV = days ?? String(lim.default_days)
+  const badUses = !(Number(usesV) >= 1 && Number(usesV) <= lim.max_uses)
+  const badDays = !(Number(daysV) >= 1 && Number(daysV) <= lim.max_days)
   return (
     <div className="flex flex-col gap-[var(--gap)]">
       <Link to="/devices" className="inline-flex w-fit items-center gap-1 text-[13px] text-muted hover:text-fg">
@@ -132,7 +135,7 @@ export function EnrollPage() {
                   e.preventDefault()
                   setErr(undefined)
                   create.mutate(
-                    { note, blueprint_id: Number(bp), uses: Number(uses), days: Number(days) },
+                    { note, blueprint_id: Number(bp), uses: Number(usesV), days: Number(daysV) },
                     { onSuccess: (r) => (setToken((r as { token: string }).token), setNote('')), onError: (er) => setErr(errorText(er)) },
                   )
                 }}
@@ -145,11 +148,11 @@ export function EnrollPage() {
                 <Field label={t('devices.enroll.note')}>{({ id }) => <input id={id} className="field" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder={t('devices.enroll.notePlaceholder')} />}</Field>
                 <Field label={t('devices.edit.blueprint')}>{({ id }) => <BlueprintSelect id={id} value={Number(bp)} onChange={(v) => setBp(String(v))} noneLabel={t('devices.enroll.defaultOnly')} />}</Field>
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label={t('devices.enroll.uses')} error={badUses ? t('devices.enroll.usesRange') : undefined}>
-                    {({ id, describedBy, invalid }) => <input id={id} type="number" min={1} max={10000} className="field" aria-describedby={describedBy} aria-invalid={invalid || undefined} value={uses} onChange={(e) => setUses(e.target.value)} />}
+                  <Field label={t('devices.enroll.uses')} error={badUses ? t('devices.enroll.range', { max: lim.max_uses }) : undefined}>
+                    {({ id, describedBy, invalid }) => <input id={id} type="number" min={1} max={lim.max_uses} className="field" aria-describedby={describedBy} aria-invalid={invalid || undefined} value={usesV} onChange={(e) => setUses(e.target.value)} />}
                   </Field>
-                  <Field label={t('devices.enroll.days')} error={badDays ? t('devices.enroll.daysRange') : undefined}>
-                    {({ id, describedBy, invalid }) => <input id={id} type="number" min={1} max={90} className="field" aria-describedby={describedBy} aria-invalid={invalid || undefined} value={days} onChange={(e) => setDays(e.target.value)} />}
+                  <Field label={t('devices.enroll.days')} error={badDays ? t('devices.enroll.range', { max: lim.max_days }) : undefined}>
+                    {({ id, describedBy, invalid }) => <input id={id} type="number" min={1} max={lim.max_days} className="field" aria-describedby={describedBy} aria-invalid={invalid || undefined} value={daysV} onChange={(e) => setDays(e.target.value)} />}
                   </Field>
                 </div>
                 <button type="submit" className="btn btn-primary" disabled={create.isPending || badUses || badDays}>

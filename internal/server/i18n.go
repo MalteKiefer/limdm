@@ -787,4 +787,15 @@ var deCatalog = map[string]string{
 	"Report schedule deleted": "Berichtszeitplan gelöscht",
 	"Scheduled report run":    "Geplanter Bericht erzeugt",
 	"Report downloaded":       "Bericht heruntergeladen",
+	// R3-S
+	"Device key is held in the TPM":       "Geräteschlüssel liegt im TPM",
+	"no TPM 2.0":                          "kein TPM 2.0",
+	"the device key cannot leave the TPM": "der Geräteschlüssel kann das TPM nicht verlassen",
+	"the device key is a file; the next certificate renewal creates it in the TPM": "der Geräteschlüssel ist eine Datei; die nächste Erneuerung des Zertifikats legt ihn im TPM an",
+	"network certificate domain: a DNS domain such as devices.example.com":         "Domain der Netzwerkzertifikate: eine DNS Domain wie devices.example.com",
+	"enrollment token limits: 1 to 500 uses and 1 to 30 days":                      "Grenzen der Registrierungstokens: 1 bis 500 Nutzungen und 1 bis 30 Tage",
+	"enrollment token defaults must be within the limits":                          "Die Vorgaben der Registrierungstokens müssen innerhalb der Grenzen liegen",
+	"this enrollment needs a TPM bound key":                                        "Diese Registrierung braucht einen an das TPM gebundenen Schlüssel",
+	"this device needs a TPM bound key":                                            "Dieses Gerät braucht einen an das TPM gebundenen Schlüssel",
+	"TPM credential activation failed":                                             "TPM Credential Activation fehlgeschlagen",
 }

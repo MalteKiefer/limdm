@@ -44,6 +44,7 @@ agent reports (the console shows them translated).
 | `mac.enforcing` | Mandatory access control is enforcing | 2 | none |
 | `disk.recovery` | Disk encryption recovery keys are escrowed | 1 | the desktop helper asks the user; `na` without escrow declared |
 | `disk.tpm` | LUKS volumes are bound to the TPM | 1 | bound with the next recovery key rotation or `limdm-agent recovery-key --all` (with a PIN the user runs it) |
+| `agent.tpm_key` | Device key is held in the TPM | 2 | the next certificate renewal creates the key in the TPM; `na` without TPM 2.0 |
 | `boot.password` | Boot loader is password protected | 1 | via `com.limdm.bootloader` |
 | `boot.secureboot` | Secure Boot is enabled | 2 | none |
 | `kernel.aslr` | Full ASLR is enabled | 1 | yes (sysctl) |
@@ -81,7 +82,7 @@ an unbound volume or a missing TPM 2.0 is reported as `na`; with `require` it fa
 ## Framework mapping
 
 The catalog has a version (`CatalogVersion` in `internal/agent/checks.go`, currently
-`2026.11.1`). The agent reports it with every result. The evidence export and the
+`2026.11.2`). The agent reports it with every result. The evidence export and the
 compliance history carry it, so a result can always be tied to the mapping it was
 made with. The version is raised whenever a check, its level or a reference changes.
 
@@ -105,6 +106,7 @@ made with. The version is raised whenever a check, its level or a reference chan
 | `mac.enforcing` | 1.3.1.4 | SYS.2.3, SYS.1.3, SYS.2.3.A8 | A.8.7, A.8.9 |
 | `disk.recovery` | none | CON.1 | A.8.24, A.8.13 |
 | `disk.tpm` | none | CON.1, SYS.2.1 | A.8.24, A.7.10 |
+| `agent.tpm_key` | none | CON.1, CON.1.A1 | A.8.24, A.5.17 |
 | `boot.password` | 1.4.1, 1.4.2 | SYS.2.1, SYS.2.3 | A.8.2, A.8.9 |
 | `boot.secureboot` | none | SYS.2.1 | A.8.1, A.8.9 |
 | `kernel.aslr` | 1.5.1 | SYS.2.3 | A.8.9 |

@@ -5,7 +5,7 @@ import { Ban, Check, Download, FolderTree, RefreshCw, Search, Wifi } from 'lucid
 import { useDeferredValue, useState } from 'react'
 import { z } from '../../lib/zod'
 import { api, unwrap, type Schemas } from '../../api/client'
-import { useCan } from '../../api/me'
+import { useCan, useMe } from '../../api/me'
 import { StackBar } from '../../components/charts'
 import { DataGrid, type GridColumn } from '../../components/datagrid'
 import { FormSection } from '../../components/form'
@@ -13,7 +13,7 @@ import { EmptyState, ErrorState, LoadingState } from '../../components/states'
 import { Badge } from '../../components/ui'
 import { ago, dateTime, fmt } from '../../i18n/format'
 import { useT, type MessageKey } from '../../i18n'
-import { useAction, useAgents, useBlueprintNames, useDirectory, useDirectoryUsers, useNetwork } from './api'
+import { useAction, useAgents, useBlueprintNames, useDirectory, useDirectoryUsers, useNetwork, useSaveSection, useSettings } from './api'
 import { Confirm, Facts, ListField, OnceSecret, SectionHead, SettingsForm, TextField, Toggle } from '../../components/settingsform'
 
 // ---- directory ----
@@ -193,9 +193,35 @@ function People() {
 
 // ---- network ----
 
+const domainRe = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
+
+/** The DNS domain of the certificates' DNS SAN (global setting). */
+function CertDomain() {
+  const t = useT()
+  const q = useSettings()
+  const save = useSaveSection('network')
+  if (q.isPending) return <LoadingState rows={2} />
+  if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
+  return (
+    <SettingsForm
+      schema={z.object({ network_cert_domain: z.string().trim().toLowerCase().refine((v) => !v || (v.length <= 200 && domainRe.test(v)), t('settings.net.domainBad')) })}
+      values={{ network_cert_domain: q.data.network_cert_domain ?? '' }}
+      onSave={(v) => save.mutateAsync(v)}
+    >
+      {(f) => (
+        <FormSection title={t('settings.net.domain')} description={t('settings.net.domainHelp')}>
+          <TextField form={f} name="network_cert_domain" label={t('settings.net.domainLabel')} placeholder="devices.example.com" mono />
+        </FormSection>
+      )}
+    </SettingsForm>
+  )
+}
+
 export function Network() {
   const t = useT()
   const admin = useCan('admin')
+  const me = useMe()
+  const global = admin && !(me.tenant && !me.super) && !me.scope_tags.length && !me.scope_groups.length
   const q = useNetwork()
   const [rotate, setRotate] = useState(false)
   const [token, setToken] = useState('')
@@ -232,6 +258,7 @@ export function Network() {
           ]}
         />
       </FormSection>
+      {global && <CertDomain />}
       <FormSection title={t('settings.net.crl')} description={t('settings.net.crlHelp')}>
         <Facts
           rows={[

@@ -513,7 +513,7 @@ function TenantEdit({ id, embedded }: { id: number; embedded?: boolean }) {
   const q = useTenant(id)
   const [logo, setLogo] = useState<{ b64: string; url: string } | null>(null)
   const [remove, setRemove] = useState(false)
-  const save = useAction(['settings', 'tenants'], (body: { name?: string; disabled?: boolean; company_name: string; color: string; logo_png?: string; remove_logo?: boolean }) =>
+  const save = useAction(['settings', 'tenants'], (body: { name?: string; disabled?: boolean; company_name: string; color: string; logo_png?: string; remove_logo?: boolean; require_tpm: boolean }) =>
     unwrap(api.PATCH('/api/v1/tenants/{id}', { params: { path: { id } }, body })),
   )
   if (q.isPending) return <LoadingState rows={4} />
@@ -529,10 +529,11 @@ function TenantEdit({ id, embedded }: { id: number; embedded?: boolean }) {
         company_name: z.string().max(100, t('settings.tenants.companyLong')),
         color: z.string().refine((v) => !v || /^#[0-9a-fA-F]{6}$/.test(v), t('settings.tenants.colorBad')),
         logo: z.string(),
+        require_tpm: z.boolean(),
       })}
-      values={{ name: x.name, disabled: x.disabled, company_name: x.company_name, color: x.color, logo: '' }}
+      values={{ name: x.name, disabled: x.disabled, company_name: x.company_name, color: x.color, logo: '', require_tpm: x.require_tpm }}
       onSave={async (v) => {
-        await save.mutateAsync({ ...(supr ? { name: v.name, disabled: v.disabled } : {}), company_name: v.company_name, color: v.color, ...(logo ? { logo_png: logo.b64 } : {}), ...(remove ? { remove_logo: true } : {}) })
+        await save.mutateAsync({ ...(supr ? { name: v.name, disabled: v.disabled } : {}), company_name: v.company_name, color: v.color, require_tpm: v.require_tpm, ...(logo ? { logo_png: logo.b64 } : {}), ...(remove ? { remove_logo: true } : {}) })
         setLogo(null)
         setRemove(false)
         void q.refetch()
@@ -549,6 +550,7 @@ function TenantEdit({ id, embedded }: { id: number; embedded?: boolean }) {
                 {x.id !== 1 && <Toggle form={f} name="disabled" label={t('settings.tenants.disable')} help={t('settings.tenants.disableHelp')} />}
               </>
             )}
+            <Toggle form={f} name="require_tpm" label={t('settings.tenants.requireTpm')} help={t(supr ? 'settings.tenants.requireTpmHelp' : 'settings.tenants.requireTpmOwn')} disabled={!supr && x.require_tpm} />
             <TextField form={f} name="company_name" label={t('settings.tenants.company')} help={t('settings.tenants.companyHelp')} />
             <Field label={t('settings.tenants.color')} help={t('settings.tenants.colorHelp')} error={f.formState.errors.color?.message}>
               {({ id: fid, describedBy, invalid }) => (

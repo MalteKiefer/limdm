@@ -149,6 +149,8 @@ type apiDeviceDetailDoc struct {
 	LockAt            *time.Time              `json:"lock_at"`
 	NotifyOnGrace     bool                    `json:"notify_on_grace"`
 	CertExpires       time.Time               `json:"cert_expires"`
+	TPMBound          bool                    `json:"tpm_bound"`     // the mTLS key is attested as held by a TPM (tpmattest.go)
+	TPMEK             string                  `json:"tpm_ek_sha256"` // SHA-256 of the TPM's endorsement key, when bound
 	UpdateState       string                  `json:"update_state"`
 	UpdateVersion     string                  `json:"update_version"`
 	UpdateRequested   bool                    `json:"update_requested"`
@@ -208,10 +210,10 @@ func (s *Server) apiDeviceDetail(w http.ResponseWriter, r *http.Request, c apiCa
 	var inv, checks, decl, users []byte
 	err = s.db.QueryRow(ctx, `SELECT d.inventory, d.checks, d.decl_status, d.users, d.cert_not_after, d.grace_until, d.auto_locked, d.noncompliant_since,
 		d.update_state, d.update_version, d.update_requested, d.external_ip, d.geo, coalesce(u.email, ''),
-		CASE WHEN d.tampered_at > now() - interval '30 days' THEN d.tampered_at END
+		CASE WHEN d.tampered_at > now() - interval '30 days' THEN d.tampered_at END, d.tpm_bound, d.tpm_ek_sha256
 		FROM devices d LEFT JOIN dir_users u ON u.id=d.primary_user_id WHERE d.id=$1`, id).
 		Scan(&inv, &checks, &decl, &users, &d.CertExpires, &d.GraceUntil, &d.AutoLocked, &d.FailingSince,
-			&d.UpdateState, &d.UpdateVersion, &d.UpdateRequested, &d.ExternalIP, &d.Geo, &d.PrimaryUser, &d.Tampered)
+			&d.UpdateState, &d.UpdateVersion, &d.UpdateRequested, &d.ExternalIP, &d.Geo, &d.PrimaryUser, &d.Tampered, &d.TPMBound, &d.TPMEK)
 	if err != nil {
 		s.apiFail(w, err)
 		return
@@ -906,6 +908,7 @@ type enrollInfo struct {
 	PublicURL   string           `json:"public_url"`
 	Fingerprint string           `json:"fingerprint"`
 	Repo        string           `json:"release_repo"`
+	Limits      EnrollSettings   `json:"limits"` // defaults and maxima of a new token
 }
 
 // apiEnrollTokens lists the active enrollment tokens of the caller's tenant
@@ -921,7 +924,8 @@ func (s *Server) apiEnrollTokens(w http.ResponseWriter, r *http.Request, c apiCa
 	if list == nil {
 		list = []apiEnrollToken{}
 	}
-	writeJSON(w, enrollInfo{Items: list, AgentURL: s.cfg.AgentURL, PublicURL: s.cfg.PublicURL, Fingerprint: s.tlsCA().Fingerprint(), Repo: s.cfg.ReleaseRepo})
+	writeJSON(w, enrollInfo{Items: list, AgentURL: s.cfg.AgentURL, PublicURL: s.cfg.PublicURL, Fingerprint: s.tlsCA().Fingerprint(), Repo: s.cfg.ReleaseRepo,
+		Limits: s.settings().Enroll.withDefaults()})
 }
 
 // apiEnrollTokenCreate creates a token (createEnrollToken); the answer is

@@ -6,6 +6,7 @@ require (
 	filippo.io/age v1.3.2
 	fyne.io/systray v1.12.2
 	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/google/go-tpm v0.9.8
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/miekg/pkcs11 v1.1.2
 	github.com/pkg/sftp v1.13.13

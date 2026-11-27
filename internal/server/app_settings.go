@@ -137,6 +137,7 @@ func (s *Server) settingsView(r *http.Request, c apiCaller, set Settings) apiSet
 		PublicURL: s.cfg.PublicURL, RedirectURI: s.cfg.PublicURL + "/auth/callback", ClientIP: clientIP(r)}
 	v.Logo = nil
 	v.Ops = v.Ops.withDefaults()
+	v.Enroll = v.Enroll.withDefaults()
 	for _, row := range retentionRows(set) {
 		v.RetentionKinds = append(v.RetentionKinds, apiRetentionKind{row.Key, row.Days, row.Default, row.Min, row.Max, row.Forever})
 	}
@@ -371,6 +372,7 @@ type apiTenantDetail struct {
 	Color       string    `json:"color"`
 	HasLogo     bool      `json:"has_logo"`
 	CreatedAt   time.Time `json:"created_at"`
+	RequireTPM  bool      `json:"require_tpm"`
 }
 
 func (s *Server) apiTenantGet(w http.ResponseWriter, r *http.Request, c apiCaller) {
@@ -383,7 +385,7 @@ func (s *Server) apiTenantGet(w http.ResponseWriter, r *http.Request, c apiCalle
 		s.apiFail(w, err)
 		return
 	}
-	writeJSON(w, apiTenantDetail{t.ID, t.Name, t.Disabled, t.CompanyName, t.Color, t.HasLogo, t.CreatedAt})
+	writeJSON(w, apiTenantDetail{t.ID, t.Name, t.Disabled, t.CompanyName, t.Color, t.HasLogo, t.CreatedAt, t.RequireTPM})
 }
 
 // apiTenantSave changes a tenant: name and state (super admins), branding
@@ -407,7 +409,8 @@ func (s *Server) apiTenantSave(w http.ResponseWriter, r *http.Request, c apiCall
 		Color       *string `json:"color"`
 		Logo        []byte  `json:"logo_png"`
 		RemoveLogo  bool    `json:"remove_logo"`
-	}{Name: &in.Name, Disabled: &in.Disabled, CompanyName: &in.CompanyName, Color: &in.Color}
+		RequireTPM  *bool   `json:"require_tpm"`
+	}{Name: &in.Name, Disabled: &in.Disabled, CompanyName: &in.CompanyName, Color: &in.Color, RequireTPM: &in.RequireTPM}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
@@ -421,7 +424,7 @@ func (s *Server) apiTenantSave(w http.ResponseWriter, r *http.Request, c apiCall
 		s.apiFail(w, err)
 		return
 	}
-	writeJSON(w, apiTenantDetail{t.ID, t.Name, t.Disabled, t.CompanyName, t.Color, t.HasLogo, t.CreatedAt})
+	writeJSON(w, apiTenantDetail{t.ID, t.Name, t.Disabled, t.CompanyName, t.Color, t.HasLogo, t.CreatedAt, t.RequireTPM})
 }
 
 // ---- keys ----

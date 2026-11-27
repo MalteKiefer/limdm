@@ -1335,7 +1335,7 @@ export interface paths {
         put?: never;
         /**
          * Create an enrollment token
-         * @description The token is in this answer only. Audited as token.create. Role admin.
+         * @description The token is in this answer only. Audited as token.create. Role admin. Uses and days are limited by Settings, Enrollment (hard limits 500 and 30).
          */
         post: operations["createEnrollmentToken"];
         delete?: never;
@@ -1902,7 +1902,7 @@ export interface paths {
         head?: never;
         /**
          * Save one settings section
-         * @description Sections: general (local_login, stale_hours), network (console_allow, console_block, scim_allow), security (password_policy, four_eyes*, geolocation, fallback_dns), remote_shell, sso (oidc_*, allowed_domain, require_mfa, mfa_acr, role_groups, oidc_client_secret, clear_secret), monitoring (webhook_url, notify_private_networks), branding (company_name, logo_png, remove_logo), operations (ops), retention. Fields left out keep their value. The same guards as the console: no self lockout, local login only off with an OIDC admin, four eyes needs two admins, OIDC changes are checked against the provider. Audited as settings.save.
+         * @description Sections: general (local_login, stale_hours), network (console_allow, console_block, scim_allow, network_cert_domain), security (password_policy, four_eyes*, geolocation, fallback_dns), remote_shell, sso (oidc_*, allowed_domain, require_mfa, mfa_acr, role_groups, oidc_client_secret, clear_secret), monitoring (webhook_url, notify_private_networks), branding (company_name, logo_png, remove_logo), operations (ops), retention, enrollment (enrollment). Fields left out keep their value. The same guards as the console: no self lockout, local login only off with an OIDC admin, four eyes needs two admins, OIDC changes are checked against the provider. Audited as settings.save.
          */
         patch: operations["saveSettings"];
         trace?: never;
@@ -3522,6 +3522,7 @@ export interface components {
             public_url: string;
             fingerprint: string;
             release_repo: string;
+            limits: components["schemas"]["EnrollSettings"];
         };
         DeviceDetail: components["schemas"]["Device"] & {
             inventory: {
@@ -3672,6 +3673,10 @@ export interface components {
                 /** Format: date-time */
                 at: string;
             }[];
+            /** @description The mTLS key was attested as held by a TPM 2.0 */
+            tpm_bound: boolean;
+            /** @description SHA-256 of the TPM endorsement key's public area, when bound */
+            tpm_ek_sha256: string;
         };
         ConfigDeleted: {
             id: number;
@@ -3983,6 +3988,9 @@ export interface components {
             /** @description PNG, square, up to 256 KiB */
             logo_png?: string;
             remove_logo?: boolean;
+            /** @description EAP-TLS certificates carry <device ID>.<domain> as DNS SAN; empty: no DNS SAN */
+            network_cert_domain?: string;
+            enrollment?: components["schemas"]["EnrollSettings"];
         };
         RetentionKind: {
             key: string;
@@ -4027,6 +4035,9 @@ export interface components {
             /** @description Signing key of the compliance webhook; admins only */
             webhook_secret?: string;
             retention_kinds: components["schemas"]["RetentionKind"][];
+            /** @description EAP-TLS certificates carry <device ID>.<domain> as DNS SAN; empty: no DNS SAN */
+            network_cert_domain?: string;
+            enrollment: components["schemas"]["EnrollSettings"];
         };
         ConsoleUser: {
             /** @description Email (OIDC) or local:name */
@@ -4087,6 +4098,8 @@ export interface components {
             has_logo: boolean;
             /** Format: date-time */
             created_at: string;
+            /** @description Enrollment into this tenant needs a TPM bound key */
+            require_tpm: boolean;
         };
         TenantPatch: {
             name?: string;
@@ -4096,6 +4109,8 @@ export interface components {
             color?: string;
             logo_png?: string;
             remove_logo?: boolean;
+            /** @description Tenant admins may only switch it on */
+            require_tpm?: boolean;
         };
         KeyStatus: {
             /** @enum {string} */
@@ -4410,6 +4425,15 @@ export interface components {
                 [key: string]: string;
             };
             docs: string;
+        };
+        /** @description Limits of new enrollment tokens (hard limits 500 uses and 30 days) and the TPM requirement for every tenant */
+        EnrollSettings: {
+            default_uses: number;
+            default_days: number;
+            max_uses: number;
+            max_days: number;
+            /** @description Refuse enrollments without a TPM bound key */
+            require_tpm: boolean;
         };
     };
     responses: {
@@ -6970,8 +6994,10 @@ export interface operations {
                 "application/json": {
                     note?: string;
                     blueprint_id?: number;
-                    uses: number;
-                    days: number;
+                    /** @description 0 or missing: the default of Settings, Enrollment; at most its maximum */
+                    uses?: number;
+                    /** @description 0 or missing: the default of Settings, Enrollment; at most its maximum */
+                    days?: number;
                 };
             };
         };
@@ -7923,7 +7949,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                section: "general" | "network" | "security" | "remote_shell" | "sso" | "monitoring" | "branding" | "operations" | "retention";
+                section: "general" | "network" | "security" | "remote_shell" | "sso" | "monitoring" | "branding" | "operations" | "retention" | "enrollment";
             };
             cookie?: never;
         };

@@ -6,6 +6,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -173,7 +174,7 @@ func pinnedTLS(caPEM []byte, server string) (*tls.Config, error) {
 			if err != nil {
 				return nil, err
 			}
-			c, err := tls.X509KeyPair(b, b)
+			c, err := loadIdentity(b)
 			return &c, err
 		}
 	}
@@ -215,21 +216,48 @@ func newClient(tc *tls.Config) *http.Client {
 	return &http.Client{Timeout: 2 * time.Minute, Transport: newSwapTransport(tc)}
 }
 
+// newCSR creates a file key (ECDSA P-256) and a CSR for it.
 func newCSR() (keyPEM []byte, csrPEM string, err error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, "", err
 	}
-	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "limdm-device"}}, key)
-	if err != nil {
+	if csrPEM, err = csrFor(key); err != nil {
 		return nil, "", err
 	}
 	kb, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
 		return nil, "", err
 	}
-	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb}),
-		string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})), nil
+	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb}), csrPEM, nil
+}
+
+func csrFor(key crypto.Signer) (string, error) {
+	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "limdm-device"}}, key)
+	if err != nil {
+		return "", err
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})), nil
+}
+
+// newIdentity creates the key of a device identity with its CSR: in the
+// TPM when a TPM 2.0 is usable (with evidence, the EK only for enrollment),
+// else as a file key. keyPEM goes into device.pem in front of the certificate.
+func newIdentity(log *slog.Logger, enroll bool) (keyPEM []byte, csrPEM string, ev *api.TPMEvidence, ts *tpmSigner, err error) {
+	if hasTPM2() {
+		if keyPEM, ts, err = newTPMKey(); err == nil {
+			if csrPEM, err = csrFor(ts); err == nil {
+				if ev, err = tpmEvidence(ts, enroll); err != nil {
+					log.Warn("TPM key without attestation", "err", err)
+					ev = nil
+				}
+				return keyPEM, csrPEM, ev, ts, nil
+			}
+		}
+		log.Warn("TPM unusable, using a file key", "err", err)
+	}
+	keyPEM, csrPEM, err = newCSR()
+	return keyPEM, csrPEM, nil, nil, err
 }
 
 // fetchPinnedCA downloads the CA and accepts it only if its SHA-256 matches
@@ -313,31 +341,32 @@ func Enroll(server, token, fingerprint string, allowScripts, allowShell bool) er
 	if err != nil {
 		return err
 	}
-	keyPEM, csr, err := newCSR()
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	keyPEM, csr, ev, ts, err := newIdentity(log, true)
 	if err != nil {
 		return err
 	}
 	hostname, _ := os.Hostname()
-	body, _ := json.Marshal(api.EnrollRequest{Token: token, CSR: csr, Hostname: hostname, MachineID: readTrim("/etc/machine-id")})
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server+"/api/v1/enroll", bytes.NewReader(body))
+	client := newClient(tc)
+	er, err := postEnroll(client, server, api.EnrollRequest{Token: token, CSR: csr, Hostname: hostname, MachineID: readTrim("/etc/machine-id"), TPM: ev})
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := newClient(tc).Do(req)
-	if err != nil {
-		return err
+	// second round of a TPM enrollment: prove that the AK and EK share the TPM
+	if er.TPMChallenge != nil && ts != nil {
+		activated, aerr := activateCredential(ts, er.TPMChallenge)
+		if aerr != nil {
+			log.Warn("enrolling without TPM attestation", "err", aerr)
+			ev = nil
+		} else {
+			ev.Activated = activated
+		}
+		if er, err = postEnroll(client, server, api.EnrollRequest{Token: token, CSR: csr, Hostname: hostname, MachineID: readTrim("/etc/machine-id"), TPM: ev}); err != nil {
+			return err
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return fmt.Errorf("enroll failed: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
-	}
-	var er api.EnrollResponse
-	if err := json.NewDecoder(resp.Body).Decode(&er); err != nil {
-		return err
+	if er.Cert == "" {
+		return errors.New("enroll failed: the server sent no certificate")
 	}
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		return err
@@ -353,6 +382,30 @@ func Enroll(server, token, fingerprint string, allowScripts, allowShell bool) er
 		return err
 	}
 	return forgetServerState()
+}
+
+// postEnroll sends one enrollment request.
+func postEnroll(c *http.Client, server string, er api.EnrollRequest) (api.EnrollResponse, error) {
+	var out api.EnrollResponse
+	body, _ := json.Marshal(er)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server+"/api/v1/enroll", bytes.NewReader(body))
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Do(req)
+	if err != nil {
+		return out, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return out, fmt.Errorf("enroll failed: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+	}
+	err = json.NewDecoder(resp.Body).Decode(&out)
+	return out, err
 }
 
 // forgetServerState drops what belonged to the previous enrollment: command
@@ -1064,18 +1117,18 @@ func (a *Agent) renewIdentity(ctx context.Context) {
 		a.log.Error("identity", "err", err)
 		return
 	}
-	c, err := tls.X509KeyPair(b, b)
+	c, err := loadIdentity(b)
 	if err != nil || c.Leaf == nil || (time.Until(c.Leaf.NotAfter) > renewBefore && !a.renewNow) {
 		return
 	}
 	expired := time.Now().After(c.Leaf.NotAfter)
-	keyPEM, csr, err := newCSR()
+	keyPEM, csr, ev, _, err := newIdentity(a.log, false)
 	if err != nil {
 		a.log.Error("renew", "err", err)
 		return
 	}
 	var resp api.EnrollResponse
-	if err := a.post(ctx, "/api/v1/renew", api.RenewRequest{CSR: csr}, &resp); err != nil {
+	if err := a.post(ctx, "/api/v1/renew", api.RenewRequest{CSR: csr, TPM: ev}, &resp); err != nil {
 		a.event("certificate renewal failed: %v", err)
 		if expired {
 			// the server accepts expired certificates for renewal only within a grace period
@@ -1085,7 +1138,7 @@ func (a *Agent) renewIdentity(ctx context.Context) {
 		return
 	}
 	// a broken answer must not replace a working identity
-	if _, err := tls.X509KeyPair([]byte(string(keyPEM)+resp.Cert), []byte(string(keyPEM)+resp.Cert)); err != nil {
+	if nc, err := loadIdentity([]byte(string(keyPEM) + resp.Cert)); err != nil || !samePublicKey(nc) {
 		a.event("renewed certificate unusable, keeping the current one: %v", err)
 		return
 	}
@@ -1096,6 +1149,17 @@ func (a *Agent) renewIdentity(ctx context.Context) {
 	a.client.CloseIdleConnections()
 	a.renewNow = false
 	a.event("client certificate renewed")
+}
+
+// samePublicKey: the certificate belongs to the key next to it. tls.X509KeyPair
+// checks that for file keys; a TPM key is only known by its public half.
+func samePublicKey(c tls.Certificate) bool {
+	s, ok := c.PrivateKey.(crypto.Signer)
+	if !ok || c.Leaf == nil {
+		return false
+	}
+	pub, ok := s.Public().(interface{ Equal(crypto.PublicKey) bool })
+	return ok && pub.Equal(c.Leaf.PublicKey)
 }
 
 // Report runs all checks locally without remediation and without contacting the server.

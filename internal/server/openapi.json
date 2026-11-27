@@ -4461,7 +4461,7 @@
       "post": {
         "operationId": "createEnrollmentToken",
         "summary": "Create an enrollment token",
-        "description": "The token is in this answer only. Audited as token.create. Role admin.",
+        "description": "The token is in this answer only. Audited as token.create. Role admin. Uses and days are limited by Settings, Enrollment (hard limits 500 and 30).",
         "requestBody": {
           "required": true,
           "content": {
@@ -4479,18 +4479,17 @@
                   "uses": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 10000
+                    "maximum": 500,
+                    "description": "0 or missing: the default of Settings, Enrollment; at most its maximum"
                   },
                   "days": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 90
+                    "maximum": 30,
+                    "description": "0 or missing: the default of Settings, Enrollment; at most its maximum"
                   }
                 },
-                "required": [
-                  "uses",
-                  "days"
-                ]
+                "required": []
               }
             }
           }
@@ -6123,7 +6122,7 @@
       "patch": {
         "operationId": "saveSettings",
         "summary": "Save one settings section",
-        "description": "Sections: general (local_login, stale_hours), network (console_allow, console_block, scim_allow), security (password_policy, four_eyes*, geolocation, fallback_dns), remote_shell, sso (oidc_*, allowed_domain, require_mfa, mfa_acr, role_groups, oidc_client_secret, clear_secret), monitoring (webhook_url, notify_private_networks), branding (company_name, logo_png, remove_logo), operations (ops), retention. Fields left out keep their value. The same guards as the console: no self lockout, local login only off with an OIDC admin, four eyes needs two admins, OIDC changes are checked against the provider. Audited as settings.save.",
+        "description": "Sections: general (local_login, stale_hours), network (console_allow, console_block, scim_allow, network_cert_domain), security (password_policy, four_eyes*, geolocation, fallback_dns), remote_shell, sso (oidc_*, allowed_domain, require_mfa, mfa_acr, role_groups, oidc_client_secret, clear_secret), monitoring (webhook_url, notify_private_networks), branding (company_name, logo_png, remove_logo), operations (ops), retention, enrollment (enrollment). Fields left out keep their value. The same guards as the console: no self lockout, local login only off with an OIDC admin, four eyes needs two admins, OIDC changes are checked against the provider. Audited as settings.save.",
         "responses": {
           "200": {
             "description": "OK",
@@ -6186,7 +6185,8 @@
                 "monitoring",
                 "branding",
                 "operations",
-                "retention"
+                "retention",
+                "enrollment"
               ]
             },
             "description": ""
@@ -11852,6 +11852,9 @@
           },
           "release_repo": {
             "type": "string"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/EnrollSettings"
           }
         },
         "required": [
@@ -11859,7 +11862,8 @@
           "agent_url",
           "public_url",
           "fingerprint",
-          "release_repo"
+          "release_repo",
+          "limits"
         ]
       },
       "DeviceDetail": {
@@ -12406,6 +12410,14 @@
                     "at"
                   ]
                 }
+              },
+              "tpm_bound": {
+                "type": "boolean",
+                "description": "The mTLS key was attested as held by a TPM 2.0"
+              },
+              "tpm_ek_sha256": {
+                "type": "string",
+                "description": "SHA-256 of the TPM endorsement key's public area, when bound"
               }
             },
             "required": [
@@ -12447,7 +12459,9 @@
               "shell",
               "four_eyes_commands",
               "four_eyes_recovery",
-              "diagnostics"
+              "diagnostics",
+              "tpm_bound",
+              "tpm_ek_sha256"
             ]
           }
         ]
@@ -13648,6 +13662,13 @@
           },
           "remove_logo": {
             "type": "boolean"
+          },
+          "network_cert_domain": {
+            "type": "string",
+            "description": "EAP-TLS certificates carry <device ID>.<domain> as DNS SAN; empty: no DNS SAN"
+          },
+          "enrollment": {
+            "$ref": "#/components/schemas/EnrollSettings"
           }
         },
         "required": []
@@ -13798,6 +13819,13 @@
             "items": {
               "$ref": "#/components/schemas/RetentionKind"
             }
+          },
+          "network_cert_domain": {
+            "type": "string",
+            "description": "EAP-TLS certificates carry <device ID>.<domain> as DNS SAN; empty: no DNS SAN"
+          },
+          "enrollment": {
+            "$ref": "#/components/schemas/EnrollSettings"
           }
         },
         "required": [
@@ -13810,7 +13838,8 @@
           "public_url",
           "redirect_uri",
           "client_ip",
-          "retention_kinds"
+          "retention_kinds",
+          "enrollment"
         ]
       },
       "ConsoleUser": {
@@ -14042,6 +14071,10 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "require_tpm": {
+            "type": "boolean",
+            "description": "Enrollment into this tenant needs a TPM bound key"
           }
         },
         "required": [
@@ -14051,7 +14084,8 @@
           "company_name",
           "color",
           "has_logo",
-          "created_at"
+          "created_at",
+          "require_tpm"
         ]
       },
       "TenantPatch": {
@@ -14076,6 +14110,10 @@
           },
           "remove_logo": {
             "type": "boolean"
+          },
+          "require_tpm": {
+            "type": "boolean",
+            "description": "Tenant admins may only switch it on"
           }
         },
         "required": []
@@ -15319,6 +15357,43 @@
           "terms",
           "states",
           "docs"
+        ]
+      },
+      "EnrollSettings": {
+        "type": "object",
+        "description": "Limits of new enrollment tokens (hard limits 500 uses and 30 days) and the TPM requirement for every tenant",
+        "properties": {
+          "default_uses": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "default_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "max_uses": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "max_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "require_tpm": {
+            "type": "boolean",
+            "description": "Refuse enrollments without a TPM bound key"
+          }
+        },
+        "required": [
+          "default_uses",
+          "default_days",
+          "max_uses",
+          "max_days",
+          "require_tpm"
         ]
       }
     }
