@@ -21,7 +21,7 @@ func TestAppWorkloads(t *testing.T) {
 	}
 	tx.Commit(ctx)
 	code, body := call(dashAuditor, "GET", "/api/v1/devices/d1/workloads", ``)
-	if code != 200 || !strings.Contains(body, `"name":"paperless"`) || !strings.Contains(body, `"policy":false`) || !strings.Contains(body, `"allowed":false`) {
+	if code != 200 || !strings.Contains(body, `"name":"paperless"`) || !strings.Contains(body, `"policy":false`) || !strings.Contains(body, `"allowed":false`) || !strings.Contains(body, `"checked_at":`) {
 		t.Fatalf("device workloads: %d %s", code, body)
 	}
 	if code, body := call(dashAuditor, "GET", "/api/v1/workloads?kind=qm&state=stopped", ``); code != 200 || !strings.Contains(body, `"hostname":"alpha"`) || strings.Contains(body, "paperless") {
@@ -59,6 +59,13 @@ func TestAppWorkloads(t *testing.T) {
 	if code, body := send(dashHelpdesk, start); code != 202 || !strings.Contains(body, `"type":"workload_action"`) {
 		t.Fatalf("helpdesk with the setting: %d %s", code, body)
 	}
+	// one waiting action per workload
+	if code, body := send(dashAdmin, start); code != 409 || !strings.Contains(body, "still waits") {
+		t.Fatalf("second action for the same workload: %d %s", code, body)
+	}
+	if _, err := db.Exec(ctx, `UPDATE commands SET status='ok' WHERE device_id='d1' AND type='workload_action'`); err != nil {
+		t.Fatal(err)
+	}
 	// four eyes: stop and restart wait for a second admin, start does not
 	set.FourEyesWorkloads = true
 	s.rt.Store(&runtimeState{set: set, auth: &oidcAuth{}})
@@ -67,6 +74,27 @@ func TestAppWorkloads(t *testing.T) {
 	}
 	if code, body := send(dashAdmin, start); code != 202 || strings.Contains(body, "approval_id") {
 		t.Fatalf("start with four eyes: %d %s", code, body)
+	}
+	// at most maxWorkloadQueue waiting actions per device
+	if _, err := db.Exec(ctx, `UPDATE commands SET status='ok' WHERE device_id='d1' AND type='workload_action'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO commands(device_id, type, payload, created_by)
+		SELECT 'd1', 'workload_action', format('{"kind":"qm","id":"%s","action":"start"}', i), 'x' FROM generate_series(1, 5) i`); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := send(dashAdmin, start); code != 409 || !strings.Contains(body, "5 workload actions already wait") {
+		t.Fatalf("full queue: %d %s", code, body)
+	}
+	// sync now: one per device and 30 seconds, across users
+	if code, body := call(dashAdmin, "POST", "/api/v1/devices/d1/commands", `{"type":"sync"}`); code != 202 {
+		t.Fatalf("sync: %d %s", code, body)
+	}
+	if code, body := call(dashHelpdesk, "POST", "/api/v1/devices/d1/commands", `{"type":"sync"}`); code != 429 || !strings.Contains(body, "try again in") {
+		t.Fatalf("second sync: %d %s", code, body)
+	}
+	if code, body := call(dashAuditor, "GET", "/api/v1/devices/d1/workloads", ``); code != 200 || strings.Contains(body, `"sync_wait":0`) {
+		t.Fatalf("sync_wait: %d %s", code, body)
 	}
 	if code, body := call(dashAdmin, "POST", "/api/v1/devices/bulk", `{"ids":["d1"],"action":"command","params":{"type":"workload_action","kind":"qm","id":"200","action":"start"}}`); code < 400 {
 		t.Fatalf("bulk: %d %s", code, body)

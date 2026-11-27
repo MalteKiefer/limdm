@@ -65,6 +65,24 @@ Stop always shuts down gracefully. A VM is never killed; Docker and Podman stop 
 with SIGKILL only after the 60 second grace period, as `docker stop` does. Every command is
 audited (`command.workload_action`) and its result appears in the device's activity.
 
+### Feedback in the console
+
+A queued command reaches the agent with its next poll (about once a minute, plus up to 10 s
+jitter). After the action the agent reads the state of that workload every 2 seconds for up to
+30 seconds until it is the end state (running after start and restart; exited, stopped or shut
+off after stop) and ends the result with `state: <state>` (or `state: <state> (not yet ... after
+30s)`). It then checks in at once, without the usual jitter, so the result and the new inventory
+arrive in the same check in and the server stores both together.
+
+On the **Containers and VMs** tab the row of a sent action shows a spinner with the action and
+its buttons are disabled. The tab polls the command and the inventory every 2 seconds until the
+command is done or failed, then shows the new state and a message (the agent's error text on
+failure). After 3 minutes without a result it stops waiting and says so; the command stays
+queued until the device picks it up. Stop and restart under four eyes wait for the approval
+first, so there is nothing to follow yet. **Refresh** reloads the tab and, for roles that may
+send commands, asks the device to sync now. **As of** shows the device's last check in
+(`checked_at`): an unchanged inventory is not sent again, so it is current as of then.
+
 Nothing acts on its own: the agent never starts, stops or restarts a workload without an
 explicit command from the console, so a host that runs important containers (for example a
 document archive) keeps running exactly as it is while it is inventoried.
