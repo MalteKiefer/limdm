@@ -218,14 +218,16 @@ func TestAdminAPIManagement(t *testing.T) {
 		t.Fatalf("tenants: %d %s", resp.StatusCode, body)
 	}
 
-	// the reference page needs no token and no script
+	// the reference page needs no token, runs no inline script and widens
+	// the CSP for images only
 	ref, err := http.Get(srv.URL + "/api/v1/docs")
 	if err != nil {
 		t.Fatal(err)
 	}
 	page, _ := io.ReadAll(ref.Body)
 	ref.Body.Close()
-	if ref.StatusCode != 200 || !strings.Contains(string(page), "/api/v1/devices/{id}/commands") || strings.Contains(string(page), "<script") {
-		t.Fatalf("reference: %d", ref.StatusCode)
+	if ref.StatusCode != 200 || !strings.Contains(string(page), "/static/apidocs/apidocs.js") || strings.Count(string(page), "<script") != strings.Count(string(page), "<script src=") ||
+		ref.Header.Get("Content-Security-Policy") != "default-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; form-action 'self'; base-uri 'none'" {
+		t.Fatalf("reference: %d %q", ref.StatusCode, ref.Header.Get("Content-Security-Policy"))
 	}
 }

@@ -5,8 +5,35 @@ and other integrations. It runs on the console listener and uses the same functi
 console: the same role rules, device scopes, tenant limits, four eyes approval, validation
 and audit entries. The OpenAPI 3.1 description is served at `/api/v1/openapi.json` (no token
 needed) and lives in the repository as
-[`internal/server/openapi.json`](../internal/server/openapi.json). `/api/v1/docs` renders it as
-a reference page on the console itself (no token, no scripts, no external resources).
+[`internal/server/openapi.json`](../internal/server/openapi.json). `/api/v1/docs` shows it as
+an interactive reference (Swagger UI) on the console itself, linked as **API reference** in
+the user menu.
+
+## Trying it out
+
+`/api/v1/docs` is public like `openapi.json`: the page holds no data. Every call it sends is
+a real request to this server and passes the same checks as any other API call: role, token
+scopes, device scope, tenant, four eyes approval and audit rules are unchanged. Start with
+`GET` calls; operations that act on devices or delete data say **Warning** in their
+description.
+
+* **With a token**: create a token (see [Tokens](#tokens), an `auditor` token with the
+  `read` scope is enough to explore), click **Authorize**, paste it into `bearer` and apply.
+  Open an operation, **Try it out**, **Execute**. The page keeps the token in memory only:
+  reloading or closing it forgets the token.
+* **With the console session**: opened while signed in to the console, the header says
+  so and calls without an authorized token use the session cookie, under your own role and
+  scope. The page reads the session's CSRF token from `GET /api/v1/me` and sends it as
+  `X-CSRF-Token` on state changes, as the console app does. An authorized token always wins
+  over the session.
+* The server list holds `/`, so calls go to the origin the page was opened on.
+* Swagger UI renders the tags in view only; a deep link such as
+  `/api/v1/docs#/Devices/listDevices` opens one operation.
+
+Swagger UI is vendored into the server (`scripts/vendor-swagger-ui.sh`, see
+[development.md](development.md#swagger-ui)); the page loads nothing from other hosts and
+its online validator is off. It runs under the console CSP with one addition for this page
+only, `img-src 'self' data: blob:` ([security.md](security.md)).
 
 ## Tokens
 
@@ -248,7 +275,7 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `DELETE /api/v1/report-schedules/{id}`, `POST .../{id}/run`, `GET .../{id}/runs` | owner, or admin of the tenant view | | `204`, the new run, or the kept runs; audited as `report.unschedule` and `report.run` |
 | `GET /api/v1/report-runs/{id}` | audit | | the file of a run: its owner, or admins and auditors without a device scope in the same or the all tenants view; audited as `report.download` |
 | `GET /api/v1/openapi.json` | none | | the OpenAPI document |
-| `GET /api/v1/docs` | none | | the reference page |
+| `GET /api/v1/docs` | none | | the interactive reference (Swagger UI), see [Trying it out](#trying-it-out) |
 | `GET /metrics` | metrics | | Prometheus text format, see [Metrics](#metrics) |
 
 ### Device filters

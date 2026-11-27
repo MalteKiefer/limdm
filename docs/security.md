@@ -141,6 +141,11 @@
   `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
   `Referrer-Policy: same-origin`, `Cache-Control: no-store`. The console works without
   JavaScript except the visual blueprint editor and the remote shell terminal.
+* The API reference `/api/v1/docs` (Swagger UI, served from the console) adds
+  `img-src 'self' data: blob:` to that one page: Swagger UI draws its icons as `data:` SVG
+  images and shows image answers from `blob:` URLs. Scripts, styles and connections stay
+  `'self'`, the initializer is a file, and images cannot run code. Tokens entered there are
+  kept in memory only ([admin-api.md](admin-api.md#trying-it-out)).
 
 ### Rate limits
 

@@ -43,7 +43,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a retired device for good
-         * @description Deletes the device with its events, metrics, commands, recovery keys and app requests. Audited as device.delete. Role admin.
+         * @description Warning: deletes or revokes data; the API cannot undo it. Deletes the device with its events, metrics, commands, recovery keys and app requests. Audited as device.delete. Role admin.
          */
         delete: operations["deleteDevice"];
         options?: never;
@@ -73,7 +73,7 @@ export interface paths {
         put?: never;
         /**
          * Queue a command
-         * @description Same commands and rules as the console: scripts, lost mode, wipe, allow_uninstall, user, software and app commands need the admin role; lost and wipe need confirm set to the host name. Audited as command.<type>. Roles admin and helpdesk, not read only. With four eyes approval on (wipe, lost mode, scripts) nothing is queued: the answer is 202 with the approval_id of a pending request that another admin decides in the console or through /api/v1/approvals/{id}. sync is accepted once per device and 30 seconds (429 with Retry-After otherwise); workload_action is refused with 409 while another action for the same workload or 5 actions in all wait for the device.
+         * @description Warning: queues a command on a real device; wipe, lost mode, reboot, shutdown and scripts act on the machine and wipe cannot be undone. Same commands and rules as the console: scripts, lost mode, wipe, allow_uninstall, user, software and app commands need the admin role; lost and wipe need confirm set to the host name. Audited as command.<type>. Roles admin and helpdesk, not read only. With four eyes approval on (wipe, lost mode, scripts) nothing is queued: the answer is 202 with the approval_id of a pending request that another admin decides in the console or through /api/v1/approvals/{id}. sync is accepted once per device and 30 seconds (429 with Retry-After otherwise); workload_action is refused with 409 while another action for the same workload or 5 actions in all wait for the device.
          */
         post: operations["enqueueCommand"];
         delete?: never;
@@ -148,7 +148,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a library item no blueprint uses
-         * @description Audited as library.delete. Role admin, not read only.
+         * @description Warning: deletes or revokes data; the API cannot undo it. Audited as library.delete. Role admin, not read only.
          */
         delete: operations["deleteLibraryItem"];
         options?: never;
@@ -202,7 +202,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a blueprint
-         * @description Its devices fall back to default; default itself cannot be deleted. Audited as blueprint.delete. Role admin, not read only.
+         * @description Warning: deletes or revokes data; the API cannot undo it. Its devices fall back to default; default itself cannot be deleted. Audited as blueprint.delete. Role admin, not read only.
          */
         delete: operations["deleteBlueprint"];
         options?: never;
@@ -395,7 +395,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Revoke a risk exception */
+        /**
+         * Revoke a risk exception
+         * @description Warning: deletes or revokes data; the API cannot undo it.
+         */
         delete: operations["revokeException"];
         options?: never;
         head?: never;
@@ -436,7 +439,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Revoke an API token */
+        /**
+         * Revoke an API token
+         * @description Warning: deletes or revokes data; the API cannot undo it.
+         */
         delete: operations["revokeToken"];
         options?: never;
         head?: never;
@@ -474,7 +480,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** This reference as a page */
+        /** This reference as an interactive page (Swagger UI) */
         get: operations["apiReference"];
         put?: never;
         post?: never;
@@ -578,7 +584,10 @@ export interface paths {
         /** Replace an own view */
         put: operations["updateView"];
         post?: never;
-        /** Delete an own view, or (admins) a shared one */
+        /**
+         * Delete an own view, or (admins) a shared one
+         * @description Warning: deletes or revokes data; the API cannot undo it.
+         */
         delete: operations["deleteView"];
         options?: never;
         head?: never;
@@ -1011,7 +1020,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Delete a schedule (owner or admin of the tenant view); audited as report.unschedule */
+        /**
+         * Delete a schedule (owner or admin of the tenant view); audited as report.unschedule
+         * @description Warning: deletes or revokes data; the API cannot undo it.
+         */
         delete: operations["deleteReportSchedule"];
         options?: never;
         head?: never;
@@ -1157,7 +1169,7 @@ export interface paths {
         put?: never;
         /**
          * Retire a device and revoke its certificates
-         * @description Audited as device.retire. Role admin.
+         * @description Warning: revokes the device certificates; the device stops being managed. Audited as device.retire. Role admin.
          */
         post: operations["retireDevice"];
         delete?: never;
@@ -1197,7 +1209,7 @@ export interface paths {
         put?: never;
         /**
          * Show a disk recovery key
-         * @description Audited as recovery.view and announced on the device. With four eyes for recovery keys the answer has no key but a state: reason (send a reason to request approval), requested, pending. Roles admin and helpdesk.
+         * @description Warning: reveals a disk recovery key; audited. Audited as recovery.view and announced on the device. With four eyes for recovery keys the answer has no key but a state: reason (send a reason to request approval), requested, pending. Roles admin and helpdesk.
          */
         post: operations["viewRecoveryKey"];
         delete?: never;
@@ -1217,7 +1229,7 @@ export interface paths {
         put?: never;
         /**
          * Start a remote shell session
-         * @description Console sessions only; the terminal connects to /shell/{session}/ws with the CSRF token. 202 when the session waits for four eyes approval. Audited as shell.start.
+         * @description Warning: opens a root shell on a real device; the session is recorded. Console sessions only; the terminal connects to /shell/{session}/ws with the CSRF token. 202 when the session waits for four eyes approval. Audited as shell.start.
          */
         post: operations["startShell"];
         delete?: never;
@@ -1314,7 +1326,7 @@ export interface paths {
         put?: never;
         /**
          * Run one action on many devices
-         * @description action: command:<type> (not lost or wipe), agent-update, tag-add, tag-remove. params are the fields of the command (as createCommand) or tag. Commands under four eyes become one approval per device. Roles admin and helpdesk (helpdesk: its commands only).
+         * @description Warning: acts on many devices at once. action: command:<type> (not lost or wipe), agent-update, tag-add, tag-remove. params are the fields of the command (as createCommand) or tag. Commands under four eyes become one approval per device. Roles admin and helpdesk (helpdesk: its commands only).
          */
         post: operations["bulkDevices"];
         delete?: never;
@@ -1376,7 +1388,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke an enrollment token
-         * @description Devices enrolled with it stay. Audited as token.revoke. Role admin.
+         * @description Warning: deletes or revokes data; the API cannot undo it. Devices enrolled with it stay. Audited as token.revoke. Role admin.
          */
         delete: operations["revokeEnrollmentToken"];
         options?: never;
@@ -1572,7 +1584,7 @@ export interface paths {
         put?: never;
         /**
          * Roll back or restore
-         * @description Saves an old version again as the newest one, or restores a deleted object, audited like a save. Root effective library items wait for four eyes approval (202).
+         * @description Warning: changes what devices apply at their next check in. Saves an old version again as the newest one, or restores a deleted object, audited like a save. Root effective library items wait for four eyes approval (202).
          */
         post: operations["configRollback"];
         delete?: never;
@@ -1637,7 +1649,7 @@ export interface paths {
         post?: never;
         /**
          * Remove a catalog app
-         * @description Installed copies stay on the devices.
+         * @description Warning: deletes or revokes data; the API cannot undo it. Installed copies stay on the devices.
          */
         delete: operations["softwareAppDelete"];
         options?: never;
@@ -1859,7 +1871,7 @@ export interface paths {
         post?: never;
         /**
          * Delete an upload
-         * @description Refused while a library item references it.
+         * @description Warning: deletes or revokes data; the API cannot undo it. Refused while a library item references it.
          */
         delete: operations["packageDelete"];
         options?: never;
@@ -1918,7 +1930,7 @@ export interface paths {
         put?: never;
         /**
          * Promote or abort a pilot rollout
-         * @description promote saves the pilot map into the blueprint (a new version), abort drops it; both put the devices back on what they had set and delete the copy.
+         * @description Warning: promoting rolls the change out to every device of the blueprint. promote saves the pilot map into the blueprint (a new version), abort drops it; both put the devices back on what they had set and delete the copy.
          */
         post: operations["configPilotEnd"];
         delete?: never;
@@ -2022,7 +2034,7 @@ export interface paths {
         put?: never;
         /**
          * Reset password and TOTP of a local account
-         * @description Not the own account. For admins with four eyes approval the approver gets the credentials. Audited as user.reset.
+         * @description Warning: the user's password and authenticator stop working at once. Not the own account. For admins with four eyes approval the approver gets the credentials. Audited as user.reset.
          */
         post: operations["resetUser"];
         delete?: never;
@@ -2130,7 +2142,7 @@ export interface paths {
         put?: never;
         /**
          * Rotate or finish a key rotation
-         * @description rotate starts a rotation (name: HSM key label), finish ends it (force: before every device moved). Audited.
+         * @description Warning: rotates a server key; read docs/keys.md first. rotate starts a rotation (name: HSM key label), finish ends it (force: before every device moved). Audited.
          */
         post: operations["keyRotation"];
         delete?: never;
@@ -2219,7 +2231,7 @@ export interface paths {
         post?: never;
         /**
          * Remove a target
-         * @description Refused while a schedule uses it; archives on it stay.
+         * @description Warning: deletes or revokes data; the API cannot undo it. Refused while a schedule uses it; archives on it stay.
          */
         delete: operations["deleteBackupTarget"];
         options?: never;
@@ -2283,7 +2295,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a schedule
-         * @description Its archives follow the retention for archives outside a schedule.
+         * @description Warning: deletes or revokes data; the API cannot undo it. Its archives follow the retention for archives outside a schedule.
          */
         delete: operations["deleteBackupSchedule"];
         options?: never;
@@ -2347,7 +2359,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a channel
-         * @description Audited as notification.channel_delete.
+         * @description Warning: deletes or revokes data; the API cannot undo it. Audited as notification.channel_delete.
          */
         delete: operations["deleteChannel"];
         options?: never;
@@ -2450,7 +2462,7 @@ export interface paths {
         put?: never;
         /**
          * New SCIM token
-         * @description The previous token stops working; the answer holds the token once.
+         * @description Warning: the old SCIM token stops working at once. The previous token stops working; the answer holds the token once.
          */
         post: operations["rotateSCIMToken"];
         delete?: never;
@@ -2527,7 +2539,7 @@ export interface paths {
         put?: never;
         /**
          * New CRL download token
-         * @description For RADIUS servers fetching /network/crl.pem; shown once. Audited as network.crl_token.
+         * @description Warning: the old CRL download token stops working at once. For RADIUS servers fetching /network/crl.pem; shown once. Audited as network.crl_token.
          */
         post: operations["rotateCRLToken"];
         delete?: never;
@@ -2762,7 +2774,10 @@ export interface paths {
         /** Change an update ring (admin); audited as update_ring.save */
         put: operations["updateUpdateRing"];
         post?: never;
-        /** Delete an update ring (admin); its devices are in no ring until their next check in */
+        /**
+         * Delete an update ring (admin); its devices are in no ring until their next check in
+         * @description Warning: deletes or revokes data; the API cannot undo it.
+         */
         delete: operations["deleteUpdateRing"];
         options?: never;
         head?: never;
@@ -2798,7 +2813,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start a new update wave in the caller's tenant (admin); the first ring has it at once */
+        /**
+         * Start a new update wave in the caller's tenant (admin); the first ring has it at once
+         * @description Warning: starts installing updates on devices.
+         */
         post: operations["startUpdateWave"];
         delete?: never;
         options?: never;
@@ -3056,7 +3074,7 @@ export interface paths {
         put?: never;
         /**
          * Adopt a foreign firewall rule into a firewall library item, keep it as an exception there, or list it to be removed
-         * @description adopt adds the rule in the declaration format, keep adds its match to keep, remove adds its match to remove: every agent that gets the item deletes the rule whenever it finds it, also after a reboot (a rule with a risk needs confirm_risk; an item with a remove list needs four eyes approval when it is on, and a new item is then refused with 409). item_id names an existing com.limdm.firewall item, saved through the library save (validation, signature, audit, four eyes). Without it a new item with name is created (enforce off) and assigned in blueprint_id, one of GET /api/v1/devices/{id}/firewall/targets, in one transaction with both audit entries: nothing is created when the assignment fails. A blueprint that is the global default or reaches more than one device needs confirm (422 on field confirm otherwise). Tenant accounts pick only blueprints of their tenant. System and managed rules are refused. Admins only.
+         * @description Warning: a removed rule is deleted on the device at its next check in. adopt adds the rule in the declaration format, keep adds its match to keep, remove adds its match to remove: every agent that gets the item deletes the rule whenever it finds it, also after a reboot (a rule with a risk needs confirm_risk; an item with a remove list needs four eyes approval when it is on, and a new item is then refused with 409). item_id names an existing com.limdm.firewall item, saved through the library save (validation, signature, audit, four eyes). Without it a new item with name is created (enforce off) and assigned in blueprint_id, one of GET /api/v1/devices/{id}/firewall/targets, in one transaction with both audit entries: nothing is created when the assignment fails. A blueprint that is the global default or reaches more than one device needs confirm (422 on field confirm otherwise). Tenant accounts pick only blueprints of their tenant. System and managed rules are refused. Admins only.
          */
         post: operations["firewallRuleAction"];
         delete?: never;
@@ -3291,7 +3309,10 @@ export interface paths {
         /** Change a log alert rule */
         put: operations["saveLogAlert"];
         post?: never;
-        /** Delete a log alert rule */
+        /**
+         * Delete a log alert rule
+         * @description Warning: deletes or revokes data; the API cannot undo it.
+         */
         delete: operations["deleteLogAlert"];
         options?: never;
         head?: never;
@@ -5828,6 +5849,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
@@ -5846,6 +5868,15 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "tags": [
+                 *         "prod",
+                 *         "berlin"
+                 *       ],
+                 *       "primary_user": "jane@example.com"
+                 *     }
+                 */
                 "application/json": components["schemas"]["DevicePatch"];
             };
         };
@@ -5917,6 +5948,11 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "type": "sync"
+                 *     }
+                 */
                 "application/json": components["schemas"]["CommandRequest"];
             };
         };
@@ -6008,6 +6044,21 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "name": "base packages",
+                 *       "type": "com.limdm.packages",
+                 *       "description": "Tools on every device",
+                 *       "payload": {
+                 *         "install": [
+                 *           "htop"
+                 *         ],
+                 *         "remove": [
+                 *           "telnet"
+                 *         ]
+                 *       }
+                 *     }
+                 */
                 "application/json": components["schemas"]["LibraryItem"];
             };
         };
@@ -6166,6 +6217,14 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "name": "workstations",
+                 *       "description": "Office desktops",
+                 *       "parent_id": null,
+                 *       "tree": []
+                 *     }
+                 */
                 "application/json": components["schemas"]["BlueprintInput"];
             };
         };
@@ -6553,6 +6612,17 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "check_id": "ssh.baseline",
+                 *       "mode": "advisory",
+                 *       "tag": "lab",
+                 *       "reason": "Lab machines need password login until the migration",
+                 *       "owner": "jane@example.com",
+                 *       "approver": "ciso@example.com",
+                 *       "expires": "2027-03-31"
+                 *     }
+                 */
                 "application/json": components["schemas"]["ExceptionInput"];
             };
         };
@@ -6650,6 +6720,17 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "name": "reporting",
+                 *       "role": "auditor",
+                 *       "days": 30,
+                 *       "read_only": true,
+                 *       "scopes": [
+                 *         "read"
+                 *       ]
+                 *     }
+                 */
                 "application/json": components["schemas"]["TokenInput"];
             };
         };
@@ -7927,6 +8008,7 @@ export interface operations {
                     "text/plain": string;
                 };
             };
+            401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
         };
@@ -8181,6 +8263,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
         };
@@ -8336,6 +8419,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
         };
@@ -8513,6 +8597,8 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
             /** @description Invalid payload or unknown device */
             422: {
                 headers: {
@@ -8554,6 +8640,8 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
         };
     };
     configItemPreview: {
@@ -11310,6 +11398,12 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "reason": "Service not exposed, fix scheduled",
+                 *       "expires": "2027-01-31"
+                 *     }
+                 */
                 "application/json": components["schemas"]["CVEAcceptanceInput"];
             };
         };
@@ -11384,6 +11478,7 @@ export interface operations {
                     "application/json": components["schemas"]["DeviceFirewall"];
                 };
             };
+            401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
         };
@@ -11450,6 +11545,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
@@ -11478,6 +11574,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
         };
