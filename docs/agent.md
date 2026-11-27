@@ -368,7 +368,12 @@ libadwaita 1.4 (Ubuntu 22.04) the tray falls back to simple dialogs.
 
 Dialogs are libadwaita message dialogs from the desktop app (`limdm-desktop-ui --dialog`);
 without GTK 4 and libadwaita 1.4 the helper uses zenity (kdialog on KDE Plasma). Texts
-follow the session language and fall back to the system locale (English and German).
+of the app, the tray, the dialogs and the notifications follow the session language
+(`LC_ALL`, `LC_MESSAGES`, `LANG`, then `LANGUAGE`) and fall back to the system locale, then
+English. Languages: English, German, French, Spanish, Italian and Russian
+([i18n.md](i18n.md)). Compliance check titles and the agent's error messages are translated
+too; texts IT writes (messages, custom check titles) are shown as written. The desktop login
+prompt (PAM) uses the system locale, since the login screen passes no session language.
 Dialogs follow the GNOME HIG: a short heading, one sentence, buttons named after their
 action.
 
@@ -413,7 +418,8 @@ the user also has an active local session (root is always allowed).
 | `limdm version` | agent version |
 
 `--json` prints `info`, `checks`, `blueprint`, `certificates`, `log` and `software list` as
-JSON. The agent decides as for the app: only catalog apps install, and only in the modes the
+JSON. Human readable output follows the terminal's language like the desktop app; JSON,
+status codes in tables (`PASS`, `FAIL`) and exit codes are the same in every language. The agent decides as for the app: only catalog apps install, and only in the modes the
 catalog allows.
 
 ## Tamper protection

@@ -2734,7 +2734,7 @@ export interface paths {
         };
         /**
          * Glossary
-         * @description Terms of the console and the device states, translated (lang de or en).
+         * @description Terms of the console and the device states, translated (lang de, en, fr, es, it or ru; default from the request).
          */
         get: operations["getGlossary"];
         put?: never;
@@ -3676,7 +3676,7 @@ export interface components {
             permissions: ("read" | "audit" | "commands" | "admin" | "tenants")[];
             four_eyes: boolean;
             /** @enum {string} */
-            locale: "de" | "en";
+            locale: "de" | "en" | "fr" | "es" | "it" | "ru";
             date_format: string;
             stale_hours: number;
             version: string;
@@ -4001,6 +4001,12 @@ export interface components {
             target: string;
             hostname?: string;
             detail: string;
+            /** @description Device events: the event in the request language */
+            text?: string;
+            /** @description Device events: key of the event format (EventFormats in internal/api/events.go) */
+            key?: string;
+            /** @description Device events: parameters of the event format */
+            params?: string[];
         };
         ActivityPage: {
             items: components["schemas"]["ActivityItem"][];
@@ -4136,7 +4142,12 @@ export interface components {
             status: string;
             by: string;
             detail: string;
+            /** @description Audit: label of the action; event: the event in the request language */
             extra: string;
+            /** @description Device events: key of the event format (EventFormats in internal/api/events.go) */
+            key?: string;
+            /** @description Device events: parameters of the event format */
+            params?: string[];
         };
         TimelinePage: {
             items: components["schemas"]["TimelineEntry"][];
@@ -4946,6 +4957,11 @@ export interface components {
             user?: string;
             from?: string;
             to?: string[];
+            /**
+             * @description Language of email, Slack and Discord notifications (webhooks stay English); English when empty
+             * @enum {string}
+             */
+            lang?: "en" | "de" | "fr" | "es" | "it" | "ru";
         };
         Channel: {
             id: number;
@@ -7081,7 +7097,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description language of titles and help texts; default from the request */
-                lang?: "de" | "en";
+                lang?: "de" | "en" | "fr" | "es" | "it" | "ru";
             };
             header?: never;
             path?: never;
@@ -7108,7 +7124,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description language of titles and help texts; default from the request */
-                lang?: "de" | "en";
+                lang?: "de" | "en" | "fr" | "es" | "it" | "ru";
             };
             header?: never;
             path: {
@@ -10886,7 +10902,7 @@ export interface operations {
     getGlossary: {
         parameters: {
             query?: {
-                lang?: "de" | "en";
+                lang?: "de" | "en" | "fr" | "es" | "it" | "ru";
             };
             header?: never;
             path?: never;

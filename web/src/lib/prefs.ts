@@ -4,7 +4,7 @@ import { useSyncExternalStore } from 'react'
 
 export type Theme = 'system' | 'light' | 'dark'
 export type Density = 'comfortable' | 'compact'
-export type Locale = 'de' | 'en'
+export type Locale = 'de' | 'en' | 'fr' | 'es' | 'it' | 'ru'
 /** Date notations of the profile, as the server names them (null: the language's own). */
 export type DateFormat = 'iso' | 'de' | 'uk' | 'us'
 export type Prefs = { theme: Theme; density: Density; locale: Locale | null; dateFormat: DateFormat | null; navCollapsed: boolean }

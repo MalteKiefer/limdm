@@ -2,8 +2,16 @@
 Type=Application
 Name=Disk recovery key
 Name[de]=Wiederherstellungsschlüssel
+Name[fr]=Clé de récupération du disque
+Name[es]=Clave de recuperación del disco
+Name[it]=Chiave di ripristino del disco
+Name[ru]=Ключ восстановления диска
 Comment=Create the recovery key for your disk encryption requested by IT
 Comment[de]=Den von der IT angeforderten Wiederherstellungsschlüssel für die Festplattenverschlüsselung erstellen
+Comment[fr]=Créer la clé de récupération du chiffrement de disque demandée par le service informatique
+Comment[es]=Crear la clave de recuperación del cifrado de disco que pide TI
+Comment[it]=Crea la chiave di ripristino della cifratura del disco richiesta dall'IT
+Comment[ru]=Создать ключ восстановления шифрования диска, запрошенный ИТ-отделом
 Exec=/usr/bin/limdm-desktop --now
 Icon=limdm
 Categories=System;Security;

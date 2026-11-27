@@ -77,6 +77,25 @@ func (s *Server) notifyRoleChange(actor, login, from, to, approver string) {
 	s.notify(notice{Type: "user.role_change", Severity: "warning", Title: "Console role changed: " + login, Text: text, URL: s.cfg.PublicURL + "/users"})
 }
 
+// localNotice translates the title and text of n into lang: a known text as
+// a whole, else a known prefix before ": " ("Command failed: wipe"). Device
+// data (host names, user names, output) stays as it is.
+func localNotice(lang string, n notice) notice {
+	tr := func(s string) string {
+		if t := translate(lang, s); t != s {
+			return t
+		}
+		if head, rest, ok := strings.Cut(s, ": "); ok {
+			if t := translate(lang, head); t != head {
+				return t + ": " + rest
+			}
+		}
+		return s
+	}
+	n.Title, n.Text = tr(n.Title), tr(n.Text)
+	return n
+}
+
 // notice is one event as channels show it.
 type notice struct {
 	Type     string    `json:"type"`
@@ -110,12 +129,16 @@ type channelConfig struct {
 	User string   `json:"user,omitempty"`
 	From string   `json:"from,omitempty"`
 	To   []string `json:"to,omitempty"`
+	Lang string   `json:"lang,omitempty"` // email, Slack and Discord text; English when empty
 }
 
 var smtpHostRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
 
 // validateChannel checks a channel before it is stored.
 func validateChannel(c channel) error {
+	if c.Config.Lang != "" && !knownLang(c.Config.Lang) {
+		return errors.New("lang: one of " + strings.Join(langs, ", "))
+	}
 	if c.Name == "" || len(c.Name) > 80 {
 		return errors.New("name: 1 to 80 characters")
 	}
@@ -176,7 +199,7 @@ func defang(s string) string { return strings.ReplaceAll(s, "://", ":\u200b//") 
 // slackBody shows title and text as plain_text blocks, which Slack never
 // renders as formatting or links; only the console link is mrkdwn. The
 // escaped fallback text is what notifications show.
-func slackBody(n notice) ([]byte, error) {
+func slackBody(lang string, n notice) ([]byte, error) {
 	plain := func(s string, max int) map[string]any {
 		return map[string]any{"type": "plain_text", "text": truncate(defang(cleanText(s)), max), "emoji": false}
 	}
@@ -185,7 +208,7 @@ func slackBody(n notice) ([]byte, error) {
 		blocks = append(blocks, map[string]any{"type": "section", "text": plain(n.Text, 3000)})
 	}
 	if n.URL != "" {
-		blocks = append(blocks, map[string]any{"type": "context", "elements": []any{map[string]any{"type": "mrkdwn", "text": "<" + n.URL + "|Open in LiMDM>"}}})
+		blocks = append(blocks, map[string]any{"type": "context", "elements": []any{map[string]any{"type": "mrkdwn", "text": "<" + n.URL + "|" + slackEscape.Replace(translate(lang, "Open in LiMDM")) + ">"}}})
 	}
 	return json.Marshal(map[string]any{"text": slackEscape.Replace(defang(n.Title)), "blocks": blocks, "unfurl_links": false, "unfurl_media": false})
 }
@@ -536,9 +559,12 @@ func smtpData(c *smtp.Client, msg []byte) error {
 
 func (s *Server) deliver(ctx context.Context, c channel, n notice) error {
 	ctx = withPrivate(ctx, c.Tenant == nil && s.notifyPrivate())
+	if c.Kind != "webhook" { // webhooks are read by programs: English
+		n = localNotice(c.Config.Lang, n)
+	}
 	switch c.Kind {
 	case "slack":
-		b, err := slackBody(n)
+		b, err := slackBody(c.Config.Lang, n)
 		if err != nil {
 			return err
 		}

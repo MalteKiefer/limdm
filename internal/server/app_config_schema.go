@@ -373,7 +373,7 @@ var schemaHints = map[string]map[string]schemaHint{
 // schemaLang is the language of a schema answer: the lang parameter of the
 // console app, else the request's language.
 func schemaLang(r *http.Request) string {
-	if l := r.URL.Query().Get("lang"); l == "de" || l == "en" {
+	if l := r.URL.Query().Get("lang"); knownLang(l) {
 		return l
 	}
 	return requestLang(r)
@@ -385,7 +385,7 @@ func annotateSchema(sch map[string]any, typ, lang string) {
 		if lang == "de" {
 			return t[1]
 		}
-		return t[0]
+		return translate(lang, t[0]) // the other languages translate the English text
 	}
 	for path, x := range schemaHints[typ] {
 		node := schemaAt(sch, path)

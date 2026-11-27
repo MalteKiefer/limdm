@@ -2,7 +2,6 @@ package agent
 
 import (
 	"errors"
-	"fmt"
 	"strconv"
 	"time"
 
@@ -48,8 +47,7 @@ func (a *Agent) scheduleReboot(now time.Time, d api.RebootDefer) error {
 // announceReboot notifies every graphical session and, while deferrals are
 // left, opens the desktop helper's dialog that offers to postpone.
 func (a *Agent) announceReboot(at time.Time, left int, d api.RebootDefer) {
-	body := fmt.Sprintf("%s restarts this device at %s to finish updates. Save your work.", a.company(), at.Format("15:04"))
-	a.notifyUsers("Restart scheduled", body, "critical")
+	a.notifyUsers(urgent, "Restart scheduled", "%s restarts this device at %s to finish updates. Save your work.", a.company(), at.Format("15:04"))
 	if left <= 0 {
 		return
 	}
@@ -81,7 +79,7 @@ func (a *Agent) deferReboot(who string, now time.Time) (time.Time, error) {
 		return at, err
 	}
 	a.event("restart postponed to %s by %s (%d of %d)", at.Format("15:04"), who, n+1, d.MaxDefers)
-	a.notifyUsers("Restart postponed", fmt.Sprintf("%s restarts this device at %s.", a.company(), at.Format("15:04")), "normal")
+	a.notifyUsers(normal, "Restart postponed", "%s restarts this device at %s.", a.company(), at.Format("15:04"))
 	// ask again shortly before the new time, unless the schedule changed meanwhile
 	time.AfterFunc(max(at.Sub(now)-time.Duration(d.NoticeMinutes)*time.Minute, 0), func() {
 		a.evMu.Lock()

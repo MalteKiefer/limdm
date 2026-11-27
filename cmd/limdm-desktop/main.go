@@ -26,36 +26,20 @@ import (
 	"time"
 
 	"github.com/maltekiefer/limdm/internal/agent"
+	"github.com/maltekiefer/limdm/internal/locale"
 )
 
 const socket = "/run/limdm/agent.sock"
 
 var ctx = context.Background()
 
-// de follows the session's locale, falling back to the system locale.
-var de = func() bool {
-	for _, k := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
-		if v := os.Getenv(k); v != "" {
-			return strings.HasPrefix(v, "de")
-		}
-	}
-	for _, f := range []string{"/etc/locale.conf", "/etc/default/locale"} {
-		if b, err := os.ReadFile(f); err == nil {
-			for _, l := range strings.Split(string(b), "\n") {
-				if v, ok := strings.CutPrefix(strings.TrimSpace(l), "LANG="); ok {
-					return strings.HasPrefix(strings.Trim(v, `"'`), "de")
-				}
-			}
-		}
-	}
-	return false
-}()
+// lang follows the session's locale, falling back to the system locale.
+var lang = locale.System()
 
-func tr(en, deText string) string {
-	if de {
-		return deText
-	}
-	return en
+func tr(msg string, args ...any) string { return locale.T(lang, msg, args...) }
+
+func trn(n int, one, other string, args ...any) string {
+	return locale.N(lang, n, one, other, args...)
 }
 
 func call(req agent.DesktopRequest) (agent.DesktopResponse, error) {
@@ -205,7 +189,7 @@ func (d *dialogs) message(heading, body string, isErr bool) {
 		if isErr {
 			kind, icon = "--error", "dialog-error"
 		}
-		_ = exec.CommandContext(ctx, d.tool, d.zenityArgs(kind, icon, "--text="+d.text(heading, body), "--ok-label="+tr("Close", "Schließen"))...).Run() // nothing to do if it fails
+		_ = exec.CommandContext(ctx, d.tool, d.zenityArgs(kind, icon, "--text="+d.text(heading, body), "--ok-label="+tr("Close"))...).Run() // nothing to do if it fails
 		return
 	}
 	kd := "--msgbox"
@@ -246,7 +230,7 @@ func (d *dialogs) sheet(icon, heading, intro string, rows [][2]string, pre strin
 	if pre != "" {
 		b.WriteString("\n\n<tt><small>" + html.EscapeString(pre) + "</small></tt>")
 	}
-	_ = exec.CommandContext(ctx, d.tool, d.zenityArgs("--info", icon, "--width=480", "--text="+b.String(), "--ok-label="+tr("Close", "Schließen"))...).Run()
+	_ = exec.CommandContext(ctx, d.tool, d.zenityArgs("--info", icon, "--width=480", "--text="+b.String(), "--ok-label="+tr("Close"))...).Run()
 }
 
 // password returns the entered text; the dialog prints it on stdout, never in argv.
@@ -260,7 +244,7 @@ func (d *dialogs) password(heading, body, label, ok string) ([]byte, bool) {
 	var cmd *exec.Cmd
 	if d.zenity {
 		cmd = exec.CommandContext(ctx, d.tool, d.zenityArgs("--forms", iconDisk, "--text="+d.text(heading, body),
-			"--add-password="+label, "--ok-label="+ok, "--cancel-label="+tr("Cancel", "Abbrechen"))...)
+			"--add-password="+label, "--ok-label="+ok, "--cancel-label="+tr("Cancel"))...)
 	} else {
 		cmd = exec.CommandContext(ctx, d.tool, d.kdialogArgs("--password", d.text(heading, body))...)
 	}
@@ -302,38 +286,37 @@ func setLastPrompt() {
 // false when the user postponed.
 func escrow(st agent.DesktopResponse, d *dialogs, company string) bool {
 	for _, v := range st.Need {
-		if !d.ask(tr("Recovery Key Required", "Wiederherstellungsschlüssel erforderlich"),
-			fmt.Sprintf(tr("%s needs a recovery key for the encrypted disk %s, so access can be restored if the passphrase is ever lost. Your passphrase stays unchanged.",
-				"%s benötigt einen Wiederherstellungsschlüssel für die verschlüsselte Festplatte %s, damit der Zugriff bei verlorener Passphrase wiederhergestellt werden kann. Ihre Passphrase bleibt unverändert."), company, v.Device),
-			tr("Set Up", "Einrichten"), tr("Later", "Später")) {
+		if !d.ask(tr("Recovery Key Required"),
+			fmt.Sprintf(tr("%s needs a recovery key for the encrypted disk %s, so access can be restored if the passphrase is ever lost. Your passphrase stays unchanged."), company, v.Device),
+			tr("Set Up"), tr("Later")) {
 			return false
 		}
 		for try := 0; ; try++ {
-			pw, ok := d.password(tr("Enter Disk Passphrase", "Festplatten Passphrase eingeben"),
-				fmt.Sprintf(tr("The passphrase you type when the computer starts, for %s.", "Die Passphrase, die Sie beim Start des Computers eingeben, für %s."), v.Device),
-				tr("Passphrase", "Passphrase"), tr("Continue", "Weiter"))
+			pw, ok := d.password(tr("Enter Disk Passphrase"),
+				fmt.Sprintf(tr("The passphrase you type when the computer starts, for %s."), v.Device),
+				tr("Passphrase"), tr("Continue"))
 			if !ok {
 				return false
 			}
 			resp, err := call(agent.DesktopRequest{Op: "escrow", UUID: v.UUID, Passphrase: string(pw)})
 			clear(pw)
 			if err == nil && resp.OK {
-				d.message(tr("Recovery Key Stored", "Wiederherstellungsschlüssel gespeichert"),
-					fmt.Sprintf(tr("The key is being sent to %s. Your passphrase is unchanged.", "Der Schlüssel wird an %s übermittelt. Ihre Passphrase bleibt unverändert."), company), false)
+				d.message(tr("Recovery Key Stored"),
+					fmt.Sprintf(tr("The key is being sent to %s. Your passphrase is unchanged."), company), false)
 				break
 			}
-			heading, body := tr("Wrong Passphrase", "Falsche Passphrase"), tr("The passphrase was not accepted.", "Die Passphrase wurde nicht akzeptiert.")
+			heading, body := tr("Wrong Passphrase"), tr("The passphrase was not accepted.")
 			switch {
 			case err != nil:
-				heading, body = tr("Agent Not Reachable", "Agent nicht erreichbar"), tr("The LiMDM agent does not respond. Try again later.", "Der LiMDM Agent antwortet nicht. Versuchen Sie es später erneut.")
+				heading, body = tr("Agent Not Reachable"), tr("The LiMDM agent does not respond. Try again later.")
 			case strings.Contains(resp.Error, "too many"):
-				heading, body = tr("Too Many Attempts", "Zu viele Versuche"), tr("Try again later.", "Versuchen Sie es später erneut.")
+				heading, body = tr("Too Many Attempts"), tr("Try again later.")
 			}
 			if err != nil || try >= 2 || strings.Contains(resp.Error, "too many") {
 				d.message(heading, body, true)
 				return false
 			}
-			if !d.ask(heading, body, tr("Try Again", "Erneut versuchen"), tr("Cancel", "Abbrechen")) {
+			if !d.ask(heading, body, tr("Try Again"), tr("Cancel")) {
 				return false
 			}
 		}
@@ -348,12 +331,12 @@ func run(now bool) error {
 	}
 	company := st.Company
 	if company == "" {
-		company = tr("Your IT department", "Ihre IT")
+		company = tr("Your IT department")
 	}
 	if len(st.Need) == 0 {
 		if now {
 			if d, err := newDialogs(company, st.Logo); err == nil {
-				d.message(tr("All Set", "Alles erledigt"), tr("Every disk has a recovery key.", "Alle Festplatten haben einen Wiederherstellungsschlüssel."), false)
+				d.message(tr("All Set"), tr("Every disk has a recovery key."), false)
 			}
 		}
 		return nil

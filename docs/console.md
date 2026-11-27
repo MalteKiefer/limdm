@@ -7,7 +7,8 @@ the addresses of the former server rendered console and what each role may do.
 ## Console app
 
 The app has a command palette (Ctrl+K), light and dark design, comfortable and compact
-density, German and English, and works down to phone width. It talks only to the admin API
+density, six languages (German, English, French, Spanish, Italian, Russian, see
+[Languages](i18n.md)), and works down to phone width. It talks only to the admin API
 (`/api/v1`) with the session cookie and a CSRF header, so every action has the roles,
 scopes, tenant rules, four eyes approval and audit entries of the API
 ([admin-api.md](admin-api.md#console-app)). The date notation picked in the profile (ISO,

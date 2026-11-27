@@ -122,6 +122,12 @@ nfpms:
         dst: /usr/lib/limdm/limdm-desktop-ui
         file_info:
           mode: 0o755
+      # translations of the GTK app, read as .po at runtime (docs/i18n.md);
+      # the CLI, the tray and the agent embed theirs (internal/locale)
+      - src: packaging/locale/*.po
+        dst: /usr/share/limdm/locale/
+        file_info:
+          mode: 0o644
       - src: packaging/artwork/limdm.svg
         dst: /usr/share/icons/hicolor/scalable/apps/limdm.svg
         file_info:

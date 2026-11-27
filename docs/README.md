@@ -23,6 +23,7 @@ The documents for LiMDM 0.18 and the unreleased changes in the changelog. Start 
 | Document | Content |
 |---|---|
 | [console.md](console.md) | Every console page and its actions, roles and permissions, device scopes |
+| [i18n.md](i18n.md) | Languages of console and server, where texts live, glossary per language |
 | [concepts.md](concepts.md) | Declarations, library, blueprints, conditions, merging, versions, commands, device states |
 | [declarations.md](declarations.md) | Reference of every declaration type and field |
 | [compliance.md](compliance.md) | Built in checks with IDs and references, custom checks, policies, risk exceptions, history, evidence |
@@ -41,6 +42,7 @@ The documents for LiMDM 0.18 and the unreleased changes in the changelog. Start 
 
 | Document | Content |
 |---|---|
+| [i18n.md](i18n.md) | Languages, how texts are translated on device and console, glossary |
 | [agent.md](agent.md) | Agent installation, `enroll.conf`, `limdm-agent`, `limdm` and `limdm-desktop` commands, files on the device, updates |
 | [desktop-login.md](desktop-login.md) | SSO desktop login, session mode, offline grace |
 

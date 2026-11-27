@@ -40,13 +40,21 @@ var dateFormats = map[string]string{
 }
 
 // pages holds the parsed templates (sign in and error page) per language.
-var pages = map[string]map[string]*template.Template{"en": parsePages("en"), "de": parsePages("de")}
+var pages = func() map[string]map[string]*template.Template {
+	m := map[string]map[string]*template.Template{}
+	for _, l := range langs {
+		m[l] = parsePages(l)
+	}
+	return m
+}()
 
 func parsePages(lang string) map[string]*template.Template {
 	funcs := template.FuncMap{
 		"t":       func(s string) string { return translate(lang, s) },
 		"errmsg":  func(msg string) friendlyMsg { return friendlyError(lang, msg) },
 		"lang":    func() string { return lang },
+		"langs":   func() []string { return langs },
+		"upper":   strings.ToUpper,
 		"version": func() string { return Version },
 	}
 	m := map[string]*template.Template{}

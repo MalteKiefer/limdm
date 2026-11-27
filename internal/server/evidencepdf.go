@@ -43,6 +43,8 @@ func pdfText(s string) string {
 			b.WriteRune(r)
 		case r == '…':
 			b.WriteByte(0x85) // WinAnsi ellipsis
+		case r == '’' || r == '‘':
+			b.WriteByte('\'') // typographic apostrophes of the French and Italian texts
 		case r == '\n' || r == '\t':
 			b.WriteByte(' ')
 		case r >= 32 && r < 127, r >= 160 && r < 256:
@@ -150,6 +152,9 @@ func (p *pdfWriter) bytes() []byte {
 // evidencePDF renders the report of a bundle in lang; sum is the SHA-256
 // of the signed bundle file.
 func evidencePDF(lang string, b evidenceBundle, sum string, sig evidenceSignature) []byte {
+	if lang == "ru" {
+		lang = "en" // the built in Helvetica fonts (WinAnsi) have no Cyrillic
+	}
 	tr := func(s string) string { return translate(lang, s) }
 	p := &pdfWriter{}
 	p.line(18, true, tr("LiMDM compliance evidence"))

@@ -1,0 +1,650 @@
+# Russian translation of the LiMDM desktop app (packaging/limdm-desktop-ui).
+# Glossary: docs/i18n.md. Checked by TestPoFiles in internal/locale.
+msgid ""
+msgstr ""
+"Project-Id-Version: limdm-desktop-ui\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "never"
+msgstr "никогда"
+
+msgid "Overview"
+msgstr "Обзор"
+
+msgid "Software"
+msgstr "Программы"
+
+msgid "Compliance"
+msgstr "Соответствие"
+
+msgid "Blueprint"
+msgstr "Блупринт"
+
+msgid "Certificates"
+msgstr "Сертификаты"
+
+msgid "Disk Encryption"
+msgstr "Шифрование диска"
+
+msgid "Agent Log"
+msgstr "Журнал агента"
+
+msgid "About"
+msgstr "О программе"
+
+msgid "Agent"
+msgstr "Агент"
+
+msgid "Compliance baseline"
+msgstr "Базовые требования соответствия"
+
+msgid "Software updates"
+msgstr "Обновления ПО"
+
+msgid "Firewall"
+msgstr "Брандмауэр"
+
+msgid "Packages"
+msgstr "Пакеты"
+
+msgid "Services"
+msgstr "Службы"
+
+msgid "Files"
+msgstr "Файлы"
+
+msgid "Users"
+msgstr "Пользователи"
+
+msgid "OS versions"
+msgstr "Версии ОС"
+
+msgid "Screen lock"
+msgstr "Блокировка экрана"
+
+msgid "Privacy"
+msgstr "Конфиденциальность"
+
+msgid "Desktop login"
+msgstr "Вход в систему"
+
+msgid "Disk encryption"
+msgstr "Шифрование диска"
+
+msgid "Package sources"
+msgstr "Источники пакетов"
+
+msgid "Flatpak"
+msgstr "Flatpak"
+
+msgid "polkit rules"
+msgstr "Правила polkit"
+
+msgid "sudo rules"
+msgstr "Правила sudo"
+
+msgid "SSH server"
+msgstr "SSH-сервер"
+
+msgid "DNS"
+msgstr "DNS"
+
+msgid "Time servers"
+msgstr "Серверы времени"
+
+msgid "Proxy"
+msgstr "Прокси"
+
+msgid "Scripts"
+msgstr "Скрипты"
+
+msgid "Boot loader"
+msgstr "Загрузчик"
+
+msgid "Appearance: system"
+msgstr "Оформление: системное"
+
+msgid "Appearance: dark"
+msgstr "Оформление: тёмное"
+
+msgid "Appearance: light"
+msgstr "Оформление: светлое"
+
+msgid "Refresh"
+msgstr "Обновить"
+
+msgid "no answer"
+msgstr "нет ответа"
+
+msgid "Managed device"
+msgstr "Управляемое устройство"
+
+msgid "Agent Not Reachable"
+msgstr "Агент недоступен"
+
+msgid "The LiMDM agent on this device does not respond. IT has been informed when it comes back."
+msgstr "Агент LiMDM на этом устройстве не отвечает. ИТ-отдел будет уведомлён, когда он снова заработает."
+
+msgid "Device Locked"
+msgstr "Устройство заблокировано"
+
+msgid "IT locked this device."
+msgstr "ИТ-отдел заблокировал это устройство."
+
+msgid "No Connection to the Server"
+msgstr "Нет связи с сервером"
+
+msgid "Action Needed"
+msgstr "Требуется действие"
+
+msgid "Device Is Compliant"
+msgstr "Устройство соответствует требованиям"
+
+msgid "All checks passed."
+msgstr "Все проверки пройдены."
+
+msgid "Device"
+msgstr "Устройство"
+
+msgid "Name"
+msgstr "Имя"
+
+msgid "Managed by"
+msgstr "Управляется"
+
+msgid "Sync Now"
+msgstr "Синхронизировать сейчас"
+
+msgid "Last sync"
+msgstr "Последняя синхронизация"
+
+msgid "Needs Your Attention"
+msgstr "Требует вашего внимания"
+
+msgid "Disk recovery key missing"
+msgstr "Нет ключа восстановления диска"
+
+msgid "IT needs a recovery key for your encrypted disk."
+msgstr "ИТ-отделу нужен ключ восстановления для вашего зашифрованного диска."
+
+msgid "Failing"
+msgstr "Не пройдены"
+
+msgid "Exceptions"
+msgstr "Исключения"
+
+msgid "Not applicable"
+msgstr "Неприменимо"
+
+msgid "Passed"
+msgstr "Пройдены"
+
+msgid "No Checks Yet"
+msgstr "Проверок пока нет"
+
+msgid "Recovery Keys Stored"
+msgstr "Ключи восстановления сохранены"
+
+msgid "IT needs a recovery key for this encrypted disk, so access can be restored if the passphrase is ever lost. Enter the passphrase you type when the computer starts; it stays unchanged."
+msgstr "ИТ-отделу нужен ключ восстановления для этого зашифрованного диска, чтобы восстановить доступ, если парольная фраза будет утеряна. Введите парольную фразу, которую вы вводите при запуске компьютера; она не изменится."
+
+msgid "Disk passphrase"
+msgstr "Парольная фраза диска"
+
+msgid "Store Key"
+msgstr "Сохранить ключ"
+
+msgid "Only warnings and errors"
+msgstr "Только предупреждения и ошибки"
+
+msgid "Latest entries of the agent and its watchdog, newest first."
+msgstr "Последние записи агента и его сторожевого процесса, сначала новые."
+
+msgid "Nothing Recorded"
+msgstr "Записей нет"
+
+msgid "Settings of Your Blueprint"
+msgstr "Настройки вашего блупринта"
+
+msgid "Settings IT applies to this device through its blueprint. Secrets are hidden."
+msgstr "Настройки, которые ИТ-отдел применяет к этому устройству через его блупринт. Секреты скрыты."
+
+msgid "Active"
+msgstr "Активно"
+
+msgid "Not applied"
+msgstr "Не применено"
+
+msgid "No Settings"
+msgstr "Настроек нет"
+
+msgid "Trusted Certificates"
+msgstr "Доверенные сертификаты"
+
+msgid "CA certificates IT installed in the system trust store."
+msgstr "Сертификаты ЦС, установленные ИТ-отделом в системное хранилище доверенных сертификатов."
+
+msgid "Subject"
+msgstr "Субъект"
+
+msgid "Issuer"
+msgstr "Издатель"
+
+msgid "Valid from"
+msgstr "Действителен с"
+
+msgid "Valid until"
+msgstr "Действителен до"
+
+msgid "No Certificates"
+msgstr "Сертификатов нет"
+
+msgid "IT has not installed any certificates."
+msgstr "ИТ-отдел не установил ни одного сертификата."
+
+msgid "Device management for Linux"
+msgstr "Управление устройствами для Linux"
+
+msgid "Version"
+msgstr "Версия"
+
+msgid "Server"
+msgstr "Сервер"
+
+msgid "Device ID"
+msgstr "ID устройства"
+
+msgid "Software is installed through this catalog. Other app stores are read only."
+msgstr "Программы устанавливаются через этот каталог. Другие магазины приложений доступны только для чтения."
+
+msgid "Search apps"
+msgstr "Поиск приложений"
+
+msgid "All categories"
+msgstr "Все категории"
+
+msgid "Request another app"
+msgstr "Запросить другое приложение"
+
+msgid "No Apps Yet"
+msgstr "Приложений пока нет"
+
+msgid "IT has not published any apps for this device."
+msgstr "ИТ-отдел ещё не опубликовал приложения для этого устройства."
+
+msgid "Installing…"
+msgstr "Установка…"
+
+msgid "Removing…"
+msgstr "Удаление…"
+
+msgid "Open"
+msgstr "Открыть"
+
+msgid "Installed"
+msgstr "Установлено"
+
+msgid "Remove"
+msgstr "Удалить"
+
+msgid "Installed by IT soon"
+msgstr "Скоро установит ИТ-отдел"
+
+msgid "Requested"
+msgstr "Запрошено"
+
+msgid "Request Again"
+msgstr "Запросить снова"
+
+msgid "Request"
+msgstr "Запросить"
+
+msgid "Install"
+msgstr "Установить"
+
+msgid "Request sent to IT"
+msgstr "Запрос отправлен в ИТ-отдел"
+
+msgid "Request %s"
+msgstr "Запросить %s"
+
+msgid "IT decides on your request. The app installs by itself once approved."
+msgstr "ИТ-отдел рассмотрит ваш запрос. После одобрения приложение установится само."
+
+msgid "Why do you need it? (optional)"
+msgstr "Зачем оно вам нужно? (необязательно)"
+
+msgid "Cancel"
+msgstr "Отмена"
+
+msgid "Send Request"
+msgstr "Отправить запрос"
+
+msgid "waiting for IT"
+msgstr "ожидает ИТ-отдел"
+
+msgid "approved"
+msgstr "одобрено"
+
+msgid "declined"
+msgstr "отклонено"
+
+msgid "My Requests"
+msgstr "Мои запросы"
+
+msgid "Apps you asked IT to add. Approved apps appear in the catalog above."
+msgstr "Приложения, которые вы запросили у ИТ-отдела. Одобренные приложения появляются в каталоге выше."
+
+msgid "Request Another App"
+msgstr "Запросить другое приложение"
+
+msgid "Search Flathub. IT decides on your request; the app installs by itself once approved."
+msgstr "Поиск во Flathub. ИТ-отдел рассмотрит ваш запрос; после одобрения приложение установится само."
+
+msgid "e.g. Krita, Obsidian, Zotero"
+msgstr "например, Krita, Obsidian, Zotero"
+
+msgid "Find an App"
+msgstr "Найти приложение"
+
+msgid "Nothing Found"
+msgstr "Ничего не найдено"
+
+msgid "The agent does not respond."
+msgstr "Агент не отвечает."
+
+msgid "Apps already in the catalog are not listed here."
+msgstr "Приложения, уже имеющиеся в каталоге, здесь не показаны."
+
+msgid "IT reviews the app and adds it to the catalog for you."
+msgstr "ИТ-отдел проверит приложение и добавит его в каталог для вас."
+
+msgid "Sync started"
+msgstr "Синхронизация запущена"
+
+msgid "Recovery key stored. Your passphrase is unchanged."
+msgstr "Ключ восстановления сохранён. Ваша парольная фраза не изменилась."
+
+msgid "Too many attempts. Try again later."
+msgstr "Слишком много попыток. Повторите позже."
+
+msgid "The passphrase was not accepted."
+msgstr "Парольная фраза не принята."
+
+msgid "OK"
+msgstr "ОК"
+
+msgid "Close"
+msgstr "Закрыть"
+
+msgid "%d check failing"
+msgid_plural "%d checks failing"
+msgstr[0] "%d проверка не пройдена"
+msgstr[1] "%d проверки не пройдены"
+msgstr[2] "%d проверок не пройдено"
+
+msgid "%d disk recovery key is stored with IT. Nothing to do."
+msgid_plural "%d disk recovery keys are stored with IT. Nothing to do."
+msgstr[0] "%d ключ восстановления хранится в ИТ-отделе. Ничего делать не нужно."
+msgstr[1] "%d ключа восстановления хранятся в ИТ-отделе. Ничего делать не нужно."
+msgstr[2] "%d ключей восстановления хранятся в ИТ-отделе. Ничего делать не нужно."
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Admin rights only for centrally approved users"
+msgstr "Права администратора только для централизованно одобренных пользователей"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Automatic updates are declared"
+msgstr "Автоматические обновления задекларированы"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Boot loader is password protected"
+msgstr "Загрузчик защищён паролем"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Core dumps are restricted"
+msgstr "Дампы памяти ограничены"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Desktop login through the central identity provider"
+msgstr "Вход на рабочий стол через центрального поставщика удостоверений"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Device key is held in the TPM"
+msgstr "Ключ устройства хранится в TPM"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Disk encryption recovery keys are escrowed"
+msgstr "Ключи восстановления шифрования дисков депонированы"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Full ASLR is enabled"
+msgstr "Полная ASLR включена"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Host firewall is active"
+msgstr "Брандмауэр хоста активен"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "ICMP redirects and source routing are disabled"
+msgstr "Перенаправления ICMP и маршрутизация от источника отключены"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "IP forwarding is disabled"
+msgstr "IP переадресация отключена"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Kernel log and pointers are restricted"
+msgstr "Журнал ядра и указатели ограничены"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "LUKS volumes are bound to the TPM"
+msgstr "Тома LUKS привязаны к TPM"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Mandatory access control is enabled (AppArmor/SELinux)"
+msgstr "Мандатное управление доступом включено (AppArmor/SELinux)"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Mandatory access control is enforcing"
+msgstr "Мандатное управление доступом в принудительном режиме"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "No accounts with empty passwords"
+msgstr "Нет учётных записей с пустыми паролями"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "No pending reboot older than 7 days"
+msgstr "Нет ожидающей перезагрузки старше 7 дней"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "No security update pending longer than allowed"
+msgstr "Нет обновлений безопасности, ожидающих дольше допустимого"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Only root has UID 0"
+msgstr "Только root имеет UID 0"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Operating system version is supported"
+msgstr "Версия операционной системы поддерживается"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Password quality (minimum length 14)"
+msgstr "Качество паролей (минимальная длина 14)"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "SSH allows keys only and no forwarding"
+msgstr "SSH разрешает только ключи и без переадресации"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "SSH offers no weak algorithms or host keys"
+msgstr "SSH не предлагает слабых алгоритмов и ключей хоста"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "SSH server is hardened"
+msgstr "Сервер SSH защищён"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Screen lock on idle is enforced"
+msgstr "Блокировка экрана при бездействии обеспечена"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Secure Boot is enabled"
+msgstr "Secure Boot включён"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Security updates are installed"
+msgstr "Обновления безопасности установлены"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "System disk is encrypted"
+msgstr "Системный диск зашифрован"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "System log is persistent"
+msgstr "Системный журнал хранится постоянно"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "TCP SYN cookies, martian logging, broadcast ICMP ignored"
+msgstr "TCP SYN cookies, журналирование пакетов martian, широковещательный ICMP игнорируется"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Time synchronisation is active"
+msgstr "Синхронизация времени активна"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "UDF is disabled"
+msgstr "UDF отключён"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "USB mass storage is blocked"
+msgstr "Запоминающие устройства USB заблокированы"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Unused filesystems are disabled"
+msgstr "Неиспользуемые файловые системы отключены"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "Unused network protocols are disabled"
+msgstr "Неиспользуемые сетевые протоколы отключены"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "auditd is active with LiMDM rules"
+msgstr "auditd активен с правилами LiMDM"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "osquery inventory source installed"
+msgstr "Источник инвентаризации osquery установлен"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "ptrace is restricted"
+msgstr "ptrace ограничен"
+
+#. compliance check title sent by the agent (internal/agent/checks.go)
+msgid "sudo logs and uses a PTY"
+msgstr "sudo ведёт журнал и использует PTY"
+
+#. error text of the agent
+msgid "bad request"
+msgstr "неверный запрос"
+
+#. error text of the agent
+msgid "not allowed"
+msgstr "не разрешено"
+
+#. error text of the agent
+msgid "not allowed from a remote session, use the device itself"
+msgstr "не разрешено из удалённого сеанса, используйте само устройство"
+
+#. error text of the agent
+msgid "too many searches, wait a minute"
+msgstr "слишком много поисковых запросов, подождите минуту"
+
+#. error text of the agent
+msgid "unknown user"
+msgstr "неизвестный пользователь"
+
+#. error text of the agent
+msgid "no remote support session is running"
+msgstr "сеанс удалённой поддержки не запущен"
+
+#. error text of the agent
+msgid "a check in was requested less than 30 seconds ago"
+msgstr "синхронизация запрошена менее 30 секунд назад"
+
+#. error text of the agent
+msgid "no recovery key needed for this volume"
+msgstr "для этого тома ключ восстановления не нужен"
+
+#. error text of the agent
+msgid "passphrase not accepted"
+msgstr "парольная фраза не принята"
+
+#. error text of the agent
+msgid "a recovery key is being created for this volume"
+msgstr "для этого тома уже создаётся ключ восстановления"
+
+#. error text of the agent
+msgid "too many attempts, try again later"
+msgstr "слишком много попыток, повторите позже"
+
+#. error text of the agent
+msgid "could not store the key, contact IT"
+msgstr "не удалось сохранить ключ, обратитесь в ИТ-отдел"
+
+#. error text of the agent
+msgid "unknown operation"
+msgstr "неизвестная операция"
+
+#. error text of the agent
+msgid "no restart is scheduled"
+msgstr "перезапуск не запланирован"
+
+#. error text of the agent
+msgid "the restart cannot be postponed any further"
+msgstr "перезапуск больше нельзя отложить"
+
+#. error text of the agent
+msgid "identity provider unreachable"
+msgstr "поставщик удостоверений недоступен"
+
+#. error text of the agent
+msgid "provider does not support the device authorization grant"
+msgstr "поставщик не поддерживает авторизацию устройства (device authorization grant)"
+
+#. error text of the agent
+msgid "not confirmed"
+msgstr "не подтверждено"
+
+#. error text of the agent
+msgid "invalid ID token"
+msgstr "недействительный токен ID"
+
+#. error text of the agent
+msgid "email not verified"
+msgstr "адрес электронной почты не подтверждён"
+
+#. error text of the agent
+msgid "account does not match this user"
+msgstr "учётная запись не соответствует этому пользователю"
+
+#. error text of the agent
+msgid "account is not in the allowed domain"
+msgstr "учётная запись не входит в разрешённый домен"
+
+#. error text of the agent
+msgid "the password contains invalid characters"
+msgstr "пароль содержит недопустимые символы"
+
+#. error text of the agent
+msgid "the password must not contain the user name"
+msgstr "пароль не должен содержать имя пользователя"
+
+#. error text of the agent
+msgid "choose a password with at least 14 characters"
+msgstr "выберите пароль длиной не менее 14 символов"

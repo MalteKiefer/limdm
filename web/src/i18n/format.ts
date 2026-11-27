@@ -1,8 +1,8 @@
 // Locale aware formatting of numbers, percentages, dates and relative times.
-import { currentLocale, t } from '.'
+import { intlTag, t } from '.'
 import { getPrefs, type DateFormat } from '../lib/prefs'
 
-const tag = () => (currentLocale() === 'de' ? 'de-DE' : 'en-GB')
+const tag = () => intlTag()
 const toDate = (v: string | number | Date) => (v instanceof Date ? v : new Date(v))
 
 export const fmt = (n: number) => new Intl.NumberFormat(tag()).format(n)

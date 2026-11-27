@@ -22,9 +22,21 @@ import (
 	"golang.org/x/term"
 
 	"github.com/maltekiefer/limdm/internal/agent"
+	"github.com/maltekiefer/limdm/internal/locale"
 )
 
-const usage = `usage: limdm COMMAND [options]
+// lang is the language of human readable output (LANG, LC_MESSAGES, ...);
+// JSON output, exit codes and status codes stay the same in every language.
+var lang = locale.System()
+
+func tr(msg string, args ...any) string { return locale.T(lang, msg, args...) }
+
+func trn(n int, one, other string, args ...any) string {
+	return locale.N(lang, n, one, other, args...)
+}
+
+func usage() string {
+	return tr(`usage: limdm COMMAND [options]
 
   info                          device, agent, compliance, blueprint, certificates
   checks [--strict]             compliance checks of this device, failing first;
@@ -52,17 +64,18 @@ const usage = `usage: limdm COMMAND [options]
   version
 
 Add --json to info, checks, blueprint, certificates, log and software list
-for machine readable output.`
+for machine readable output.`)
+}
 
 var socket = "/run/limdm/agent.sock" // tests point it elsewhere
 
 func main() {
 	if len(os.Args) < 2 || os.Args[1] == "-h" || os.Args[1] == "--help" || os.Args[1] == "help" {
-		fmt.Println(usage)
+		fmt.Println(usage())
 		return
 	}
 	if err := run(os.Args[1], os.Args[2:]); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
+		fmt.Fprintln(os.Stderr, tr("error:"), err)
 		if errors.Is(err, errChecksFailing) {
 			os.Exit(2)
 		}
@@ -89,7 +102,7 @@ func run(cmd string, args []string) error {
 		if _, err := call(agent.DesktopRequest{Op: "sync"}); err != nil {
 			return err
 		}
-		fmt.Println("sync requested")
+		fmt.Println(tr("sync requested"))
 		return nil
 	case "software", "apps":
 		if len(args) == 0 {
@@ -106,15 +119,15 @@ func run(cmd string, args []string) error {
 		return recoveryKey()
 	case "support":
 		if len(args) != 1 || args[0] != "end" {
-			return errors.New("usage: limdm support end")
+			return errors.New(tr("usage: limdm support end"))
 		}
 		if _, err := call(agent.DesktopRequest{Op: "shell-end"}); err != nil {
 			return err
 		}
-		fmt.Println("remote support session ended")
+		fmt.Println(tr("remote support session ended"))
 		return nil
 	}
-	return fmt.Errorf("unknown command %q (limdm help)", cmd)
+	return errors.New(tr("unknown command %q (limdm help)", cmd))
 }
 
 // call sends one request and reads one answer; errors of the agent come back
@@ -123,7 +136,7 @@ func call(req agent.DesktopRequest) (agent.DesktopResponse, error) {
 	var resp agent.DesktopResponse
 	c, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(context.Background(), "unix", socket)
 	if err != nil {
-		return resp, fmt.Errorf("the LiMDM agent does not answer (%w); is it running?", err)
+		return resp, fmt.Errorf("%s (%w)", tr("the LiMDM agent does not answer; is it running?"), err)
 	}
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(3 * time.Minute))
@@ -139,9 +152,9 @@ func call(req agent.DesktopRequest) (agent.DesktopResponse, error) {
 	}
 	if resp.Error != "" {
 		if resp.Error == "not allowed" {
-			return resp, errors.New("not allowed: only users signed in at this device, and root, may ask the agent")
+			return resp, errors.New(tr("not allowed: only users signed in at this device, and root, may ask the agent"))
 		}
-		return resp, errors.New(resp.Error)
+		return resp, errors.New(tr(resp.Error))
 	}
 	return resp, nil
 }
@@ -162,7 +175,7 @@ func table() *tabwriter.Writer { return tabwriter.NewWriter(os.Stdout, 0, 0, 2, 
 
 func when(t *time.Time) string {
 	if t == nil || t.IsZero() {
-		return "never"
+		return tr("never")
 	}
 	return t.Local().Format("2006-01-02 15:04") + " (" + ago(*t) + ")"
 }
@@ -171,13 +184,13 @@ func ago(t time.Time) string {
 	d := time.Since(t).Round(time.Minute)
 	switch {
 	case d < time.Minute:
-		return "just now"
+		return tr("just now")
 	case d < time.Hour:
-		return fmt.Sprintf("%d min ago", int(d.Minutes()))
+		return tr("%d min ago", int(d.Minutes()))
 	case d < 48*time.Hour:
-		return fmt.Sprintf("%d h ago", int(d.Hours()))
+		return tr("%d h ago", int(d.Hours()))
 	}
-	return fmt.Sprintf("%d days ago", int(d.Hours()/24))
+	return trn(int(d.Hours()/24), "%d day ago", "%d days ago")
 }
 
 func info(args []string) error {
@@ -190,72 +203,69 @@ func info(args []string) error {
 		return printJSON(resp)
 	}
 	w := table()
-	if resp.Company != "" {
-		fmt.Fprintf(w, "Managed by\t%s\n", resp.Company)
-	}
+	row(w, tr("Managed by"), resp.Company)
 	if st := resp.Status; st != nil {
 		sys := st.System
-		fmt.Fprintf(w, "Hostname\t%s\n", st.Hostname)
-		row(w, "System", strings.TrimSpace(sys.OS+" "+sys.Arch))
-		row(w, "Kernel", sys.Kernel)
-		row(w, "Hardware", strings.TrimSpace(sys.Vendor+" "+sys.Model))
-		row(w, "Serial number", sys.Serial)
+		fmt.Fprintf(w, "%s\t%s\n", tr("Hostname"), st.Hostname)
+		row(w, tr("System"), strings.TrimSpace(sys.OS+" "+sys.Arch))
+		row(w, tr("Kernel"), sys.Kernel)
+		row(w, tr("Hardware"), strings.TrimSpace(sys.Vendor+" "+sys.Model))
+		row(w, tr("Serial number"), sys.Serial)
 		fmt.Fprintf(w, "\t\n")
-		fmt.Fprintf(w, "Device ID\t%s\n", st.DeviceID)
-		fmt.Fprintf(w, "Server\t%s\n", st.Server)
-		fmt.Fprintf(w, "Agent\t%s\n", st.Version)
-		row(w, "Inventory", sys.Inventory)
-		fmt.Fprintf(w, "Last sync\t%s\n", when(st.LastCheckin))
+		fmt.Fprintf(w, "%s\t%s\n", tr("Device ID"), st.DeviceID)
+		fmt.Fprintf(w, "%s\t%s\n", tr("Server"), st.Server)
+		fmt.Fprintf(w, "%s\t%s\n", tr("Agent"), st.Version)
+		row(w, tr("Inventory"), sys.Inventory)
+		fmt.Fprintf(w, "%s\t%s\n", tr("Last sync"), when(st.LastCheckin))
 		if st.CheckinEvery > 0 {
-			fmt.Fprintf(w, "Sync every\t%s (and at once when IT sends a command)\n", time.Duration(st.CheckinEvery)*time.Second)
+			fmt.Fprintf(w, "%s\t%s\n", tr("Sync every"), tr("%s (and at once when IT sends a command)", time.Duration(st.CheckinEvery)*time.Second))
 		}
-		if st.LastError != "" {
-			fmt.Fprintf(w, "Last error\t%s\n", st.LastError)
-		}
+		row(w, tr("Last error"), st.LastError)
 		if st.QueuedEvents+st.QueuedResults > 0 {
-			fmt.Fprintf(w, "Waiting to send\t%d events, %d command results\n", st.QueuedEvents, st.QueuedResults)
+			fmt.Fprintf(w, "%s\t%s, %s\n", tr("Waiting to send"), trn(st.QueuedEvents, "%d event", "%d events"),
+				trn(st.QueuedResults, "%d command result", "%d command results"))
 		}
-		fmt.Fprintf(w, "Declarations\t%d (token %s)\n", st.Declarations, st.DeclToken)
-		row(w, "Updates", st.Updates)
+		fmt.Fprintf(w, "%s\t%d (token %s)\n", tr("Declarations"), st.Declarations, st.DeclToken)
+		row(w, tr("Updates"), st.Updates)
 		if st.LastUpdateRun != nil {
-			fmt.Fprintf(w, "Last update run\t%s\n", when(st.LastUpdateRun))
+			fmt.Fprintf(w, "%s\t%s\n", tr("Last update run"), when(st.LastUpdateRun))
 		}
-		fmt.Fprintf(w, "Desktop login\t%s\n", st.DesktopLogin)
-		fmt.Fprintf(w, "Remote scripts\t%s\n", map[bool]string{true: "allowed", false: "not allowed"}[st.ScriptsAllow])
+		fmt.Fprintf(w, "%s\t%s\n", tr("Desktop login"), st.DesktopLogin)
+		fmt.Fprintf(w, "%s\t%s\n", tr("Remote scripts"), map[bool]string{true: tr("allowed"), false: tr("not allowed")}[st.ScriptsAllow])
 		if st.RemoteShell != "" {
-			fmt.Fprintf(w, "Remote support\tsession running: %s (end it: limdm support end)\n", st.RemoteShell)
+			fmt.Fprintf(w, "%s\t%s\n", tr("Remote support"), tr("session running: %s (end it: limdm support end)", st.RemoteShell))
 		}
 		if st.OfflineLockH > 0 {
-			fmt.Fprintf(w, "Offline lock\tafter %d h without the server\n", st.OfflineLockH)
+			fmt.Fprintf(w, "%s\t%s\n", tr("Offline lock"), trn(st.OfflineLockH, "after %d hour without the server", "after %d hours without the server"))
 		}
 		switch {
 		case st.LostMode:
-			fmt.Fprintf(w, "Device lock\tlost mode\n")
+			fmt.Fprintf(w, "%s\t%s\n", tr("Device lock"), tr("lost mode"))
 		case st.OfflineLocked:
-			fmt.Fprintf(w, "Device lock\tlocked: no server contact for too long\n")
+			fmt.Fprintf(w, "%s\t%s\n", tr("Device lock"), tr("locked: no server contact for too long"))
 		case st.Locked:
-			fmt.Fprintf(w, "Device lock\tlocked by IT\n")
+			fmt.Fprintf(w, "%s\t%s\n", tr("Device lock"), tr("locked by IT"))
 		}
 		fmt.Fprintf(w, "\t\n")
-		state := "compliant"
+		state := tr("compliant")
 		if len(st.Failing) > 0 {
-			state = fmt.Sprintf("%d of %d checks failing", len(st.Failing), st.Checks)
+			state = trn(len(st.Failing), "%d of %d checks failing", "%d of %d checks failing", st.Checks)
 		} else if st.Checks == 0 {
-			state = "no compliance checks declared"
+			state = tr("no compliance checks declared")
 		}
-		fmt.Fprintf(w, "Compliance\t%s\n", state)
+		fmt.Fprintf(w, "%s\t%s\n", tr("Compliance"), state)
 		for _, f := range st.Failing {
-			fmt.Fprintf(w, "\t  failing: %s\n", f)
+			fmt.Fprintf(w, "\t  %s %s\n", tr("failing:"), tr(f))
 		}
-		fmt.Fprintf(w, "Recovery keys\t%d escrowed\n", st.Escrowed)
+		fmt.Fprintf(w, "%s\t%s\n", tr("Recovery keys"), trn(st.Escrowed, "%d escrowed", "%d escrowed"))
 	}
 	for _, v := range resp.Need {
-		fmt.Fprintf(w, "Action needed\trecovery key for %s (run: limdm recovery-key)\n", v.Device)
+		fmt.Fprintf(w, "%s\t%s\n", tr("Action needed"), tr("recovery key for %s (run: limdm recovery-key)", v.Device))
 	}
-	fmt.Fprintf(w, "Blueprint\t%d settings in force (limdm blueprint)\n", len(resp.Profiles))
-	fmt.Fprintf(w, "Certificates\t%d managed (limdm certificates)\n", len(resp.Certs))
+	fmt.Fprintf(w, "%s\t%s\n", tr("Blueprint"), trn(len(resp.Profiles), "%d setting in force (limdm blueprint)", "%d settings in force (limdm blueprint)"))
+	fmt.Fprintf(w, "%s\t%s\n", tr("Certificates"), trn(len(resp.Certs), "%d managed (limdm certificates)", "%d managed (limdm certificates)"))
 	if s, err := call(agent.DesktopRequest{Op: "sso-status"}); err == nil && s.SSO != nil && s.SSO.Managed {
-		fmt.Fprintf(w, "Company account\t%s\n", ssoLine(s.SSO))
+		fmt.Fprintf(w, "%s\t%s\n", tr("Company account"), ssoLine(s.SSO))
 	}
 	return w.Flush()
 }
@@ -268,7 +278,7 @@ func row(w io.Writer, label, value string) {
 }
 
 // errChecksFailing makes limdm checks --strict exit with 2.
-var errChecksFailing = errors.New("compliance checks failing")
+var errChecksFailing = errors.New(tr("compliance checks failing"))
 
 // sortChecks puts failing checks first, then exceptions, not applicable and
 // passed ones, each by level and ID.
@@ -309,16 +319,16 @@ func checks(args []string) error {
 	if asJSON {
 		err = printJSON(list)
 	} else if len(list) == 0 {
-		fmt.Println("no compliance checks declared for this device")
+		fmt.Println(tr("no compliance checks declared for this device"))
 	} else {
 		w := table()
-		fmt.Fprintln(w, "STATUS\tLEVEL\tID\tCHECK\tDETAIL")
+		fmt.Fprintln(w, tr("STATUS\tLEVEL\tID\tCHECK\tDETAIL"))
 		for _, c := range list {
 			level := "-"
 			if c.Level > 0 {
 				level = fmt.Sprint(c.Level)
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", strings.ToUpper(c.Status), level, c.ID, c.Title, c.Detail)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", strings.ToUpper(c.Status), level, c.ID, tr(c.Title), c.Detail)
 		}
 		err = w.Flush()
 	}
@@ -339,11 +349,11 @@ func blueprint(args []string) error {
 	}
 	verbose := slices.Contains(rest, "-v") || slices.Contains(rest, "--verbose")
 	w := table()
-	fmt.Fprintln(w, "STATE\tTYPE\tIDENTIFIER")
+	fmt.Fprintln(w, tr("STATE\tTYPE\tIDENTIFIER"))
 	for _, p := range resp.Profiles {
-		state := "active"
+		state := tr("active")
 		if !p.Active {
-			state = "not achieved"
+			state = tr("not achieved")
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\n", state, p.Type, p.Identifier)
 		for _, r := range p.Reasons {
@@ -369,11 +379,11 @@ func certificates(args []string) error {
 		return printJSON(resp.Certs)
 	}
 	if len(resp.Certs) == 0 {
-		fmt.Println("no managed certificates")
+		fmt.Println(tr("no managed certificates"))
 		return nil
 	}
 	w := table()
-	fmt.Fprintln(w, "NAME\tSUBJECT\tVALID UNTIL\tSHA-256")
+	fmt.Fprintln(w, tr("NAME\tSUBJECT\tVALID UNTIL\tSHA-256"))
 	for _, c := range resp.Certs {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", c.Name, c.Subject, c.NotAfter.Local().Format("2006-01-02"), c.SHA256)
 	}
@@ -383,7 +393,7 @@ func certificates(args []string) error {
 func logLines(args []string) error {
 	rest, asJSON := jsonFlag(args)
 	fs := flag.NewFlagSet("log", flag.ContinueOnError)
-	n := fs.Int("n", 50, "number of entries")
+	n := fs.Int("n", 50, tr("number of entries"))
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
@@ -409,9 +419,9 @@ func logLines(args []string) error {
 func software(sub string, args []string) error {
 	rest, asJSON := jsonFlag(args)
 	fs := flag.NewFlagSet("software "+sub, flag.ContinueOnError)
-	note := fs.String("note", "", "a note for IT")
-	remote := fs.String("remote", "", "Flatpak remote of the app (request-new)")
-	name := fs.String("name", "", "display name (request-new)")
+	note := fs.String("note", "", tr("a note for IT"))
+	remote := fs.String("remote", "", tr("Flatpak remote of the app (request-new)"))
+	name := fs.String("name", "", tr("display name (request-new)"))
 	pos, flags := splitArgs(rest)
 	if err := fs.Parse(flags); err != nil {
 		return err
@@ -428,7 +438,7 @@ func software(sub string, args []string) error {
 		return listApps(resp)
 	case "install", "remove", "request":
 		if len(pos) != 1 {
-			return fmt.Errorf("usage: limdm software %s APP", sub)
+			return errors.New(tr("usage: limdm software %s APP", sub))
 		}
 		id, err := findApp(pos[0])
 		if err != nil {
@@ -439,14 +449,16 @@ func software(sub string, args []string) error {
 		}
 		switch sub {
 		case "request":
-			fmt.Println("request sent to IT; it shows up in limdm software list once decided")
+			fmt.Println(tr("request sent to IT; it shows up in limdm software list once decided"))
+		case "install":
+			fmt.Println(tr("installation of %s started; follow it with: limdm software list", id))
 		default:
-			fmt.Printf("%s of %s started; follow it with: limdm software list\n", sub, id)
+			fmt.Println(tr("removal of %s started; follow it with: limdm software list", id))
 		}
 		return nil
 	case "search":
 		if len(pos) == 0 {
-			return errors.New("usage: limdm software search QUERY")
+			return errors.New(tr("usage: limdm software search QUERY"))
 		}
 		resp, err := call(agent.DesktopRequest{Op: "search", Query: strings.Join(pos, " ")})
 		if err != nil {
@@ -456,24 +468,24 @@ func software(sub string, args []string) error {
 			return printJSON(resp.Hits)
 		}
 		if len(resp.Hits) == 0 {
-			fmt.Println("nothing found, or everything found is in the catalog already (limdm software list)")
+			fmt.Println(tr("nothing found, or everything found is in the catalog already (limdm software list)"))
 			return nil
 		}
 		w := table()
-		fmt.Fprintln(w, "FLATPAK ID\tNAME\tSUMMARY")
+		fmt.Fprintln(w, tr("FLATPAK ID\tNAME\tSUMMARY"))
 		for _, h := range resp.Hits {
 			fmt.Fprintf(w, "%s\t%s\t%s\n", h.ID, h.Name, h.Summary)
 		}
-		fmt.Fprintln(w, "\nask IT for one: limdm software request-new FLATPAK_ID --note \"why\"")
+		fmt.Fprintln(w, "\n"+tr("ask IT for one: limdm software request-new FLATPAK_ID --note \"why\""))
 		return w.Flush()
 	case "request-new":
 		if len(pos) != 1 {
-			return errors.New("usage: limdm software request-new FLATPAK_ID [--remote flathub] [--name NAME] [--note TEXT]")
+			return errors.New(tr("usage: limdm software request-new FLATPAK_ID [--remote flathub] [--name NAME] [--note TEXT]"))
 		}
 		if _, err := call(agent.DesktopRequest{Op: "app-request-new", Flatpak: pos[0], Remote: *remote, Name: *name, Note: *note}); err != nil {
 			return err
 		}
-		fmt.Println("request sent to IT; follow it with: limdm software requests")
+		fmt.Println(tr("request sent to IT; follow it with: limdm software requests"))
 		return nil
 	case "requests":
 		resp, err := call(agent.DesktopRequest{Op: "catalog"})
@@ -484,17 +496,17 @@ func software(sub string, args []string) error {
 			return printJSON(resp.Requests)
 		}
 		if len(resp.Requests) == 0 {
-			fmt.Println("no requests for apps outside the catalog")
+			fmt.Println(tr("no requests for apps outside the catalog"))
 			return nil
 		}
 		w := table()
-		fmt.Fprintln(w, "STATUS\tFLATPAK ID\tNAME")
+		fmt.Fprintln(w, tr("STATUS\tFLATPAK ID\tNAME"))
 		for _, r := range resp.Requests {
 			fmt.Fprintf(w, "%s\t%s\t%s\n", r.Status, r.Flatpak, r.Name)
 		}
 		return w.Flush()
 	}
-	return fmt.Errorf("unknown software command %q (limdm help)", sub)
+	return errors.New(tr("unknown software command %q (limdm help)", sub))
 }
 
 // splitArgs separates positional arguments from flags, so flags may follow
@@ -517,35 +529,39 @@ func splitArgs(args []string) (pos, flags []string) {
 
 func listApps(resp agent.DesktopResponse) error {
 	if len(resp.Apps) == 0 {
-		fmt.Println("the company catalog is empty for this device")
+		fmt.Println(tr("the company catalog is empty for this device"))
 		return nil
 	}
 	w := table()
-	fmt.Fprintln(w, "APP\tNAME\tSTATE\tAVAILABILITY")
+	fmt.Fprintln(w, tr("APP\tNAME\tSTATE\tAVAILABILITY"))
 	for _, a := range resp.Apps {
-		state := "not installed"
+		state := tr("not installed")
 		switch {
+		case a.Busy == "install":
+			state = tr("installation running")
 		case a.Busy != "":
-			state = a.Busy + " running"
+			state = tr("removal running")
 		case a.Error != "":
-			state = "failed: " + a.Error
+			state = tr("failed:") + " " + tr(a.Error)
 		case a.Installed:
-			state = "installed"
+			state = tr("installed")
 			if a.Via != "" {
 				state += " (" + a.Via + ")"
 			}
 		}
-		avail := map[string]string{"available": "install yourself", "request": "on request", "required": "required by IT"}[a.Mode]
+		avail := map[string]string{"available": tr("install yourself"), "request": tr("on request"), "required": tr("required by IT")}[a.Mode]
 		if avail == "" {
 			avail = a.Mode
 		}
-		if a.Request != "" {
-			avail += ", request " + a.Request
+		if r := map[string]string{"pending": tr("request pending"), "approved": tr("request approved"), "denied": tr("request declined")}[a.Request]; r != "" {
+			avail += ", " + r
+		} else if a.Request != "" {
+			avail += ", " + a.Request
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", a.ID, a.Name, state, avail)
 	}
 	if s := resp.Store; s != nil && s.ReadOnly {
-		fmt.Fprintln(w, "\nsoftware centers are read only on this device: install through this catalog")
+		fmt.Fprintln(w, "\n"+tr("software centers are read only on this device: install through this catalog"))
 	}
 	return w.Flush()
 }
@@ -569,9 +585,9 @@ func findApp(q string) (string, error) {
 	case 1:
 		return hits[0], nil
 	case 0:
-		return "", fmt.Errorf("%q is not in the catalog (limdm software list, or limdm software search)", q)
+		return "", errors.New(tr("%q is not in the catalog (limdm software list, or limdm software search)", q))
 	}
-	return "", fmt.Errorf("%q matches several apps: %s", q, strings.Join(hits, ", "))
+	return "", errors.New(tr("%q matches several apps: %s", q, strings.Join(hits, ", ")))
 }
 
 // ---- company account and recovery key ----
@@ -579,17 +595,17 @@ func findApp(q string) (string, error) {
 func ssoLine(s *agent.SSOStatus) string {
 	switch {
 	case s.Running:
-		return "confirmation running"
+		return tr("confirmation running")
 	case s.Due:
-		return s.Email + ": confirmation due (limdm sso confirm)"
+		return s.Email + ": " + tr("confirmation due (limdm sso confirm)")
 	case s.Confirmed != nil:
-		line := s.Email + ": confirmed " + ago(*s.Confirmed)
+		line := s.Email + ": " + tr("confirmed %s", ago(*s.Confirmed))
 		if s.Deadline != nil {
-			line += ", next by " + s.Deadline.Local().Format("2006-01-02")
+			line += ", " + tr("next by %s", s.Deadline.Local().Format("2006-01-02"))
 		}
 		return line
 	}
-	return s.Email + ": not confirmed yet (limdm sso confirm)"
+	return s.Email + ": " + tr("not confirmed yet (limdm sso confirm)")
 }
 
 func sso(sub string) error {
@@ -600,7 +616,7 @@ func sso(sub string) error {
 			return err
 		}
 		if resp.SSO == nil || !resp.SSO.Managed {
-			fmt.Println("your account is not managed by the company directory on this device")
+			fmt.Println(tr("your account is not managed by the company directory on this device"))
 			return nil
 		}
 		fmt.Println(ssoLine(resp.SSO))
@@ -611,10 +627,10 @@ func sso(sub string) error {
 			return err
 		}
 		if resp.SSO == nil || !resp.SSO.Managed {
-			return errors.New("your account is not managed by the company directory on this device")
+			return errors.New(tr("your account is not managed by the company directory on this device"))
 		}
-		fmt.Printf("Open %s and enter the code %s\n", resp.SSO.URI, resp.SSO.Code)
-		fmt.Println("waiting for the sign in (Ctrl+C stops waiting, the sign in stays valid) …")
+		fmt.Println(tr("Open %s and enter the code %s", resp.SSO.URI, resp.SSO.Code))
+		fmt.Println(tr("waiting for the sign in (Ctrl+C stops waiting, the sign in stays valid) …"))
 		for range 120 { // ten minutes, the lifetime of the device code
 			time.Sleep(5 * time.Second)
 			st, err := call(agent.DesktopRequest{Op: "sso-status"})
@@ -623,15 +639,15 @@ func sso(sub string) error {
 			}
 			if s := st.SSO; s != nil && !s.Running {
 				if s.Error != "" {
-					return errors.New(s.Error)
+					return errors.New(tr(s.Error))
 				}
-				fmt.Println("confirmed")
+				fmt.Println(tr("confirmed"))
 				return nil
 			}
 		}
-		return errors.New("no sign in within ten minutes")
+		return errors.New(tr("no sign in within ten minutes"))
 	}
-	return fmt.Errorf("unknown sso command %q (status or confirm)", sub)
+	return errors.New(tr("unknown sso command %q (status or confirm)", sub))
 }
 
 func recoveryKey() error {
@@ -640,14 +656,14 @@ func recoveryKey() error {
 		return err
 	}
 	if len(resp.Need) == 0 {
-		fmt.Println("no recovery key is needed on this device")
+		fmt.Println(tr("no recovery key is needed on this device"))
 		return nil
 	}
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return errors.New("the passphrase is read from a terminal only")
+		return errors.New(tr("the passphrase is read from a terminal only"))
 	}
 	for _, v := range resp.Need {
-		fmt.Fprintf(os.Stderr, "Disk passphrase of %s: ", v.Device)
+		fmt.Fprint(os.Stderr, tr("Disk passphrase of %s: ", v.Device))
 		pw, err := term.ReadPassword(int(os.Stdin.Fd()))
 		fmt.Fprintln(os.Stderr)
 		if err != nil {
@@ -656,7 +672,7 @@ func recoveryKey() error {
 		if _, err := call(agent.DesktopRequest{Op: "escrow", UUID: v.UUID, Passphrase: string(pw)}); err != nil {
 			return fmt.Errorf("%s: %w", v.Device, err)
 		}
-		fmt.Printf("recovery key for %s created; it reaches IT with the next sync\n", v.Device)
+		fmt.Println(tr("recovery key for %s created; it reaches IT with the next sync", v.Device))
 	}
 	return nil
 }

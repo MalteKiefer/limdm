@@ -203,7 +203,7 @@ function Entry({ it, onFilter }: { it: Item; onFilter: (p: Partial<ActivitySearc
       </div>
       {it.detail && (
         <details className="text-meta text-muted">
-          <summary className="cursor-pointer truncate">{it.detail.slice(0, 140)}</summary>
+          <summary className="cursor-pointer truncate">{(it.text || it.detail).slice(0, 140)}</summary>
           <pre className="mt-1 max-h-64 overflow-auto rounded bg-surface-2 p-2 font-mono text-meta whitespace-pre-wrap">{it.detail}</pre>
         </details>
       )}
