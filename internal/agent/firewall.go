@@ -271,7 +271,9 @@ func (a *Agent) syncFirewallRules() error {
 			}
 			a.state.FirewallEgress = "allow"
 		}
-	} else {
+	} else if deny || len(f.Zones) > 0 || slices.ContainsFunc(applied, func(r fwRule) bool { return r.Out || r.Zone != "" }) {
+		// only with zones or outbound filtering, now or before: a plain
+		// declaration runs exactly the firewall-cmd calls it did before zones
 		var err error
 		if applied, changed, err = firewalldPrepare(want, applied, deny); err != nil {
 			return err
