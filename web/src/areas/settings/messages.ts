@@ -150,6 +150,9 @@ export const de = {
   'settings.approvals.twoAdmins': 'Braucht mindestens zwei aktive Administratoren.',
   'settings.approvals.recovery': 'Auch für das Anzeigen von Wiederherstellungsschlüsseln',
   'settings.approvals.shell': 'Auch für Remote Shell Sitzungen',
+  'settings.approvals.workloads': 'Auch für das Herunterfahren und Neustarten von Containern und VMs',
+  'settings.approvals.workloadsHelpdesk': 'Helpdesk darf Container und VMs starten, herunterfahren und neu starten',
+  'settings.approvals.workloadsHelpdeskHelp': 'Sonst nur Administratoren. Die Richtlinie des Geräts muss es zusätzlich erlauben (Agent, Container und VMs steuern).',
   'settings.approvals.inbox': 'Offene Freigaben im Eingang',
 
   'settings.shell.sub': 'Interaktives Terminal von der Konsole zu einem Gerät. Sitzungen werden protokolliert und aufgezeichnet.',
@@ -850,6 +853,9 @@ export const en: Record<keyof typeof de, Msg> = {
   'settings.approvals.twoAdmins': 'Needs at least two active administrators.',
   'settings.approvals.recovery': 'Also for recovery key views',
   'settings.approvals.shell': 'Also for remote shell sessions',
+  'settings.approvals.workloads': 'Also for shutting down and restarting containers and VMs',
+  'settings.approvals.workloadsHelpdesk': 'Helpdesk may start, shut down and restart containers and VMs',
+  'settings.approvals.workloadsHelpdeskHelp': "Otherwise administrators only. The device's policy must allow it as well (Agent, Workload control).",
   'settings.approvals.inbox': 'Open approvals in the inbox',
 
   'settings.shell.sub': 'Interactive terminal from the console to a device. Sessions are audited and recorded.',
