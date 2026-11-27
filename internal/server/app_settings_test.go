@@ -92,6 +92,20 @@ func TestAppSettingsAPI(t *testing.T) {
 	want(code, body, 422, "four eyes with one admin")
 	code, body = call(admin, "PATCH", "/api/v1/settings/network", `{"console_allow":["10.9.0.0/33"]}`)
 	want(code, body, 422, "bad network")
+	code, body = call(admin, "PATCH", "/api/v1/settings/network", `{"network_cert_domain":"a b"}`)
+	want(code, body, 422, "bad certificate domain")
+	code, body = call(admin, "PATCH", "/api/v1/settings/network", `{"network_cert_domain":"Devices.Example.com."}`)
+	want(code, body, 200, "certificate domain")
+	if s.settings().NetCertDomain != "devices.example.com" {
+		t.Fatalf("certificate domain not normalized: %q", s.settings().NetCertDomain)
+	}
+	code, body = call(admin, "PATCH", "/api/v1/settings/enrollment", `{"enrollment":{"max_uses":501}}`)
+	want(code, body, 422, "token uses above the hard limit")
+	code, body = call(admin, "PATCH", "/api/v1/settings/enrollment", `{"enrollment":{"max_uses":20,"max_days":7,"default_uses":5,"default_days":2,"require_tpm":true}}`)
+	want(code, body, 200, "enrollment")
+	if e := s.settings().Enroll; e.MaxUses != 20 || e.DefaultDays != 2 || !e.RequireTPM || !strings.Contains(body, `"max_days":7`) {
+		t.Fatalf("enrollment: %+v %s", e, body)
+	}
 	code, body = call(admin, "PATCH", "/api/v1/settings/sso", `{"role_groups":[{"group":"it","role":"owner"}]}`)
 	want(code, body, 422, "bad role group")
 	code, body = call(admin, "PATCH", "/api/v1/settings/retention", `{"retention":{"metrics":14}}`)
@@ -101,7 +115,7 @@ func TestAppSettingsAPI(t *testing.T) {
 	}
 	var audited int
 	db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action='settings.save'`).Scan(&audited)
-	if audited != 2 {
+	if audited != 4 { // general, certificate domain, enrollment, retention
 		t.Fatalf("settings saves audited: %d", audited)
 	}
 

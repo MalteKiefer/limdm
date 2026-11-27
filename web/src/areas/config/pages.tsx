@@ -87,7 +87,7 @@ function BlueprintsTab({ q, setQ }: { q: string; setQ: (q: string) => void }) {
   const list = bps.data.items.filter((b) => `${b.name} ${b.description ?? ''}`.toLowerCase().includes(q.toLowerCase()))
   return (
     <div className="flex flex-col gap-[var(--gap)]">
-      <p className="flex items-start gap-2 rounded-lg bg-info-soft p-3 text-[13px]">
+      <p className="flex items-start gap-2 rounded-lg bg-info-soft p-3 text-body">
         <Info size={15} className="mt-0.5 shrink-0 text-info" aria-hidden /> {t('config.assignOrder')}
       </p>
       <SearchBox value={q} onChange={setQ} label={t('config.searchBlueprints')} />
@@ -122,7 +122,7 @@ function BlueprintCard({ b, items }: { b: BlueprintRow; items: Map<number | unde
               {b.name}
             </Link>
           </h2>
-          {b.description && <p className="text-[12.5px] text-muted">{b.description}</p>}
+          {b.description && <p className="text-meta text-muted">{b.description}</p>}
           <div className="mt-1 flex flex-wrap gap-1">
             {b.parent && (
               <Badge>
@@ -145,15 +145,15 @@ function BlueprintCard({ b, items }: { b: BlueprintRow; items: Map<number | unde
       </div>
       <dl className="my-4 grid grid-cols-3 gap-2 text-center">
         <div className="rounded-lg bg-surface-2 py-2">
-          <dt className="text-[11.5px] text-muted">{t('config.devices')}</dt>
+          <dt className="text-micro text-muted">{t('config.devices')}</dt>
           <dd className="num font-semibold">{fmt(b.devices)}</dd>
         </div>
         <div className="rounded-lg bg-surface-2 py-2">
-          <dt className="text-[11.5px] text-muted">{t('config.items')}</dt>
+          <dt className="text-micro text-muted">{t('config.items')}</dt>
           <dd className="num font-semibold">{fmt(b.items)}</dd>
         </div>
         <div className="rounded-lg bg-surface-2 py-2">
-          <dt className="text-[11.5px] text-muted">{t('config.compliance')}</dt>
+          <dt className="text-micro text-muted">{t('config.compliance')}</dt>
           <dd className={cx('num font-semibold', score !== undefined && score < 90 && 'text-bad')}>
             {score === undefined ? '·' : pct(score)}
             {score !== undefined && score < 90 && <ShieldAlert size={12} className="ml-1 inline" aria-label={t('config.belowTarget')} />}
@@ -161,7 +161,7 @@ function BlueprintCard({ b, items }: { b: BlueprintRow; items: Map<number | unde
         </div>
       </dl>
       <div className="mb-3">
-        <h3 className="mb-1 text-[12px] font-medium text-muted">{t('config.sources')}</h3>
+        <h3 className="mb-1 text-meta font-medium text-muted">{t('config.sources')}</h3>
         <ul className="flex flex-wrap gap-1">
           {b.sources.map((s, i) => (
             <li key={i}>
@@ -170,19 +170,19 @@ function BlueprintCard({ b, items }: { b: BlueprintRow; items: Map<number | unde
               </Badge>
             </li>
           ))}
-          {!b.sources.length && <li className="text-[12.5px] text-muted">{t('config.srcNone')}</li>}
+          {!b.sources.length && <li className="text-meta text-muted">{t('config.srcNone')}</li>}
         </ul>
       </div>
       {tree.length > 0 && (
         <ul className="mb-4 flex flex-wrap gap-1" aria-label={t('config.items')}>
           {tree.slice(0, 12).map((id) => (
             <li key={id}>
-              <Link to="/config/library/$id" params={{ id: String(id) }} className="inline-block rounded-md bg-surface-2 px-1.5 py-0.5 text-[12px] hover:text-accent">
+              <Link to="/config/library/$id" params={{ id: String(id) }} className="inline-block rounded-md bg-surface-2 px-1.5 py-0.5 text-meta hover:text-accent">
                 {items.get(id)?.name ?? `#${id}`}
               </Link>
             </li>
           ))}
-          {tree.length > 12 && <li className="text-[12px] text-muted">{t('config.more', { count: tree.length - 12 })}</li>}
+          {tree.length > 12 && <li className="text-meta text-muted">{t('config.more', { count: tree.length - 12 })}</li>}
         </ul>
       )}
       <div className="mt-auto flex flex-wrap items-center gap-2">
@@ -192,7 +192,7 @@ function BlueprintCard({ b, items }: { b: BlueprintRow; items: Map<number | unde
         <Link to="/config/blueprints/$id" params={{ id: String(b.id) }} className="btn">
           {t(b.read_only ? 'config.open' : 'config.edit')}
         </Link>
-        <span className="ml-auto text-[12px] text-muted" title={b.updated_at ? dateTime(b.updated_at) : undefined}>
+        <span className="ml-auto text-meta text-muted" title={b.updated_at ? dateTime(b.updated_at) : undefined}>
           {b.updated_at && ago(b.updated_at)}
         </span>
       </div>
@@ -237,7 +237,7 @@ function LibraryTab({ q, type, set }: { q: string; type?: string; set: (s: Confi
             key={g}
             title={
               <span className="flex flex-wrap items-baseline gap-2">
-                {title.get(g) ?? g} <span className="num text-[12px] font-normal text-muted">{rows.length}</span> <span className="font-mono text-[11.5px] font-normal text-muted">{g}</span>
+                {title.get(g) ?? g} <span className="num text-meta font-normal text-muted">{rows.length}</span> <span className="font-mono text-micro font-normal text-muted">{g}</span>
               </span>
             }
             bodyClass="!px-0 !pt-2 !pb-1"
@@ -252,12 +252,12 @@ function LibraryTab({ q, type, set }: { q: string; type?: string; set: (s: Confi
                         {i.invalid && <Badge tone="bad">{t('config.sigInvalid')}</Badge>}
                         {i.read_only && <Badge tone="info">{t('config.shared')}</Badge>}
                       </div>
-                      {i.description && <div className="truncate text-[12.5px] text-muted">{i.description}</div>}
+                      {i.description && <div className="truncate text-meta text-muted">{i.description}</div>}
                     </div>
-                    <span className="flex flex-wrap gap-1 text-[12.5px]">
+                    <span className="flex flex-wrap gap-1 text-meta">
                       {i.used_by.length ? i.used_by.map((u) => <Badge key={u}>{u}</Badge>) : <span className="text-muted">{t('config.unused')}</span>}
                     </span>
-                    <span className="w-28 text-right text-[12px] text-muted" title={dateTime(i.updated_at)}>
+                    <span className="w-28 text-right text-meta text-muted" title={dateTime(i.updated_at)}>
                       {ago(i.updated_at)}
                     </span>
                   </Link>

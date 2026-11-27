@@ -19,7 +19,7 @@ import { useT, type MessageKey } from '../../i18n'
 import { useAction, useShared, useTenant, useTenantList, useTokens, useUsers } from './api'
 import { Confirm, Facts, OnceSecret, SectionHead, SelectField, SettingsForm, TextField, Toggle } from '../../components/settingsform'
 import { colorCheck, fileBase64, lines } from './logic'
-import { blobURL } from '../../lib/blob'
+import { FilePreview } from '../../lib/blob'
 
 type Pending = { approval_id?: number }
 const isPending = (r: unknown): r is Pending => typeof r === 'object' && r !== null && 'approval_id' in r
@@ -100,7 +100,7 @@ export function Users() {
               card={(u) => (
                 <span className="flex flex-col">
                   <span className="font-mono">{u.login.replace(/^local:/, '')}</span>
-                  <span className="text-[12px] text-muted">
+                  <span className="text-meta text-muted">
                     {t(roleKey(u.role))} · {u.local ? t('settings.users.local') : 'OIDC'}
                   </span>
                 </span>
@@ -121,7 +121,7 @@ export function Users() {
             )
           }
         />
-        <p className="mt-3 text-[12.5px] text-muted">
+        <p className="mt-3 text-meta text-muted">
           {t('settings.users.rolesHelp')}{' '}
           <a className="text-accent underline-offset-2 hover:underline" href="/app/help#roles">
             {t('settings.users.rolesLink')}
@@ -169,7 +169,7 @@ function AddUser({ oidc, localLogin, fourEyes, onClose, onSecret }: { oidc: bool
             <TextField form={f} name="login" label={f.watch('kind') === 'oidc' ? t('settings.users.email') : t('settings.users.name')} required />
             <SelectField form={f} name="role" label={t('settings.users.role')} help={t(`settings.users.roleHelp.${f.watch('role')}` as MessageKey)} options={roleOptions(t)} />
             {fourEyes && f.watch('role') === 'admin' && <TextField form={f} name="reason" label={t('settings.reason')} help={t('settings.reasonHelp')} />}
-            <p className="text-[12.5px] text-muted">
+            <p className="text-meta text-muted">
               {t('settings.users.localNote')} {!localLogin && t('settings.users.localOff')}
             </p>
           </div>
@@ -205,7 +205,7 @@ function UserSheet({ user, fourEyes, onClose, onPrev, onNext, onSecret }: { user
       }
     >
       <Facts rows={[[t('settings.users.last'), user.last_login ? dateTime(user.last_login) : t('settings.never')]]} />
-      {user.self && <p className="mt-3 rounded-md bg-info-soft p-3 text-[13px]">{t('settings.users.selfNote')}</p>}
+      {user.self && <p className="mt-3 rounded-md bg-info-soft p-3 text-body">{t('settings.users.selfNote')}</p>}
       <SettingsForm
         readOnly={ro}
         schema={z.object({ role: z.enum(['admin', 'helpdesk', 'auditor']), disabled: z.boolean(), scope_tags: z.string(), scope_groups: z.string(), reason: z.string().max(500) })}
@@ -279,7 +279,7 @@ export function Tokens() {
   const tokens = (q.data.items ?? []) as Token[]
   const columns: GridColumn<Token>[] = [
     { id: 'name', header: t('settings.tokens.name'), cell: (c) => <span className="font-medium">{c.row.original.name}</span> },
-    { id: 'prefix', header: t('settings.tokens.prefix'), cell: (c) => <code className="font-mono text-[12px]">{c.row.original.prefix}…</code> },
+    { id: 'prefix', header: t('settings.tokens.prefix'), cell: (c) => <code className="font-mono text-meta">{c.row.original.prefix}…</code> },
     {
       id: 'role',
       header: t('settings.users.role'),
@@ -344,7 +344,7 @@ export function Tokens() {
           card={(x) => (
             <span className="flex flex-col">
               <span className="font-medium">{x.name}</span>
-              <span className="text-[12px] text-muted">
+              <span className="text-meta text-muted">
                 {t(roleKey(x.role ?? ''))} · {t(`settings.tokens.${tokenState(x)}` as MessageKey)}
               </span>
             </span>
@@ -403,11 +403,11 @@ function AddToken({ onClose, onSecret }: { onClose: () => void; onSecret: (s: st
                 <>
                   <Toggle form={f} name="read_only" label={t('settings.tokens.readOnly')} help={t('settings.tokens.readOnlyHelp')} />
                   <fieldset className="flex flex-col gap-2">
-                    <legend className="text-[13px] font-medium">{t('settings.tokens.scopes')}</legend>
-                    <p className="text-[12.5px] text-muted">{t('settings.tokens.scopesHelp')}</p>
+                    <legend className="text-body font-medium">{t('settings.tokens.scopes')}</legend>
+                    <p className="text-meta text-muted">{t('settings.tokens.scopesHelp')}</p>
                     <div className="flex flex-wrap gap-x-4 gap-y-2">
                       {scopeList.map((sc) => (
-                        <label key={sc} className="flex items-center gap-1.5 text-[13px]">
+                        <label key={sc} className="flex items-center gap-1.5 text-body">
                           <input type="checkbox" value={sc} {...f.register('scopes')} /> {t(`settings.tokens.scope.${sc}` as MessageKey)}
                         </label>
                       ))}
@@ -511,9 +511,9 @@ function TenantEdit({ id, embedded }: { id: number; embedded?: boolean }) {
   const me = useMe()
   const admin = useCan('admin')
   const q = useTenant(id)
-  const [logo, setLogo] = useState<{ b64: string; url: string } | null>(null)
+  const [logo, setLogo] = useState<{ b64: string; file: Blob } | null>(null)
   const [remove, setRemove] = useState(false)
-  const save = useAction(['settings', 'tenants'], (body: { name?: string; disabled?: boolean; company_name: string; color: string; logo_png?: string; remove_logo?: boolean }) =>
+  const save = useAction(['settings', 'tenants'], (body: { name?: string; disabled?: boolean; company_name: string; color: string; logo_png?: string; remove_logo?: boolean; require_tpm: boolean }) =>
     unwrap(api.PATCH('/api/v1/tenants/{id}', { params: { path: { id } }, body })),
   )
   if (q.isPending) return <LoadingState rows={4} />
@@ -529,10 +529,11 @@ function TenantEdit({ id, embedded }: { id: number; embedded?: boolean }) {
         company_name: z.string().max(100, t('settings.tenants.companyLong')),
         color: z.string().refine((v) => !v || /^#[0-9a-fA-F]{6}$/.test(v), t('settings.tenants.colorBad')),
         logo: z.string(),
+        require_tpm: z.boolean(),
       })}
-      values={{ name: x.name, disabled: x.disabled, company_name: x.company_name, color: x.color, logo: '' }}
+      values={{ name: x.name, disabled: x.disabled, company_name: x.company_name, color: x.color, logo: '', require_tpm: x.require_tpm }}
       onSave={async (v) => {
-        await save.mutateAsync({ ...(supr ? { name: v.name, disabled: v.disabled } : {}), company_name: v.company_name, color: v.color, ...(logo ? { logo_png: logo.b64 } : {}), ...(remove ? { remove_logo: true } : {}) })
+        await save.mutateAsync({ ...(supr ? { name: v.name, disabled: v.disabled } : {}), company_name: v.company_name, color: v.color, require_tpm: v.require_tpm, ...(logo ? { logo_png: logo.b64 } : {}), ...(remove ? { remove_logo: true } : {}) })
         setLogo(null)
         setRemove(false)
         void q.refetch()
@@ -549,6 +550,7 @@ function TenantEdit({ id, embedded }: { id: number; embedded?: boolean }) {
                 {x.id !== 1 && <Toggle form={f} name="disabled" label={t('settings.tenants.disable')} help={t('settings.tenants.disableHelp')} />}
               </>
             )}
+            <Toggle form={f} name="require_tpm" label={t('settings.tenants.requireTpm')} help={t(supr ? 'settings.tenants.requireTpmHelp' : 'settings.tenants.requireTpmOwn')} disabled={!supr && x.require_tpm} />
             <TextField form={f} name="company_name" label={t('settings.tenants.company')} help={t('settings.tenants.companyHelp')} />
             <Field label={t('settings.tenants.color')} help={t('settings.tenants.colorHelp')} error={f.formState.errors.color?.message}>
               {({ id: fid, describedBy, invalid }) => (
@@ -564,14 +566,18 @@ function TenantEdit({ id, embedded }: { id: number; embedded?: boolean }) {
               )}
             </Field>
             {check && (
-              <p role="status" className={check.ok ? 'text-[12.5px] text-muted' : 'rounded-md bg-warn-soft p-2 text-[12.5px]'}>
+              <p role="status" className={check.ok ? 'text-meta text-muted' : 'rounded-md bg-warn-soft p-2 text-meta'}>
                 {t('settings.tenants.contrast', { light: check.light.toFixed(1), dark: check.dark.toFixed(1) })} {check.ok ? t('settings.tenants.contrastOk') : t('settings.tenants.contrastLow')}
               </p>
             )}
             <Field label={t('settings.branding.logo')} help={t('settings.branding.logoHelp')}>
               {({ id: fid, describedBy }) => (
                 <div className="flex flex-wrap items-center gap-3">
-                  {(logo || (x.has_logo && !remove)) && <img src={blobURL(logo?.url) ?? `/tenants/${x.id}/logo.png?v=${encodeURIComponent(x.created_at)}${q.dataUpdatedAt}`} alt={t('settings.branding.preview')} className="size-14 rounded-md border border-line object-contain" />}
+                  {logo ? (
+                    <FilePreview file={logo.file} label={t('settings.branding.preview')} className="size-14 rounded-md border border-line object-contain" />
+                  ) : (
+                    x.has_logo && !remove && <img src={`/tenants/${x.id}/logo.png?v=${encodeURIComponent(x.created_at)}${q.dataUpdatedAt}`} alt={t('settings.branding.preview')} className="size-14 rounded-md border border-line object-contain" />
+                  )}
                   <label className="btn cursor-pointer">
                     {t('settings.branding.choose')}
                     <input
@@ -584,7 +590,7 @@ function TenantEdit({ id, embedded }: { id: number; embedded?: boolean }) {
                         const file = e.target.files?.[0]
                         if (file)
                           void fileBase64(file).then((b64) => {
-                            setLogo({ b64, url: URL.createObjectURL(file) })
+                            setLogo({ b64, file })
                             f.setValue('logo', file.name, { shouldDirty: true })
                           })
                       }}
@@ -649,12 +655,12 @@ function SharedObjects() {
             ([k, list, p]) =>
               list.length > 0 && (
                 <fieldset key={k} className="flex flex-col gap-1.5">
-                  <legend className="mb-1 text-[13px] font-medium">{t(`settings.tenants.shared.${k}` as MessageKey)}</legend>
+                  <legend className="mb-1 text-body font-medium">{t(`settings.tenants.shared.${k}` as MessageKey)}</legend>
                   {list.map((o) => (
-                    <label key={o.id} className="flex items-center gap-2 text-[13px]">
+                    <label key={o.id} className="flex items-center gap-2 text-body">
                       <input type="checkbox" value={`${p}${o.id}`} {...f.register('shared')} />
                       {o.name}
-                      {o.type && <span className="font-mono text-[11.5px] text-muted">{o.type}</span>}
+                      {o.type && <span className="font-mono text-micro text-muted">{o.type}</span>}
                     </label>
                   ))}
                 </fieldset>

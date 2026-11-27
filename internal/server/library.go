@@ -390,6 +390,9 @@ type resolved struct {
 	Chain []blueprintRec
 	Items []api.LibraryItem
 	Decls []api.Declaration
+	// TemplateErrors are the items whose templates did not render for the
+	// device (templates.go); their payload goes out still marked.
+	TemplateErrors []string
 }
 
 // resolveDevice evaluates the device's blueprint chain against its facts.
@@ -422,7 +425,11 @@ func resolveDevice(ctx context.Context, q pgx.Tx, deviceID string) (resolved, er
 	if res.Items, err = libraryItems(ctx, q, deviceID, ids); err != nil {
 		return res, err
 	}
-	if res.Decls, err = api.Merge(res.Items); err != nil {
+	rendered, err := renderItems(ctx, q, deviceID, res.Items, &res.TemplateErrors)
+	if err != nil {
+		return res, err
+	}
+	if res.Decls, err = api.Merge(rendered); err != nil {
 		return res, err
 	}
 	return res, applyExceptions(ctx, q, deviceID, res.Decls) // risk exceptions (exceptions.go)

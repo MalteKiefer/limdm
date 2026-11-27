@@ -36,14 +36,14 @@ function NavItem({ nav, collapsed, count }: { nav: NonNullable<Area['nav']>; col
       to={nav.to}
       aria-current={on ? 'page' : undefined}
       className={cx(
-        'group flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13.5px] font-medium transition-colors',
+        'group flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-body font-medium transition-colors',
         on ? 'bg-surface text-fg shadow-sm ring-1 ring-line' : 'text-fg-2 hover:bg-surface-2 hover:text-fg',
         collapsed && 'justify-center px-0',
       )}
     >
       <nav.icon size={17} aria-hidden className={on ? 'text-accent' : 'text-muted group-hover:text-fg'} />
       {collapsed ? <span className="sr-only">{label}</span> : <span className="flex-1 truncate">{label}</span>}
-      {!collapsed && !!count && <span className="num rounded-full bg-accent px-1.5 text-[11px] font-semibold text-on-accent">{count}</span>}
+      {!collapsed && !!count && <span className="num rounded-full bg-accent px-1.5 text-micro font-semibold text-on-accent">{count}</span>}
     </Link>
   )
   return collapsed ? <Tip label={label}>{link}</Tip> : link
@@ -58,7 +58,7 @@ function NavViews({ list, to }: { list: string; to: string }) {
     <ul className="mb-1 ml-[19px] flex flex-col border-l border-line pl-2">
       {views.slice(0, 8).map((v) => (
         <li key={v.id}>
-          <Link to={to} search={{ q: v.query || undefined, sort: v.sort || undefined }} className={cx('flex items-center gap-2 rounded px-2 py-1 text-[12.5px]', path === to && search.q === v.query ? 'font-medium text-fg' : 'text-muted hover:text-fg')}>
+          <Link to={to} search={{ q: v.query || undefined, sort: v.sort || undefined }} className={cx('flex items-center gap-2 rounded px-2 py-1 text-meta', path === to && search.q === v.query ? 'font-medium text-fg' : 'text-muted hover:text-fg')}>
             {v.shared ? <Users size={12} aria-hidden /> : <Bookmark size={12} aria-hidden />}
             <span className="truncate">{v.name}</span>
           </Link>
@@ -80,8 +80,8 @@ function TenantSwitch({ collapsed }: { collapsed: boolean }) {
       {!collapsed && (
         <>
           <span className="min-w-0 flex-1">
-            <span className="block text-[11px] text-muted">{t('tenant.label')}</span>
-            <span className="block truncate text-[13px] font-medium">{name}</span>
+            <span className="block text-micro text-muted">{t('tenant.label')}</span>
+            <span className="block truncate text-body font-medium">{name}</span>
           </span>
           {tenants.data && <ChevronsUpDown size={14} className="text-muted" aria-hidden />}
         </>
@@ -115,7 +115,7 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
     <nav aria-label={t('nav.main')} className="flex h-full flex-col gap-4 overflow-y-auto p-3" onClick={(e) => (e.target as HTMLElement).closest('a') && onNavigate?.()}>
       <div className={cx('flex items-center gap-2 px-1.5 pt-1', collapsed && 'justify-center px-0')}>
         <Logo />
-        {!collapsed && <span className="truncate text-[15px] font-semibold tracking-tight">{me.company_name || t('app.name')}</span>}
+        {!collapsed && <span className="truncate text-title font-semibold tracking-tight">{me.company_name || t('app.name')}</span>}
       </div>
       <TenantSwitch collapsed={collapsed} />
       <ul className="flex flex-col gap-0.5">
@@ -163,8 +163,8 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
           <Avatar name={login} size={28} />
           {!collapsed && (
             <span className="min-w-0 leading-tight">
-              <span className="block truncate text-[13px] font-medium">{login}</span>
-              <span className="block text-[11.5px] text-muted">{t(`role.${me.role}` as MessageKey)}</span>
+              <span className="block truncate text-body font-medium">{login}</span>
+              <span className="block text-micro text-muted">{t(`role.${me.role}` as MessageKey)}</span>
             </span>
           )}
         </button>
@@ -215,7 +215,7 @@ function Topbar({ onMenu, onSearch, collapsed }: { onMenu: () => void; onSearch:
         <span className="kbd hidden sm:inline">{t('top.searchKey')}</span>
       </button>
       <div className="ml-auto flex items-center gap-1">
-        <span className="mr-2 hidden items-center gap-1.5 text-[12px] text-muted md:flex" title={t('top.liveHint')} role="status">
+        <span className="mr-2 hidden items-center gap-1.5 text-meta text-muted md:flex" title={t('top.liveHint')} role="status">
           <span className={cx('size-2 rounded-full', live === 'live' ? 'live-dot bg-ok' : live === 'connecting' ? 'bg-warn-mark' : 'bg-off')} aria-hidden />
           {live === 'live' ? t('top.live') : live === 'connecting' ? t('top.liveConnecting') : t('top.liveOffline')}
         </span>
@@ -231,7 +231,7 @@ function Topbar({ onMenu, onSearch, collapsed }: { onMenu: () => void; onSearch:
         </Tip>
         <Link to="/inbox" className="btn btn-ghost relative px-2" aria-label={t('top.inbox', { count: inbox })}>
           <Bell size={17} />
-          {inbox > 0 && <span className="num absolute top-0.5 right-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-bad px-1 text-[10px] font-semibold text-surface">{inbox}</span>}
+          {inbox > 0 && <span className="num absolute top-0.5 right-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-bad px-1 text-micro font-semibold text-surface">{inbox}</span>}
         </Link>
       </div>
     </header>
@@ -278,7 +278,7 @@ export function Shell() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
   return (
-    <div className={cx('min-h-dvh lg:grid', collapsed ? 'lg:grid-cols-[64px_1fr]' : 'lg:grid-cols-[244px_1fr]')}>
+    <div className={cx('min-h-dvh lg:grid', collapsed ? 'lg:grid-cols-[64px_1fr]' : 'lg:grid-cols-[244px_1fr]')} style={{ '--nav-w': collapsed ? '64px' : '244px' } as React.CSSProperties}>
       <SvgDefs />
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-surface focus:p-2">
         {t('app.skip')}
@@ -297,7 +297,7 @@ export function Shell() {
       </Dialog.Root>
       <div className="flex min-w-0 flex-col">
         <Topbar onMenu={() => setMobileNav(true)} onSearch={() => setPalette(true)} collapsed={collapsed} />
-        <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1600px] min-w-0 flex-1 px-4 py-5 outline-none lg:px-6">
+        <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1600px] min-w-0 flex-1 px-4 pt-5 pb-[calc(1.25rem+var(--bulk-h,0px))] outline-none lg:px-6">
           <ErrorBoundary key={path}>
             <Outlet />
           </ErrorBoundary>

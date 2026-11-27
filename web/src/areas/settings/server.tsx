@@ -13,7 +13,7 @@ import { useT, type MessageKey } from '../../i18n'
 import { useSaveSection, useSettings, type Section, type Settings, type SettingsInput } from './api'
 import { Facts, ListField, SectionHead, SelectField, SettingsForm, TextField, Toggle } from '../../components/settingsform'
 import { badNet, fileBase64, isPEM, isSyslog, lines, parseRoleGroups, roleGroupsText, unlines } from './logic'
-import { blobURL } from '../../lib/blob'
+import { FilePreview } from '../../lib/blob'
 
 
 /** Loads the settings once and hands them to a section. */
@@ -30,6 +30,8 @@ function WithSettings({ children }: { children: (s: Settings, save: (section: Se
     branding: useSaveSection('branding'),
     operations: useSaveSection('operations'),
     retention: useSaveSection('retention'),
+    enrollment: useSaveSection('enrollment'),
+    cve_feeds: useSaveSection('cve_feeds'),
   }
   if (q.isPending) return <LoadingState rows={6} />
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
@@ -71,7 +73,7 @@ export function General() {
 
 function Branding({ s, save, ro }: { s: Settings; save: (section: Section, body: SettingsInput) => Promise<unknown>; ro: boolean }) {
   const t = useT()
-  const [logo, setLogo] = useState<{ b64: string; url: string } | null>(null)
+  const [logo, setLogo] = useState<{ b64: string; file: Blob } | null>(null)
   const [remove, setRemove] = useState(false)
   const [v, setV] = useState(0) // reloads the logo preview after a save
   return (
@@ -92,7 +94,11 @@ function Branding({ s, save, ro }: { s: Settings; save: (section: Section, body:
           <Field label={t('settings.branding.logo')} help={t('settings.branding.logoHelp')}>
             {({ id, describedBy }) => (
               <div className="flex flex-wrap items-center gap-3">
-                {(logo || (s.has_logo && !remove)) && <img src={blobURL(logo?.url) ?? `/branding/logo.png?v=${v}`} alt={t('settings.branding.preview')} className="size-14 rounded-md border border-line bg-surface-2 object-contain" />}
+                {logo ? (
+                  <FilePreview file={logo.file} label={t('settings.branding.preview')} className="size-14 rounded-md border border-line bg-surface-2 object-contain" />
+                ) : (
+                  s.has_logo && !remove && <img src={`/branding/logo.png?v=${v}`} alt={t('settings.branding.preview')} className="size-14 rounded-md border border-line bg-surface-2 object-contain" />
+                )}
                 <label className="btn cursor-pointer">
                   <ImageUp size={14} aria-hidden /> {t('settings.branding.choose')}
                   <input
@@ -105,7 +111,7 @@ function Branding({ s, save, ro }: { s: Settings; save: (section: Section, body:
                       const file = e.target.files?.[0]
                       if (!file) return
                       void fileBase64(file).then((b64) => {
-                        setLogo({ b64, url: URL.createObjectURL(file) })
+                        setLogo({ b64, file })
                         setRemove(false)
                         f.setValue('logo', file.name, { shouldDirty: true })
                       })
@@ -152,7 +158,7 @@ export function Access() {
                 <FormSection title={t('settings.access.console')} description={t('settings.access.consoleHelp', { ip: s.client_ip })}>
                   <ListField form={f} name="console_allow" label={t('settings.access.allow')} help={t('settings.access.allowHelp')} placeholder="10.0.0.0/8 2001:db8::/32" />
                   <ListField form={f} name="console_block" label={t('settings.access.block')} help={t('settings.access.blockHelp')} placeholder="203.0.113.0/24" />
-                  <p className="text-[12.5px] text-muted">{t('settings.access.lockout')}</p>
+                  <p className="text-meta text-muted">{t('settings.access.lockout')}</p>
                 </FormSection>
                 <FormSection title={t('settings.access.scim')} description={t('settings.access.scimHelp')}>
                   <ListField form={f} name="scim_allow" label={t('settings.access.scimAllow')} help={t('settings.access.empty')} placeholder="198.51.100.0/24" rows={2} />
@@ -162,6 +168,47 @@ export function Access() {
           </SettingsForm>
         </>
       )}
+    </WithSettings>
+  )
+}
+
+/** Limits of new enrollment tokens and the TPM requirement. */
+export function Enrollment() {
+  const t = useT()
+  return (
+    <WithSettings>
+      {(s, save, ro) => {
+        const e = s.enrollment
+        const n = (max: number) => z.number({ message: t('settings.err.number') }).int().min(1, t('settings.enroll.range', { max })).max(max, t('settings.enroll.range', { max }))
+        return (
+          <>
+            <SectionHead title={t('settings.nav.enroll')} sub={t('settings.enroll.sub')} />
+            <SettingsForm
+              readOnly={ro}
+              schema={z
+                .object({ max_uses: n(500), max_days: n(30), default_uses: n(500), default_days: n(30), require_tpm: z.boolean() })
+                .refine((v) => v.default_uses <= v.max_uses, { path: ['default_uses'], message: t('settings.enroll.aboveMax') })
+                .refine((v) => v.default_days <= v.max_days, { path: ['default_days'], message: t('settings.enroll.aboveMax') })}
+              values={{ max_uses: e.max_uses, max_days: e.max_days, default_uses: e.default_uses, default_days: e.default_days, require_tpm: e.require_tpm }}
+              onSave={(v) => save('enrollment', { enrollment: v })}
+            >
+              {(f) => (
+                <>
+                  <FormSection title={t('settings.enroll.tokens')} description={t('settings.enroll.tokensHelp')}>
+                    <TextField form={f} name="max_uses" type="number" label={t('settings.enroll.maxUses')} help={t('settings.enroll.range', { max: 500 })} required />
+                    <TextField form={f} name="max_days" type="number" label={t('settings.enroll.maxDays')} help={t('settings.enroll.range', { max: 30 })} required />
+                    <TextField form={f} name="default_uses" type="number" label={t('settings.enroll.defaultUses')} required />
+                    <TextField form={f} name="default_days" type="number" label={t('settings.enroll.defaultDays')} required />
+                  </FormSection>
+                  <FormSection title={t('settings.enroll.tpm')} description={t('settings.enroll.tpmHelp')}>
+                    <Toggle form={f} name="require_tpm" label={t('settings.enroll.requireTpm')} help={t('settings.enroll.requireTpmHelp')} />
+                  </FormSection>
+                </>
+              )}
+            </SettingsForm>
+          </>
+        )
+      }}
     </WithSettings>
   )
 }
@@ -244,13 +291,13 @@ export function SignIn() {
             {(f) => (
               <>
                 <FormSection title={t('settings.signin.oidc')} description={t('settings.signin.oidcHelp')}>
-                  <Facts rows={[[t('settings.signin.redirect'), <code className="font-mono text-[12.5px] break-all">{s.redirect_uri}</code>]]} />
+                  <Facts rows={[[t('settings.signin.redirect'), <code className="font-mono text-meta break-all">{s.redirect_uri}</code>]]} />
                   <TextField form={f} name="oidc_issuer" label={t('settings.signin.issuer')} placeholder="https://accounts.google.com" mono />
                   <TextField form={f} name="oidc_client_id" label={t('settings.signin.clientId')} mono />
                   <TextField form={f} name="oidc_client_secret" type="password" autoComplete="new-password" label={t('settings.signin.secret')} help={s.has_oidc_secret ? t('settings.signin.secretKept') : t('settings.signin.secretNone')} />
                   {s.has_oidc_secret && <Toggle form={f} name="clear_secret" label={t('settings.signin.secretClear')} />}
                   <TextField form={f} name="allowed_domain" label={t('settings.signin.domain')} help={t('settings.signin.domainHelp')} placeholder="example.com" />
-                  <p className="text-[12.5px] text-muted">{t('settings.signin.checked')}</p>
+                  <p className="text-meta text-muted">{t('settings.signin.checked')}</p>
                 </FormSection>
                 <FormSection title={t('settings.signin.mfa')} description={t('settings.signin.mfaHelp')}>
                   <Toggle form={f} name="require_mfa" label={t('settings.signin.mfaToggle')} help={t('settings.signin.mfaToggleHelp')} />
@@ -319,8 +366,8 @@ export function Approvals() {
           <SectionHead title={t('settings.nav.approvals')} sub={t('settings.approvals.sub')} />
           <SettingsForm
             readOnly={ro}
-            schema={z.object({ four_eyes: z.boolean(), four_eyes_recovery: z.boolean(), four_eyes_shell: z.boolean() })}
-            values={{ four_eyes: !!s.four_eyes, four_eyes_recovery: !!s.four_eyes_recovery, four_eyes_shell: !!s.four_eyes_shell }}
+            schema={z.object({ four_eyes: z.boolean(), four_eyes_recovery: z.boolean(), four_eyes_shell: z.boolean(), four_eyes_workloads: z.boolean(), workloads_helpdesk: z.boolean() })}
+            values={{ four_eyes: !!s.four_eyes, four_eyes_recovery: !!s.four_eyes_recovery, four_eyes_shell: !!s.four_eyes_shell, four_eyes_workloads: !!s.four_eyes_workloads, workloads_helpdesk: !!s.workloads_helpdesk }}
             onSave={(v) => save('security', v)}
           >
             {(f) => {
@@ -330,9 +377,11 @@ export function Approvals() {
                   <Toggle form={f} name="four_eyes" label={t('settings.approvals.toggle')} help={t('settings.approvals.twoAdmins')} />
                   <Toggle form={f} name="four_eyes_recovery" label={t('settings.approvals.recovery')} disabled={!on} />
                   <Toggle form={f} name="four_eyes_shell" label={t('settings.approvals.shell')} disabled={!on} />
-                  <a className="text-[13px] text-accent underline-offset-2 hover:underline" href="/app/inbox">
+                  <Toggle form={f} name="four_eyes_workloads" label={t('settings.approvals.workloads')} disabled={!on} />
+                  <a className="text-body text-accent underline-offset-2 hover:underline" href="/app/inbox">
                     {t('settings.approvals.inbox')}
                   </a>
+                  <Toggle form={f} name="workloads_helpdesk" label={t('settings.approvals.workloadsHelpdesk')} help={t('settings.approvals.workloadsHelpdeskHelp')} />
                 </FormSection>
               )
             }}
@@ -418,7 +467,7 @@ export function Retention() {
                       />
                     )
                   })}
-                  <p className="text-[12.5px] text-muted">{t('settings.retention.backups')}</p>
+                  <p className="text-meta text-muted">{t('settings.retention.backups')}</p>
                 </FormSection>
               )}
             </SettingsForm>
@@ -512,8 +561,8 @@ export function Monitoring({ s, save, ro }: { s: Settings; save: (section: Secti
           {s.webhook_secret && (
             <Facts
               rows={[
-                [t('settings.monitor.key'), <code className="font-mono text-[12px] break-all">{s.webhook_secret}</code>],
-                [t('settings.monitor.header'), <code className="font-mono text-[12px]">X-LiMDM-Signature: sha256=HMAC-SHA256(key, timestamp + "." + body)</code>],
+                [t('settings.monitor.key'), <code className="font-mono text-meta break-all">{s.webhook_secret}</code>],
+                [t('settings.monitor.header'), <code className="font-mono text-meta">X-LiMDM-Signature: sha256=HMAC-SHA256(key, timestamp + "." + body)</code>],
               ]}
             />
           )}

@@ -117,7 +117,8 @@ declaration per type:
 * **List types** are combined:
   * packages and services: union, removal and disabling win over installation and enabling;
   * files: by path, a later item wins;
-  * firewall rules: union, `enforce` if any item enforces;
+  * firewall rules: union, `enforce` if any item enforces, zones of the same name combined,
+    outbound `deny` wins over `allow`;
   * OS minimum versions;
   * package sources, CA certificates, recurring scripts, local accounts, polkit rules and
     sudo rules: by name, a later item wins; switched off package sources are combined;
@@ -139,7 +140,7 @@ People and groups come from SCIM 2.0 or Google Workspace ([configuration.md](con
 
 * A device's **primary user** links it to a person; their groups and department become
   rule facts, and group assignments select the blueprint.
-* **Desktop users** are listed per device (`username email [admin]`). The agent creates
+* **Desktop users** are listed per device (user name, mail address, admin flag). The agent creates
   these accounts and manages admin group membership ([desktop-login.md](desktop-login.md)).
 * A person deactivated in the directory is removed from the account list of every device
   at its next check in; the agent then locks the account (home directory kept). Accounts
@@ -209,14 +210,18 @@ One off actions from the device page or the device list:
 | `diagnostics` | collect redacted agent logs | admin, helpdesk |
 | `user_create`, `user_admin`, `user_delete` | create a local account, change its admin right, delete it | admin |
 | `app_install`, `app_remove`, `software_remove` | install or remove catalog apps, remove software found on the device | admin |
-| `script` | root shell script with parameters and a timeout, only on devices enrolled with `allow_scripts` | admin |
+| `script` | root shell script with parameters and a timeout, only on devices enrolled with `allow_scripts` (no protection against admins, see below) | admin |
 | `allow_uninstall` | allow removing the agent package for one hour | admin |
 | `lost`, `found` | lost mode and its end ([disk-encryption.md](disk-encryption.md#lost-or-stolen-devices)) | admin |
 | `wipe` | erase the device | admin |
 
 `lost` and `wipe` are confirmed by typing the host name and are sent to one device at a
 time. With four eyes approval on, `wipe`, `lost` and `script` wait for a second admin
-([security.md](security.md#four-eyes-approval)). The interactive support terminal
+([security.md](security.md#four-eyes-approval)). `allow_scripts` does not keep an
+administrator out of a device: other declarations (repositories, packages, sudo, local
+users, artifacts) also run code as root. Four eyes approval, signed commands and the audit
+log are the controls against a single administrator
+([security.md](security.md#known-limitations-of-the-agent)). The interactive support terminal
 (`shell`) is started on the device's remote shell page and decided by its own setting
 ([remote-shell.md](remote-shell.md)); it is no command of the device page or the admin
 API.

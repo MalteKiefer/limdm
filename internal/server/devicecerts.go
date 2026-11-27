@@ -63,10 +63,38 @@ func (c netCertRow) State() string {
 	return "valid"
 }
 
+// netCertDNSName is the DNS SAN of a network certificate: the device ID
+// under the configured domain, never a name the device reports about
+// itself; "" without a domain.
+func netCertDNSName(deviceID, domain string) string {
+	if domain == "" {
+		return ""
+	}
+	return deviceID + "." + domain
+}
+
+// validCertDomain accepts a DNS domain for netCertDNSName: lower case
+// labels of at most 63 characters, room for the device ID in front.
+func validCertDomain(d string) bool {
+	if d == "" {
+		return true
+	}
+	if len(d) > 200 || !certHostRe.MatchString(d) || d != strings.ToLower(d) || strings.Contains(d, "..") {
+		return false
+	}
+	for _, l := range strings.Split(d, ".") {
+		if len(l) > 63 || strings.HasPrefix(l, "-") || strings.HasSuffix(l, "-") {
+			return false
+		}
+	}
+	return true
+}
+
 // signNetworkCSR issues an EAP-TLS client certificate. Template: CN is the
-// device ID, SANs are the host name (DNS), urn:limdm:device:<id> (URI) and
-// the primary user's email when known. The CSR contributes only its key.
-func (ca *deviceCA) signNetworkCSR(csrPEM, deviceID, hostname, email string) (string, netCertRow, error) {
+// device ID, SANs are urn:limdm:device:<id> (URI), dnsName (built by the
+// server from the device ID) and the email of the primary user as the
+// directory knows it. The CSR contributes only its key.
+func (ca *deviceCA) signNetworkCSR(csrPEM, deviceID, dnsName, email string) (string, netCertRow, error) {
 	csr, err := parseCSR(csrPEM)
 	if err != nil {
 		return "", netCertRow{}, err
@@ -83,9 +111,9 @@ func (ca *deviceCA) signNetworkCSR(csrPEM, deviceID, hostname, email string) (st
 		URIs: []*url.URL{uri},
 	}
 	sans := []string{"URI:" + uri.String()}
-	if certHostRe.MatchString(hostname) {
-		tmpl.DNSNames = []string{hostname}
-		sans = append(sans, "DNS:"+hostname)
+	if certHostRe.MatchString(dnsName) {
+		tmpl.DNSNames = []string{dnsName}
+		sans = append(sans, "DNS:"+dnsName)
 	}
 	if a, err := mail.ParseAddress(email); err == nil && a.Address == email {
 		tmpl.EmailAddresses = []string{email}
@@ -125,13 +153,15 @@ func (s *Server) networkCert(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusForbidden, "no EAP-TLS network profile applies to this device")
 		return
 	}
-	var host, email string
-	if err := tx.QueryRow(ctx, `SELECT d.hostname, COALESCE(u.email, d.users->0->>'email', '')
-		FROM devices d LEFT JOIN dir_users u ON u.id=d.primary_user_id AND u.active WHERE d.id=$1`, id).Scan(&host, &email); err != nil {
+	// only the directory vouches for an address: the users a device reports
+	// (devices.users) are its own claim and never reach a certificate
+	var email string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(u.email, '')
+		FROM devices d LEFT JOIN dir_users u ON u.id=d.primary_user_id AND u.active WHERE d.id=$1`, id).Scan(&email); err != nil {
 		s.failAPI(w, err)
 		return
 	}
-	cert, row, err := s.netCA.signNetworkCSR(req.CSR, id, host, email)
+	cert, row, err := s.netCA.signNetworkCSR(req.CSR, id, netCertDNSName(id, s.settings().NetCertDomain), email)
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid certificate signing request")
 		return

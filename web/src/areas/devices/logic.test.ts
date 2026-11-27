@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { enrollConf, installCommand } from './enrolltext'
-import { accountActionable, badParamLine, filterByName, formatUsers, mayCommand, parseTags, parseUsers, pkgValue, statusTone, usedPct } from './logic'
+import { accountActionable, badParamLine, connectionState, filterByName, filterRules, firewallHealth, formatAttrs, mayCommand, orderNotices, parseAttrs, parseTags, pkgValue, statusTone, suggestUsername, updatesHealth, usedPct, userError } from './logic'
 
 describe('enrollment texts', () => {
   it('prints the install command and enroll.conf', () => {
@@ -18,17 +18,35 @@ describe('devices logic', () => {
     expect(mayCommand('wipe', { admin: true, commands: true })).toBe(true)
   })
 
-  it('parses desktop users like the console', () => {
-    const r = parseUsers('jdoe Jane@Example.com admin\n\n  max max@example.com ')
-    expect(r.error).toBeUndefined()
-    expect(r.users).toEqual([
-      { username: 'jdoe', email: 'jane@example.com', admin: true },
-      { username: 'max', email: 'max@example.com', admin: false },
-    ])
-    expect(formatUsers(r.users)).toBe('jdoe jane@example.com admin\nmax max@example.com')
-    expect(parseUsers('root r@x.de').error).toBe('root r@x.de')
-    expect(parseUsers('a a@x.de\na b@x.de').error).toBe('a b@x.de')
-    expect(parseUsers('a a@x.de sudo').error).toBeDefined()
+  it('checks desktop users like the server', () => {
+    const u = (username: string, email = 'a@x.de') => ({ username, email, admin: false })
+    expect(userError([u('jdoe')], 0)).toBeUndefined()
+    expect(userError([u('root')], 0)).toBe('name')
+    expect(userError([u('9x')], 0)).toBe('name')
+    expect(userError([u('max', 'nomail')], 0)).toBe('email')
+    expect(userError([u('a'), u('a', 'b@x.de')], 1)).toBe('dup')
+    expect(suggestUsername('Jane.Doe-2@Example.com')).toBe('janedoe-2')
+    expect(suggestUsername('42max@x.de')).toBe('max')
+  })
+
+  it('derives the health cards and the notice order', () => {
+    expect(updatesHealth([])).toEqual({ tone: 'off', state: 'unknown' })
+    expect(updatesHealth([{ id: 'updates.security', status: 'fail', detail: '3 pending' }, { id: 'updates.reboot', status: 'fail' }])).toEqual({ tone: 'bad', state: 'pending', detail: '3 pending' })
+    expect(updatesHealth([{ id: 'updates.security', status: 'pass' }, { id: 'updates.reboot', status: 'fail' }]).state).toBe('reboot')
+    expect(updatesHealth([{ id: 'updates.security', status: 'pass' }, { id: 'updates.auto', status: 'fail' }]).state).toBe('manual')
+    expect(updatesHealth([{ id: 'updates.security', status: 'pass' }, { id: 'updates.auto', status: 'pass', detail: 'mode all' }])).toEqual({ tone: 'ok', state: 'current', detail: 'mode all' })
+    expect(firewallHealth([{ id: 'firewall.active', status: 'fail' }], [{ type: 'com.limdm.firewall' }])).toEqual({ tone: 'bad', state: 'inactive', managed: true })
+    expect(firewallHealth([], []).state).toBe('unknown')
+    expect(connectionState(null, 'pending').state).toBe('never')
+    expect(connectionState('2026-01-01T00:00:00Z', 'stale').tone).toBe('warn')
+    expect(orderNotices([{ level: 'info' as const }, { level: 'compliance' as const }, { level: 'security' as const }]).map((n) => n.level)).toEqual(['security', 'compliance', 'info'])
+  })
+
+  it('parses template attributes', () => {
+    expect(parseAttrs('site = ber\n\nnet=10.0.0.0/8')).toEqual({ attrs: { site: 'ber', net: '10.0.0.0/8' } })
+    expect(parseAttrs('1x=y').error).toBe('1x=y')
+    expect(parseAttrs('a=1\na=2').error).toBe('a=2')
+    expect(formatAttrs({ a: '1', b: 'x=y' })).toBe('a=1\nb=x=y')
   })
 
   it('parses tags', () => {
@@ -55,5 +73,16 @@ describe('devices logic', () => {
     expect(usedPct(0, 0)).toBe(0)
     expect(accountActionable({ name: 'root' })).toBe(false)
     expect(accountActionable({ name: 'jdoe', source: 'local' })).toBe(true)
+  })
+
+  it('filters firewall rules by text, place, comment and service', () => {
+    const rules = [
+      { match: 'ufw : ufw allow 8080/tcp', comment: 'web' },
+      { match: 'firewalld public: --zone=public --add-service=ssh', service: 'ssh' },
+    ]
+    expect(filterRules(rules, '')).toHaveLength(2)
+    expect(filterRules(rules, 'WEB')).toEqual([rules[0]])
+    expect(filterRules(rules, 'public')).toEqual([rules[1]])
+    expect(filterRules(rules, 'nope')).toEqual([])
   })
 })

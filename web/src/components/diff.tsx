@@ -30,7 +30,7 @@ export function DiffViewer({ before, after, label }: { before: string; after: st
   const removed = rows.filter((r) => r.kind === '-').length
   return (
     <figure className="overflow-hidden rounded-lg border border-line">
-      <figcaption className="flex gap-3 border-b border-line bg-surface-2 px-3 py-1.5 text-[12px] text-muted">
+      <figcaption className="flex gap-3 border-b border-line bg-surface-2 px-3 py-1.5 text-meta text-muted">
         <span className="font-medium text-fg">{label ?? t('diff.title')}</span>
         {added + removed === 0 ? (
           <span>{t('diff.none')}</span>
@@ -42,7 +42,7 @@ export function DiffViewer({ before, after, label }: { before: string; after: st
         )}
       </figcaption>
       <div className="max-h-[480px] overflow-auto">
-        <table className="w-full font-mono text-[12px] leading-5">
+        <table className="w-full font-mono text-meta leading-5">
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} className={cx(r.kind === '+' && 'bg-ok-soft', r.kind === '-' && 'bg-bad-soft')}>

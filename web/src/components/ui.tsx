@@ -36,7 +36,7 @@ export function StatusPill({ status, compact }: { status: DeviceStatus; compact?
   const I = statusIcon[status] ?? CircleDashed
   const label = t(`status.${status}` as MessageKey)
   return (
-    <span className={cx('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium whitespace-nowrap', toneClass[statusTone[status] ?? 'off'])}>
+    <span className={cx('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-meta font-medium whitespace-nowrap', toneClass[statusTone[status] ?? 'off'])}>
       <I size={13} aria-hidden />
       {compact ? <span className="sr-only">{label}</span> : label}
     </span>
@@ -50,7 +50,7 @@ export function Badge({ children, tone = 'neutral' }: { children: ReactNode; ton
     info: 'bg-info-soft text-info',
     ...toneClass,
   }[tone]
-  return <span className={cx('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-medium whitespace-nowrap', c)}>{children}</span>
+  return <span className={cx('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-meta font-medium whitespace-nowrap', c)}>{children}</span>
 }
 
 export function Card({ title, sub, action, children, className, bodyClass, id }: { title?: ReactNode; sub?: ReactNode; action?: ReactNode; children: ReactNode; className?: string; bodyClass?: string; id?: string }) {
@@ -59,10 +59,10 @@ export function Card({ title, sub, action, children, className, bodyClass, id }:
       {title && (
         <header className="flex items-start justify-between gap-3 px-[var(--pad-card)] pt-[var(--pad-card)]">
           <div className="min-w-0">
-            <h2 id={id} className="text-[14px] font-semibold">
+            <h2 id={id} className="text-title font-semibold">
               {title}
             </h2>
-            {sub && <p className="mt-0.5 text-[12.5px] text-muted">{sub}</p>}
+            {sub && <p className="mt-0.5 text-meta text-muted">{sub}</p>}
           </div>
           {action}
         </header>
@@ -76,7 +76,7 @@ export function PageHeader({ title, sub, actions, children }: { title: ReactNode
   return (
     <header className="mb-[var(--gap)] flex flex-wrap items-end justify-between gap-3">
       <div className="min-w-0">
-        <h1 className="text-[22px] leading-tight font-semibold tracking-[-0.01em]">{title}</h1>
+        <h1 className="text-heading font-semibold">{title}</h1>
         {sub && <p className="mt-1 text-muted">{sub}</p>}
         {children}
       </div>
@@ -92,7 +92,7 @@ export function Delta({ value, unit, goodUp = true, label }: { value: number; un
   const good = flat ? null : value > 0 === goodUp
   const I = flat ? Minus : value > 0 ? ArrowUpRight : ArrowDownRight
   return (
-    <span className={cx('num inline-flex items-center gap-0.5 text-[12px] font-medium', good === null ? 'text-muted' : good ? 'text-ok' : 'text-bad')}>
+    <span className={cx('num inline-flex items-center gap-0.5 text-meta font-medium', good === null ? 'text-muted' : good ? 'text-ok' : 'text-bad')}>
       <I size={14} aria-hidden />
       {flat ? t('common.unchanged') : `${value > 0 ? '+' : '−'}${fmt1(Math.abs(value))} ${unit ?? t('common.points')}`}
       {label && <span className="font-normal text-muted">&nbsp;{label}</span>}
@@ -109,7 +109,7 @@ export function Avatar({ name, size = 24 }: { name: string; size?: number }) {
     .slice(0, 2)
     .join('')
   return (
-    <span aria-hidden className="inline-grid shrink-0 place-items-center rounded-full bg-surface-2 text-[10px] font-semibold text-fg-2 ring-1 ring-line" style={{ width: size, height: size }}>
+    <span aria-hidden className="inline-grid shrink-0 place-items-center rounded-full bg-surface-2 text-micro font-semibold text-fg-2 ring-1 ring-line" style={{ width: size, height: size }}>
       {ini || '?'}
     </span>
   )
@@ -121,7 +121,7 @@ export function Tip({ label, children }: { label: string; children: ReactElement
       <Tooltip.Trigger render={children} />
       <Tooltip.Portal>
         <Tooltip.Positioner sideOffset={6} className="z-[70]">
-          <Tooltip.Popup className="rounded-md bg-fg px-2 py-1 text-[12px] text-bg shadow-pop">{label}</Tooltip.Popup>
+          <Tooltip.Popup className="rounded-md bg-fg px-2 py-1 text-meta text-bg shadow-pop">{label}</Tooltip.Popup>
         </Tooltip.Positioner>
       </Tooltip.Portal>
     </Tooltip.Root>
@@ -141,7 +141,7 @@ export function ActionMenu({ trigger, items, align = 'end' }: { trigger: ReactEl
               it === 'sep' ? (
                 <div key={i} role="separator" className="my-1 h-px bg-line" />
               ) : 'group' in it ? (
-                <div key={i} className="px-2 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-muted uppercase">
+                <div key={i} className="px-2 pt-2 pb-1 text-micro font-semibold tracking-wide text-muted uppercase">
                   {it.group}
                 </div>
               ) : (
@@ -154,7 +154,7 @@ export function ActionMenu({ trigger, items, align = 'end' }: { trigger: ReactEl
                   {it.icon && <it.icon size={15} aria-hidden />}
                   <span className="flex-1">{it.label}</span>
                   {it.checked && <CheckCircle2 size={14} className="text-accent" aria-hidden />}
-                  {it.hint && <span className="text-[11px] text-muted">{it.hint}</span>}
+                  {it.hint && <span className="text-micro text-muted">{it.hint}</span>}
                 </Menu.Item>
               ),
             )}
@@ -196,7 +196,7 @@ export function Segmented<T extends string>({ value, onChange, options, label }:
             if (e.key === 'ArrowLeft') onChange(options[(i - 1 + options.length) % options.length].value)
           }}
           tabIndex={value === o.value ? 0 : -1}
-          className={cx('rounded px-2.5 py-1 text-[12.5px] font-medium', value === o.value ? 'bg-surface text-fg shadow-sm ring-1 ring-line' : 'text-muted hover:text-fg')}
+          className={cx('rounded px-2.5 py-1 text-meta font-medium', value === o.value ? 'bg-surface text-fg shadow-sm ring-1 ring-line' : 'text-muted hover:text-fg')}
         >
           {o.label}
         </button>
@@ -214,7 +214,7 @@ export function Modal({ open, onClose, title, description, children, footer, wid
         <Dialog.Popup className={cx('fade-in fixed top-[12vh] left-1/2 z-50 max-h-[80vh] w-[calc(100vw-32px)] -translate-x-1/2 overflow-y-auto rounded-xl border border-line bg-surface shadow-pop outline-none', wide ? 'max-w-2xl' : 'max-w-md')}>
           <div className="flex items-start justify-between gap-4 p-5 pb-0">
             <div>
-              <Dialog.Title className="text-[16px] font-semibold">{title}</Dialog.Title>
+              <Dialog.Title className="text-title font-semibold">{title}</Dialog.Title>
               {description && <Dialog.Description className="mt-1 text-muted">{description}</Dialog.Description>}
             </div>
             <Dialog.Close className="btn btn-ghost -mt-1 -mr-2 px-2" aria-label={t('common.close')}>

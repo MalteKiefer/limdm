@@ -166,14 +166,33 @@ func TestAppDevicesAPI(t *testing.T) {
 		t.Fatalf("bulk wipe: %d", code)
 	}
 
-	// the timeline merges events and the commands just sent, newest first
-	code, tl := call(auditor, "GET", "/api/v1/devices/d1/timeline?limit=1", "")
+	// the timeline merges events and the commands just sent, newest first;
+	// the helpdesk has no audit permission, so it sees no audit entries
+	code, tl := call(help, "GET", "/api/v1/devices/d1/timeline?limit=1", "")
 	if code != 200 || len(tl["items"].([]any)) != 1 || tl["next_cursor"] == nil || tl["items"].([]any)[0].(map[string]any)["kind"] != "command" {
 		t.Fatalf("timeline: %d %v", code, tl)
 	}
-	code, tl2 := call(auditor, "GET", "/api/v1/devices/d1/timeline?cursor="+tl["next_cursor"].(string), "")
+	code, tl2 := call(help, "GET", "/api/v1/devices/d1/timeline?cursor="+tl["next_cursor"].(string), "")
 	if code != 200 || len(tl2["items"].([]any)) != 1 || tl2["items"].([]any)[0].(map[string]any)["kind"] != "event" {
 		t.Fatalf("timeline page 2: %d %v", code, tl2)
+	}
+	if code, tl := call(help, "GET", "/api/v1/devices/d1/timeline?kind=audit", ""); code != 200 || len(tl["items"].([]any)) != 0 {
+		t.Fatalf("helpdesk audit timeline: %d %v", code, tl)
+	}
+	// compliance changes and, with the audit permission, audit entries about the device
+	if _, err := db.Exec(ctx, `INSERT INTO compliance_changes(device_id, at, check_id, status) VALUES ('d1', now(), 'c1', 'fail')`); err != nil {
+		t.Fatal(err)
+	}
+	code, tl = call(auditor, "GET", "/api/v1/devices/d1/timeline?kind=compliance", "")
+	if code != 200 || len(tl["items"].([]any)) != 1 || tl["items"].([]any)[0].(map[string]any)["title"] != "c1" || tl["items"].([]any)[0].(map[string]any)["status"] != "fail" {
+		t.Fatalf("compliance timeline: %d %v", code, tl)
+	}
+	code, tl = call(auditor, "GET", "/api/v1/devices/d1/timeline?kind=audit", "")
+	if code != 200 || len(tl["items"].([]any)) == 0 || tl["items"].([]any)[0].(map[string]any)["by"] != "admin@firma.de" {
+		t.Fatalf("audit timeline: %d %v", code, tl)
+	}
+	if code, _ := call(auditor, "GET", "/api/v1/devices/d1/timeline?kind=nope", ""); code != 400 {
+		t.Fatalf("bad kind: %d", code)
 	}
 
 	// agent update and recovery key: role checks and validation
@@ -211,7 +230,7 @@ func TestAppDevicesAPI(t *testing.T) {
 	}
 
 	// enrollment tokens
-	if code, _ := call(admin, "POST", "/api/v1/enrollment-tokens", `{"note":"batch","uses":0,"days":7}`); code != 422 {
+	if code, _ := call(admin, "POST", "/api/v1/enrollment-tokens", `{"note":"batch","uses":501,"days":7}`); code != 422 {
 		t.Fatalf("token validation: %d", code)
 	}
 	code, tok := call(admin, "POST", "/api/v1/enrollment-tokens", `{"note":"batch","uses":3,"days":7}`)

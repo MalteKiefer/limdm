@@ -1,7 +1,7 @@
 //go:build linux
 
 // limdm-desktop runs in the user's desktop session (XDG autostart). It shows
-// a tray icon with the device's state (details, check in, agent log) and asks
+// a tray icon with the device's state (details, sync, agent log) and asks
 // the user for what only they can provide, currently the disk passphrase to
 // create a recovery key. Dialogs are libadwaita message dialogs from the GTK
 // app (limdm-desktop-ui --dialog); zenity (GNOME) or kdialog (KDE) stand in

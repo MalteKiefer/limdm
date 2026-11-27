@@ -79,6 +79,7 @@ func (a *Agent) applyExtra() {
 	run(api.TypeNetwork, a.applyNetwork(x.Network))
 	run(api.TypePrinters, a.applyPrinters(x.Printers))
 	run(api.TypeArtifacts, a.applyArtifacts(x.Artifacts))
+	run(api.TypeHostname, a.applyHostname(x.Hostname))
 	a.ensureDependencies()
 	a.notifyEscrow()
 }
@@ -452,12 +453,23 @@ func (a *Agent) applyScripts(scripts []api.Script) error {
 	if a.state.ScriptRuns == nil {
 		a.state.ScriptRuns = map[string]time.Time{}
 	}
+	if a.state.ScriptSums == nil {
+		a.state.ScriptSums = map[string]string{}
+	}
 	var errs []error
 	for _, sc := range scripts {
-		if time.Since(a.state.ScriptRuns[sc.Name]) < time.Duration(sc.IntervalHours)*time.Hour {
+		now := time.Now().Round(0) // wall clock, suspend included
+		sum := scriptSum(sc)
+		if a.state.ScriptSums[sc.Name] == "" && !a.state.ScriptRuns[sc.Name].IsZero() {
+			a.state.ScriptSums[sc.Name] = sum // ran before agents kept sums: not a change
+		}
+		if !scriptDue(sc, a.state.ScriptRuns[sc.Name], a.state.ScriptSums[sc.Name], sum, now, scriptJitter(a.cfg.DeviceID, sc)) {
+			if _, seen := a.state.ScriptRuns[sc.Name]; !seen {
+				a.state.ScriptRuns[sc.Name] = now // a new schedule waits for its next slot
+			}
 			continue
 		}
-		a.state.ScriptRuns[sc.Name] = time.Now().Round(0) // wall clock, suspend included
+		a.state.ScriptRuns[sc.Name], a.state.ScriptSums[sc.Name] = now, sum
 		res, err := runScript(sc.Body, sc.Params, sc.TimeoutMinutes)
 		res.Name = sc.Name
 		if len(a.state.ScriptResults) >= 50 { // bounded while offline: the oldest go first

@@ -163,14 +163,15 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `POST /api/v1/tenants` | admin, global token | `{"name"}` | `201` `{"id"}`; `409` name taken; audited as `tenant.add` |
 | `GET /api/v1/devices/{id}/detail` | read | | `200` everything the device page shows: inventory, check results, declaration states, resolved chain, protective actions, recovery key metadata, network certificates, catalog state and app requests, 7 day metrics, and switches for the actions (shell, four eyes) |
 | `GET /api/v1/devices/{id}/packages` | read | | `200` `{"items": [{"name", "version", "arch"}]}` |
-| `GET /api/v1/devices/{id}/timeline` | read | `kind`, `limit`, `cursor` | `200` page of events, commands, script results, shell sessions (helpdesk: its own) and diagnostics bundles (admin, helpdesk), newest first |
+| `GET /api/v1/devices/{id}/timeline` | read | `kind`, `limit`, `cursor` | `200` page of events, commands, script results, shell sessions (helpdesk: its own), diagnostics bundles (admin, helpdesk), compliance check changes and audit entries about the device (audit permission; reading them is audited like `/api/v1/audit`), newest first |
 | `GET /api/v1/devices/{id}/diagnostics/{cid}` | helpdesk | | `200` text attachment; audited as `device.diagnostics.download` |
 | `POST /api/v1/devices/{id}/retire` | admin | | `200` device; audited as `device.retire` |
 | `DELETE /api/v1/devices/{id}` | admin | `confirm` (the host name) | `204`; `409` unless retired; audited as `device.delete` |
 | `POST /api/v1/devices/{id}/agent-update` | admin | `{"version"}` (empty: newest approved) | `202`; audited as `agent_update.request` |
 | `POST /api/v1/devices/{id}/recovery-keys/{uuid}/view` | helpdesk | `{"reason"}` | `200` `{"key", "rotate", ...}`; with four eyes for recovery keys `state` `reason`, `requested` or `pending` instead of the key; audited as `recovery.view` |
 | `POST /api/v1/devices/{id}/shell` | helpdesk, console session | `{"user"}` | `201` `{"id"}`, the terminal connects to `/shell/{id}/ws?csrf=`; `202` waits for approval; audited as `shell.start` |
-| `GET /api/v1/devices/{id}/shell-sessions`, `GET /api/v1/shell-sessions/{sid}` | read | | sessions; the transcript for admins and auditors after the end |
+| `GET /api/v1/devices/{id}/shell-sessions`, `GET /api/v1/shell-sessions/{sid}` | read | | sessions; the transcript (plain text) for admins and auditors after the end |
+| `GET /api/v1/shell-sessions/{sid}/transcript` | audit | | `200` raw recorded bytes of an ended session (`application/octet-stream`, `.log`), audited read; `409` while it runs |
 | `POST /api/v1/shell-sessions/{sid}/end` | helpdesk | | `204`; the user who started it or an admin |
 | `POST /api/v1/devices/bulk` | helpdesk | `{"ids": [...], "action": "command:sync", "params": {...}}`; actions `command:<type>` (not `lost`, `wipe`), `agent-update`, `tag-add`, `tag-remove` (admin) | `202` `{"status": "queued"}` or `{"status": "approval", "approvals": n}` |
 | `GET /api/v1/devices/catalog-apps` | read | | `200` enabled catalog apps (`id`, `name`) for bulk install and removal |
@@ -215,6 +216,17 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `GET /api/v1/activity/histogram` | read | the filters of `/api/v1/activity` | `200` counts per day and category, default the last 30 days, at most 400 |
 | `GET /api/v1/audit/status`, `POST /api/v1/audit/verify` | audit | | `200` first broken entry (0 = intact), last full verification, keyed from, known actions; `verify` checks the whole chain now (audited as `audit.verify`) |
 | `GET /api/v1/stats/updates` | read | `days` (1 to 400, default 30) | `200` devices with pending security updates (from the detail of the check `updates.security`), their sum, devices failing it for more than 14 days, devices on the newest approved agent release (else the newest reported); daily history in the global view |
+| `GET /api/v1/update-rings` | read | | `200` update rings of the tenant view with wave, pause, approval and devices (by their last check in), the newest 20 waves, devices in no ring; see [Patch management](patching.md#update-rings) |
+| `POST /api/v1/update-rings`, `PUT /api/v1/update-rings/{id}` | admin | `{"name", "position", "deferral_days", "wave_days", "require_approval", "all_devices", "tags", "groups", "blueprints"}` | `200` the ring; `422` names the field; audited as `update_ring.save` |
+| `DELETE /api/v1/update-rings/{id}`, `POST /api/v1/update-rings/{id}/{action}` | admin | `action` `pause`, `resume`, `approve` | `204` or the ring; audited as `update_ring.delete` and `update_ring.<action>` |
+| `POST /api/v1/update-waves` | admin | | `201` the new wave of the caller's tenant (the default tenant in the global view); `409` without rings; audited as `update_wave.start` |
+| `GET /api/v1/devices/{id}/updates` | read | | `200` ring, pending updates with versions, security flag, severity and CVEs, last run per source, CVEs matched from the Debian and Ubuntu data (`vulnerabilities`) |
+| `GET /api/v1/devices/{id}/workloads` | read | | `200` containers and VMs of the device, tool versions, read errors, when the inventory last changed, and `control` (policy allows actions, caller may send them, four eyes for stop and restart); see [Containers and VMs](workloads.md) |
+| `GET /api/v1/workloads` | read | `kind`, `state`, `image` | `200` containers and VMs of the fleet in the caller's scope with device and host name, at most 2000 |
+| `GET /api/v1/updates/fleet` | read | `cve` | `200` devices with security and pending updates, open CVEs with severity and devices, pending updates per package; with `cve` the devices it affects |
+| `GET /api/v1/updates/package-versions` | read | `name` | `200` installed versions of the package with device counts |
+| `GET /api/v1/updates/cve-feeds` | read | | `200` Debian, Ubuntu, Arch and Alpine security data: any feed on, import running, per feed on or off, URL, last import, entries, bytes, last error; see [Patch management](patching.md#cve-data-for-debian-ubuntu-arch-and-alpine) |
+| `POST /api/v1/updates/cve-feeds/refresh` | admin of the whole installation | | `202`, the switched on feeds are imported in the background; `409` while every feed is off or an import runs; audited as `cve_feeds.refresh` |
 | `GET /api/v1/stats/annotations` | audit | `days` | `200` key rotations, approved agent releases, blueprint changes and failed backups per day, for the history charts |
 | `GET /api/v1/report-schedules` | audit | | `200` own schedules (admins: all of the tenant view) and the channels a schedule may use |
 | `POST /api/v1/report-schedules` | admin or auditor person, not a token | `{"view_id", "cadence", "channels", "emails"}` | `200` schedule of a saved report (list `reports`); audited as `report.schedule`; see [Scheduled reports](#scheduled-reports) |
@@ -334,12 +346,17 @@ strings, numbers or booleans; `true` is sent as a checked box.
 | Types | Roles |
 |---|---|
 | `sync`, `update`, `reboot`, `shutdown`, `lock`, `unlock`, `message`, `user_password`, `user_lock`, `user_unlock`, `diagnostics` | admin, helpdesk |
-| `script`, `lost`, `found`, `wipe`, `allow_uninstall`, `app_install`, `app_remove`, `user_create`, `user_admin`, `user_delete`, `software_remove` | admin |
+| `script`, `lost`, `found`, `wipe`, `allow_uninstall`, `app_install`, `app_remove`, `user_create`, `user_admin`, `user_delete`, `software_remove`, `package_hold`, `package_downgrade`, `firewall_remove_rule` | admin |
+| `workload_action` | admin; helpdesk when Settings, Approvals allow it |
 
 Fields: `minutes` (reboot, shutdown: 0 to 1440, default 1), `confirm` and `message` (lost,
 wipe: `confirm` is the host name), `title` and `text` (message), `payload` (script), `app`
 (app_install, app_remove), `username`, `full_name`, `password`, `admin`, `keep_home` (user
-commands), `kind`, `name`, `installation` (software_remove), `reason` (shown with an
+commands), `kind`, `name`, `installation` (software_remove), `name` and `release` (package_hold),
+`name` and `version` (package_downgrade, see [Patch management](patching.md#rollback)), `kind`, `id` and
+`action` (workload_action: a workload of the device's last inventory, `409` when the device's policy
+does not allow it, see [Containers and VMs](workloads.md)), `rule_id` and
+`confirm_risk` (firewall_remove_rule, see [Firewall inventory](#firewall-inventory)), `reason` (shown with an
 approval request, up to 500 characters). A type the token's role may not send answers `403`
 and is audited as `api.denied`; other rule violations answer `422`. A retired device answers
 `409`.
@@ -353,12 +370,45 @@ answers `422`, while the first is still running `409`. Poll
 `sent` are still open; commands expire after 7 days). The payload is never returned, since
 it can hold a password.
 
-With four eyes approval on (Settings, Security), wipe, lost mode and scripts do not run:
+With four eyes approval on (Settings, Security), wipe, lost mode, scripts, package downgrades and firewall rule removals do not run:
 the answer is `202` with `{"approval_id": 12, "status": "pending"}` (`ApprovalPending` in the
 OpenAPI document, `Location: /api/v1/approvals/{id}`) instead of a command, and another
 admin decides under **Approvals** in the console (`params.reason` is shown there) or through
 `POST /api/v1/approvals/{id}/approve`. Neither the requesting token nor the person who created
 it can approve; once approved, the command is queued with the token as creator.
+
+### Firewall inventory
+
+`GET /api/v1/devices/{id}/firewall` (read, device scope) returns the latest firewall
+inventory the agent reported: `backend` (ufw, firewalld, nftables, iptables), `active`,
+`policy` (`in`, `out`, `forward`) and `rules`, each with `origin` `managed` (added by LiMDM),
+`foreign` or `system` (Docker, Podman, libvirt, Kubernetes, NetBird, Tailscale, ZeroTier, wg-quick, fail2ban, CrowdSec,
+and rules on addresses of the local container bridges in `bridge_nets`), its fields,
+the raw text, `risk` (`ssh` or `server`), `kept` (listed in `keep` of the device's firewall
+declaration) and `adopt_error` when it cannot be adopted.
+
+`POST /api/v1/devices/{id}/firewall/rules/{rid}/adopt`, `.../keep` and `.../remove` (admins;
+remove adds the rule to the item's `remove` list, a rule with a `risk` needs
+`"confirm_risk": true`, and with four eyes approval on the save answers `202` with the
+approval or, for a new item, `409`) take
+`{"item_id": 12}` or `{"name": "Adopted rules", "blueprint_id": 4, "confirm": true}`. Adopt
+adds the rule to that `com.limdm.firewall` item in the declaration format, keep adds its
+`match` to `keep`. An existing item is a normal library save (validation, signature,
+version, audit, four eyes). A new item (enforce off) is created and assigned in
+`blueprint_id` in one transaction with both versions and audit entries, so nothing is left
+behind when the assignment fails. `GET /api/v1/devices/{id}/firewall/targets` lists the
+blueprints the caller may pick with the devices each reaches (`devices`, `global_default`,
+`device`): tenant accounts only those of their tenant, never the global default. A blueprint
+that is the global default or reaches more than one device answers `422` on `confirm`
+without `"confirm": true`. Every adopt, keep and remove adds an audit entry `firewall.adopt`,
+`firewall.keep` or `firewall.remove` on the device.
+
+`firewall_remove_rule` (command, admins, four eyes) deletes one foreign rule on the device:
+`{"type": "firewall_remove_rule", "params": {"rule_id": "3f2a9c1d7e4b5a60"}}`. System and
+managed rules answer `422`; a rule with a `risk` needs `"confirm_risk": true`. The agent
+reads the firewall again and refuses the rule when it changed meanwhile. With nftables and
+iptables this changes the running ruleset only; the console's Discard writes a `remove` list
+entry instead, which outlasts a reboot.
 
 ### Library items and blueprints
 

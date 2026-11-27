@@ -305,14 +305,14 @@ func (s *Server) bulkAction(r *http.Request, sess session, ids []string, action 
 			}
 		}
 	case "command":
-		if typ == "lost" || typ == "wipe" {
-			return 0, &userError{http.StatusBadRequest, "lost mode and wipe are sent to one device at a time"}
+		if typ == "lost" || typ == "wipe" || typ == "workload_action" {
+			return 0, &userError{http.StatusBadRequest, "lost mode, wipe and workload actions are sent to one device at a time"}
 		}
 		payload, code, msg := s.commandPayload(r, sess, ids[0], typ)
 		if code != 0 {
 			return 0, &userError{code, msg}
 		}
-		if s.needsApproval(typ) { // bulk scripts: one four eyes request per device
+		if s.needsApproval(typ, payload) { // bulk scripts: one four eyes request per device
 			for _, id := range ids {
 				if _, err := s.requestApproval(ctx, sess, "command", id, commandApproval{Type: typ, Payload: payload}, strings.TrimSpace(r.FormValue("reason"))); err != nil {
 					return 0, err
@@ -373,6 +373,7 @@ type declRow struct {
 	State      string   `json:"state"` // pending | invalid | not achieved | active
 	Class      string   `json:"-"`
 	Reasons    []string `json:"reasons"`
+	Info       []string `json:"info,omitempty"` // notes of a reported state, failure or not (com.limdm.hostname)
 }
 
 // declarationRows compares the declarations a device should have with what
@@ -386,6 +387,9 @@ func declarationRows(want []api.Declaration, got []api.DeclarationStatus) []decl
 	for _, dcl := range want {
 		row := declRow{Identifier: dcl.Identifier, Type: dcl.Type, Reasons: []string{}}
 		st, ok := reported[dcl.Identifier]
+		if ok && st.ServerToken == dcl.ServerToken {
+			row.Info = st.Info
+		}
 		switch {
 		case !ok || st.ServerToken != dcl.ServerToken:
 			row.State, row.Class = "pending", "warn"
@@ -444,7 +448,7 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 	if !slices.Contains(api.CommandTypes, typ) || len(payload) > 64<<10 {
 		return "", http.StatusBadRequest, "invalid command"
 	}
-	if sess.Role != "admin" && !slices.Contains(helpdeskCommands, typ) {
+	if sess.Role != "admin" && !slices.Contains(helpdeskCommands, typ) && (typ != "workload_action" || !s.mayControlWorkloads(sess.Role)) {
 		return "", http.StatusForbidden, "this action requires the admin role"
 	}
 	switch {
@@ -507,6 +511,21 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		}
 		b, _ := json.Marshal(u) //nolint:gosec // signed command payload over mTLS, cleared from the database once applied
 		payload = string(b)
+	case typ == "workload_action": // app_workloads.go
+		return s.workloadCommandPayload(r, id)
+	case typ == "package_hold" || typ == "package_downgrade": // R3-P, app_patch.go
+		var b []byte
+		var err error
+		if b, err = packageCommandPayload(r, typ); err != nil {
+			return "", http.StatusBadRequest, err.Error()
+		}
+		payload = string(b)
+	case typ == "firewall_remove_rule": // R3-F, app_firewall.go
+		b, err := s.firewallRemovePayload(r, id)
+		if err != nil {
+			return "", http.StatusBadRequest, err.Error()
+		}
+		payload = string(b)
 	case typ == "software_remove":
 		sr := api.SoftwareRemove{Kind: r.FormValue("kind"), Name: r.FormValue("name"), Installation: r.FormValue("installation")}
 		if err := sr.Validate(); err != nil {
@@ -561,12 +580,14 @@ func (s *Server) retireDevice(ctx context.Context, actor, id string) error {
 
 // ---- enrollment tokens ----
 
-// createEnrollToken creates an enrollment token for 1..10000 uses and
-// 1..90 days, optionally binding new devices to a blueprint (0: default),
-// and returns it; it is shown only once.
+// createEnrollToken creates an enrollment token within the limits of
+// Settings, Enrollment (0 uses or days: the default there), optionally
+// binding new devices to a blueprint (0: default), and returns it; it is
+// shown only once.
 func (s *Server) createEnrollToken(ctx context.Context, sess session, note string, blueprintID int64, uses, days int) (string, error) {
-	if uses < 1 || uses > 10000 || days < 1 || days > 90 {
-		return "", &userError{http.StatusBadRequest, "uses 1..10000, days 1..90"}
+	uses, days, err := s.settings().Enroll.tokenLimits(uses, days)
+	if err != nil {
+		return "", err
 	}
 	var bpID *int64
 	if blueprintID > 0 {
@@ -577,7 +598,7 @@ func (s *Server) createEnrollToken(ctx context.Context, sess session, note strin
 	}
 	token := "lmt_" + randToken(24)
 	note = truncate(note, 200)
-	err := s.auditAction(ctx, sess.Email, "token.create", note, fmt.Sprintf("uses=%d days=%d blueprint=%d", uses, days, blueprintID), func(tx pgx.Tx) error {
+	err = s.auditAction(ctx, sess.Email, "token.create", note, fmt.Sprintf("uses=%d days=%d blueprint=%d", uses, days, blueprintID), func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO enroll_tokens(token_hash, note, blueprint_id, uses_left, expires_at, created_by, tenant_id)
 			VALUES ($1,$2,$3,$4, now() + make_interval(days => $5), $6, $7)`, sha(token), note, bpID, uses, days, sess.Email, ownerTenant(ctx))
 		return err

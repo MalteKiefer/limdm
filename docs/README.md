@@ -1,6 +1,6 @@
 # LiMDM documentation
 
-The documents for LiMDM 0.16. Start with [Installation](installation.md), then
+The documents for LiMDM 0.18 and the unreleased changes in the changelog. Start with [Installation](installation.md), then
 [Concepts](concepts.md) and [Console](console.md). Changes per version are in the
 [changelog](../CHANGELOG.md); the upgrade from 0.15 is in
 [Operations](operations.md#upgrading-from-015-to-016).
@@ -28,10 +28,12 @@ The documents for LiMDM 0.16. Start with [Installation](installation.md), then
 | [compliance.md](compliance.md) | Built in checks with IDs and references, custom checks, policies, risk exceptions, history, evidence |
 | [notifications.md](notifications.md) | Channels and every notification event |
 | [software.md](software.md) | Software catalog, requests, Flathub and vendor repositories |
+| [patching.md](patching.md) | Update rules per source, update rings and waves, pending updates, CVEs, rollback |
 | [packages.md](packages.md) | Uploaded packages, scripts and files, delivery and verification |
 | [network.md](network.md) | WLAN, 802.1X, WireGuard and OpenVPN profiles, EAP-TLS certificates, CRL |
 | [disk-encryption.md](disk-encryption.md) | LUKS recovery keys, escrow, rotation, TPM 2.0, lost devices |
 | [remote-shell.md](remote-shell.md) | Audited remote support shell |
+| [workloads.md](workloads.md) | Containers and VMs per device (Docker, Podman, LXC, LXD, Incus, Proxmox, libvirt), start, shut down, restart |
 
 ## Devices
 

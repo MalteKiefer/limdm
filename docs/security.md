@@ -3,7 +3,12 @@
 ## Agent channel
 
 * **mTLS only, TLS 1.3.** The server runs its own device CA (ECDSA P-384). The agent
-  creates its key locally (P-256) and only sends a certificate signing request. It pins the
+  creates its key locally (P-256), inside the TPM 2.0 when there is one, and only sends a
+  certificate signing request. A TPM bound key is attested at enrollment (TPM2_Certify by an
+  attestation key, credential activation with the endorsement key) and can be required per
+  tenant ([agent.md](agent.md#tpm-bound-device-key)).
+* **Enrollment tokens** allow at most 500 uses and 30 days (lower limits in **Settings**,
+  **Enrollment**); every use is audited with the token it used. It pins the
   CA by SHA-256 fingerprint at enrollment and trusts nothing else afterwards, no system
   CAs. A TLS terminating proxy cannot sit in between.
 * **Revocation without CRLs:** the server accepts only the certificate serial currently
@@ -216,10 +221,11 @@ global only.
 ## Four eyes approval
 
 **Settings**, **Security**, **Four eyes approval** makes a second administrator approve:
-wipe, lost mode, scripts, role changes of console users, every change to an administrator
+wipe, lost mode, scripts, package downgrades, role changes of console users, every change to an administrator
 account (adding one, disabling or enabling one, resetting a local administrator's
 credentials), admin API tokens, risk exceptions (the approving admin is recorded as their
-approver), and optionally recovery key views and remote shell sessions.
+approver), and optionally recovery key views, remote shell sessions and shutting down or
+restarting containers and VMs ([workloads.md](workloads.md)).
 It also covers the declarations that act like a script, so one administrator cannot reach
 root on devices without a second one:
 
@@ -379,8 +385,9 @@ removes them; the deletion is one of them (`device.delete`).
   with `sshd -t`.
 * The desktop socket authorizes by peer credentials and active local session. A process of
   the same user in an SSH session (remote logind session or below the SSH service) may
-  read status, catalog and logs, but is refused every change: app install, removal and
-  requests, recovery key escrow, SSO confirmation and reboot deferral. A process started
+  read status and catalog, gets no journal or agent log lines, and is refused every change:
+  app install, removal and requests, recovery key escrow, SSO confirmation, reboot deferral
+  and ending a remote support session. A process started
   through the user's systemd manager belongs to no session and is not told apart.
 * The SSO device flow starts only at the device: never from `su` or `sudo`, never with
   `PAM_RHOST`, a pseudo terminal or a remote parent session
@@ -395,8 +402,20 @@ removes them; the deletion is one of them (`device.delete`).
 
 ### Known limitations of the agent
 
+* **`allow_scripts` does not protect devices against administrators.** It is a switch the
+  device owner sets at enrollment, not a boundary against the console. An administrator who
+  can deploy declarations can run code as root on every device in scope without it: packages
+  from added repositories run maintainer scripts, `com.limdm.artifacts` installs uploaded
+  packages, and `com.limdm.sudo`, `com.limdm.localusers`, `com.limdm.ssh`, `com.limdm.login`
+  and `com.limdm.polkit` grant root access. `allow_scripts` only keeps `com.limdm.scripts`,
+  the `script` command and file targets outside the plain text allowlist off a device. The
+  controls against a single administrator are elsewhere: [four eyes approval](#four-eyes-approval)
+  for these declaration types and for `script`, `wipe` and `lost`, signed commands and
+  declarations the agent verifies against pinned keys, device scopes per role, and the hash
+  chained [audit log](#audit-log) of every save, approval and command.
 * **SSH sessions of a user who is also logged in locally.** The desktop socket refuses app
-  changes, key escrow, SSO confirmation and reboot deferral from processes in an SSH or
+  changes, key escrow, SSO confirmation, reboot deferral, ending remote support and journal
+  lines from processes in an SSH or
   other remote session. A process the same user starts outside any session (`systemd-run
   --user`, under `user@.service`), or a descriptor passed on by a process that already
   exited, is not recognized as remote. The check keeps casual misuse out; it is no barrier

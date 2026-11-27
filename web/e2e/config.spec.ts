@@ -3,6 +3,7 @@
 // rollback, a blueprint with a condition, the software catalog settings
 // and remotes, and a package upload. LIMDM_E2E_SHOTS=<dir> also saves
 // screenshots of the screens.
+import { execFileSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
@@ -29,10 +30,10 @@ async function shoot(page: Page, name: string) {
 }
 
 test('every declaration type has a form without JSON', async ({ page }) => {
-  test.setTimeout(180_000) // 33 page loads; CI runners are slower than 30 s allows
+  test.setTimeout(180_000) // 34 page loads; CI runners are slower than 30 s allows
   await page.goto('/app/config?tab=library')
   const types = await page.evaluate(async () => ((await (await fetch('/api/v1/schemas?lang=de')).json()).items as { type: string }[]).map((x) => x.type))
-  expect(types.length).toBe(33)
+  expect(types.length).toBe(34)
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(e.message))
   for (const type of types) {
@@ -43,6 +44,12 @@ test('every declaration type has a form without JSON', async ({ page }) => {
     await expect(page.locator('fieldset.card').first()).toBeVisible()
   }
   expect(errors).toEqual([])
+})
+
+test('host name item: warning and preview', async ({ page }) => {
+  await page.goto('/app/config/library/new?type=com.limdm.hostname')
+  await expect(page.getByRole('note').filter({ hasText: 'Ein neuer Hostname kann Dienste stören' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Vorschau des Hostnamens' })).toBeVisible()
 })
 
 test('library item: type picker, form, review, versions and rollback', async ({ page }) => {
@@ -138,6 +145,25 @@ test('software: store settings, a remote and a package upload', async ({ page })
   await expect(page.getByText(`Gespeichert: hello-${stamp}`)).toBeVisible()
   await page.goto('/app/config?tab=packages')
   await expect(page.getByRole('button', { name: `hello-${stamp} löschen` })).toBeDisabled()
+})
+
+test('files item: template preview for one device', async ({ page }) => {
+  const repo = join(import.meta.dirname, '..', '..')
+  execFileSync('go', ['run', './scripts/e2eseed', join(import.meta.dirname, 'devices.seed.sql')], { cwd: repo, stdio: 'inherit', env: { ...process.env, CGO_ENABLED: '0' } })
+  await page.goto('/app/config/library/new?type=com.limdm.files')
+  await page.getByRole('radio', { name: 'JSON' }).click()
+  await page.getByLabel('Einstellungen als JSON').fill(JSON.stringify({ files: [{ path: '/etc/motd', content: 'host {{.Hostname}} {{default "-" (index .Attributes "site")}}', mode: '0644', template: true }] }))
+  await page.getByRole('radio', { name: 'Formular' }).click()
+  const preview = page.getByRole('region', { name: 'Vorschau der Vorlage' })
+  await preview.getByLabel('Gerät (Hostname oder ID)').fill('e2e-ws1')
+  await preview.getByRole('button', { name: 'Erzeugen' }).click()
+  await expect(preview.getByText('host e2e-ws1 -')).toBeVisible()
+  await shoot(page, 'template-preview')
+  // a missing attribute is an error, and the device keeps what it has
+  await page.getByRole('radio', { name: 'JSON' }).click()
+  await page.getByLabel('Einstellungen als JSON').fill(JSON.stringify({ files: [{ path: '/etc/motd', content: '{{.Attributes.site}}', mode: '0644', template: true }] }))
+  await preview.getByRole('button', { name: 'Erzeugen' }).click()
+  await expect(preview.getByRole('alert')).toContainText('Nicht erzeugt')
 })
 
 test('dark theme of the main screen', async ({ page }) => {

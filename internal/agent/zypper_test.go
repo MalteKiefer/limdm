@@ -44,21 +44,24 @@ func TestZypperCommands(t *testing.T) {
 	if got := zypperInstallArgs([]string{"chrony"}); !slices.Equal(got[len(got)-2:], []string{"--", "chrony"}) {
 		t.Fatal(got)
 	}
-	n, err := countZypperUpdates(`<?xml version='1.0'?>
+	l, err := parseZypperUpdates(`<?xml version='1.0'?>
 <stream>
 <message type="info">Loading repository data...</message>
 <update-status version="0.6">
 <update-list>
 <update name="openssl-3" edition="3.1.4-150600.5.21.1" arch="x86_64" kind="package"><summary>x</summary></update>
-<update name="vim" edition="9.1.0836-150500.20.21.1" arch="x86_64" kind="package"/>
+<update name="vim" edition="9.1.0836-150500.20.21.1" arch="x86_64" kind="package"><source url="https://download.opensuse.org/update/leap/15.6/oss" alias="repo-update"/></update>
+<update name="code" edition="1.95" arch="x86_64" kind="package"><source url="https://packages.microsoft.com/yumrepos/vscode" alias="code"/></update>
+<update name="openSUSE-SLE-15.6-2024-123" edition="1" arch="noarch" kind="patch" category="security" severity="important"><issue-list><issue type="cve" id="2024-1234"/><issue type="bugzilla" id="1"/></issue-list></update>
 </update-list>
 </update-status>
 </stream>`)
-	if err != nil || n != 2 {
-		t.Fatal(n, err)
+	if err != nil || len(l) != 4 || l[0].Name != "openssl-3" || l[1].Source != api.SourceOSAll || l[2].Source != api.SourceThirdParty ||
+		!l[3].Patch || !l[3].Security || l[3].Severity != "important" || len(l[3].CVEs) != 1 || l[3].CVEs[0] != "CVE-2024-1234" {
+		t.Fatalf("%+v %v", l, err)
 	}
-	if n, err := countZypperUpdates("<stream><update-status/></stream>"); err != nil || n != 0 {
-		t.Fatal(n, err)
+	if l, err := parseZypperUpdates("<stream><update-status/></stream>"); err != nil || len(l) != 0 {
+		t.Fatal(l, err)
 	}
 }
 

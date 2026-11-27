@@ -25,7 +25,7 @@ there.
 | Fedora | Fedora, CentOS Stream 9 and later, RHEL, Rocky and Alma 9 and later | dnf, `.rpm` | systemd | full feature set |
 | SUSE | openSUSE Leap 16, openSUSE Tumbleweed, SLES and SLED 16 | zypper, `.rpm` | systemd | see [SUSE](#suse) |
 | Arch | Arch, Manjaro, EndeavourOS | pacman, `.pkg.tar.zst` | systemd | no osquery (native inventory); pending updates through `pacman-contrib`; updates are always full upgrades |
-| Alpine | Alpine 3.17 and later | apk, `.apk` | OpenRC | no osquery; no host firewall management; SSO login needs linux-pam; no systemd watchdog (supervise-daemon restarts the agent) |
+| Alpine | Alpine 3.17 and later | apk, `.apk` | OpenRC | no osquery; host firewall with nftables; SSO login needs linux-pam; no systemd watchdog (supervise-daemon restarts the agent) |
 
 The agent needs OpenSSL 3: the installer verifies the Ed25519 signature of the release with
 `openssl pkeyutl -rawin`, which OpenSSL 1.1.1 lacks, and the packages depend on
@@ -79,10 +79,16 @@ dependencies, and the agent installs any missing tool itself.
 
 ## Enrollment tokens
 
-**Enrollment** in the console creates tokens with a note, an optional blueprint, a number of
-uses (1 to 10000) and a validity (1 to 90 days). The token is shown once. The page shows the
-commands below with the token filled in. **Revoke** ends a token at once (audit
-`token.revoke`); devices already enrolled with it are not affected. With multi tenancy a
+**Add device** in the console creates tokens with a note, an optional blueprint, a number of
+uses and a validity in days. The token is shown once. The page shows the commands below with
+the token filled in and lists the active tokens with their uses left. **Revoke** ends a
+token at once (audit `token.revoke`); devices already enrolled with it are not affected.
+
+A token is a bearer secret: whoever holds it can enroll any machine. The hard limits are 500
+uses and 30 days; **Settings**, **Enrollment** lowers them and sets the defaults of a new
+token (1 use, 1 day). Tokens created before these limits were cut down to them once. Every
+use is audited as `device.enroll` with the first 12 hex digits of the token's hash, its note
+and the uses left. With multi tenancy a
 token enrolls into the tenant it was created in, and tokens of a disabled tenant stop
 working ([tenants.md](tenants.md)).
 
@@ -143,6 +149,11 @@ Lines starting with `#` are comments. Both `allow_*` values are stored in
 `/etc/limdm/agent.json` and cannot be switched on from the server later; enroll again to
 change them.
 
+`allow_scripts` is no protection against administrators: whoever can deploy declarations
+(repositories, packages, sudo rules, local users, artifacts) can run code as root on the
+device without it. Four eyes approval, signed commands and declarations, and the audit log
+are the controls for that ([security.md](security.md#known-limitations-of-the-agent)).
+
 Then install the package by any means (your own apt or dnf mirror, the release files, or the
 install script without `LIMDM_TOKEN`). The agent enrolls
 
@@ -192,7 +203,36 @@ falls back to native inventory when osquery is missing.
 The agent fetches the device CA over TLS, accepts it only when its SHA-256 matches the
 fingerprint, creates a P-256 key locally and sends only a certificate signing request with
 the token. The key never leaves the device (`/etc/limdm/device.pem`, 0600). From then on
-every connection is mTLS with TLS 1.3, pinned to that CA. Certificates last 90 days and
+every connection is mTLS with TLS 1.3, pinned to that CA.
+
+### TPM bound device key
+
+With a TPM 2.0 (`/dev/tpmrm0`) the agent creates the key inside the TPM instead, where it
+cannot be exported (`fixedTPM`, `fixedParent`); `device.pem` then holds only a reference
+(PEM block `LIMDM TPM KEY`) next to the certificate. The enrollment proves it to the server
+in two rounds:
+
+1. The agent certifies the key with an attestation key (AK, a restricted signing key of the
+   TPM, `TPM2_Certify`) and sends the public parts of key, AK and endorsement key (EK) with the
+   CSR. The server checks the signature and the key's attributes, and that the key is the
+   one of the CSR.
+2. The server answers with a credential encrypted to the EK for this AK
+   (`TPM2_MakeCredential`); only the same TPM can decrypt it (`TPM2_ActivateCredential`). The
+   agent sends the request again with the credential; only then the token is used and the
+   certificate issued.
+
+The server records the device as **TPM bound** (device page, **Device key** fact), pins the
+AK and keeps the SHA-256 of the EK public area. A renewal creates a new key in the TPM and
+stays TPM bound when the pinned AK certifies it. Without a TPM, or when a TPM command fails,
+the agent uses a file key as before. **Settings**, **Enrollment**, **Require TPM bound key**
+(all tenants) or the tenant's own setting refuses enrollments without it; devices enrolled
+earlier keep working and renew as before. The compliance check `agent.tpm_key` (level 2)
+reports whether the key is in the TPM.
+
+Limits: the EK certificate is not checked against the TPM vendors' roots, so a software TPM
+passes the attestation; the recorded EK fingerprint ties the device to one TPM. Clearing the
+TPM destroys the key; enroll the device again. Tested with unit and integration tests and
+software built TPM structures; not yet verified on real TPM hardware or swtpm. Certificates last 90 days and
 rotate automatically 30 days before they expire, or earlier when the server asks (device CA
 rotation, [keys.md](keys.md)).
 
@@ -290,11 +330,14 @@ one instance per user.
 
 ### Tray
 
-The tray icon is the LiMDM logo with a status dot: green (compliant), amber (checks
-failing), red (no contact to the server or locked). The menu names who manages the device,
-shows the state and the last check in, and offers **Open LiMDM…**, **Install Software…**,
+The tray icon is the symbolic LiMDM logo (dark shield on a white fill, readable on light
+and dark panels) with a status badge whose shape carries the state, not only its color:
+a check mark (compliant), an exclamation mark (checks failing, remote support running) or a
+cross (no contact to the server, agent not reachable, locked). The tooltip and the first
+menu line say the same in words. The menu names who manages the device,
+shows the state and the last sync, and offers **Open LiMDM…**, **Install Software…**,
 **Compliance…**, **Set Up Recovery Key…** and **Confirm Company Account…** when needed,
-**Check In Now** (at most every 30 seconds) and **Agent Log…**; the agent version is at the
+**Sync Now** (at most every 30 seconds) and **Agent Log…**; the agent version is at the
 bottom and in the tooltip. While IT runs a remote shell it shows **IT remote support
 session running**. The tray uses StatusNotifierItem: sway with waybar, KDE Plasma, Xfce,
 Cinnamon and Ubuntu show it; stock GNOME needs the AppIndicator extension.
@@ -306,16 +349,18 @@ style of GNOME Settings (GTK 4, libadwaita 1.4) with these pages:
 
 | Page | |
 |---|---|
-| Overview | state, who manages the device, last check in, **Check In Now**, open tasks such as a missing recovery key |
+| Overview | state, who manages the device, last sync, **Sync Now**, open tasks such as a missing recovery key |
 | Software | the company catalog: install, remove or request apps ([software.md](software.md)) |
 | Compliance | every check with its result, grouped by failing, exceptions, not applicable and passed |
-| Profiles | every declaration in force with its settings, secrets masked |
+| Blueprint | every setting (declaration) of the blueprint in force, secrets masked |
 | Certificates | CA certificates IT installed, with subject, issuer, validity and fingerprint |
 | Disk Encryption | store a recovery key with the disk passphrase |
 | Agent Log | journal entries of the agent and its watchdog, optionally only warnings and errors |
 | About | versions and server |
 
-It shows the company logo, or the LiMDM logo, and follows the system's light or dark style;
+The window reloads the device state every minute. It rebuilds the visible page only when
+the data changed, and never while the user types in it or a field holds text not sent yet
+(the disk passphrase); the software search keeps its text. It shows the company logo, or the LiMDM logo, and follows the system's light or dark style;
 the button next to the logo switches between system, dark and light. Without GTK 4 and
 libadwaita 1.4 (Ubuntu 22.04) the tray falls back to simple dialogs.
 
@@ -349,12 +394,12 @@ the user also has an active local session (root is always allowed).
 
 | Command | |
 |---|---|
-| `limdm info` (alias `status`) | everything about this device and the agent: manager, system, hardware, server, check in, declarations, updates, locks, compliance, recovery keys, company account, remote support session |
-| `limdm checks` | every compliance check with its result |
-| `limdm profiles` | declarations in force (secrets masked) |
+| `limdm info` (alias `status`) | everything about this device and the agent: manager, system, hardware, server, sync, declarations, updates, locks, compliance, recovery keys, company account, remote support session |
+| `limdm checks [--strict]` | every compliance check with its result, level and ID: failing first, then exceptions, not applicable and passed, each by level and ID. `--strict` exits with code 2 when a check fails (1 stays for errors), for scripts and login checks |
+| `limdm blueprint [-v]` (old name `profiles`) | settings of the blueprint in force (secrets masked); `-v` adds each setting's payload |
 | `limdm certificates` (alias `certs`) | CA certificates IT installed |
 | `limdm log [-n 50]` | latest entries of the agent log |
-| `limdm sync` | check in now |
+| `limdm sync` | sync with the server now |
 | `limdm software list` (alias `limdm software`, `limdm apps`, `ls`) | catalog apps with mode and state |
 | `limdm software install APP`, `limdm software remove APP` | install or remove an app the catalog offers (ID or name) |
 | `limdm software request APP [--note TEXT]` | ask IT for a catalog app in request mode |
@@ -367,7 +412,7 @@ the user also has an active local session (root is always allowed).
 | `limdm support end` | end the remote support session IT opened ([remote-shell.md](remote-shell.md)) |
 | `limdm version` | agent version |
 
-`--json` prints `info`, `checks`, `profiles`, `certificates`, `log` and `software list` as
+`--json` prints `info`, `checks`, `blueprint`, `certificates`, `log` and `software list` as
 JSON. The agent decides as for the app: only catalog apps install, and only in the modes the
 catalog allows.
 

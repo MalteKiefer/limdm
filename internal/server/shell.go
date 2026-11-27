@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -560,22 +559,6 @@ func (s *Server) shellAgent(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ansiRe matches terminal control sequences: CSI, OSC and two byte escapes.
-var ansiRe = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[@-Z\\-_]`)
-
-// terminalText makes a transcript readable: control sequences removed,
-// carriage returns resolved, other control characters dropped.
-func terminalText(raw []byte) string {
-	s := strings.ToValidUTF8(ansiRe.ReplaceAllString(string(raw), ""), "�")
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	return strings.Map(func(r rune) rune {
-		if r < 0x20 && r != '\n' && r != '\t' {
-			return -1
-		}
-		return r
-	}, s)
-}
-
 // shellPolicyOff is the answer when the device's policy does not allow
 // remote shells.
 const shellPolicyOff = "remote shells are not allowed by this device's policy: switch on Remote shell in the Agent settings of its blueprint"
@@ -583,15 +566,6 @@ const shellPolicyOff = "remote shells are not allowed by this device's policy: s
 // policyAllowsShell reports whether the resolved policy of a device allows
 // remote shell sessions (com.limdm.agent remote_shell). The agent checks again.
 func (s *Server) policyAllowsShell(ctx context.Context, id string) (bool, error) {
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback(ctx) // read only
-	res, err := resolveDevice(ctx, tx, id)
-	if err != nil {
-		return false, err
-	}
-	pol, _ := api.Compose(res.Decls)
-	return pol.RemoteShell, nil
+	pol, err := devicePolicy(ctx, s, id)
+	return pol.RemoteShell, err
 }

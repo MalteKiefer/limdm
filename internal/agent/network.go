@@ -253,20 +253,20 @@ func routeTable() []api.Route {
 // from sssd, LDAP, winbind, systemd-homed or DynamicUser appear next to the
 // local files. Services that disable enumeration only show known entries.
 func nssAccounts() ([]api.Account, []api.Group) {
-	passwd, err := run(30*time.Second, "getent", "passwd")
-	if err != nil || passwd == "" {
-		passwd = readFile("/etc/passwd")
+	accountDB, err := run(30*time.Second, "getent", "passwd")
+	if err != nil || accountDB == "" {
+		accountDB = readFile("/etc/passwd")
 	}
 	group, err := run(30*time.Second, "getent", "group")
 	if err != nil || group == "" {
 		group = readFile("/etc/group")
 	}
-	return parseAccounts(passwd, group, readFile("/etc/passwd"), readFile("/etc/group"))
+	return parseAccounts(accountDB, group, readFile("/etc/passwd"), readFile("/etc/group"))
 }
 
 // parseAccounts merges NSS output with the local files to mark the source.
-func parseAccounts(passwd, group, localPasswd, localGroup string) ([]api.Account, []api.Group) {
-	localUsers, localGroups := names(localPasswd), names(localGroup)
+func parseAccounts(accountDB, group, localAccounts, localGroup string) ([]api.Account, []api.Group) {
+	localUsers, localGroups := names(localAccounts), names(localGroup)
 	admins := map[string]bool{}
 	var groups []api.Group
 	seen := map[string]bool{}
@@ -294,7 +294,7 @@ func parseAccounts(passwd, group, localPasswd, localGroup string) ([]api.Account
 	}
 	var users []api.Account
 	seen = map[string]bool{}
-	for _, line := range strings.Split(passwd, "\n") {
+	for _, line := range strings.Split(accountDB, "\n") {
 		f := strings.Split(line, ":")
 		if len(f) < 7 || seen[f[0]] {
 			continue

@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/maltekiefer/limdm/internal/api"
 )
 
 func TestComplianceImpact(t *testing.T) {
@@ -298,4 +300,49 @@ func TestAppConfigAPI(t *testing.T) {
 	code, body = call(admin, "PUT", "/api/v1/packages/settings", `{"max_upload_mb":64,"quota_mb":1024,"quota_count":50,"store":"local"}`)
 	want(code, body, 200, `"saved"`)
 	is(422)(call(admin, "PUT", "/api/v1/packages/settings", `{"max_upload_mb":0,"quota_mb":1,"quota_count":1,"store":"local"}`))
+
+	// R3-E: device attributes, template preview, rendering at check in and script results
+	is(422)(call(admin, "PATCH", "/api/v1/devices/d1", `{"attributes":{"1bad":"x"}}`))
+	is(200)(call(admin, "PATCH", "/api/v1/devices/d1", `{"attributes":{"site":"ber","net":"10.1.0.0/16"}}`))
+	code, body = call(admin, "GET", "/api/v1/devices/d1", "")
+	want(code, body, 200, `"attributes":{"net":"10.1.0.0/16","site":"ber"}`)
+	tplFiles := `{"files":[{"path":"/etc/motd","content":"{{.Hostname}} at {{.Attributes.site}}","mode":"0644","template":true}]}`
+	code, body = call(admin, "POST", "/api/v1/config/library/render", `{"type":"com.limdm.files","device":"alpha","payload":`+tplFiles+`}`)
+	want(code, body, 200, `"content":"alpha at ber"`)
+	code, body = call(admin, "POST", "/api/v1/config/library/render", `{"type":"com.limdm.files","device":"d1","payload":{"files":[{"path":"/etc/motd","content":"{{.Attributes.nope}}","mode":"0644","template":true}]}}`)
+	want(code, body, 200, `"error":"file /etc/motd`)
+	is(422)(call(admin, "POST", "/api/v1/config/library/render", `{"type":"com.limdm.files","device":"nope","payload":`+tplFiles+`}`))
+	is(422)(call(admin, "POST", "/api/v1/config/library/render", `{"type":"com.limdm.files","device":"d1","payload":{"files":[{"path":"/etc/motd","content":"{{template \"t\"}}","mode":"0644","template":true}]}}`))
+	is(403)(call(auditor, "POST", "/api/v1/config/library/render", `{"type":"com.limdm.files","device":"d1","payload":`+tplFiles+`}`))
+	var terrs []string
+	items, err := renderItems(ctx, db, "d1", []api.LibraryItem{{Name: "fw", Type: api.TypeFirewall, Payload: json.RawMessage(`{"enforce":true,"allow":[],"rules":[{"port":"22/tcp","from":"{{.Attributes.net}}"}],"template":true}`)}}, &terrs)
+	if err != nil || len(terrs) != 0 || !strings.Contains(string(items[0].Payload), `"from":"10.1.0.0/16"`) {
+		t.Fatalf("render at check in: %v %v %s", err, terrs, items[0].Payload)
+	}
+	// R3-H: hostname preview from the last report and rendering at check in
+	if _, err := db.Exec(ctx, `UPDATE devices SET inventory = '{"hostname":"alpha","serial":"PF2AB","hostname_info":{"ptr":"WS17.corp.example","mac":"aa:bb:cc:dd:ee:ff"}}' WHERE id = 'd1'`); err != nil {
+		t.Fatal(err)
+	}
+	code, body = call(admin, "POST", "/api/v1/config/library/render", `{"type":"com.limdm.hostname","device":"d1","payload":{"source":"template","template":"pc-{{lower .Serial}}-{{.Attributes.site}}","domain":"corp.example"}}`)
+	want(code, body, 200, `"target":"pc-pf2ab-ber.corp.example"`)
+	code, body = call(admin, "POST", "/api/v1/config/library/render", `{"type":"com.limdm.hostname","device":"d1","payload":{"source":"rdns"}}`)
+	want(code, body, 200, `"current":"alpha","target":"ws17.corp.example","source":"rdns"`)
+	code, body = call(admin, "POST", "/api/v1/config/library/render", `{"type":"com.limdm.hostname","device":"d1","payload":{"source":"dns","fallback":"keep"}}`)
+	want(code, body, 200, `"error":"dns: no DNS name`)
+	is(422)(call(admin, "POST", "/api/v1/config/library/render", `{"type":"com.limdm.hostname","device":"d1","payload":{"source":"fixed"}}`))
+	items, err = renderItems(ctx, db, "d1", []api.LibraryItem{{Name: "hn", Type: api.TypeHostname, Payload: json.RawMessage(`{"source":"template","template":"{{.MAC}}"}`)}}, &terrs)
+	if err != nil || len(terrs) != 0 || !strings.Contains(string(items[0].Payload), `"template":"aa:bb:cc:dd:ee:ff"`) {
+		t.Fatalf("hostname render at check in: %v %v %s", err, terrs, items[0].Payload)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO script_results(device_id, name, exit_code, stdout, started_at, ended_at) VALUES
+		('d1', 'cleanup', 1, 'old', now(), now()), ('d1', 'cleanup', 0, 'line1
+line2', now(), now())`); err != nil {
+		t.Fatal(err)
+	}
+	code, body = call(auditor, "GET", "/api/v1/config/scripts/results?name=cleanup", "")
+	want(code, body, 200, `"exit_code":0`)
+	if strings.Count(body, `"device_id"`) != 1 || !strings.Contains(body, `"output":"line1\nline2"`) {
+		t.Fatalf("script results: %s", body)
+	}
+	is(422)(call(auditor, "GET", "/api/v1/config/scripts/results", ""))
 }

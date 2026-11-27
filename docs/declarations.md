@@ -28,6 +28,8 @@ Console: **Agent**.
 |---|---|---|
 | `checkin_seconds` | number | required, 30 to 86400; how often the agent checks in |
 | `offline_lock_hours` | number | 0 or absent: off; at most 8760. Locks the device after this many hours without server contact, see [desktop-login.md](desktop-login.md#offline-lock) |
+| `remote_shell` | boolean | devices accept remote shell sessions, see [remote-shell.md](remote-shell.md) |
+| `workload_control` | boolean | default off; the console may start, shut down and restart containers and VMs, see [workloads.md](workloads.md) |
 
 The default library item "Agent check in every 5 minutes" sets 300 seconds.
 
@@ -132,6 +134,13 @@ With all patch management fields:
 | `reboot_notice_minutes` | number | 0 to 120; 0 or absent means 5 |
 | `reboot_max_defers` | number | 0 to 5, default 0 |
 | `reboot_defer_minutes` | number | 15 to 480; 0 or absent means 60 |
+| `rules` | list | rules per source; when present they replace `mode` (which may then be `off` or empty); see below |
+| `rules[].source` | text | `os_security`, `os_all`, `third_party` or `flatpak`, each once |
+| `rules[].mode` | text | `off`, `notify` (report only) or `install` |
+| `rules[].window`, `rules[].days` | text, list | as `window` and `days`; an empty window takes the declaration's window and days |
+| `rules[].rings` | true or false | install once per wave of the device's update ring |
+| `rules[].repos` | list of text | `third_party` only: up to 50 apt origins, dnf repo IDs or zypper aliases (glob); empty is every third party repository |
+| `security_max_days` | number | 0 to 365; the check `updates.security_age` fails after this many days of pending security updates, 14 when 0 |
 
 What runs per distribution family:
 
@@ -162,6 +171,20 @@ What runs per distribution family:
   `reboot_max_defers` the desktop helper offers to postpone it by `reboot_defer_minutes` that
   many times; it asks again shortly before each new time. After the last deferral the restart
   happens. Every deferral is reported as a device event with the user name.
+
+With rules per source and update rings:
+
+```json
+{"window": "02:00-05:00", "reboot": true, "security_max_days": 7, "rules": [
+  {"source": "os_security", "mode": "install"},
+  {"source": "os_all", "mode": "install", "rings": true},
+  {"source": "third_party", "mode": "install", "rings": true, "repos": ["Docker*", "google-chrome"]},
+  {"source": "flatpak", "mode": "notify"}]}
+```
+
+What the sources cover per distribution, how they run, the update rings and the reported
+results are in [Patch management](patching.md). Flatpak is its own source now: `all` without
+rules still updates Flatpak, `security` never did.
 
 The default library item "Security updates at night" sets `security`, `02:00-05:00`, no
 reboot.
@@ -328,6 +351,7 @@ Console: **Files**.
 | `files[].mode` | text | octal `0000` to `0777`, default `0644`; no setuid, setgid or sticky bits |
 | `files[].owner` | text | user name, default root |
 | `files[].group` | text | group name, default root |
+| `files[].template` | true or false | render `content` per device (see [Templates](#templates)) |
 
 Merged by path, a later item wins. Owner and group must exist on the device. Files removed
 from the declaration are deleted from the device: the agent remembers the paths it wrote
@@ -351,6 +375,38 @@ redirect the write, owner change or removal (declare the real path, for example
 from `/` with `O_NOFOLLOW`, writes a temporary file in the opened directory, sets mode and
 owner on the open file and renames it in place, so swapping a directory for a link between
 check and write has no effect.
+
+#### Templates
+
+With `template` set, the server renders `content` (files) or every rule text (firewall) for
+each device with Go `text/template` before it sends the declaration, so the agent only ever
+gets the result and the declarations token changes when a value changes. The values are:
+
+| Value | Content |
+|---|---|
+| `{{.Hostname}}` | host name the device reported |
+| `{{.ID}}` | device ID |
+| `{{.Tags}}` | tags (list) |
+| `{{.Tenant}}` | tenant name |
+| `{{.PrimaryUser}}` | mail address of the primary user, empty without one |
+| `{{.Attributes.name}}` | custom device attribute, set in the console under **Edit** on the device page or with `PATCH /api/v1/devices/{id}` (`attributes`) |
+| `{{.Serial}}` | DMI system serial number the device reported, empty for a vendor placeholder |
+| `{{.MAC}}` | MAC address of the primary interface (the interface of the default route) |
+| `{{.Vendor}}`, `{{.Model}}` | hardware vendor and model the device reported |
+
+Functions: `lower`, `upper`, `trim`, `replace s old new`, `join list sep`,
+`hasTag .Tags "x"`, `default "fallback" value`, plus the built in `if`, `with`, `range`,
+`eq`, `index`, `len`, `and`, `or`, `not`. A missing attribute is an error; for an optional
+one write `{{default "none" (index .Attributes "site")}}`. Nothing outside these values is
+reachable: no files, commands or environment. `define`, `block` and `template` are refused
+(recursion), `range` only works over `.Tags` or `.Attributes`, `printf` and `call` are not
+available, and the output is limited to 1 MiB. The syntax is checked when the item is saved;
+the editor shows a preview for one device (`POST /api/v1/config/library/render`).
+
+When a template does not render for a device (a missing attribute, a firewall rule that is
+not valid afterwards), that file or the whole firewall declaration goes out still marked as
+template and the agent leaves the device as it is and reports the problem. A template file is
+never written with its raw template text.
 
 ### `com.limdm.certificates` (list)
 
@@ -442,13 +498,19 @@ Console: **Recurring scripts**.
 
 ```json
 {"scripts": [{"name": "cleanup", "interval_hours": 24, "body": "#!/bin/sh\njournalctl --vacuum-time=$KEEP",
-              "params": {"KEEP": "30d"}, "timeout_minutes": 10}]}
+              "params": {"KEEP": "30d"}, "timeout_minutes": 10},
+             {"name": "report", "schedule": {"times": ["02:00"], "days": ["mon", "thu"], "jitter_minutes": 30},
+              "run_on_change": true, "body": "#!/bin/sh\n/usr/local/bin/report"}]}
 ```
 
 | Field | Type | Rules |
 |---|---|---|
 | `scripts[].name` | text | lower case letters, digits, `.`, `_`, `-` |
-| `scripts[].interval_hours` | number | 1 to 720 |
+| `scripts[].interval_hours` | number | 1 to 720; absent (0) with a schedule |
+| `scripts[].schedule.times` | list of text | local `HH:MM` of the device, 1 to 24, each once |
+| `scripts[].schedule.days` | list of text | `mon` … `sun`; empty is every day |
+| `scripts[].schedule.jitter_minutes` | number | 0 to 120 |
+| `scripts[].run_on_change` | true or false | also run once when body, params or timeout change |
 | `scripts[].body` | text | up to 64 KiB |
 | `scripts[].params` | object of text | environment variables: up to 50, names of letters, digits and `_`, values up to 4096 characters, 32 KiB in total |
 | `scripts[].timeout_minutes` | number | 1 to 240; 0 or absent means 30 |
@@ -461,6 +523,17 @@ similar) and everything starting with `LD_`, `LC_` or `DYLD_`. Each run is repor
 server with exit code, start, end and the last 16 KiB of stdout and stderr, and shown under
 **Script results** on the device page. While the device is offline it keeps the last 50
 results.
+
+A script runs either every `interval_hours` (the first time right after it is declared) or
+on a `schedule`. A scheduled script runs at most once per slot: at the first agent loop after
+the slot time plus the jitter. A slot missed while the device was off or asleep runs once at
+the next chance; several missed slots collapse into one run. A new schedule waits for its
+next slot. The jitter is a fixed delay per device and script (a hash of both), so a fleet
+spreads over the jitter window but each device keeps its own time. `run_on_change` runs the
+script once more when its body, params or timeout change, the first declaration included.
+Agents before 0.19 reject `schedule` and `run_on_change` as unknown keys and report the
+declaration as invalid instead of running the script. The item editor shows the last run per
+device (`GET /api/v1/config/scripts/results?name=`).
 
 ### `com.limdm.network` (list)
 
@@ -479,7 +552,7 @@ of a profile: `name`, `type`, `auto_connect`, `ssid`, `hidden`, `security`, `psk
 `openvpn` (`content`). EAP pins a CA of a certificates item (`ca_cert`) and the server domain.
 EAP-TLS uses a device certificate the server issues from its network CA. Secrets are masked
 in the console, the audit log, the version history, the admin API, the desktop app and
-`limdm profiles`. Every field with its limits, the device side and the CRL for the RADIUS
+`limdm blueprint`. Every field with its limits, the device side and the CRL for the RADIUS
 server: [Network profiles](network.md).
 
 ### `com.limdm.printers`
@@ -520,6 +593,93 @@ up with `lpadmin` (separate arguments, no shell).
 * Devices without CUPS are skipped, unless `install_cups` is true: then the agent installs
   the `cups` package and starts the service.
 
+### `com.limdm.hostname`
+
+Console: **Host name**.
+
+```json
+{"source": "template", "template": "pc-{{lower .Serial}}", "domain": "corp.example", "lowercase": true,
+ "max_length": 63, "fallback": "keep", "hosts": true, "mailname": true}
+```
+
+| Field | Type | Rules |
+|---|---|---|
+| `source` | text | `rdns`, `dns`, `serial`, `template` or `fixed` |
+| `name` | text | source `fixed` only: short name or FQDN |
+| `template` | text | source `template`, and the fallback of the other sources; one line up to 1024 characters, the values of [Templates](#templates) |
+| `domain` | text | DNS domain; the FQDN is short name + domain. Empty keeps the domain the source gives |
+| `lowercase` | true or false | default true |
+| `max_length` | number | length of the short name, 1 to 63; 0 is 63 |
+| `fallback` | text | `keep` (default) or `template`: what happens when the source gives no usable name |
+| `hosts` | true or false | manage the `127.0.1.1` line of `/etc/hosts` |
+| `mailname` | true or false | write the FQDN to `/etc/mailname` where the file or an MTA (Postfix, Exim) exists |
+| `pretty` | text | pretty host name, one line up to 64 characters (systemd only) |
+
+Not a list type: the item evaluated last wins. Sources:
+
+* `rdns`: the PTR record of the primary address, which is the source address of the default
+  route (IPv4 first, then IPv6). The first name counts, and only when it is forward confirmed:
+  its A or AAAA records contain that address. A PTR record that does not resolve back is
+  ignored, so whoever controls a reverse zone cannot name the device alone.
+* `dns`: the DNS name of the host. Candidates are the current host name when it is an FQDN,
+  then the current short name in each search domain of `/etc/resolv.conf` (the last `search`
+  or `domain` line, in order). The canonical name (CNAME target) of the first candidate whose
+  A or AAAA records contain the primary address wins. `hostname -f` is not used: it reads
+  `/etc/hosts`, which this declaration writes, so it would confirm its own entry.
+* `serial`: the DMI system serial number (`/sys/class/dmi/id/product_serial`, on ARM boards
+  the device tree serial). Vendor placeholders such as `To be filled by O.E.M.`,
+  `Default string`, `System Serial Number`, `0` or an empty value count as no serial.
+  The whole serial is one label (dots become `-`).
+* `template`: the template, rendered by the server for the device like file templates, with
+  `{{.Serial}}`, `{{.MAC}}`, `{{.Vendor}}` and `{{.Model}}` in addition. A template that uses
+  `.Serial` or `.MAC` while the device has not reported that value does not render.
+* `fixed`: `name`.
+
+The name is made a valid RFC 1123 host name: letters and digits stay (lower case unless
+`lowercase` is false), every other run of characters becomes one `-`, no `-` at either end,
+the short name at most `max_length` characters, the FQDN at most 253. A name of digits only
+and `localhost` are refused. When the source gives no usable name the template is used with
+`fallback` `template`; otherwise the device keeps its name and the declaration reports the
+reason as not achieved. An invalid name is never set.
+
+The agent:
+
+* sets the name only when it differs from the current one: with systemd
+  `hostnamectl set-hostname --static --transient <short name>` (and `--pretty` for `pretty`),
+  without systemd (Alpine) it writes `/etc/hostname` and runs `hostname -F /etc/hostname`.
+  The static host name is the short name; the FQDN goes to `/etc/hosts`.
+* with `hosts`, sets `127.0.1.1 <FQDN> <short name>`: inside a block between
+  `# BEGIN LiMDM hostname` and `# END LiMDM hostname` when there is one, else on the first
+  `127.0.1.1` line (Debian and Ubuntu have one), else it appends that block (Fedora, RHEL,
+  SUSE, Arch and Alpine have none). No other line is changed or removed. The SELinux label
+  is restored after writing.
+* with `mailname`, writes the FQDN to `/etc/mailname` when that file exists or Postfix or
+  Exim is installed.
+* never edits MTA configuration. When Postfix sets `myhostname` explicitly, or Exim's
+  `primary_hostname`, to another name, the declaration status shows a warning.
+* applies names from `rdns` and `dns` only when two check ins in a row give the same result,
+  and changes such a name at most once an hour, so a PTR record that changes with DHCP never
+  makes the device rename itself in a loop. Until then the status says `waiting`.
+* reports in the inventory (`hostname_info`) the primary address, its MAC, the confirmed PTR
+  name, the DNS name, the computed target, the source used, the result (`unchanged`,
+  `changed`, `waiting`, `failed`) and the name before the last change. The declaration status
+  carries the same as notes. Address, PTR and DNS name are only reported with
+  `privacy.network_info` (they are still used on the device while the item is assigned).
+
+The device page shows this under **Configuration**, **Host name**; the item editor shows the
+name the declaration computes for one device from its last report
+(`POST /api/v1/config/library/render`, field `hostname`). The device list takes the new
+name from the next check in.
+
+**Caution.** A new host name affects mail servers (HELO name, `myhostname`), Kerberos and
+Active Directory or FreeIPA joins (the machine account and keytab keep the old name), TLS
+certificates issued for the old name, monitoring and anything that matches on the name.
+Test the item on a pilot blueprint first. Nothing changes on a device until the item is
+assigned through a blueprint; removing the item leaves the current name in place. The device
+identity does not depend on the host name: the device ID, the mTLS client certificate
+(common name is the device ID) and the network certificate (DNS name derived from the device
+ID by the server) stay the same, so a device keeps checking in under its new name.
+
 ## Security
 
 ### `com.limdm.firewall` (list)
@@ -527,7 +687,9 @@ up with `lpadmin` (separate arguments, no shell).
 Console: **Firewall**.
 
 ```json
-{"enforce": true, "allow": ["22/tcp"], "rules": [{"port": "5432/tcp", "from": "10.0.0.0/8"}]}
+{"enforce": true, "allow": ["22/tcp"], "rules": [{"port": "5432/tcp", "from": "10.0.0.0/8"}],
+ "zones": [{"name": "internal", "interfaces": ["wg0"], "sources": ["10.0.0.0/8"], "allow": ["9100/tcp"]}],
+ "outbound": {"policy": "deny", "allow": [{"to": "192.0.2.0/24", "port": "443/tcp"}, {"port": "80/tcp"}]}}
 ```
 
 | Field | Type | Rules |
@@ -536,9 +698,38 @@ Console: **Firewall**.
 | `allow` | list of text | `port/proto` or `low:high/proto`, ports 1 to 65535, proto `tcp` or `udp` |
 | `rules[].port` | text | as in `allow` |
 | `rules[].from` | text | source network (CIDR) or address |
+| `zones[].name` | text | lower case, up to 17 characters, each once |
+| `zones[].interfaces` | list of text | interface names, for example `wg0` |
+| `zones[].sources` | list of text | networks (CIDR) or addresses; a zone needs interfaces or sources |
+| `zones[].allow` | list of text | ports as in `allow` |
+| `outbound.policy` | text | `allow` or `deny`; without `outbound` outgoing traffic is left alone |
+| `outbound.allow[].to` | text | destination network (CIDR) or address, empty is any |
+| `outbound.allow[].port` | text | as in `allow`, empty is any; `to` or `port` is required |
+| `template` | true or false | render every rule text per device (see [Templates](#templates)) |
+| `keep` | list of text | exceptions: rules LiMDM did not add that stay on the device (the `match` of the [firewall inventory](#firewall-inventory)); agents of 0.18 and before refuse an item with `keep` |
 
-Merged as a union; `enforce` is on when any item sets it. `allow` opens ports for
-everybody, `rules` opens a port only for a source network or address.
+Merged as a union; `enforce` is on when any item sets it, zones of the same name are
+combined, and outbound `deny` wins over `allow`. `allow` opens ports for everybody, `rules`
+opens a port only for a source network or address, `zones` open ports only for traffic that
+arrives on the listed interfaces or from the listed sources.
+
+Zones per backend:
+
+* firewalld: the zone of that name (created when missing). Interfaces are moved into it with
+  `--change-interface`, sources added with `--add-source`, ports with `--zone=… --add-port`.
+* ufw and nftables have no zones; the closest equivalent is one rule per port, interface and
+  source: `ufw allow in on wg0 from 10.0.0.0/8 to any port 9100 proto tcp`. The zone name
+  only groups the rules.
+
+Outbound `deny` allows only the listed destinations plus what the device needs to stay
+managed: DNS (53 udp and tcp), DHCP (67/udp, 547/udp), NTP (123/udp) and the LiMDM server, or
+the proxy the agent reaches it through, resolved at each run. Established connections and
+loopback always pass. The allow rules go in first, the deny policy last, and when outbound
+deny is no longer declared the policy is switched back before the rules go. With ufw it is
+`ufw default deny outgoing` plus `ufw allow out …`; with firewalld a policy object
+`limdm-egress` (ingress zone HOST, egress zone ANY, target REJECT, firewalld 0.9 or newer)
+holding the allow rules as rich rules; on Alpine the output chain of the LiMDM table. If the
+server address cannot be resolved, nothing is changed.
 
 * Debian family: ufw (installed when missing). Allow rules are added first, then
   `ufw default deny incoming` and `ufw --force enable`, so an active SSH session is never cut.
@@ -546,13 +737,113 @@ everybody, `rules` opens a port only for a source network or address.
   active nftables service and no ufw is reported instead of being overwritten.
 * Other families: firewalld (installed and enabled when missing); ports in the default zone,
   rules with a source as rich rules.
-* Alpine is not supported.
+* Alpine: nftables (installed when missing). The agent writes one table it owns,
+  `inet limdm`, to `/etc/nftables.d/limdm.nft` and loads that file atomically with `nft -f`
+  whenever it changes or is missing. The file deletes and recreates only `inet limdm` and never
+  contains `flush ruleset`. The agent never starts, restarts or reloads the nftables service
+  and never loads or edits the main configuration (`/etc/nftables.conf`, `/etc/nftables.nft`):
+  both begin with `flush ruleset` and would drop the tables of Docker, NetBird or CrowdSec. Input policy drop
+  with established traffic, loopback, ICMP and DHCP replies allowed, then the declared rules;
+  output policy drop only with outbound deny. nftables was chosen over awall because it is the
+  kernel's current firewall, needs no second policy language on top of iptables, and is what
+  the `firewall.active` check reads. Other tables still apply: a packet must pass every input
+  chain, so a stock `/etc/nftables.nft` with its own drop policy must allow the same ports or
+  be reduced to the include.
 
 The agent keeps the rules in line with the declaration also while the firewall is active:
 new rules are added first, rules it added earlier and that are no longer declared are
 deleted. Rules added by hand or by agents before 0.16 are never deleted. Without a firewall
 declaration (or with `enforce` off) the rules are left as they are, so a dropped item cannot
 lock out SSH. The default library item "Host firewall, SSH allowed" allows `22/tcp`.
+
+#### Firewall inventory
+
+At every check in the agent reads the host firewall, without changing anything, and sends
+it when it changed (a hash, like the package list). Backend is the first found of a running
+firewalld, an active ufw, nftables and iptables:
+
+* firewalld: `firewall-cmd --permanent --list-all-zones` and `--list-all-policies`, one rule
+  per interface or source binding, service, port, protocol, forward port and rich rule. The
+  raw text is the `firewall-cmd` option that adds it.
+* ufw: `ufw status verbose` (default policies) and `ufw show added`.
+* nftables: `nft -j list ruleset` for the fields, `nft -a list ruleset` for the text and handle.
+* iptables: `iptables-save` and `ip6tables-save`, only when nothing else is there.
+
+Beside ufw and firewalld the agent also lists the nftables tables (or iptables rules) they do
+not own, which is where Docker, libvirt and fail2ban put theirs. Each tool runs at most
+20 seconds; the inventory holds up to 2000 rules.
+
+Every rule has an origin: `managed` (added by LiMDM from this declaration, or in a table
+or firewalld zone of LiMDM itself: `inet limdm` on Alpine, `inet limdm_fw` of early agents,
+the policy `limdm-egress`), `system` or `foreign`. System rules belong to container,
+virtualization, VPN and intrusion prevention tools: names starting with docker, br-, veth,
+podman, cni, netavark, nv_, libvirt, virbr, kube, cali, flannel, cilium, weave, netbird,
+nb- (NetBird sets), tailscale, ts-, wg-quick, f2b-, fail2ban or crowdsec, or the VPN
+interfaces `wt0` (NetBird) and `zt...` (ZeroTier), in table, chain, set, zone, interface,
+jump target, comment or text. Rules whose addresses lie in a subnet of a local container or VM
+bridge (docker0, br-*, podman*, cni*, virbr*; the agent reads them from the interface list,
+`bridge_nets`) are system rules too, which covers Docker's hairpin NAT and masquerade
+rules outside its chains. Rules an admin wrote for a `wg*` interface stay foreign: they
+cannot be told from wg-quick PostUp rules. System rules are shown and never adopted, kept
+or removed; the server classifies every rule again, also stored inventories when it reads
+them, and does not trust the agent's word. On a Docker host every Docker chain, the jumps
+into it and the rules for `docker0` and `br-*` are system rules.
+
+On the **Firewall** tab of a device an admin decides per foreign rule:
+
+* **Adopt**: the rule is added to a firewall library item (an existing one, or a new one
+  with `enforce` off that is assigned in a blueprint the admin picks; the device's own
+  blueprint is preselected unless it is the global default, the dialog shows how many devices
+  the blueprint reaches and asks a second time for the global default or a blueprint that
+  reaches more than this device; tenant admins see only the blueprints of their tenant) in this
+  format: a port of the default zone goes to `allow`, a port with a source to `rules`, a port
+  on an interface or in another firewalld zone (with that zone's interfaces and sources) to
+  `zones`, an outbound allow rule to `outbound.allow` (only into an item that already has an
+  outbound policy, so adopting never changes the device's outbound default). Deny rules,
+  rules without TCP or UDP port and firewalld services without a known port cannot be
+  adopted; the tab says why.
+* **Exception**: the rule's `match` (tool, place and text without counters or handles) is
+  added to `keep` of a firewall item. The rule stays and is listed as accepted.
+* **Discard**: the rule's `match` is added to `remove` of a firewall item (the same dialog
+  as adopt: existing item or a new one in a picked blueprint, a second confirmation for a rule
+  that may cut SSH or the server). Every agent that gets the item deletes a matching foreign
+  rule in every cycle, so a rule that comes back at boot or with a reload of the tool that
+  added it goes again; the declaration status lists what was removed or left. Rules of LiMDM,
+  of container, VPN and protection tools (also by bridge address) and rules listed in `keep`
+  are never removed, even when listed: the server refuses such entries when the item is
+  saved, and the agent checks the live rule again. With four eyes approval on, saving an item
+  with a `remove` list waits for another administrator (a new item is refused then; pick an
+  existing one). The removal uses `ufw --force delete`, `firewall-cmd --permanent --remove-…`
+  plus `--reload`, `nft delete rule … handle N` or `iptables -D`.
+* The signed command `firewall_remove_rule` (API only, admins, four eyes) still removes one
+  rule at once; with nftables and iptables that changes the running ruleset only, so a rule
+  loaded at boot comes back unless it is also in a `remove` list.
+
+Adopt, exception and discard are normal library saves (signature, version, audit) plus an
+audit entry `firewall.adopt`, `firewall.keep` or `firewall.remove` on the device.
+
+#### After a reboot
+
+What LiMDM applies stays in force after a reboot on every backend, and the agent applies
+everything again at its start anyway:
+
+* ufw: rules and defaults live in ufw's own files (`/etc/ufw/user.rules`, `ufw.conf`);
+  `ufw --force enable` also enables it at boot.
+* firewalld: every change is made with `--permanent` and then `--reload`; the firewalld
+  service is enabled.
+* nftables (Alpine): `/etc/nftables.d/limdm.nft` is loaded at boot by the distribution's
+  nftables service when its main configuration includes `/etc/nftables.d/*.nft` and the
+  service is enabled (checked from the files, no command). Otherwise the agent installs its
+  own boot service `limdm-firewall` (systemd unit after `nftables.service`, or an OpenRC
+  script after `nftables`) that loads only LiMDM's file, and enables it without starting
+  anything. The main configuration is never edited.
+* Remove lists are enforced in every cycle, so rules restored at boot are removed again at
+  the agent's first cycle.
+
+On Debian 13 with Docker, NetBird and CrowdSec (nftables service with `flush ruleset` and
+`include "/etc/nftables.d/*.nft"`) the agent loads no ruleset at all: LiMDM's firewall there is
+ufw, and a host with an active nftables service and no ufw is reported, not overwritten. A
+remove list there deletes single foreign rules by handle at runtime, in every cycle.
 
 ### `com.limdm.ssh` (list), `com.limdm.banner`
 

@@ -3,13 +3,8 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
-	"math"
 	"os"
 	"os/exec"
 	"strings"
@@ -23,68 +18,6 @@ import (
 // Tray icon (StatusNotifierItem over D-Bus): sway with waybar, KDE Plasma,
 // Xfce, Cinnamon, Ubuntu's GNOME and GNOME with the AppIndicator extension
 // show it. Without a tray host the helper still runs its reminders.
-
-// statusIcon draws the LiMDM logo (shield with prompt on a teal tile, see
-// packaging/artwork/limdm.svg) with a status dot: green (compliant), amber
-// (checks failing), red (no contact or locked). Drawn in code: the tray
-// needs pixels and the binary has no SVG renderer.
-func statusIcon(c color.RGBA) []byte {
-	const n = 64
-	img := image.NewRGBA(image.Rect(0, 0, n, n))
-	teal := color.RGBA{0x0f, 0x6e, 0x6e, 0xff}
-	white := color.RGBA{0xff, 0xff, 0xff, 0xff}
-	seg := func(px, py, ax, ay, bx, by float64) float64 { // distance point to segment
-		dx, dy := bx-ax, by-ay
-		t := math.Max(0, math.Min(1, ((px-ax)*dx+(py-ay)*dy)/(dx*dx+dy*dy)))
-		return math.Hypot(px-ax-t*dx, py-ay-t*dy)
-	}
-	for y := 0; y < n; y++ {
-		for x := 0; x < n; x++ {
-			// coordinates of the 128 unit logo
-			px, py := (float64(x)+0.5)*2, (float64(y)+0.5)*2
-			// rounded tile 8..120, radius 26
-			qx, qy := math.Max(math.Abs(px-64)-30, 0), math.Max(math.Abs(py-64)-30, 0)
-			if math.Hypot(qx, qy) > 26 {
-				continue
-			}
-			col := color.RGBA{uint8(0x16 - 10*py/128), uint8(0x85 - 42*py/128), uint8(0x7f - 39*py/128), 0xff}
-			// shield
-			half := 0.0
-			switch {
-			case py >= 24 && py < 36:
-				half = 34 * (py - 24) / 12
-			case py >= 36 && py < 62:
-				half = 34
-			case py >= 62 && py <= 108:
-				k := (py - 62) / 46
-				half = 34 * math.Sqrt(1-k*k)
-			}
-			if math.Abs(px-64) <= half {
-				col = white
-				if seg(px, py, 49, 55, 61, 65) < 3.5 || seg(px, py, 61, 65, 49, 75) < 3.5 || seg(px, py, 66, 78, 80, 78) < 3.5 {
-					col = teal
-				}
-			}
-			// status dot with a white ring
-			switch d := math.Hypot(px-102, py-102); {
-			case d <= 20:
-				col = c
-			case d <= 26:
-				col = white
-			}
-			img.SetRGBA(x, y, col)
-		}
-	}
-	var b bytes.Buffer
-	_ = png.Encode(&b, img) // in-memory encoding of a valid image cannot fail
-	return b.Bytes()
-}
-
-var (
-	iconOK   = statusIcon(color.RGBA{0x2e, 0xc2, 0x7e, 0xff})
-	iconWarn = statusIcon(color.RGBA{0xf5, 0xc2, 0x11, 0xff})
-	iconBad  = statusIcon(color.RGBA{0xe0, 0x1b, 0x24, 0xff})
-)
 
 type tray struct {
 	header, status, checkin                                 *systray.MenuItem
@@ -116,7 +49,7 @@ func runTray() {
 		t.sso = systray.AddMenuItem(tr("Confirm Company Account…", "Firmenkonto bestätigen…"), "")
 		t.sso.Hide()
 		systray.AddSeparator()
-		t.sync = systray.AddMenuItem(tr("Check In Now", "Jetzt synchronisieren"), "")
+		t.sync = systray.AddMenuItem(tr("Sync Now", "Jetzt synchronisieren"), "")
 		t.logs = systray.AddMenuItem(tr("Agent Log…", "Agent Protokoll…"), "")
 		systray.AddSeparator()
 		t.about = systray.AddMenuItem(tr("Agent version unknown", "Agent Version unbekannt"), "")
@@ -148,9 +81,9 @@ func (t *tray) loop() {
 				case err != nil:
 					d.message(tr("Agent Not Reachable", "Agent nicht erreichbar"), err.Error(), true)
 				case !resp.OK:
-					d.message(tr("Check In Not Started", "Synchronisierung nicht gestartet"), resp.Error, true)
+					d.message(tr("Sync Not Started", "Synchronisierung nicht gestartet"), resp.Error, true)
 				default:
-					d.message(tr("Check In Started", "Synchronisierung gestartet"), tr("The device reports to the server within a minute.", "Das Gerät meldet sich innerhalb einer Minute beim Server."), false)
+					d.message(tr("Sync Started", "Synchronisierung gestartet"), tr("The device reports to the server within a minute.", "Das Gerät meldet sich innerhalb einer Minute beim Server."), false)
 				}
 			}()
 			time.AfterFunc(20*time.Second, t.refresh)
@@ -173,7 +106,7 @@ func (t *tray) refresh() {
 	if err != nil || resp.Status == nil {
 		systray.SetIcon(iconBad)
 		systray.SetTooltip(tr("LiMDM agent not reachable", "LiMDM Agent nicht erreichbar"))
-		t.status.SetTitle("● " + tr("Agent not reachable", "Agent nicht erreichbar"))
+		t.status.SetTitle("✕ " + tr("Agent not reachable", "Agent nicht erreichbar"))
 		t.checkin.SetTitle("")
 		t.about.SetTitle(tr("Agent version unknown", "Agent Version unbekannt"))
 		return
@@ -184,24 +117,24 @@ func (t *tray) refresh() {
 		t.header.SetTitle(fmt.Sprintf(tr("Managed by %s", "Verwaltet von %s"), resp.Company))
 	}
 	t.about.SetTitle(fmt.Sprintf(tr("LiMDM agent %s", "LiMDM Agent %s"), st.Version))
-	icon, line := iconOK, tr("Device is compliant", "Gerät ist konform")
+	icon, mark, line := iconOK, "✓ ", tr("Device is compliant", "Gerät ist konform")
 	switch {
 	case st.RemoteShell != "":
-		icon, line = iconWarn, tr("IT remote support session running", "Fernwartung durch die IT läuft")
+		icon, mark, line = iconWarn, "! ", tr("IT remote support session running", "Fernwartung durch die IT läuft")
 	case st.Locked:
-		icon, line = iconBad, tr("Device is locked", "Gerät ist gesperrt")
+		icon, mark, line = iconBad, "✕ ", tr("Device is locked", "Gerät ist gesperrt")
 	case st.LastError != "":
-		icon, line = iconBad, tr("No contact to the server", "Keine Verbindung zum Server")
+		icon, mark, line = iconBad, "✕ ", tr("No contact to the server", "Keine Verbindung zum Server")
 	case len(st.Failing) > 0:
-		icon, line = iconWarn, fmt.Sprintf(tr("%d checks failing", "%d Prüfungen fehlgeschlagen"), len(st.Failing))
+		icon, mark, line = iconWarn, "! ", fmt.Sprintf(tr("%d checks failing", "%d Prüfungen fehlgeschlagen"), len(st.Failing))
 	}
 	systray.SetIcon(icon)
 	systray.SetTooltip(resp.Company + ": " + line + " · " + tr("agent", "Agent") + " " + st.Version)
-	t.status.SetTitle("● " + line)
+	t.status.SetTitle(mark + line)
 	if st.LastCheckin != nil {
-		t.checkin.SetTitle(tr("Last check in ", "Letzte Synchronisierung ") + st.LastCheckin.Local().Format("15:04"))
+		t.checkin.SetTitle(tr("Last sync ", "Letzte Synchronisierung ") + st.LastCheckin.Local().Format("15:04"))
 	} else {
-		t.checkin.SetTitle(tr("Not checked in yet", "Noch nicht synchronisiert"))
+		t.checkin.SetTitle(tr("Not synced yet", "Noch nicht synchronisiert"))
 	}
 	if len(resp.Need) > 0 {
 		t.recovery.Show()
@@ -242,7 +175,7 @@ func showDetails(last agent.DesktopResponse) {
 	rows := [][2]string{
 		{tr("Device", "Gerät"), st.Hostname},
 		{tr("Compliance", "Compliance"), state},
-		{tr("Last check in", "Letzte Synchronisierung"), seen},
+		{tr("Last sync", "Letzte Synchronisierung"), seen},
 		{tr("Agent version", "Agent Version"), st.Version},
 		{tr("Server", "Server"), st.Server},
 		{tr("Recovery keys", "Wiederherstellungsschlüssel"), fmt.Sprint(st.Escrowed)},

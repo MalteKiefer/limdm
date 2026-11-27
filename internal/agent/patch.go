@@ -1,13 +1,401 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/maltekiefer/limdm/internal/api"
 )
+
+// errUnsupported: the distribution has no such update source or action.
+var errUnsupported = errors.New("not supported on this distribution")
+
+// maintenance runs every update rule in its window: once a day, or with
+// rings once per wave of the device's ring. A run that changed nothing is
+// logged as "no updates", never as installed.
+func (a *Agent) maintenance(now time.Time) {
+	u := a.pol.Updates
+	if a.state.UpdateRuns == nil {
+		a.state.UpdateRuns = map[string]api.UpdateRun{}
+	}
+	installed, inWin := false, false
+	for _, r := range u.EffectiveRules() {
+		if r.Mode != "install" || !inWindow(now, r.Window) || !updateDay(now, r.Window, r.Days) {
+			continue
+		}
+		inWin = true
+		last := a.state.UpdateRuns[r.Source]
+		if last.At.IsZero() {
+			last.At = a.state.LastUpdateRun // the run before rules existed
+		}
+		due, wave := runDue(r, last, a.state.UpdateGate, now)
+		if !due {
+			continue
+		}
+		run := a.runSource(r, now, wave)
+		a.state.UpdateRuns[r.Source] = run
+		a.state.LastUpdateRun = run.At
+		installed = installed || run.Result == "installed"
+	}
+	if installed && u.Autoremove {
+		if out, err := a.host.autoremove(); err != nil {
+			a.problem(api.TypeUpdates, "autoremove failed: %v", err)
+		} else if strings.TrimSpace(out) != "" {
+			a.event("autoremove: %s", lastLines(out, 3))
+		}
+	}
+	// Schedule once: a new shutdown call would replace and postpone the pending one.
+	if inWin && u.Reboot && !a.rebootPending(now) && a.host.rebootRequired() {
+		if err := a.scheduleReboot(now, u.RebootDefer); err != nil {
+			a.problem(api.TypeUpdates, "reboot after updates: %v", err)
+		}
+	}
+}
+
+// runDue decides whether a rule runs now (inside its window): once a day,
+// or with rings once per wave of an open ring, a failed run again a day
+// later. It returns the wave the run belongs to.
+func runDue(r api.UpdateRule, last api.UpdateRun, g *api.UpdateGate, now time.Time) (bool, int) {
+	daily := now.Sub(last.At) > 20*time.Hour
+	if !r.Rings || g == nil { // no ring: no gate
+		return daily, 0
+	}
+	return g.Open && (last.Wave < g.Wave || last.Result == "failed" && daily), g.Wave
+}
+
+// runSource installs one source and tells honestly what happened: the
+// package versions before and after decide between installed and no
+// updates, not the exit code.
+func (a *Agent) runSource(r api.UpdateRule, now time.Time, wave int) api.UpdateRun {
+	run := api.UpdateRun{Source: r.Source, At: now.Round(0), Wave: wave} // wall clock: the monotonic one stops during suspend
+	before := a.host.pkgVersions()
+	out, err := a.host.installSource(r)
+	out = cleanUpgradeOutput(out)
+	switch {
+	case errors.Is(err, errUnsupported):
+		run.Result, run.Detail = "unsupported", r.Source+" updates are "+err.Error()
+		a.event("updates (%s): %s", r.Source, run.Detail)
+	case err != nil:
+		run.Result, run.Detail = "failed", truncate(strings.TrimSpace(lastLines(out, 3)+"\n"+err.Error()), 500)
+		a.problem(api.TypeUpdates, "updates (%s) failed: %v", r.Source, err)
+	default:
+		if r.Source == api.SourceFlatpak {
+			run.Count = len(flatpakDoneRe.FindAllString(out, -1))
+		} else {
+			run.Count = changedPackages(before, a.host.pkgVersions())
+		}
+		run.Result = "no_updates"
+		if run.Count > 0 {
+			run.Result = "installed"
+		}
+		run.Detail = truncate(lastLines(out, 3), 500)
+		if run.Count > 0 {
+			a.event("updates (%s): %d updated", r.Source, run.Count)
+		} else {
+			a.event("updates (%s): no updates", r.Source)
+		}
+	}
+	return run
+}
+
+// flatpakDoneRe matches the numbered lines of flatpak update ("1. [✓] org.x …").
+var flatpakDoneRe = regexp.MustCompile(`(?m)^\s*[0-9]+\.\s+\[`)
+
+// mailNoiseRe: unattended-upgrade complains when it cannot mail its report.
+var mailNoiseRe = regexp.MustCompile(`(?i)(send mail|sendmail|mailx|/usr/bin/mail)`)
+
+// cleanUpgradeOutput drops the mail noise of unattended-upgrade.
+func cleanUpgradeOutput(out string) string {
+	lines := strings.Split(out, "\n")
+	return strings.Join(slices.DeleteFunc(lines, mailNoiseRe.MatchString), "\n")
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
+
+// pkgVersions maps "name arch" to the installed version.
+func (h *host) pkgVersions() map[string]string {
+	pkgs, _, err := h.installedPackages()
+	if err != nil {
+		return nil
+	}
+	m := make(map[string]string, len(pkgs))
+	for _, p := range pkgs {
+		m[p.Name+" "+p.Arch] = p.Version
+	}
+	return m
+}
+
+// changedPackages counts packages that are new or have another version.
+func changedPackages(before, after map[string]string) int {
+	if before == nil || after == nil {
+		return 0
+	}
+	n := 0
+	for k, v := range after {
+		if old, ok := before[k]; !ok || old != v {
+			n++
+		}
+	}
+	return n
+}
+
+// installSource installs the updates of one source. OS updates use the
+// plain full upgrade unless third party updates are pending; then only the
+// distribution's packages (apt: name=version, dnf and zypper: their repos).
+// Arch, Alpine and rolling openSUSE have no third party source the agent
+// can separate.
+func (h *host) installSource(r api.UpdateRule) (string, error) {
+	switch r.Source {
+	case api.SourceOSSecurity:
+		return h.upgrade(true)
+	case api.SourceFlatpak:
+		if !hasCmd("flatpak") {
+			return "", errors.New("flatpak is not installed")
+		}
+		return flatpakUpgrade()
+	}
+	if h.family == "arch" || h.family == "alpine" || h.rolling() {
+		if r.Source == api.SourceThirdParty {
+			return "", errUnsupported
+		}
+		return h.upgrade(false)
+	}
+	pending, err := h.pendingList()
+	if err != nil {
+		return "", err
+	}
+	var third bool
+	var sel []api.PendingUpdate
+	for _, p := range pending {
+		if p.Patch || p.Source == api.SourceFlatpak {
+			continue
+		}
+		third = third || p.Source == api.SourceThirdParty
+		if p.Source == r.Source && (r.Source != api.SourceThirdParty || matchRepo(r.Repos, p.Origin)) {
+			sel = append(sel, p)
+		}
+	}
+	if r.Source == api.SourceOSAll && !third {
+		return h.upgrade(false) // nothing third party pending: the plain full upgrade
+	}
+	if len(sel) == 0 {
+		return "", nil
+	}
+	return h.upgradeSelected(sel)
+}
+
+// upgradeSelected upgrades the listed pending updates only.
+func (h *host) upgradeSelected(sel []api.PendingUpdate) (string, error) {
+	h.pkgMu.Lock()
+	defer h.pkgMu.Unlock()
+	h.pending = pendingCache{}
+	var repos []string
+	for _, p := range sel {
+		if p.Origin != "" && !slices.Contains(repos, p.Origin) {
+			repos = append(repos, p.Origin)
+		}
+	}
+	switch h.family {
+	case "debian":
+		args := []string{"install", "--only-upgrade", "-y", "-q", "-o", "DPkg::Lock::Timeout=900",
+			"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"}
+		for _, p := range sel {
+			args = append(args, p.Name+"="+p.Candidate)
+		}
+		return run(2*time.Hour, "apt-get", args...)
+	case "suse":
+		return h.zypperUpgrade(false, repos)
+	}
+	args := []string{"upgrade", "-y", "-q", "--refresh"}
+	for _, r := range repos {
+		args = append(args, "--repo="+r)
+	}
+	return run(2*time.Hour, "dnf", args...)
+}
+
+// securitySince tracks since when security updates are pending without a
+// break.
+func (a *Agent) securitySince(sec int, now time.Time) time.Time {
+	switch {
+	case sec == 0:
+		a.state.SecuritySince = time.Time{}
+	case a.state.SecuritySince.IsZero():
+		a.state.SecuritySince = now.Round(0)
+	}
+	return a.state.SecuritySince
+}
+
+func runSecurityAge(a *Agent) (string, string) {
+	_, sec, err := a.host.pendingUpdates()
+	if err != nil {
+		return fail, "update status unknown: " + err.Error()
+	}
+	since := a.securitySince(sec, time.Now())
+	if sec == 0 {
+		return pass, "no security updates pending"
+	}
+	days := a.pol.Updates.SecurityMaxDays
+	if days == 0 {
+		days = 14
+	}
+	// a date, not a running duration: the detail would change the status every hour
+	detail := fmt.Sprintf("security updates pending since %s, at most %d days allowed", since.UTC().Format("2006-01-02"), days)
+	if time.Since(since) > time.Duration(days)*24*time.Hour {
+		return fail, detail
+	}
+	return pass, detail
+}
+
+// updateStatus is the patch part of the status report.
+func (a *Agent) updateStatus() *api.UpdateStatus {
+	list, err := a.host.pendingList()
+	st := &api.UpdateStatus{Pending: list}
+	if st.Pending == nil {
+		st.Pending = []api.PendingUpdate{}
+	}
+	if err != nil {
+		st.PendingError = truncate(err.Error(), 300)
+	}
+	for _, s := range api.UpdateSources {
+		if r, ok := a.state.UpdateRuns[s]; ok {
+			st.Runs = append(st.Runs, r)
+		}
+	}
+	if g := a.state.UpdateGate; g != nil {
+		st.Ring = g.Ring
+	}
+	if t := a.state.SecuritySince; !t.IsZero() {
+		st.SecuritySince = &t
+	}
+	return st
+}
+
+// rulesSummary describes the effective rules for the check updates.auto.
+func rulesSummary(u api.Updates) string {
+	var parts []string
+	for _, r := range u.EffectiveRules() {
+		s := r.Source + " " + r.Mode
+		if r.Mode != "off" {
+			s += " " + r.Window
+		}
+		if r.Rings {
+			s += " (rings)"
+		}
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// packageHold keeps a package at its installed version or releases it:
+// apt-mark, dnf versionlock (dnf4 needs its plugin), zypper locks.
+func (a *Agent) packageHold(payload string) (string, error) {
+	var p api.PackageHold
+	if err := json.Unmarshal([]byte(payload), &p); err != nil {
+		return "", err
+	}
+	if err := p.Validate(); err != nil {
+		return "", err
+	}
+	if !a.host.isInstalled(p.Name) && !p.Release {
+		return "", fmt.Errorf("%s is not installed", p.Name)
+	}
+	return a.host.hold(p.Name, !p.Release)
+}
+
+func (h *host) hold(name string, on bool) (string, error) {
+	h.pkgMu.Lock()
+	defer h.pkgMu.Unlock()
+	switch h.family {
+	case "debian":
+		return sh("apt-mark", map[bool]string{true: "hold", false: "unhold"}[on], "--", name)
+	case "fedora":
+		return sh("dnf", "versionlock", map[bool]string{true: "add", false: "delete"}[on], name)
+	case "suse":
+		return zypper(time.Minute, map[bool]string{true: "addlock", false: "removelock"}[on], name)
+	}
+	return "", errUnsupported
+}
+
+// packageDowngrade installs an older version (the given one, or the
+// highest available below the installed one) and holds the package there,
+// or the next update run would upgrade it again. Debian family and dnf
+// only: zypper, pacman and apk keep no older versions in their
+// repositories.
+func (a *Agent) packageDowngrade(payload string) (string, error) {
+	var p api.PackageDowngrade
+	if err := json.Unmarshal([]byte(payload), &p); err != nil {
+		return "", err
+	}
+	if err := p.Validate(); err != nil {
+		return "", err
+	}
+	h := a.host
+	if !h.isInstalled(p.Name) {
+		return "", fmt.Errorf("%s is not installed", p.Name)
+	}
+	var out string
+	var err error
+	h.pkgMu.Lock()
+	switch h.family {
+	case "debian":
+		v := p.Version
+		if v == "" {
+			v, err = aptPreviousVersion(p.Name)
+		}
+		if err == nil {
+			out, err = run(30*time.Minute, "apt-get", "install", "-y", "-q", "--allow-downgrades", "-o", "DPkg::Lock::Timeout=300",
+				"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold", p.Name+"="+v)
+		}
+	case "fedora":
+		target := p.Name
+		if p.Version != "" {
+			target += "-" + p.Version
+		}
+		out, err = run(30*time.Minute, "dnf", "downgrade", "-y", "-q", target)
+	default:
+		err = errUnsupported
+	}
+	h.pending = pendingCache{}
+	h.pkgMu.Unlock()
+	if err != nil {
+		return out, err
+	}
+	hout, err := h.hold(p.Name, true)
+	return out + "\n" + hout, err
+}
+
+// aptPreviousVersion is the highest version apt knows below the installed one.
+func aptPreviousVersion(name string) (string, error) {
+	cur, err := run(time.Minute, "dpkg-query", "-W", "-f", "${Version}", "--", name)
+	if err != nil {
+		return "", err
+	}
+	out, err := run(time.Minute, "apt-cache", "madison", name)
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(out, "\n") { // newest first
+		f := strings.Split(line, "|")
+		if len(f) < 2 {
+			continue
+		}
+		v := strings.TrimSpace(f[1])
+		if _, err := run(time.Minute, "dpkg", "--compare-versions", v, "lt", strings.TrimSpace(cur)); err == nil {
+			return v, nil
+		}
+	}
+	return "", errors.New("no older version in the configured repositories")
+}
 
 const (
 	dnf5Hold   = "/etc/dnf/libdnf5.conf.d/60-limdm-hold.conf"

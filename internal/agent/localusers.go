@@ -140,9 +140,9 @@ func (a *Agent) applyLocalUser(u api.LocalUser) error {
 	return nil
 }
 
-// passwdShell is the login shell of name in passwd content.
-func passwdShell(passwd, name string) string {
-	for _, l := range strings.Split(passwd, "\n") {
+// passwdShell is the login shell of name in /etc/passwd content.
+func passwdShell(accountDB, name string) string {
+	for _, l := range strings.Split(accountDB, "\n") {
 		if f := strings.Split(l, ":"); len(f) == 7 && f[0] == name {
 			return f[6]
 		}

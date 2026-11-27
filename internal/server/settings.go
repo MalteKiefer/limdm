@@ -54,6 +54,11 @@ type Settings struct {
 	FourEyes         bool `json:"four_eyes,omitempty"`
 	FourEyesRecovery bool `json:"four_eyes_recovery,omitempty"`
 	FourEyesShell    bool `json:"four_eyes_shell,omitempty"` // remote shell sessions
+	// FourEyesWorkloads: stopping and restarting containers and VMs needs
+	// approval; WorkloadsHelpdesk lets the helpdesk role send workload
+	// actions (app_workloads.go).
+	FourEyesWorkloads bool `json:"four_eyes_workloads,omitempty"`
+	WorkloadsHelpdesk bool `json:"workloads_helpdesk,omitempty"`
 	// RequireMFA refuses OIDC sign ins whose id token shows no second factor
 	// (amr), or, with MFAACR set, whose acr is not one of these values.
 	RequireMFA bool     `json:"require_mfa,omitempty"`
@@ -74,6 +79,12 @@ type Settings struct {
 	FallbackDNS bool                `json:"fallback_dns,omitempty"`
 	RemoteShell RemoteShellSettings `json:"remote_shell,omitzero"`
 	Ops         OpsSettings         `json:"ops"`
+	// NetCertDomain: EAP-TLS certificates carry <device ID>.<domain> as
+	// DNS SAN; empty leaves the DNS SAN out (devicecerts.go).
+	NetCertDomain string `json:"network_cert_domain,omitempty"`
+	// Enroll limits new enrollment tokens and can require TPM bound keys.
+	Enroll   EnrollSettings  `json:"enrollment"`
+	CVEFeeds CVEFeedSettings `json:"cve_feeds"` // Debian and Ubuntu security data (app_patch_cve.go)
 }
 
 // OpsSettings are the runtime operations of every instance (Settings,
@@ -457,7 +468,7 @@ func consoleAllowed(rt *runtimeState, ip string) bool {
 // ---- settings page ----
 
 // settingsSections are the sections saveSettings accepts.
-var settingsSections = []string{"general", "sso", "monitoring", "network", "branding", "security", "remote_shell", "operations", "retention"}
+var settingsSections = []string{"general", "sso", "monitoring", "network", "branding", "security", "remote_shell", "operations", "retention", "enrollment", "cve_feeds"}
 
 // saveSettings stores the fields of one settings section taken from in and
 // makes them active. The console form and the admin API both call it, so
@@ -509,6 +520,10 @@ func (s *Server) saveSettings(ctx context.Context, sess session, ip, section str
 		set.WebhookURL, set.NotifyPrivate = strings.TrimSpace(in.WebhookURL), in.NotifyPrivate
 	case "network":
 		set.ConsoleAllow, set.ConsoleBlock, set.SCIMAllow = in.ConsoleAllow, in.ConsoleBlock, in.SCIMAllow
+		set.NetCertDomain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(in.NetCertDomain)), ".")
+		if !validCertDomain(set.NetCertDomain) {
+			return reject(in, "network certificate domain: a DNS domain such as devices.example.com")
+		}
 	case "branding":
 		set.CompanyName, set.Logo = strings.TrimSpace(in.CompanyName), in.Logo
 	case "security":
@@ -516,6 +531,7 @@ func (s *Server) saveSettings(ctx context.Context, sess session, ip, section str
 		set.FourEyes = in.FourEyes
 		set.FourEyesRecovery = set.FourEyes && in.FourEyesRecovery
 		set.FourEyesShell = set.FourEyes && in.FourEyesShell
+		set.FourEyesWorkloads, set.WorkloadsHelpdesk = set.FourEyes && in.FourEyesWorkloads, in.WorkloadsHelpdesk
 		set.Geolocation, set.FallbackDNS = in.Geolocation, in.FallbackDNS
 		if set.FourEyes && !cur.FourEyes {
 			n, err := s.activeAdmins(ctx)
@@ -531,12 +547,23 @@ func (s *Server) saveSettings(ctx context.Context, sess session, ip, section str
 	case "operations":
 		set.Ops = in.Ops
 		set.Ops.Syslog, set.Ops.SyslogCA = strings.TrimSpace(set.Ops.Syslog), strings.TrimSpace(set.Ops.SyslogCA)
+	case "enrollment":
+		set.Enroll = in.Enroll.withDefaults()
+		if err := set.Enroll.validate(); err != nil {
+			return reject(in, err.Error())
+		}
 	case "retention":
 		set.Retention = map[string]int{}
 		for _, k := range retentionKinds {
 			set.Retention[k.Key] = in.retentionDays(k.Key)
 		}
 		set.AuditRetentionDays = 0 // replaced by Retention["audit"]
+	case "cve_feeds":
+		in.CVEFeeds.DebianURL, in.CVEFeeds.UbuntuURL = strings.TrimSpace(in.CVEFeeds.DebianURL), strings.TrimSpace(in.CVEFeeds.UbuntuURL)
+		if msg := in.CVEFeeds.validate(); msg != "" {
+			return reject(in, msg)
+		}
+		set.CVEFeeds = in.CVEFeeds
 	}
 	// never lock the admin who saves out of the console
 	if rt, err := (&Server{}).netsOnly(set); err == nil && !consoleAllowed(rt, ip) {
@@ -567,9 +594,12 @@ func (s *Server) saveSettings(ctx context.Context, sess session, ip, section str
 	detail := fmt.Sprintf("oidc=%q domain=%q local=%v stale=%d webhook=%v secret_changed=%v company=%q logo_bytes=%d allow=%q block=%q rules=%+v four_eyes=%v four_eyes_recovery=%v four_eyes_shell=%v require_mfa=%v acr=%q audit_retention_days=%d role_groups=%+v geolocation=%v fallback_dns=%v",
 		set.OIDCIssuer, set.AllowedDomain, set.LocalLogin, set.StaleHours, set.WebhookURL != "", set.OIDCClientSecret != cur.OIDCClientSecret,
 		set.CompanyName, len(set.Logo), set.ConsoleAllow, set.ConsoleBlock, set.Rules,
-		set.FourEyes, set.FourEyesRecovery, set.FourEyesShell, set.RequireMFA, set.MFAACR, set.AuditRetentionDays, set.RoleGroups, set.Geolocation, set.FallbackDNS) + fmt.Sprintf(" remote_shell=%+v retention=%v scim_allow=%q notify_private=%v", set.RemoteShell, set.Retention, set.SCIMAllow, set.NotifyPrivate) +
+		set.FourEyes, set.FourEyesRecovery, set.FourEyesShell, set.RequireMFA, set.MFAACR, set.AuditRetentionDays, set.RoleGroups, set.Geolocation, set.FallbackDNS) + fmt.Sprintf(" remote_shell=%+v retention=%v scim_allow=%q notify_private=%v network_cert_domain=%q", set.RemoteShell, set.Retention, set.SCIMAllow, set.NotifyPrivate, set.NetCertDomain) +
+		fmt.Sprintf(" enrollment=%+v", set.Enroll.withDefaults()) +
 		fmt.Sprintf(" log_level=%s access_log=%v audit_api_reads=%s update_downloads=%d max_checkins=%d agent_proxy_protocol=%q syslog=%q syslog_ca_bytes=%d",
-			set.Ops.LogLevel, set.Ops.AccessLog, set.Ops.AuditAPIReads, set.Ops.UpdateDownloads, set.Ops.MaxCheckins, set.Ops.AgentProxyFrom, set.Ops.Syslog, len(set.Ops.SyslogCA))
+			set.Ops.LogLevel, set.Ops.AccessLog, set.Ops.AuditAPIReads, set.Ops.UpdateDownloads, set.Ops.MaxCheckins, set.Ops.AgentProxyFrom, set.Ops.Syslog, len(set.Ops.SyslogCA)) +
+		fmt.Sprintf(" cve_feeds=%+v", set.CVEFeeds) +
+		fmt.Sprintf(" four_eyes_workloads=%v workloads_helpdesk=%v", set.FourEyesWorkloads, set.WorkloadsHelpdesk)
 	err = s.auditAction(ctx, sess.Email, "settings.save", "server", detail, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()
 			RETURNING updated_at`, string(doc)).Scan(&at)

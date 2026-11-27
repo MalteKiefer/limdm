@@ -3,7 +3,7 @@
 // and the live feed. Every number links to the list behind it.
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { ArrowRight, CheckCircle2, CircleAlert, Circle, DatabaseBackup, Monitor, ShieldAlert, TriangleAlert, WifiOff, X, type LucideIcon } from 'lucide-react'
+import { ArrowRight, CheckCircle2, CircleAlert, Circle, DatabaseBackup, Monitor, ShieldAlert, ShieldCheck, TriangleAlert, WifiOff, X, type LucideIcon } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { api, unwrap, type Schemas } from '../../api/client'
 import { useLiveActivity } from '../../api/live'
@@ -94,11 +94,11 @@ export function Home() {
         <>
           <div className="grid grid-cols-2 gap-[var(--gap)] md:grid-cols-3 xl:grid-cols-6">
             <KpiCard to="/compliance" label={t('home.kpi.score')} value={pct(c.score)} delta={week !== undefined ? <Delta value={c.score - week} label={t('home.d7')} /> : undefined} spark={hist.map((h) => h.score)} sparkLabel={t('home.kpi.scoreSpark')} tone="accent" />
-            <KpiCard to="/devices" label={t('home.kpi.online')} value={fmt(f.online)} unit={t('home.kpi.ofTotal', { total: f.total })} delta={<span className="text-[12px] text-muted">{t('home.kpi.offline', { count: f.total - f.online })}</span>} spark={hist.map((h) => h.compliant + h.noncompliant + h.in_grace)} tone="muted" />
+            <KpiCard to="/devices" label={t('home.kpi.online')} value={fmt(f.online)} unit={t('home.kpi.ofTotal', { total: f.total })} delta={<span className="text-meta text-muted">{t('home.kpi.offline', { count: f.total - f.online })}</span>} spark={hist.map((h) => h.compliant + h.noncompliant + h.in_grace)} tone="muted" />
             <KpiCard to="/devices" search={{ q: 'status:non-compliant' }} label={t('home.kpi.noncompliant')} value={fmt(a.noncompliant)} delta={week !== undefined ? <Delta value={a.noncompliant - hist[hist.length - 8].noncompliant} unit="" goodUp={false} label={t('home.d7')} /> : undefined} spark={hist.map((h) => h.noncompliant)} tone="bad" />
             <SecurityKpi u={upd.data} />
             <AgentKpi u={upd.data} />
-            <KpiCard to="/inbox" search={{ group: 'commands' }} label={t('home.kpi.failed')} value={fmt(a.commands_failed_24h)} unit={t('home.kpi.h24')} delta={<span className="text-[12px] text-muted">{t('home.kpi.sent', { count: a.commands_sent_24h })}</span>} spark={cmdDays.data?.map((d) => d.failed)} sparkLabel={t('home.kpi.failedSpark')} tone="bad" />
+            <KpiCard to="/inbox" search={{ group: 'commands' }} label={t('home.kpi.failed')} value={fmt(a.commands_failed_24h)} unit={t('home.kpi.h24')} delta={<span className="text-meta text-muted">{t('home.kpi.sent', { count: a.commands_sent_24h })}</span>} spark={cmdDays.data?.map((d) => d.failed)} sparkLabel={t('home.kpi.failedSpark')} tone="bad" />
           </div>
 
           <div className="grid gap-[var(--gap)] xl:grid-cols-12">
@@ -197,7 +197,7 @@ function Attention({ approvals, a }: { approvals: Schemas['Approval'][]; a: Sche
           </span>
           <div className="min-w-0 flex-1">
             <div className="truncate font-medium">{it.title}</div>
-            <div className="truncate text-[12.5px] text-muted">{it.meta}</div>
+            <div className="truncate text-meta text-muted">{it.meta}</div>
           </div>
           <Link to={it.to} search={it.search} className={cx('btn shrink-0', it.approval && 'btn-primary')}>
             {it.approval ? t('home.review') : t('home.show')}
@@ -214,7 +214,7 @@ function GridCard({ f }: { f: Schemas['StatsFleet'] }) {
   return (
     <>
       <FleetGrid cells={f.cells} cell={f.cells.length > 600 ? 9 : f.cells.length > 150 ? 13 : 18} onPick={(c) => void nav({ to: '/devices', search: { sel: c.id } })} />
-      {f.truncated && <p className="mt-2 text-[12px] text-muted">{t('home.gridTruncated', { count: f.cells.length })}</p>}
+      {f.truncated && <p className="mt-2 text-meta text-muted">{t('home.gridTruncated', { count: f.cells.length })}</p>}
     </>
   )
 }
@@ -225,11 +225,11 @@ function TopFailing({ items }: { items: Schemas['StatsCompliance']['top_failing'
   const max = items[0].fail || 1
   return (
     <div className="mt-5 border-t border-line pt-4">
-      <h3 className="mb-2 text-[12.5px] font-semibold text-muted">{t('home.topFailing')}</h3>
+      <h3 className="mb-2 text-meta font-semibold text-muted">{t('home.topFailing')}</h3>
       <ul className="flex flex-col gap-1.5">
         {items.slice(0, 5).map((c) => (
           <li key={c.id}>
-            <Link to="/devices" search={{ q: `check:${c.id}` }} className="grid grid-cols-[1fr_90px_36px] items-center gap-3 rounded text-[13px] hover:text-accent">
+            <Link to="/devices" search={{ q: `check:${c.id}` }} className="grid grid-cols-[1fr_90px_36px] items-center gap-3 rounded text-body hover:text-accent">
               <span className="truncate">{c.title || c.id}</span>
               <span className="h-1.5 rounded-full bg-surface-2" aria-hidden>
                 <span className="block h-1.5 rounded-full bg-bad" style={{ width: `${(c.fail / max) * 100}%` }} />
@@ -293,7 +293,7 @@ function TrendChart({ hist, marks }: { hist: Schemas['StatsCompliance']['history
       table={{ head: [t('home.day'), t('home.score'), t('home.compliantCol'), t('home.noncompliantCol'), t('home.events')], rows: [...hist].reverse().map((h) => [dateShort(h.day), pct(h.score), h.compliant, h.noncompliant, byDay.get(h.day) ?? '']) }}
     />
     {byDay.size > 0 && (
-      <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-muted" aria-label={t('home.events')}>
+      <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-meta text-muted" aria-label={t('home.events')}>
         {[...byDay].slice(-5).map(([day, text]) => (
           <li key={day}>
             <span className="mr-1 inline-block h-3 border-l-2 border-dotted border-info align-middle" aria-hidden />
@@ -318,7 +318,7 @@ function SecurityKpi({ u }: { u?: Schemas['StatsUpdates'] }) {
       value={fmt(u.security_devices)}
       unit={t('home.kpi.devices')}
       delta={
-        <span className={cx('text-[12px]', u.security_old ? 'font-medium text-bad' : 'text-muted')}>
+        <span className={cx('text-meta', u.security_old ? 'font-medium text-bad' : 'text-muted')}>
           {u.security_old ? t('home.kpi.securityOld', { count: u.security_old }) : t('home.kpi.securityTotal', { count: u.security_updates })}
         </span>
       }
@@ -341,7 +341,7 @@ function AgentKpi({ u }: { u?: Schemas['StatsUpdates'] }) {
       label={t('home.kpi.agent')}
       value={share === undefined ? '–' : pct(share)}
       delta={
-        <span className="text-[12px] text-muted">
+        <span className="text-meta text-muted">
           {u.agent_newest ? t(u.agent_approved ? 'home.kpi.agentOn' : 'home.kpi.agentNewest', { version: u.agent_newest }) : t('home.kpi.agentNone')}
         </span>
       }
@@ -355,7 +355,7 @@ function AgentKpi({ u }: { u?: Schemas['StatsUpdates'] }) {
 function Frameworks({ list }: { list: Schemas['StatsCompliance']['frameworks'] }) {
   const t = useT()
   const shown = list.filter((f) => f.pass + f.fail > 0)
-  if (!shown.length) return <p className="text-muted">{t('home.noChecks')}</p>
+  if (!shown.length) return <EmptyState compact icon={ShieldCheck} title={t('home.noChecks')} />
   return (
     <ul className="flex flex-col gap-4">
       {shown.map((f) => (
@@ -384,7 +384,7 @@ function Distribution({ items, label, filterKey }: { items: Schemas['FacetCount'
     <>
       <StackBar parts={parts} label={label} />
       {filterKey && top[0] && (
-        <Link to="/devices" search={{ q: `${filterKey}:${top[0].value}` }} className="mt-2 inline-block text-[12.5px] text-accent hover:underline">
+        <Link to="/devices" search={{ q: `${filterKey}:${top[0].value}` }} className="mt-2 inline-block text-meta text-accent hover:underline">
           {top[0].value} <ArrowRight size={12} className="inline" aria-hidden />
         </Link>
       )}
@@ -403,7 +403,7 @@ function Backup({ b }: { b: Schemas['StatsAttention']['last_backup'] }) {
       </span>
       <div className="min-w-0">
         <div className="font-semibold">{ok ? t('home.backupOk') : t('home.backupFailed')}</div>
-        <div className="num truncate text-[12.5px] text-muted">
+        <div className="num truncate text-meta text-muted">
           {dateTime(b.started_at)}
           {b.size > 0 && ` · ${bytes(b.size)}`}
           {b.error && ` · ${b.error}`}
@@ -416,13 +416,13 @@ function Backup({ b }: { b: Schemas['StatsAttention']['last_backup'] }) {
 function LiveFeed() {
   const t = useT()
   const ev = useLiveActivity()
-  if (!ev.length) return <p className="text-[12.5px] text-muted">{t('home.liveEmpty')}</p>
+  if (!ev.length) return <p className="text-meta text-muted">{t('home.liveEmpty')}</p>
   return (
     <ul className="flex flex-col">
       {ev.slice(0, 6).map((e, i) => (
         <li key={e.id} className={cx('flex gap-2.5 py-1.5', i === 0 && 'fade-in')}>
           <Avatar name={e.actor} size={22} />
-          <div className="min-w-0 flex-1 text-[12.5px] leading-snug">
+          <div className="min-w-0 flex-1 text-meta leading-snug">
             <div className="line-clamp-2">
               <span className="font-medium">{e.actor}</span> <Badge>{e.action}</Badge>
             </div>
@@ -489,7 +489,7 @@ function Onboarding() {
                   {t(`home.step.${s.id}` as MessageKey)}
                   {s.done && <span className="sr-only"> ({t('home.stepDone')})</span>}
                 </span>
-                <span className="block text-[12.5px] text-muted">{t(`home.stepHint.${s.id}` as MessageKey)}</span>
+                <span className="block text-meta text-muted">{t(`home.stepHint.${s.id}` as MessageKey)}</span>
               </span>
             </Link>
           </li>
@@ -510,7 +510,7 @@ function Tenants() {
   return (
     <Card title={t('home.tenants')} sub={t('home.tenantsSub', { target: TARGET })} id="h-tenants">
       <div className="overflow-x-auto">
-        <table className="w-full text-left text-[13px]">
+        <table className="w-full text-left text-body">
           <thead>
             <tr className="border-b border-line text-muted">
               <th scope="col" className="py-2 pr-4 font-medium">{t('home.tenant')}</th>

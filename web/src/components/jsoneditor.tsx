@@ -26,11 +26,11 @@ export function JsonEditor({ value, onChange, label, rows = 18, readOnly }: { va
   const lines = value.split('\n').length
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-[13px] font-medium">
+      <label htmlFor={id} className="text-body font-medium">
         {label ?? t('json.label')}
       </label>
       <div className="flex overflow-hidden rounded-md border border-field bg-surface focus-within:outline-2 focus-within:outline-accent" aria-hidden={false}>
-        <pre aria-hidden className="num m-0 min-w-10 bg-surface-2 px-2 py-2 text-right font-mono text-[12.5px] leading-5 text-muted select-none">
+        <pre aria-hidden className="num m-0 min-w-10 bg-surface-2 px-2 py-2 text-right font-mono text-meta leading-5 text-muted select-none">
           {Array.from({ length: Math.max(lines, rows) }, (_, i) => i + 1).join('\n')}
         </pre>
         <textarea
@@ -55,10 +55,10 @@ export function JsonEditor({ value, onChange, label, rows = 18, readOnly }: { va
             onChange(next, undefined)
             requestAnimationFrame(() => el.setSelectionRange(s + 2, s + 2))
           }}
-          className="min-w-0 flex-1 resize-y bg-transparent px-2 py-2 font-mono text-[12.5px] leading-5 outline-none"
+          className="min-w-0 flex-1 resize-y bg-transparent px-2 py-2 font-mono text-meta leading-5 outline-none"
         />
       </div>
-      <p id={`${id}-state`} role="status" className={res.ok ? 'text-[12.5px] text-muted' : 'text-[12.5px] font-medium text-bad'}>
+      <p id={`${id}-state`} role="status" className={res.ok ? 'text-meta text-muted' : 'text-meta font-medium text-bad'}>
         {res.ok ? t('json.valid') : t('json.invalid', { line: res.line, col: res.col, msg: res.msg })}
       </p>
     </div>

@@ -36,7 +36,7 @@ export function ExceptionsPage() {
   const list = useMemo(() => (q.data ?? []).filter((e) => tab === 'all' || e.state === tab), [q.data, tab])
   const columns = useMemo<GridColumn<Exception>[]>(
     () => [
-      { id: 'check', header: t('compliance.exc.col.check'), cell: ({ row: { original: e } }) => <Link to="/compliance" search={{ sel: e.check_id } as never} className="font-mono text-[12.5px] hover:text-accent">{e.check_id}</Link> },
+      { id: 'check', header: t('compliance.exc.col.check'), cell: ({ row: { original: e } }) => <Link to="/compliance" search={{ sel: e.check_id } as never} className="font-mono text-meta hover:text-accent">{e.check_id}</Link> },
       { id: 'mode', header: t('compliance.exc.col.mode'), cell: ({ row: { original: e } }) => t(`compliance.exc.mode.${e.mode}` as MessageKey) },
       { id: 'scope', header: t('compliance.exc.col.scope'), cell: ({ row: { original: e } }) => (e.tag ? <Link to="/devices" search={{ q: `tag:${e.tag}` } as never} className="hover:text-accent">{e.tag}</Link> : t('compliance.exc.allDevices')) },
       {
@@ -45,7 +45,7 @@ export function ExceptionsPage() {
         cell: ({ row: { original: e } }) => (
           <span className="flex min-w-0 flex-col">
             <span className="truncate" title={e.reason}>{e.reason}</span>
-            <span className="truncate text-[11.5px] text-muted">{t('compliance.exc.by', { who: e.created_by ?? '', when: e.created_at ? dateTime(e.created_at) : '' })}</span>
+            <span className="truncate text-micro text-muted">{t('compliance.exc.by', { who: e.created_by ?? '', when: e.created_at ? dateTime(e.created_at) : '' })}</span>
           </span>
         ),
       },
@@ -91,7 +91,7 @@ export function ExceptionsPage() {
         }
       />
       <SectionNav />
-      <p className="mb-[var(--gap)] max-w-3xl text-[13px] text-muted">{t('compliance.exc.explain')}</p>
+      <p className="mb-[var(--gap)] max-w-3xl text-body text-muted">{t('compliance.exc.explain')}</p>
       <TabBar
         label={t('compliance.exc.col.state')}
         value={tab}
@@ -117,10 +117,10 @@ export function ExceptionsPage() {
           card={(e) => (
             <span className="flex flex-col gap-0.5">
               <span className="flex items-center justify-between gap-2">
-                <span className="font-mono text-[12.5px]">{e.check_id}</span>
+                <span className="font-mono text-meta">{e.check_id}</span>
                 <ExceptionBadge state={e.state} />
               </span>
-              <span className="truncate text-[12.5px] text-muted">{e.reason}</span>
+              <span className="truncate text-meta text-muted">{e.reason}</span>
             </span>
           )}
         />

@@ -6,6 +6,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -80,6 +81,7 @@ type State struct {
 	RebootAt      time.Time            `json:"reboot_at,omitzero"` // when it happens, deferrals included (guarded by evMu)
 	RebootDefers  int                  `json:"reboot_defers,omitempty"`
 	ScriptRuns    map[string]time.Time `json:"script_runs,omitempty"` // last run of recurring scripts
+	ScriptSums    map[string]string    `json:"script_sums,omitempty"` // body, parameters and timeout of the last run (run_on_change)
 	Results       []api.CommandResult  `json:"results"`               // not yet reported
 	Events        []string             `json:"events"`
 
@@ -111,8 +113,13 @@ type State struct {
 	ScriptResults       []api.ScriptResult        `json:"script_results,omitempty"`    // recurring script runs not yet reported
 	ManagedFiles        []string                  `json:"managed_files,omitempty"`     // paths written for com.limdm.files, removed when undeclared
 	ManagedFileSums     map[string]string         `json:"managed_file_sums,omitempty"` // path -> SHA-256 of the content written; removal only when it still matches
-	FirewallRules       []api.FirewallRule        `json:"firewall_rules,omitempty"`    // allow rules LiMDM added
+	FirewallRules       []fwRule                  `json:"firewall_rules,omitempty"`    // rules LiMDM added
+	FirewallEgress      string                    `json:"firewall_egress,omitempty"`   // ufw outgoing default LiMDM set: deny or allow
 	LocalUsers          map[string]localUserState `json:"local_users,omitempty"`       // accounts com.limdm.localusers manages
+	Hostname            *hostState                `json:"hostname,omitempty"`          // com.limdm.hostname (hostname.go)
+	UpdateRuns          map[string]api.UpdateRun  `json:"update_runs,omitempty"`       // last run per update source
+	UpdateGate          *api.UpdateGate           `json:"update_gate,omitempty"`       // the device's update ring as the server last sent it
+	SecuritySince       time.Time                 `json:"security_since,omitzero"`     // security updates pending since
 }
 
 type Agent struct {
@@ -132,8 +139,10 @@ type Agent struct {
 	declStatus []api.DeclarationStatus
 	users      []api.User
 	reasons    map[string][]string // declaration type -> why it is not active
+	fwNotes    []string            // what the firewall remove list did this cycle (firewall_inventory.go)
 
 	sentStatusHash, sentPkgHash string
+	sentFwHash                  string    // firewall inventory (firewall_inventory.go)
 	failedUpdate                string    // release version whose update already failed, reported once
 	busy                        backoff   // the server asked to come back later (503, 429)
 	checkinFailures             int       // failed check ins in a row (checkinWait)
@@ -173,7 +182,7 @@ func pinnedTLS(caPEM []byte, server string) (*tls.Config, error) {
 			if err != nil {
 				return nil, err
 			}
-			c, err := tls.X509KeyPair(b, b)
+			c, err := loadIdentity(b)
 			return &c, err
 		}
 	}
@@ -215,21 +224,48 @@ func newClient(tc *tls.Config) *http.Client {
 	return &http.Client{Timeout: 2 * time.Minute, Transport: newSwapTransport(tc)}
 }
 
+// newCSR creates a file key (ECDSA P-256) and a CSR for it.
 func newCSR() (keyPEM []byte, csrPEM string, err error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, "", err
 	}
-	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "limdm-device"}}, key)
-	if err != nil {
+	if csrPEM, err = csrFor(key); err != nil {
 		return nil, "", err
 	}
 	kb, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
 		return nil, "", err
 	}
-	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb}),
-		string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})), nil
+	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb}), csrPEM, nil
+}
+
+func csrFor(key crypto.Signer) (string, error) {
+	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "limdm-device"}}, key)
+	if err != nil {
+		return "", err
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})), nil
+}
+
+// newIdentity creates the key of a device identity with its CSR: in the
+// TPM when a TPM 2.0 is usable (with evidence, the EK only for enrollment),
+// else as a file key. keyPEM goes into device.pem in front of the certificate.
+func newIdentity(log *slog.Logger, enroll bool) (keyPEM []byte, csrPEM string, ev *api.TPMEvidence, ts *tpmSigner, err error) {
+	if hasTPM2() {
+		if keyPEM, ts, err = newTPMKey(); err == nil {
+			if csrPEM, err = csrFor(ts); err == nil {
+				if ev, err = tpmEvidence(ts, enroll); err != nil {
+					log.Warn("TPM key without attestation", "err", err)
+					ev = nil
+				}
+				return keyPEM, csrPEM, ev, ts, nil
+			}
+		}
+		log.Warn("TPM unusable, using a file key", "err", err)
+	}
+	keyPEM, csrPEM, err = newCSR()
+	return keyPEM, csrPEM, nil, nil, err
 }
 
 // fetchPinnedCA downloads the CA and accepts it only if its SHA-256 matches
@@ -313,31 +349,32 @@ func Enroll(server, token, fingerprint string, allowScripts, allowShell bool) er
 	if err != nil {
 		return err
 	}
-	keyPEM, csr, err := newCSR()
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	keyPEM, csr, ev, ts, err := newIdentity(log, true)
 	if err != nil {
 		return err
 	}
 	hostname, _ := os.Hostname()
-	body, _ := json.Marshal(api.EnrollRequest{Token: token, CSR: csr, Hostname: hostname, MachineID: readTrim("/etc/machine-id")})
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server+"/api/v1/enroll", bytes.NewReader(body))
+	client := newClient(tc)
+	er, err := postEnroll(client, server, api.EnrollRequest{Token: token, CSR: csr, Hostname: hostname, MachineID: readTrim("/etc/machine-id"), TPM: ev})
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := newClient(tc).Do(req)
-	if err != nil {
-		return err
+	// second round of a TPM enrollment: prove that the AK and EK share the TPM
+	if er.TPMChallenge != nil && ts != nil {
+		activated, aerr := activateCredential(ts, er.TPMChallenge)
+		if aerr != nil {
+			log.Warn("enrolling without TPM attestation", "err", aerr)
+			ev = nil
+		} else {
+			ev.Activated = activated
+		}
+		if er, err = postEnroll(client, server, api.EnrollRequest{Token: token, CSR: csr, Hostname: hostname, MachineID: readTrim("/etc/machine-id"), TPM: ev}); err != nil {
+			return err
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return fmt.Errorf("enroll failed: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
-	}
-	var er api.EnrollResponse
-	if err := json.NewDecoder(resp.Body).Decode(&er); err != nil {
-		return err
+	if er.Cert == "" {
+		return errors.New("enroll failed: the server sent no certificate")
 	}
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		return err
@@ -353,6 +390,30 @@ func Enroll(server, token, fingerprint string, allowScripts, allowShell bool) er
 		return err
 	}
 	return forgetServerState()
+}
+
+// postEnroll sends one enrollment request.
+func postEnroll(c *http.Client, server string, er api.EnrollRequest) (api.EnrollResponse, error) {
+	var out api.EnrollResponse
+	body, _ := json.Marshal(er)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server+"/api/v1/enroll", bytes.NewReader(body))
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Do(req)
+	if err != nil {
+		return out, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return out, fmt.Errorf("enroll failed: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+	}
+	err = json.NewDecoder(resp.Body).Decode(&out)
+	return out, err
 }
 
 // forgetServerState drops what belonged to the previous enrollment: command
@@ -460,6 +521,10 @@ const eventRepeat = 6 * time.Hour
 
 func (a *Agent) event(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
+	// event texts carry device and server text (rule texts, file paths):
+	// one line each, so no forged log lines
+	msg = strings.ReplaceAll(msg, "\n", " ")
+	msg = strings.ReplaceAll(msg, "\r", " ")
 	a.log.Info(msg)
 	now := time.Now()
 	a.evMu.Lock()
@@ -588,6 +653,12 @@ func (a *Agent) declarationStatus() []api.DeclarationStatus {
 		if r := a.reasons[out[i].Type]; out[i].Valid && len(r) > 0 {
 			out[i].Active, out[i].Reasons = false, r
 		}
+		if out[i].Type == api.TypeHostname {
+			out[i].Info = a.hostnameNotes()
+		}
+		if out[i].Type == api.TypeFirewall {
+			out[i].Info = a.fwNotes
+		}
 	}
 	return out
 }
@@ -608,12 +679,14 @@ func (a *Agent) cycle(ctx context.Context) {
 	inv := a.host.inventory(a.pol.Privacy)
 	inv.Certificates = certInfo(a.pol.Extra.Certificates)
 	inv.WireGuardKeys = wireguardKeys(a.pol.Extra.Network)
+	inv.HostnameInfo = a.hostnameInfo(a.pol.Privacy)
 	a.applyCatalog(inv.Flatpaks)
 	inv.Apps = a.catalogStates(inv.Flatpaks)
 	a.lastFlatpaks = inv.Flatpaks
 	a.lastSystem = DesktopSystem{OS: strings.TrimSpace(inv.OSName + " " + inv.OSVersion), Kernel: inv.Kernel, Arch: inv.Arch,
 		Inventory: inv.Source, Vendor: inv.Vendor, Model: inv.Model, Serial: inv.Serial}
-	status := api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus(), CatalogVersion: CatalogVersion}
+	status := api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus(), CatalogVersion: CatalogVersion, Updates: a.updateStatus(),
+		Workloads: collectWorkloads()}
 	statusHash := statusHashOf(status)
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
 		StatusHash: statusHash, Results: a.state.Results, Events: a.pendingEvents(), Metrics: metrics(), BrandingHash: a.state.BrandingHash,
@@ -644,6 +717,11 @@ func (a *Agent) cycle(ctx context.Context) {
 	req.PackagesHash = pkgHash
 	if pkgHash != a.sentPkgHash {
 		req.Packages = pkgs
+	}
+	fw := a.collectFirewall()
+	req.FirewallHash = firewallHash(fw)
+	if req.FirewallHash != a.sentFwHash {
+		req.Firewall = &fw
 	}
 
 	var resp api.CheckinResponse
@@ -701,6 +779,12 @@ func (a *Agent) cycle(ctx context.Context) {
 	if resp.NeedPackages {
 		a.sentPkgHash = ""
 	}
+	if req.Firewall != nil {
+		a.sentFwHash = req.FirewallHash
+	}
+	if resp.NeedFirewall {
+		a.sentFwHash = ""
+	}
 	// The server omits unchanged declarations; a new token with none means "nothing declared".
 	if resp.DeclarationsToken != "" && resp.DeclarationsToken != a.state.DeclToken {
 		a.state.Declarations, a.state.DeclToken = resp.Declarations, resp.DeclarationsToken
@@ -713,6 +797,7 @@ func (a *Agent) cycle(ctx context.Context) {
 		a.state.Users = users
 		a.syncNow = true
 	}
+	a.state.UpdateGate = resp.UpdateGate
 	a.compose()
 	if resp.DeviceCAs != "" {
 		a.updateTrustAnchors(resp.DeviceCAs)
@@ -787,6 +872,10 @@ func (a *Agent) enforce() {
 			a.problem(api.TypeFirewall, "firewall: %v", err)
 		}
 	}
+	a.fwNotes = nil
+	if len(p.Firewall.Remove) > 0 {
+		a.enforceFirewallRemove(p.Firewall)
+	}
 	if err := a.applyUsers(); err != nil {
 		a.problem(api.TypeLogin, "users: %v", err)
 	}
@@ -835,36 +924,6 @@ func inWindow(now time.Time, window string) bool {
 	return m >= f || m < t
 }
 
-// maintenance installs updates once per window and reboots if declared.
-func (a *Agent) maintenance(now time.Time) {
-	u := a.pol.Updates
-	if u.Mode == "" || u.Mode == "off" || !inWindow(now, u.Window) || !updateDay(now, u.Window, u.Days) {
-		return
-	}
-	if now.Sub(a.state.LastUpdateRun) > 20*time.Hour {
-		out, err := a.host.upgrade(u.Mode == "security")
-		a.state.LastUpdateRun = now.Round(0) // wall clock: the monotonic one stops during suspend
-		if err != nil {
-			a.problem(api.TypeUpdates, "updates (%s) failed: %v", u.Mode, err)
-		} else {
-			a.event("updates (%s) installed: %s", u.Mode, lastLines(out, 3))
-			if u.Autoremove {
-				if out, err := a.host.autoremove(); err != nil {
-					a.problem(api.TypeUpdates, "autoremove failed: %v", err)
-				} else if strings.TrimSpace(out) != "" {
-					a.event("autoremove: %s", lastLines(out, 3))
-				}
-			}
-		}
-	}
-	// Schedule once: a new shutdown call would replace and postpone the pending one.
-	if u.Reboot && !a.rebootPending(now) && a.host.rebootRequired() {
-		if err := a.scheduleReboot(now, u.RebootDefer); err != nil {
-			a.problem(api.TypeUpdates, "reboot after updates: %v", err)
-		}
-	}
-}
-
 func (a *Agent) execute(c api.Command) api.CommandResult {
 	r := api.CommandResult{ID: c.ID}
 	var out string
@@ -874,7 +933,19 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out = "ok"
 	case "update":
 		out, err = a.host.upgrade(false)
+		if fo, ferr := flatpakUpgrade(); ferr != nil {
+			out += "\nflatpak: " + ferr.Error()
+		} else if fo != "" {
+			out += "\n" + lastLines(fo, 10)
+		}
+		out = cleanUpgradeOutput(out)
 		a.state.LastUpdateRun = time.Now().Round(0)
+	case "package_hold":
+		out, err = a.packageHold(c.Payload)
+	case "package_downgrade":
+		out, err = a.packageDowngrade(c.Payload)
+	case "firewall_remove_rule":
+		out, err = a.firewallRemoveRule(c.Payload)
 	case "reboot", "shutdown":
 		out, err = a.powerAction(c.Type, c.Payload, c.CreatedAt)
 	case "lock":
@@ -905,6 +976,8 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = a.appCommand(strings.TrimPrefix(c.Type, "app_"), c.Payload)
 	case "shell":
 		out, err = a.startShell(c)
+	case "workload_action":
+		out, err = a.workloadAction(c)
 	case "script":
 		if !a.cfg.AllowScripts {
 			err = errors.New("remote scripts are disabled on this device (allow_scripts)")
@@ -1064,18 +1137,18 @@ func (a *Agent) renewIdentity(ctx context.Context) {
 		a.log.Error("identity", "err", err)
 		return
 	}
-	c, err := tls.X509KeyPair(b, b)
+	c, err := loadIdentity(b)
 	if err != nil || c.Leaf == nil || (time.Until(c.Leaf.NotAfter) > renewBefore && !a.renewNow) {
 		return
 	}
 	expired := time.Now().After(c.Leaf.NotAfter)
-	keyPEM, csr, err := newCSR()
+	keyPEM, csr, ev, _, err := newIdentity(a.log, false)
 	if err != nil {
 		a.log.Error("renew", "err", err)
 		return
 	}
 	var resp api.EnrollResponse
-	if err := a.post(ctx, "/api/v1/renew", api.RenewRequest{CSR: csr}, &resp); err != nil {
+	if err := a.post(ctx, "/api/v1/renew", api.RenewRequest{CSR: csr, TPM: ev}, &resp); err != nil {
 		a.event("certificate renewal failed: %v", err)
 		if expired {
 			// the server accepts expired certificates for renewal only within a grace period
@@ -1085,7 +1158,7 @@ func (a *Agent) renewIdentity(ctx context.Context) {
 		return
 	}
 	// a broken answer must not replace a working identity
-	if _, err := tls.X509KeyPair([]byte(string(keyPEM)+resp.Cert), []byte(string(keyPEM)+resp.Cert)); err != nil {
+	if nc, err := loadIdentity([]byte(string(keyPEM) + resp.Cert)); err != nil || !samePublicKey(nc) {
 		a.event("renewed certificate unusable, keeping the current one: %v", err)
 		return
 	}
@@ -1096,6 +1169,17 @@ func (a *Agent) renewIdentity(ctx context.Context) {
 	a.client.CloseIdleConnections()
 	a.renewNow = false
 	a.event("client certificate renewed")
+}
+
+// samePublicKey: the certificate belongs to the key next to it. tls.X509KeyPair
+// checks that for file keys; a TPM key is only known by its public half.
+func samePublicKey(c tls.Certificate) bool {
+	s, ok := c.PrivateKey.(crypto.Signer)
+	if !ok || c.Leaf == nil {
+		return false
+	}
+	pub, ok := s.Public().(interface{ Equal(crypto.PublicKey) bool })
+	return ok && pub.Equal(c.Leaf.PublicKey)
 }
 
 // Report runs all checks locally without remediation and without contacting the server.

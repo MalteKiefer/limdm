@@ -37,6 +37,7 @@ agent reports (the console shows them translated).
 | `os.supported` | Operating system version is supported | 1 | none; minimum from `com.limdm.osversion` |
 | `updates.auto` | Automatic updates are declared | 1 | declare `com.limdm.updates` |
 | `updates.security` | Security updates are installed | 1 | installed in the maintenance window of `com.limdm.updates` |
+| `updates.security_age` | No security update pending longer than allowed | 1 | installed in the maintenance window; the limit is `security_max_days` of `com.limdm.updates` (14 days when unset) |
 | `updates.reboot` | No pending reboot older than 7 days | 1 | reboot in the maintenance window |
 | `disk.encryption` | System disk is encrypted | 1 | none (needs reinstallation with LUKS) |
 | `firewall.active` | Host firewall is active | 1 | yes |
@@ -44,6 +45,7 @@ agent reports (the console shows them translated).
 | `mac.enforcing` | Mandatory access control is enforcing | 2 | none |
 | `disk.recovery` | Disk encryption recovery keys are escrowed | 1 | the desktop helper asks the user; `na` without escrow declared |
 | `disk.tpm` | LUKS volumes are bound to the TPM | 1 | bound with the next recovery key rotation or `limdm-agent recovery-key --all` (with a PIN the user runs it) |
+| `agent.tpm_key` | Device key is held in the TPM | 2 | the next certificate renewal creates the key in the TPM; `na` without TPM 2.0 |
 | `boot.password` | Boot loader is password protected | 1 | via `com.limdm.bootloader` |
 | `boot.secureboot` | Secure Boot is enabled | 2 | none |
 | `kernel.aslr` | Full ASLR is enabled | 1 | yes (sysctl) |
@@ -81,7 +83,7 @@ an unbound volume or a missing TPM 2.0 is reported as `na`; with `require` it fa
 ## Framework mapping
 
 The catalog has a version (`CatalogVersion` in `internal/agent/checks.go`, currently
-`2026.11.1`). The agent reports it with every result. The evidence export and the
+`2026.11.2`). The agent reports it with every result. The evidence export and the
 compliance history carry it, so a result can always be tied to the mapping it was
 made with. The version is raised whenever a check, its level or a reference changes.
 
@@ -98,6 +100,7 @@ made with. The version is raised whenever a check, its level or a reference chan
 | `os.supported` | 1.2.2.1 | SYS.2.1, OPS.1.1.3, SYS.2.3.A4 | A.8.8 |
 | `updates.auto` | none | SYS.2.1, OPS.1.1.3, SYS.2.1.A3, OPS.1.1.3.A15 | A.8.8, A.8.32 |
 | `updates.security` | 1.2.2.1 | SYS.2.1, SYS.2.3, OPS.1.1.3, SYS.2.3.A4, OPS.1.1.3.A15 | A.8.8 |
+| `updates.security_age` | none | OPS.1.1.3, OPS.1.1.3.A15 | A.8.8 |
 | `updates.reboot` | none | OPS.1.1.3, OPS.1.1.3.A15 | A.8.8 |
 | `disk.encryption` | none | SYS.2.1, CON.1 | A.8.1, A.8.24, A.7.10 |
 | `firewall.active` | 4.1.1, 4.2.3 | SYS.2.1, SYS.2.3 | A.8.20 |
@@ -105,6 +108,7 @@ made with. The version is raised whenever a check, its level or a reference chan
 | `mac.enforcing` | 1.3.1.4 | SYS.2.3, SYS.1.3, SYS.2.3.A8 | A.8.7, A.8.9 |
 | `disk.recovery` | none | CON.1 | A.8.24, A.8.13 |
 | `disk.tpm` | none | CON.1, SYS.2.1 | A.8.24, A.7.10 |
+| `agent.tpm_key` | none | CON.1, CON.1.A1 | A.8.24, A.5.17 |
 | `boot.password` | 1.4.1, 1.4.2 | SYS.2.1, SYS.2.3 | A.8.2, A.8.9 |
 | `boot.secureboot` | none | SYS.2.1 | A.8.1, A.8.9 |
 | `kernel.aslr` | 1.5.1 | SYS.2.3 | A.8.9 |

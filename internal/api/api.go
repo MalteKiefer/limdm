@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/netip"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -66,8 +65,9 @@ var Types = map[string]string{
 // A zero section means "not managed".
 type Policy struct {
 	CheckinSeconds    int               `json:"checkin_seconds"`
-	OfflineLockHours  int               `json:"offline_lock_hours"`     // lock the device when the server was unreachable this long, 0 = off
-	RemoteShell       bool              `json:"remote_shell,omitempty"` // remote shell sessions allowed (com.limdm.agent)
+	OfflineLockHours  int               `json:"offline_lock_hours"`         // lock the device when the server was unreachable this long, 0 = off
+	RemoteShell       bool              `json:"remote_shell,omitempty"`     // remote shell sessions allowed (com.limdm.agent)
+	WorkloadControl   bool              `json:"workload_control,omitempty"` // containers and VMs may be started, stopped, restarted (com.limdm.agent)
 	Compliance        Compliance        `json:"compliance"`
 	Updates           Updates           `json:"updates"`
 	Packages          Packages          `json:"packages"`
@@ -86,6 +86,9 @@ type agentPayload struct {
 	CheckinSeconds   int  `json:"checkin_seconds"`
 	OfflineLockHours int  `json:"offline_lock_hours,omitempty"`
 	RemoteShell      bool `json:"remote_shell,omitempty"` // devices accept remote shell sessions
+	// WorkloadControl lets the console start, stop and restart containers
+	// and VMs on devices (workload_action); off by default.
+	WorkloadControl bool `json:"workload_control,omitempty"`
 }
 
 type Compliance struct {
@@ -119,6 +122,12 @@ type Updates struct {
 	SnapRefresh string `json:"snap_refresh,omitempty"`
 	// Reboot deferral, see RebootDefer.
 	RebootDefer
+	// Rules set mode, window and ring per update source; when present they
+	// replace Mode (EffectiveRules).
+	Rules []UpdateRule `json:"rules,omitempty"`
+	// SecurityMaxDays is how long security updates may stay pending before
+	// the check updates.security_age fails, 14 when unset.
+	SecurityMaxDays int `json:"security_max_days,omitempty"`
 }
 
 // RebootDefer lets desktop users postpone a scheduled reboot: up to
@@ -153,12 +162,83 @@ type File struct {
 	Mode    string `json:"mode"`            // octal, default 0644
 	Owner   string `json:"owner,omitempty"` // user name, default root
 	Group   string `json:"group,omitempty"` // group name, default root
+	// Template renders Content per device on the server (TemplateVars). A
+	// file still marked when it reaches the agent could not be rendered and
+	// is left as it is.
+	Template bool `json:"template,omitempty"`
 }
 
 type Firewall struct {
 	Enforce bool           `json:"enforce"`
 	Allow   []string       `json:"allow"`           // "22/tcp", "60000:61000/udp"
 	Rules   []FirewallRule `json:"rules,omitempty"` // allow rules limited to source networks
+	// Zones open ports for traffic from given interfaces or networks only:
+	// firewalld zones, ufw and nftables rules matching interface and source.
+	Zones []FirewallZone `json:"zones,omitempty"`
+	// Outbound filters traffic the device sends; nil leaves it alone.
+	Outbound *FirewallOutbound `json:"outbound,omitempty"`
+	// Template renders every rule text per device on the server
+	// (TemplateVars). A payload still marked when it reaches the agent could
+	// not be rendered; the agent then leaves the firewall as it is.
+	Template bool `json:"template,omitempty"`
+	// Keep lists rules that are not LiMDM's but accepted on the device
+	// (FirewallInvRule.Match). Nothing removes them; the console lists them
+	// as exceptions.
+	Keep []string `json:"keep,omitempty"`
+	// Remove lists rules that are not LiMDM's and must not be on the device
+	// (FirewallInvRule.Match). The agent deletes a matching foreign rule in
+	// every cycle, so it stays gone after a reboot or a reload of the tool
+	// that added it. Rules of LiMDM, of container, VPN and protection tools
+	// and rules also listed in Keep are never removed.
+	Remove []string `json:"remove,omitempty"`
+}
+
+// FirewallZone binds interfaces and source networks to a zone and opens
+// ports in it.
+type FirewallZone struct {
+	Name       string   `json:"name"`                 // firewalld zone, for example internal or trusted
+	Interfaces []string `json:"interfaces,omitempty"` // for example wg0
+	Sources    []string `json:"sources,omitempty"`    // CIDR or address
+	Allow      []string `json:"allow,omitempty"`      // ports as in Firewall.Allow
+}
+
+// FirewallOutbound is the policy for traffic the device sends. With policy
+// deny only the listed destinations, DNS, DHCP and the LiMDM server are
+// reachable.
+type FirewallOutbound struct {
+	Policy string           `json:"policy"` // allow | deny
+	Allow  []FirewallEgress `json:"allow,omitempty"`
+}
+
+// FirewallEgress allows traffic to a destination, a port or both.
+type FirewallEgress struct {
+	To   string `json:"to,omitempty"`   // CIDR or address, empty is any
+	Port string `json:"port,omitempty"` // as in Firewall.Allow, empty is any
+}
+
+// Walk calls fn for every rule text of f (what a template can fill).
+func (f *Firewall) Walk(fn func(*string)) {
+	for i := range f.Allow {
+		fn(&f.Allow[i])
+	}
+	for i := range f.Rules {
+		fn(&f.Rules[i].Port)
+		fn(&f.Rules[i].From)
+	}
+	for i := range f.Zones {
+		z := &f.Zones[i]
+		for _, l := range [][]string{z.Interfaces, z.Sources, z.Allow} {
+			for j := range l {
+				fn(&l[j])
+			}
+		}
+	}
+	if f.Outbound != nil {
+		for i := range f.Outbound.Allow {
+			fn(&f.Outbound.Allow[i].To)
+			fn(&f.Outbound.Allow[i].Port)
+		}
+	}
 }
 
 // FirewallRule allows a port only from a source network.
@@ -291,7 +371,7 @@ func (d Declaration) apply(p *Policy) error {
 		if v.OfflineLockHours < 0 || v.OfflineLockHours > 8760 {
 			bad("offline_lock_hours must be 0 (off) up to 8760")
 		}
-		p.CheckinSeconds, p.OfflineLockHours, p.RemoteShell = v.CheckinSeconds, v.OfflineLockHours, v.RemoteShell
+		p.CheckinSeconds, p.OfflineLockHours, p.RemoteShell, p.WorkloadControl = v.CheckinSeconds, v.OfflineLockHours, v.RemoteShell, v.WorkloadControl
 	case TypeCompliance:
 		if err := strict(d.Payload, &p.Compliance); err != nil {
 			return err
@@ -315,19 +395,29 @@ func (d Declaration) apply(p *Policy) error {
 		if err := strict(d.Payload, &p.Updates); err != nil {
 			return err
 		}
-		switch p.Updates.Mode {
-		case "off", "security", "all":
-		default:
-			bad("mode must be off, security or all")
-		}
 		u := p.Updates
-		if (u.Mode != "off" || u.SnapRefresh == "window") && !windowRe.MatchString(u.Window) {
+		switch {
+		case u.Mode == "off", u.Mode == "security", u.Mode == "all":
+		case u.Mode == "" && len(u.Rules) > 0: // the rules decide
+		default:
+			bad("mode must be off, security or all (or empty with rules)")
+		}
+		if (u.Mode == "security" || u.Mode == "all" || u.SnapRefresh == "window") && !windowRe.MatchString(u.Window) {
 			bad("window must be HH:MM-HH:MM")
 		}
-		for i, d := range u.Days {
-			if !slices.Contains(Weekdays, d) || slices.Contains(u.Days[:i], d) {
-				bad("days: %q is not one of mon, tue, wed, thu, fri, sat, sun (each once)", d)
+		if err := validDays(u.Days); err != nil {
+			bad("%v", err)
+		}
+		for i, r := range u.Rules {
+			if err := r.validate(sourcesOf(u.Rules[:i])); err != nil {
+				bad("%v", err)
 			}
+			if r.Mode != "off" && r.Window == "" && !windowRe.MatchString(u.Window) {
+				bad("rules: %s needs a window, its own or the declaration's", r.Source)
+			}
+		}
+		if u.SecurityMaxDays < 0 || u.SecurityMaxDays > 365 {
+			bad("security_max_days must be 0..365")
 		}
 		if len(u.Hold) > 200 {
 			bad("hold: at most 200 packages")
@@ -376,6 +466,11 @@ func (d Declaration) apply(p *Policy) error {
 			if _, err := f.FileMode(); err != nil {
 				bad("file %s: %v", f.Path, err)
 			}
+			if f.Template {
+				if _, err := ParseTemplate(f.Content); err != nil {
+					bad("file %s: template: %v", f.Path, err)
+				}
+			}
 			if userWritable(f.Path) {
 				bad("file %s: directories writable by users cannot be managed (symlink attacks)", f.Path)
 			}
@@ -390,21 +485,7 @@ func (d Declaration) apply(p *Policy) error {
 		if err := strict(d.Payload, &p.Firewall); err != nil {
 			return err
 		}
-		for _, a := range p.Firewall.Allow {
-			if !validPortRule(a) {
-				bad("invalid firewall rule %q (port 1..65535, ranges low:high)", a)
-			}
-		}
-		for _, r := range p.Firewall.Rules {
-			if !validPortRule(r.Port) {
-				bad("invalid firewall rule %q (port 1..65535, ranges low:high)", r.Port)
-			}
-			if _, err := netip.ParsePrefix(r.From); err != nil {
-				if _, err := netip.ParseAddr(r.From); err != nil || strings.Contains(r.From, "%") {
-					bad("firewall rule %s: from must be a network (CIDR) or an address, got %q", r.Port, r.From)
-				}
-			}
-		}
+		errs = append(errs, p.Firewall.validate()...)
 	case TypeOSVersion:
 		var v osPayload
 		if err := strict(d.Payload, &v); err != nil {
@@ -586,6 +667,7 @@ type DeclarationStatus struct {
 	Valid       bool     `json:"valid"`
 	Active      bool     `json:"active"`
 	Reasons     []string `json:"reasons,omitempty"`
+	Info        []string `json:"info,omitempty"` // state notes that are no failure (com.limdm.hostname: target, source, result, warnings)
 }
 
 func (f File) FileMode() (uint32, error) {
@@ -623,41 +705,76 @@ type EnrollRequest struct {
 	CSR       string `json:"csr"` // PEM, key generated on the device and never leaves it
 	Hostname  string `json:"hostname"`
 	MachineID string `json:"machine_id"`
+	// TPM is set when the key of the CSR lives in the device's TPM 2.0.
+	TPM *TPMEvidence `json:"tpm,omitempty"`
+}
+
+// TPMEvidence shows that a key is held by a TPM 2.0 and cannot leave it.
+// All fields are TPM wire structures (TPMT_PUBLIC, TPMS_ATTEST,
+// TPMT_SIGNATURE). The attestation key (AK) certifies the key with
+// TPM2_Certify; the endorsement key (EK) proves through credential
+// activation that the AK sits in the same TPM.
+type TPMEvidence struct {
+	EKPublic    []byte `json:"ek_public,omitempty"` // enrollment only
+	AKPublic    []byte `json:"ak_public"`
+	KeyPublic   []byte `json:"key_public"`
+	CertifyInfo []byte `json:"certify_info"`
+	CertifySig  []byte `json:"certify_signature"`
+	// Activated is the credential the TPM decrypted from TPMChallenge; set
+	// in the second enrollment request.
+	Activated []byte `json:"activated,omitempty"`
+}
+
+// TPMChallenge is TPM2_MakeCredential output for the EK and AK of the
+// evidence: only that TPM can decrypt it (TPM2_ActivateCredential).
+type TPMChallenge struct {
+	Credential []byte `json:"credential"`
+	Secret     []byte `json:"secret"`
 }
 
 type EnrollResponse struct {
 	DeviceID string `json:"device_id"`
 	Cert     string `json:"cert"` // PEM client certificate, CN = device ID
+	// TPMChallenge answers a first enrollment request with TPM evidence:
+	// no certificate yet, the agent sends the request again with the
+	// activated credential.
+	TPMChallenge *TPMChallenge `json:"tpm_challenge,omitempty"`
+	TPMBound     bool          `json:"tpm_bound,omitempty"` // the server accepted the key as TPM bound
 }
 
 type RenewRequest struct {
 	CSR string `json:"csr"`
+	// TPM is set when the new key lives in the TPM; it is certified by the
+	// attestation key the server pinned at enrollment (no EK, no challenge).
+	TPM *TPMEvidence `json:"tpm,omitempty"`
 }
 
 // ---- status channel ----
 
 type Inventory struct {
-	Source      string `json:"source"` // "osquery 5.x" or "native"
-	Hostname    string `json:"hostname"`
-	MachineID   string `json:"machine_id"`
-	OSID        string `json:"os_id"`
-	OSVersion   string `json:"os_version"`
-	OSName      string `json:"os_name"`
-	OSCodename  string `json:"os_codename,omitempty"`
-	Kernel      string `json:"kernel"`
-	Arch        string `json:"arch"`
-	CPU         string `json:"cpu"`
-	CPUCores    int    `json:"cpu_cores,omitempty"`
-	CPUThreads  int    `json:"cpu_threads,omitempty"`
-	MemoryMB    uint64 `json:"memory_mb"`
-	SwapMB      uint64 `json:"swap_mb,omitempty"`
-	DiskGB      uint64 `json:"disk_gb"` // root filesystem
-	Vendor      string `json:"vendor"`
-	Model       string `json:"model"`
-	Serial      string `json:"serial"`
-	BIOSVendor  string `json:"bios_vendor,omitempty"`
-	BIOSVersion string `json:"bios_version,omitempty"`
-	BootTime    int64  `json:"boot_time"`
+	Source   string `json:"source"` // "osquery 5.x" or "native"
+	Hostname string `json:"hostname"`
+	// HostnameInfo: facts and result of com.limdm.hostname (hostname.go).
+	HostnameInfo *HostnameInfo `json:"hostname_info,omitempty"`
+	MachineID    string        `json:"machine_id"`
+	OSID         string        `json:"os_id"`
+	OSVersion    string        `json:"os_version"`
+	OSName       string        `json:"os_name"`
+	OSCodename   string        `json:"os_codename,omitempty"`
+	Kernel       string        `json:"kernel"`
+	Arch         string        `json:"arch"`
+	CPU          string        `json:"cpu"`
+	CPUCores     int           `json:"cpu_cores,omitempty"`
+	CPUThreads   int           `json:"cpu_threads,omitempty"`
+	MemoryMB     uint64        `json:"memory_mb"`
+	SwapMB       uint64        `json:"swap_mb,omitempty"`
+	DiskGB       uint64        `json:"disk_gb"` // root filesystem
+	Vendor       string        `json:"vendor"`
+	Model        string        `json:"model"`
+	Serial       string        `json:"serial"`
+	BIOSVendor   string        `json:"bios_vendor,omitempty"`
+	BIOSVersion  string        `json:"bios_version,omitempty"`
+	BootTime     int64         `json:"boot_time"`
 	// Desktop environment and display manager, empty on servers.
 	Desktop        string              `json:"desktop,omitempty"`
 	DisplayManager string              `json:"display_manager,omitempty"`
@@ -795,6 +912,9 @@ type Package struct {
 	Name    string `json:"n"`
 	Version string `json:"v"`
 	Arch    string `json:"a,omitempty"`
+	// Source is the source package of a Debian package when it differs
+	// from Name: the security trackers list source packages.
+	Source string `json:"s,omitempty"`
 }
 
 // Refs maps a check to the frameworks it provides evidence for.
@@ -825,6 +945,10 @@ type Status struct {
 	// CatalogVersion is the version of the agent's check catalog and its
 	// framework mapping the Checks were made with.
 	CatalogVersion string `json:"catalog_version,omitempty"`
+	// Updates are the pending updates and the last run per update source.
+	Updates *UpdateStatus `json:"updates,omitempty"`
+	// Workloads are the containers and VMs on the device (workloads.go).
+	Workloads *Workloads `json:"workloads,omitempty"`
 }
 
 type Command struct {
@@ -842,7 +966,8 @@ type Command struct {
 
 // CommandTypes are the one off actions an admin can send.
 var CommandTypes = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "script", "lost", "found", "wipe", "allow_uninstall", "message", "app_install", "app_remove",
-	"user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete", "software_remove", "diagnostics"}
+	"user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete", "software_remove", "diagnostics",
+	"package_hold", "package_downgrade", "workload_action", "firewall_remove_rule"}
 
 // PollResponse answers the agent's frequent poll (POST /api/v1/poll).
 type PollResponse struct {
@@ -948,22 +1073,26 @@ type CommandResult struct {
 }
 
 type CheckinRequest struct {
-	AgentVersion      string          `json:"agent_version"`
-	Arch              string          `json:"arch"`
-	DeclarationsToken string          `json:"declarations_token"`
-	Status            *Status         `json:"status,omitempty"`
-	StatusHash        string          `json:"status_hash"`
-	Packages          []Package       `json:"packages,omitempty"`
-	PackagesHash      string          `json:"packages_hash"`
-	Results           []CommandResult `json:"results,omitempty"`
-	Metrics           *Metrics        `json:"metrics,omitempty"`       // sent every check in, outside the status hash
-	RecoveryKeys      []RecoveryKey   `json:"recovery_keys,omitempty"` // new LUKS recovery keys to escrow
-	BrandingHash      string          `json:"branding_hash,omitempty"`
-	UpdateResult      *UpdateResult   `json:"update_result,omitempty"` // outcome of the last agent update
-	Events            []string        `json:"events,omitempty"`
-	CatalogHash       string          `json:"catalog_hash,omitempty"`
-	AppRequests       []AppRequest    `json:"app_requests,omitempty"`   // self service requests of users
-	ScriptResults     []ScriptResult  `json:"script_results,omitempty"` // runs of recurring scripts
+	AgentVersion      string    `json:"agent_version"`
+	Arch              string    `json:"arch"`
+	DeclarationsToken string    `json:"declarations_token"`
+	Status            *Status   `json:"status,omitempty"`
+	StatusHash        string    `json:"status_hash"`
+	Packages          []Package `json:"packages,omitempty"`
+	PackagesHash      string    `json:"packages_hash"`
+	// Firewall is the host firewall inventory, sent when FirewallHash
+	// changed (like Packages).
+	Firewall      *FirewallInventory `json:"firewall,omitempty"`
+	FirewallHash  string             `json:"firewall_hash,omitempty"`
+	Results       []CommandResult    `json:"results,omitempty"`
+	Metrics       *Metrics           `json:"metrics,omitempty"`       // sent every check in, outside the status hash
+	RecoveryKeys  []RecoveryKey      `json:"recovery_keys,omitempty"` // new LUKS recovery keys to escrow
+	BrandingHash  string             `json:"branding_hash,omitempty"`
+	UpdateResult  *UpdateResult      `json:"update_result,omitempty"` // outcome of the last agent update
+	Events        []string           `json:"events,omitempty"`
+	CatalogHash   string             `json:"catalog_hash,omitempty"`
+	AppRequests   []AppRequest       `json:"app_requests,omitempty"`   // self service requests of users
+	ScriptResults []ScriptResult     `json:"script_results,omitempty"` // runs of recurring scripts
 	// CommandKey is the command key the agent has pinned (hex), so the
 	// console can show how far a key rotation has reached the fleet.
 	CommandKey string `json:"command_key,omitempty"`
@@ -997,6 +1126,7 @@ type CheckinResponse struct {
 	Commands          []Command     `json:"commands,omitempty"`
 	NeedStatus        bool          `json:"need_status"`
 	NeedPackages      bool          `json:"need_packages"`
+	NeedFirewall      bool          `json:"need_firewall,omitempty"`
 	AgentUpdate       *AgentUpdate  `json:"agent_update,omitempty"`
 	ServerTime        time.Time     `json:"server_time"`
 	// RecoveryRotate carries escrowed keys the agent should replace (after
@@ -1025,6 +1155,9 @@ type CheckinResponse struct {
 	// then refuses entries without a valid signature.
 	SignedData  bool         `json:"signed_data,omitempty"`
 	SignedUsers *SignedUsers `json:"signed_users,omitempty"`
+	// UpdateGate is the state of the device's update ring; nil when the
+	// device is in no ring.
+	UpdateGate *UpdateGate `json:"update_gate,omitempty"`
 }
 
 // ---- signed agent releases ----

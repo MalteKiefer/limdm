@@ -15,6 +15,7 @@ const server = () => import('./server')
 const people = () => import('./people')
 const ops = () => import('./ops')
 const fleet = () => import('./fleet')
+const cve = () => import('./cvefeeds')
 
 const views: Record<SectionId, ComponentType> = {
   general: mod(server, 'General'),
@@ -24,6 +25,7 @@ const views: Record<SectionId, ComponentType> = {
   password: mod(server, 'Password'),
   approvals: mod(server, 'Approvals'),
   shell: mod(server, 'RemoteShell'),
+  enroll: mod(server, 'Enrollment'),
   keys: mod(ops, 'Keys'),
   users: mod(people, 'Users'),
   tenants: mod(people, 'Tenants'),
@@ -35,6 +37,7 @@ const views: Record<SectionId, ComponentType> = {
   directory: mod(fleet, 'Directory'),
   network: mod(fleet, 'Network'),
   agents: mod(fleet, 'Agents'),
+  cve: mod(cve, 'CVEFeeds'),
 }
 
 /** The sections the signed in user may open, in navigation order. */
@@ -73,7 +76,7 @@ export function SettingsPage() {
         <nav aria-label={t('settings.sections')} className="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible">
           {groups.map((g) => (
             <div key={g} className="contents lg:flex lg:flex-col lg:gap-0.5 lg:pb-3">
-              <span className="hidden px-2.5 pb-1 text-[11.5px] font-semibold tracking-wide text-muted uppercase lg:block">{t(`settings.group.${g}` as MessageKey)}</span>
+              <span className="hidden px-2.5 pb-1 text-micro font-semibold tracking-wide text-muted uppercase lg:block">{t(`settings.group.${g}` as MessageKey)}</span>
               {list
                 .filter((x) => x.group === g)
                 .map((x) => (

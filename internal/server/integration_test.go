@@ -878,6 +878,43 @@ func TestIntegration(t *testing.T) {
 	}
 	s.rt.Store(&runtimeState{set: Settings{LocalLogin: true, StaleHours: 24, OIDCIssuer: "https://idp.test", OIDCClientID: "x"}, auth: &oidcAuth{}})
 
+	// TPM bound enrollment: refused without evidence while the tenant
+	// requires it, two rounds with evidence (built in software, see
+	// fakeTPMEvidence; the second round answers with the credential the
+	// TPM would have decrypted)
+	tpmToken := "lmt_tpmtest"
+	if _, err := db.Exec(ctx, `INSERT INTO enroll_tokens(token_hash, uses_left, expires_at, created_by) VALUES ($1, 1, now() + interval '1 day', 'test')`, sha(tpmToken)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE tenants SET require_tpm=true WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	tkey, tcsr := newIdentity()
+	if code := call(clientFor(nil, ""), "/api/v1/enroll", api.EnrollRequest{Token: tpmToken, CSR: tcsr}, nil); code != http.StatusForbidden {
+		t.Fatalf("enrollment without TPM key while required: %d", code)
+	}
+	ev := fakeTPMEvidence(t, &tkey.PublicKey, tpmKeyAttrs)
+	var round api.EnrollResponse
+	if code := call(clientFor(nil, ""), "/api/v1/enroll", api.EnrollRequest{Token: tpmToken, CSR: tcsr, TPM: ev}, &round); code != 200 || round.TPMChallenge == nil || round.Cert != "" {
+		t.Fatalf("first TPM round: %d %+v", code, round)
+	}
+	ev.Activated = []byte("guessed")
+	if code := call(clientFor(nil, ""), "/api/v1/enroll", api.EnrollRequest{Token: tpmToken, CSR: tcsr, TPM: ev}, nil); code != http.StatusForbidden {
+		t.Fatalf("wrong credential accepted: %d", code)
+	}
+	ev.Activated = s.tpmCredential(sha(tpmToken), tcsr, ev, time.Now().Unix()/int64(tpmChallengeSlot.Seconds()))
+	round = api.EnrollResponse{}
+	if code := call(clientFor(nil, ""), "/api/v1/enroll", api.EnrollRequest{Token: tpmToken, CSR: tcsr, TPM: ev}, &round); code != 200 || round.Cert == "" || !round.TPMBound {
+		t.Fatalf("second TPM round: %d %+v", code, round)
+	}
+	var bound bool
+	if err := db.QueryRow(ctx, `SELECT tpm_bound FROM devices WHERE id=$1`, round.DeviceID).Scan(&bound); err != nil || !bound {
+		t.Fatalf("device not recorded as TPM bound: %v", err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE tenants SET require_tpm=false WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+
 	// audit log is append only and chained
 	if _, err := db.Exec(ctx, `UPDATE audit_log SET detail='x'`); err == nil {
 		t.Fatal("audit_log update must fail")

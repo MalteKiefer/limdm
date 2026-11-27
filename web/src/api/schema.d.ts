@@ -1115,7 +1115,7 @@ export interface paths {
         };
         /**
          * Activity of a device, newest first
-         * @description Merges device events, commands, script results, remote shell sessions (the helpdesk sees its own) and diagnostics bundles (admin and helpdesk).
+         * @description Merges device events, commands, script results, remote shell sessions (the helpdesk sees its own), diagnostics bundles (admin and helpdesk), compliance check changes (title is the check id, status the new result) and audit entries with the device as target (audit permission; title is the action, by the actor, extra the translated action label).
          */
         get: operations["deviceTimeline"];
         put?: never;
@@ -1263,6 +1263,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/shell-sessions/{sid}/transcript": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Raw recorded bytes of an ended remote shell session
+         * @description The terminal output as recorded (escape sequences included) for replay in a terminal or download as .log. Admins and auditors; the read is audited like /api/v1/audit. 409 while the session runs.
+         */
+        get: operations["shellTranscript"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/shell-sessions/{sid}/end": {
         parameters: {
             query?: never;
@@ -1335,7 +1355,7 @@ export interface paths {
         put?: never;
         /**
          * Create an enrollment token
-         * @description The token is in this answer only. Audited as token.create. Role admin.
+         * @description The token is in this answer only. Audited as token.create. Role admin. Uses and days are limited by Settings, Enrollment (hard limits 500 and 30).
          */
         post: operations["createEnrollmentToken"];
         delete?: never;
@@ -1433,6 +1453,46 @@ export interface paths {
          * @description Every visible library item (network secrets masked) with the blueprints that use it, an invalid signature flag, read only for shared items of the default tenant, and the deleted items that can be restored.
          */
         get: operations["configLibrary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/library/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Render a files, firewall or hostname template for one device
+         * @description Admins. Validates the payload like a save, then renders its templates with the values of the device (an ID or hostname in the caller's scope). Nothing is saved. A render error comes back in error with the payload as the agent would get it. For com.limdm.hostname the response adds hostname: the name the declaration computes for the device from its last report (current name, target FQDN, source used or the reason it keeps its name).
+         */
+        post: operations["configItemRender"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/scripts/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Last run of a recurring script per device
+         * @description Role read. The latest result of the named recurring script on every device in the caller's scope that reported one, with the last lines of its output.
+         */
+        get: operations["configScriptResults"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1902,7 +1962,7 @@ export interface paths {
         head?: never;
         /**
          * Save one settings section
-         * @description Sections: general (local_login, stale_hours), network (console_allow, console_block, scim_allow), security (password_policy, four_eyes*, geolocation, fallback_dns), remote_shell, sso (oidc_*, allowed_domain, require_mfa, mfa_acr, role_groups, oidc_client_secret, clear_secret), monitoring (webhook_url, notify_private_networks), branding (company_name, logo_png, remove_logo), operations (ops), retention. Fields left out keep their value. The same guards as the console: no self lockout, local login only off with an OIDC admin, four eyes needs two admins, OIDC changes are checked against the provider. Audited as settings.save.
+         * @description Sections: general (local_login, stale_hours), network (console_allow, console_block, scim_allow, network_cert_domain), security (password_policy, four_eyes*, geolocation, fallback_dns), remote_shell, sso (oidc_*, allowed_domain, require_mfa, mfa_acr, role_groups, oidc_client_secret, clear_secret), monitoring (webhook_url, notify_private_networks), branding (company_name, logo_png, remove_logo), operations (ops), retention, enrollment (enrollment). Fields left out keep their value. The same guards as the console: no self lockout, local login only off with an OIDC admin, four eyes needs two admins, OIDC changes are checked against the provider. Audited as settings.save.
          */
         patch: operations["saveSettings"];
         trace?: never;
@@ -2673,6 +2733,264 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/update-rings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Update rings with their wave and device count, the newest waves */
+        get: operations["listUpdateRings"];
+        put?: never;
+        /** Create an update ring (admin); audited as update_ring.save */
+        post: operations["createUpdateRing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/update-rings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Change an update ring (admin); audited as update_ring.save */
+        put: operations["updateUpdateRing"];
+        post?: never;
+        /** Delete an update ring (admin); its devices are in no ring until their next check in */
+        delete: operations["deleteUpdateRing"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/update-rings/{id}/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause, resume or approve an update ring (admin)
+         * @description pause stops installs in the ring and the rollout to later rings; approve lets the wave of the ring before it through (rings with require_approval). Audited as update_ring.<action>.
+         */
+        post: operations["updateRingAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/update-waves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a new update wave in the caller's tenant (admin); the first ring has it at once */
+        post: operations["startUpdateWave"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pending updates, last run per source and update ring of a device */
+        get: operations["getDeviceUpdates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/workloads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Containers and VMs of a device, tool versions and whether workload actions are allowed */
+        get: operations["getDeviceWorkloads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workloads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Containers and VMs of the fleet in the caller's scope, at most 2000 */
+        get: operations["listWorkloads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/updates/fleet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open security updates and CVEs of the devices in scope
+         * @description CVEs come from the advisories the devices' package managers know (dnf, zypper); a CVE counts as open while an update that fixes it is pending. With ?cve= the answer lists the devices it affects instead.
+         */
+        get: operations["getUpdatesFleet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/updates/package-versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Installed versions of one package across the devices in scope */
+        get: operations["getPackageVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/updates/cve-feeds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * State of the Debian, Ubuntu, Arch and Alpine security data imports
+         * @description Last successful import (time, fixes kept, bytes), last error. A failed import keeps the last data.
+         */
+        get: operations["getCVEFeeds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/updates/cve-feeds/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import the switched on security data feeds now (admin); audited as cve_feeds.refresh
+         * @description Runs in the background; poll GET /api/v1/updates/cve-feeds. 409 while the feeds are off or an import runs.
+         */
+        post: operations["refreshCVEFeeds"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/firewall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Firewall inventory of a device: backend, default policies and every rule grouped managed, foreign and system */
+        get: operations["getDeviceFirewall"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/firewall/rules/{rid}/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adopt a foreign firewall rule into a firewall library item, keep it as an exception there, or list it to be removed
+         * @description adopt adds the rule in the declaration format, keep adds its match to keep, remove adds its match to remove: every agent that gets the item deletes the rule whenever it finds it, also after a reboot (a rule with a risk needs confirm_risk; an item with a remove list needs four eyes approval when it is on, and a new item is then refused with 409). item_id names an existing com.limdm.firewall item, saved through the library save (validation, signature, audit, four eyes). Without it a new item with name is created (enforce off) and assigned in blueprint_id, one of GET /api/v1/devices/{id}/firewall/targets, in one transaction with both audit entries: nothing is created when the assignment fails. A blueprint that is the global default or reaches more than one device needs confirm (422 on field confirm otherwise). Tenant accounts pick only blueprints of their tenant. System and managed rules are refused. Admins only.
+         */
+        post: operations["firewallRuleAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/firewall/targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Blueprints a new firewall item adopted from this device can be assigned in, with the devices each reaches
+         * @description Tenant accounts get the blueprints of their tenant (never the global default); accounts of the whole installation those of the device's tenant and of the default tenant. Admins only.
+         */
+        get: operations["getFirewallTargets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2718,6 +3036,10 @@ export interface components {
             enrolled_at?: string;
             /** @description Inventory as reported by the agent (single device only) */
             inventory?: Record<string, never>;
+            /** @description Custom attributes for file and firewall templates (single device only) */
+            attributes?: {
+                [key: string]: string;
+            };
             /** @description Desktop environment, empty on servers */
             desktop: string;
             memory_mb: number;
@@ -2740,11 +3062,15 @@ export interface components {
             }[];
             /** @description Email of a directory person; empty clears it */
             primary_user?: string;
+            /** @description Custom attributes for templates ({{.Attributes.name}}), replacing all; names start with a letter (letters, digits, _), at most 50, values up to 1024 bytes */
+            attributes?: {
+                [key: string]: string;
+            };
         };
         CommandRequest: {
-            /** @description A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create */
+            /** @description A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create, package_hold, package_downgrade, workload_action, firewall_remove_rule */
             type: string;
-            /** @description The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove). true is sent as on; reason (wipe, lost, script: the reason shown to the approving admin when four eyes approval is on). */
+            /** @description The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove), name and release (package_hold), name and version (package_downgrade), kind, id and action (workload_action: start, stop or restart of a workload of the last inventory), rule_id and confirm_risk (firewall_remove_rule: a foreign rule of the inventory; confirm_risk for a rule that may cut SSH or the server). true is sent as on; reason (wipe, lost, script, package_downgrade, firewall_remove_rule, workload_action stop and restart: the reason shown to the approving admin when four eyes approval is on). */
             params?: {
                 [key: string]: string | number | boolean;
             };
@@ -3457,7 +3783,7 @@ export interface components {
         };
         TimelineEntry: {
             /** @enum {string} */
-            kind: "event" | "command" | "script" | "shell" | "diagnostics";
+            kind: "event" | "command" | "script" | "shell" | "diagnostics" | "compliance" | "audit";
             id: string;
             /** Format: date-time */
             at: string;
@@ -3522,6 +3848,7 @@ export interface components {
             public_url: string;
             fingerprint: string;
             release_repo: string;
+            limits: components["schemas"]["EnrollSettings"];
         };
         DeviceDetail: components["schemas"]["Device"] & {
             inventory: {
@@ -3535,6 +3862,8 @@ export interface components {
                 type: string;
                 state: string;
                 reasons: string[];
+                /** @description notes of the reported state (com.limdm.hostname: target, source, result, warnings) */
+                info?: string[];
             }[];
             chain: {
                 id: number;
@@ -3672,6 +4001,10 @@ export interface components {
                 /** Format: date-time */
                 at: string;
             }[];
+            /** @description The mTLS key was attested as held by a TPM 2.0 */
+            tpm_bound: boolean;
+            /** @description SHA-256 of the TPM endorsement key's public area, when bound */
+            tpm_ek_sha256: string;
         };
         ConfigDeleted: {
             id: number;
@@ -3966,6 +4299,10 @@ export interface components {
             four_eyes?: boolean;
             four_eyes_recovery?: boolean;
             four_eyes_shell?: boolean;
+            /** @description Stopping and restarting containers and VMs waits for a second admin (needs four_eyes) */
+            four_eyes_workloads?: boolean;
+            /** @description The helpdesk role may start, stop and restart containers and VMs */
+            workloads_helpdesk?: boolean;
             require_mfa?: boolean;
             mfa_acr?: string[];
             /** @description Days per data type (retention_kinds); 0 keeps the audit log forever */
@@ -3983,6 +4320,10 @@ export interface components {
             /** @description PNG, square, up to 256 KiB */
             logo_png?: string;
             remove_logo?: boolean;
+            /** @description EAP-TLS certificates carry <device ID>.<domain> as DNS SAN; empty: no DNS SAN */
+            network_cert_domain?: string;
+            enrollment?: components["schemas"]["EnrollSettings"];
+            cve_feeds?: components["schemas"]["CVEFeedSettings"];
         };
         RetentionKind: {
             key: string;
@@ -4008,6 +4349,10 @@ export interface components {
             four_eyes?: boolean;
             four_eyes_recovery?: boolean;
             four_eyes_shell?: boolean;
+            /** @description Stopping and restarting containers and VMs waits for a second admin (needs four_eyes) */
+            four_eyes_workloads?: boolean;
+            /** @description The helpdesk role may start, stop and restart containers and VMs */
+            workloads_helpdesk?: boolean;
             require_mfa?: boolean;
             mfa_acr?: string[];
             /** @description Days per data type (retention_kinds); 0 keeps the audit log forever */
@@ -4027,6 +4372,10 @@ export interface components {
             /** @description Signing key of the compliance webhook; admins only */
             webhook_secret?: string;
             retention_kinds: components["schemas"]["RetentionKind"][];
+            /** @description EAP-TLS certificates carry <device ID>.<domain> as DNS SAN; empty: no DNS SAN */
+            network_cert_domain?: string;
+            enrollment: components["schemas"]["EnrollSettings"];
+            cve_feeds?: components["schemas"]["CVEFeedSettings"];
         };
         ConsoleUser: {
             /** @description Email (OIDC) or local:name */
@@ -4087,6 +4436,8 @@ export interface components {
             has_logo: boolean;
             /** Format: date-time */
             created_at: string;
+            /** @description Enrollment into this tenant needs a TPM bound key */
+            require_tpm: boolean;
         };
         TenantPatch: {
             name?: string;
@@ -4096,6 +4447,8 @@ export interface components {
             color?: string;
             logo_png?: string;
             remove_logo?: boolean;
+            /** @description Tenant admins may only switch it on */
+            require_tpm?: boolean;
         };
         KeyStatus: {
             /** @enum {string} */
@@ -4410,6 +4763,310 @@ export interface components {
                 [key: string]: string;
             };
             docs: string;
+        };
+        /** @description Limits of new enrollment tokens (hard limits 500 uses and 30 days) and the TPM requirement for every tenant */
+        EnrollSettings: {
+            default_uses: number;
+            default_days: number;
+            max_uses: number;
+            max_days: number;
+            /** @description Refuse enrollments without a TPM bound key */
+            require_tpm: boolean;
+        };
+        UpdateRingInput: {
+            name: string;
+            /** @description order of the ring, lowest first */
+            position: number;
+            /** @description days after a wave started before it may reach this ring */
+            deferral_days?: number;
+            /** @description first ring only: start a new wave every N days, 0 is manual */
+            wave_days?: number;
+            /** @description a wave reaches this ring only after an admin approved it */
+            require_approval?: boolean;
+            /** @description every device that is in no earlier ring */
+            all_devices?: boolean;
+            tags?: string[];
+            /** @description directory groups of the primary user */
+            groups?: string[];
+            /** @description blueprint IDs; a device matches its blueprint and the ones it inherits from */
+            blueprints?: number[];
+        };
+        UpdateRing: {
+            name?: string;
+            /** @description order of the ring, lowest first */
+            position?: number;
+            /** @description days after a wave started before it may reach this ring */
+            deferral_days?: number;
+            /** @description first ring only: start a new wave every N days, 0 is manual */
+            wave_days?: number;
+            /** @description a wave reaches this ring only after an admin approved it */
+            require_approval?: boolean;
+            /** @description every device that is in no earlier ring */
+            all_devices?: boolean;
+            tags?: string[];
+            /** @description directory groups of the primary user */
+            groups?: string[];
+            /** @description blueprint IDs; a device matches its blueprint and the ones it inherits from */
+            blueprints?: number[];
+            id?: number;
+            tenant_id?: number;
+            paused?: boolean;
+            approved_wave?: number;
+            /** @description the newest wave that reached the ring */
+            wave?: number;
+            /** Format: date-time */
+            wave_at?: string | null;
+            /** @description devices in the ring at their last check in */
+            devices?: number;
+        };
+        UpdateWave: {
+            tenant_id?: number;
+            wave?: number;
+            /** Format: date-time */
+            started_at?: string;
+            started_by?: string;
+        };
+        UpdateRingList: {
+            items?: components["schemas"]["UpdateRing"][];
+            /** @description the newest 20 */
+            waves?: components["schemas"]["UpdateWave"][];
+            /** @description devices in no ring */
+            unassigned?: number;
+        };
+        PendingUpdate: {
+            name?: string;
+            current?: string;
+            candidate?: string;
+            /** @description apt origin, dnf or zypper repo, Flatpak remote */
+            origin?: string;
+            /** @enum {string} */
+            source?: "os_all" | "third_party" | "flatpak";
+            security?: boolean;
+            /** @description as the advisory states it */
+            severity?: string;
+            cves?: string[];
+            /** @description a SUSE patch, not a package */
+            patch?: boolean;
+        };
+        UpdateRun: {
+            /** @enum {string} */
+            source?: "os_security" | "os_all" | "third_party" | "flatpak";
+            /** Format: date-time */
+            at?: string;
+            /** @enum {string} */
+            result?: "installed" | "no_updates" | "failed" | "unsupported";
+            count?: number;
+            detail?: string;
+            wave?: number;
+        };
+        WorkloadTool: {
+            kind?: string;
+            version?: string;
+        };
+        Workload: {
+            /** @enum {string} */
+            kind?: "docker" | "podman" | "lxc" | "lxd" | "incus" | "pct" | "qm" | "libvirt";
+            /** @description Container ID, VMID or name: what workload_action takes */
+            id?: string;
+            name?: string;
+            /** @description container or vm */
+            type?: string;
+            /** @description Image reference or OS template */
+            image?: string;
+            image_id?: string;
+            /** @description The tool's state in lower case, for example running, exited, stopped, paused, shut off */
+            state?: string;
+            /** Format: date-time */
+            created?: string;
+            /** Format: date-time */
+            started?: string;
+            /** @description Restart policy or autostart */
+            restart?: string;
+            ports?: string[];
+            project?: string;
+            service?: string;
+            cpus?: number;
+            memory_mb?: number;
+        };
+        Workloads: {
+            tools?: components["schemas"]["WorkloadTool"][];
+            items?: components["schemas"]["Workload"][];
+            errors?: string[];
+            truncated?: boolean;
+        };
+        DeviceWorkloads: {
+            /** @description The device has reported workloads */
+            reports?: boolean;
+            /**
+             * Format: date-time
+             * @description When the inventory last changed
+             */
+            updated_at?: string | null;
+            inventory?: components["schemas"]["Workloads"];
+            control?: {
+                /** @description The device's policy allows workload actions (com.limdm.agent workload_control) */
+                policy?: boolean;
+                /** @description The caller's role may send workload actions */
+                allowed?: boolean;
+                /** @description Stop and restart wait for a second admin */
+                four_eyes?: boolean;
+            };
+        };
+        FleetWorkloads: {
+            items?: {
+                device_id?: string;
+                hostname?: string;
+                workload?: components["schemas"]["Workload"];
+            }[];
+        };
+        DeviceUpdates: {
+            ring?: components["schemas"]["UpdateRing"] | null;
+            /** @description the agent reports its update status */
+            reports?: boolean;
+            status?: {
+                pending?: components["schemas"]["PendingUpdate"][];
+                pending_error?: string;
+                runs?: components["schemas"]["UpdateRun"][];
+                ring?: string;
+                /** Format: date-time */
+                security_since?: string | null;
+            };
+            /** @description CVEs matched from the Debian and Ubuntu security data: the installed version is older than the fixed one */
+            vulnerabilities?: {
+                cve?: string;
+                package?: string;
+                installed?: string;
+                fixed?: string;
+                severity?: string;
+            }[];
+        };
+        UpdatesFleet: {
+            reporting?: number;
+            security_devices?: number;
+            pending_devices?: number;
+            /** @description pending security updates without CVE IDs (apt) */
+            security_no_cve?: number;
+            devices_by_source?: {
+                [key: string]: number;
+            };
+            cves?: {
+                id?: string;
+                severity?: string;
+                devices?: number;
+                packages?: string[];
+            }[];
+            packages?: {
+                name?: string;
+                source?: string;
+                security?: boolean;
+                severity?: string;
+                devices?: number;
+            }[];
+        };
+        /** @description Security data of Debian, Ubuntu, Arch and Alpine; every feed is off by default */
+        CVEFeedSettings: {
+            /** @description import the Debian Security Tracker daily */
+            debian?: boolean;
+            /** @description import the Ubuntu OSV export daily */
+            ubuntu?: boolean;
+            /** @description import the Arch Security Tracker daily */
+            arch?: boolean;
+            /** @description import the Alpine secdb of the branches the Alpine devices run daily */
+            alpine?: boolean;
+            /** @description https URL of the Debian Security Tracker JSON; empty is https://security-tracker.debian.org/tracker/data/json */
+            debian_url?: string;
+            /** @description https URL of the Ubuntu OSV export (zip); empty is https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip */
+            ubuntu_url?: string;
+            /** @description https URL of the Arch tracker's AVG list; empty is https://security.archlinux.org/issues/all.json */
+            arch_url?: string;
+            /** @description https base URL of the Alpine secdb (…/v3.20/main.json); empty is https://secdb.alpinelinux.org */
+            alpine_url?: string;
+            /** @description download limit per feed in MB, 1024 when 0 */
+            max_mb?: number;
+        };
+        CVEFeedState: {
+            /** @enum {string} */
+            distro?: "debian" | "ubuntu" | "arch" | "alpine";
+            url?: string;
+            /** Format: date-time */
+            fetched_at?: string | null;
+            rows?: number;
+            bytes?: number;
+            error?: string;
+            /** Format: date-time */
+            error_at?: string | null;
+            enabled?: boolean;
+        };
+        FirewallInventoryRule: {
+            /** @description identity of the rule now; a removal names it */
+            id: string;
+            /** @description stable text of the rule (tool, place, raw text without counters); keep entries store it */
+            match: string;
+            /** @description tool it was read with: ufw, firewalld, nftables, iptables, ip6tables */
+            source: string;
+            /** @enum {string} */
+            origin: "managed" | "foreign" | "system";
+            table?: string;
+            chain?: string;
+            /** @description firewalld zone or policy */
+            zone?: string;
+            /** @description in, out or forward */
+            direction?: string;
+            action?: string;
+            proto?: string;
+            port?: string;
+            service?: string;
+            from?: string;
+            to?: string;
+            iface?: string;
+            comment?: string;
+            /** @description the rule as the tool shows it */
+            raw: string;
+            /** @description nftables rule handle */
+            handle?: string;
+            /** @description ssh or server: removing it may cut remote access; a removal needs confirm_risk */
+            risk?: string;
+        };
+        DeviceFirewallRule: components["schemas"]["FirewallInventoryRule"] & {
+            /** @description listed in keep of the device's firewall declaration */
+            kept: boolean;
+            /** @description why the rule cannot be adopted */
+            adopt_error?: string;
+        };
+        DeviceFirewall: {
+            /** @description the agent reported a firewall inventory */
+            reports: boolean;
+            /** Format: date-time */
+            updated_at: string | null;
+            /** @description a firewall declaration applies to the device */
+            managed: boolean;
+            inventory: {
+                /** @description ufw, firewalld, nftables, iptables; empty when none was found */
+                backend: string;
+                active: boolean;
+                default_zone?: string;
+                policy: {
+                    in?: string;
+                    out?: string;
+                    forward?: string;
+                };
+                truncated?: boolean;
+                errors?: string[];
+                /** @description subnets of the local container and VM bridges; rules on these addresses are system rules */
+                bridge_nets?: string[];
+            };
+            rules: components["schemas"]["DeviceFirewallRule"][];
+        };
+        FirewallTarget: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /** @description active devices the blueprint reaches, children included */
+            devices: number;
+            /** @description the default blueprint of the whole installation */
+            global_default: boolean;
+            /** @description the device's own effective blueprint */
+            device: boolean;
         };
     };
     responses: {
@@ -6586,7 +7243,7 @@ export interface operations {
                 limit?: components["parameters"]["limit"];
                 /** @description next_cursor of the previous page */
                 cursor?: components["parameters"]["cursor"];
-                kind?: "event" | "command" | "script" | "shell" | "diagnostics";
+                kind?: "event" | "command" | "script" | "shell" | "diagnostics" | "compliance" | "audit";
             };
             header?: never;
             path: {
@@ -6844,6 +7501,34 @@ export interface operations {
             503: components["responses"]["Problem"];
         };
     };
+    shellTranscript: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
     endShell: {
         parameters: {
             query?: never;
@@ -6970,8 +7655,10 @@ export interface operations {
                 "application/json": {
                     note?: string;
                     blueprint_id?: number;
-                    uses: number;
-                    days: number;
+                    /** @description 0 or missing: the default of Settings, Enrollment; at most its maximum */
+                    uses?: number;
+                    /** @description 0 or missing: the default of Settings, Enrollment; at most its maximum */
+                    days?: number;
                 };
             };
         };
@@ -7128,6 +7815,111 @@ export interface operations {
             403: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
+        };
+    };
+    configItemRender: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    type: string;
+                    payload: Record<string, never>;
+                    /** @description device ID or hostname */
+                    device: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        payload: Record<string, never>;
+                        error?: string;
+                        vars: {
+                            hostname: string;
+                            id: string;
+                            tags: string[];
+                            tenant: string;
+                            primary_user: string;
+                            attributes: {
+                                [key: string]: string;
+                            };
+                            /** @description DMI serial number, empty for a placeholder */
+                            serial?: string;
+                            /** @description MAC address of the primary interface */
+                            mac?: string;
+                            vendor?: string;
+                            model?: string;
+                        };
+                        /** @description com.limdm.hostname only */
+                        hostname?: {
+                            /** @description host name the device reported */
+                            current: string;
+                            /** @description FQDN (or short name) the declaration computes */
+                            target?: string;
+                            /** @description source used, "template (fallback)" for the fallback */
+                            source?: string;
+                            /** @description why the device keeps its name */
+                            error?: string;
+                            serial?: string;
+                            /** @description hostname_info of the inventory: address, mac, ptr, fqdn, target, source, result, detail, previous, changed_at, warning */
+                            facts?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description Invalid payload or unknown device */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    configScriptResults: {
+        parameters: {
+            query: {
+                /** @description script name */
+                name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            device_id: string;
+                            hostname: string;
+                            exit_code: number;
+                            /** Format: date-time */
+                            start: string;
+                            /** Format: date-time */
+                            end: string;
+                            output: string;
+                        }[];
+                    };
+                };
+            };
         };
     };
     configItemPreview: {
@@ -7923,7 +8715,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                section: "general" | "network" | "security" | "remote_shell" | "sso" | "monitoring" | "branding" | "operations" | "retention";
+                section: "general" | "network" | "security" | "remote_shell" | "sso" | "monitoring" | "branding" | "operations" | "retention" | "enrollment" | "cve_feeds";
             };
             cookie?: never;
         };
@@ -9397,6 +10189,495 @@ export interface operations {
             422: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
+        };
+    };
+    listUpdateRings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateRingList"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    createUpdateRing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRingInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateRing"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    updateUpdateRing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRingInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateRing"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deleteUpdateRing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    updateRingAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                action: "pause" | "resume" | "approve";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateRing"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    startUpdateWave: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateWave"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getDeviceUpdates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceUpdates"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getDeviceWorkloads: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceWorkloads"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listWorkloads: {
+        parameters: {
+            query?: {
+                kind?: "docker" | "podman" | "lxc" | "lxd" | "incus" | "pct" | "qm" | "libvirt";
+                /** @description Exact state, for example running or exited */
+                state?: string;
+                /** @description Part of the image reference or OS template, case insensitive */
+                image?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetWorkloads"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getUpdatesFleet: {
+        parameters: {
+            query?: {
+                cve?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdatesFleet"] | {
+                        items?: {
+                            id?: string;
+                            hostname?: string;
+                            packages?: string[];
+                        }[];
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getPackageVersions: {
+        parameters: {
+            query: {
+                name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items?: {
+                            version?: string;
+                            arch?: string;
+                            devices?: number;
+                        }[];
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getCVEFeeds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        enabled?: boolean;
+                        running?: boolean;
+                        items?: components["schemas"]["CVEFeedState"][];
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    refreshCVEFeeds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        running?: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getDeviceFirewall: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceFirewall"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    firewallRuleAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                /** @description rule id from the inventory */
+                rid: string;
+                action: "adopt" | "keep" | "remove";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: int64
+                     * @description existing firewall item; 0 or missing creates one
+                     */
+                    item_id?: number;
+                    /** @description name of the new item */
+                    name?: string;
+                    /**
+                     * Format: int64
+                     * @description blueprint the new item is assigned in (required without item_id)
+                     */
+                    blueprint_id?: number;
+                    /** @description confirms a blueprint that is the global default or reaches more than this device */
+                    confirm?: boolean;
+                    /** @description remove: confirms a rule that may cut SSH or the server */
+                    confirm_risk?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: int64 */
+                        item_id: number;
+                        item_name: string;
+                        created: boolean;
+                    };
+                };
+            };
+            /** @description Four eyes: the save waits for another admin */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: int64 */
+                        approval_id?: number;
+                        status?: string;
+                    };
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    getFirewallTargets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FirewallTarget"][];
+                    };
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
 }

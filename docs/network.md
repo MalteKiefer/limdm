@@ -85,7 +85,7 @@ the signed declaration over the mTLS channel. They are masked:
   secret. A rollback takes the secrets of the current item (matched by profile name); a
   restored deleted item or a changed profile shape needs the secrets entered again;
 * in admin API answers (`/api/v1/library-items`); a `PUT` with the mask keeps the stored value;
-* in the desktop app and in `limdm profiles`, like every other secret.
+* in the desktop app and in `limdm blueprint`, like every other secret.
 
 On the device they are stored in the root only keyfiles, as NetworkManager requires.
 
@@ -105,10 +105,23 @@ The server ignores everything in the CSR except the key and fills in:
 |---|---|
 | Subject | `CN=<device ID>, O=LiMDM network` |
 | SAN URI | `urn:limdm:device:<device ID>` |
-| SAN DNS | the device's host name, when it is a valid DNS name |
-| SAN email | the primary user's email, else the first assigned user's, when known |
+| SAN DNS | `<device ID>.<domain>` when **Network certificates**, **Certificate domain** is set, else none |
+| SAN email | the primary user's email as the directory knows it (active SCIM or Google user), else none |
 | Validity | 90 days |
 | Key usage | digital signature, extended key usage client authentication |
+
+Nothing a device reports about itself reaches the certificate: not its host name (any
+local administrator can change it) and not the users it lists. The DNS name is built from the
+device ID, which the server assigned at enrollment, under a domain the administrator sets
+(for example `devices.example.com`, giving `3f2a....devices.example.com`); the email address
+comes only from the directory entry set as the device's primary user.
+
+**What RADIUS should match.** Authorize on the certificate chain (network CA only, CRL
+checked) and on the device ID: the subject CN or the SAN URI `urn:limdm:device:<device ID>`,
+or the DNS SAN under your certificate domain. Use the email SAN only to map the session to a
+person (VLAN by department, accounting), never as proof of the device. Do not match on host
+names: certificates issued before this rule may still carry the host name the device
+reported, until they renew (at most 90 days).
 
 ### Network CA
 

@@ -30,8 +30,8 @@ export function PackagesTab() {
         {admin ? <UploadCard kinds={d.kinds} limitMB={d.config.max_upload_mb} fourEyes={d.four_eyes} /> : <div />}
         <Card title={t('config.quota')}>
           <Bullet value={quota ? (d.used_bytes / quota) * 100 : 0} target={100} label={t('config.quotaUse')} />
-          <p className="mt-2 text-[13px]">{t('config.quotaLine', { used: bytes(d.used_bytes), quota: bytes(quota), files: fmt(d.used_count), max: fmt(d.config.quota_count) })}</p>
-          <p className="text-[12.5px] text-muted">{t('config.uploadLimit', { mb: fmt(d.config.max_upload_mb) })} · {t(d.config.store === 's3' ? 'config.storeS3' : 'config.storeLocal')}</p>
+          <p className="mt-2 text-body">{t('config.quotaLine', { used: bytes(d.used_bytes), quota: bytes(quota), files: fmt(d.used_count), max: fmt(d.config.quota_count) })}</p>
+          <p className="text-meta text-muted">{t('config.uploadLimit', { mb: fmt(d.config.max_upload_mb) })} · {t(d.config.store === 's3' ? 'config.storeS3' : 'config.storeLocal')}</p>
         </Card>
       </div>
       <Card title={t('config.uploads')} sub={t('config.uploadsSub')} bodyClass="!px-0 !py-0">
@@ -43,7 +43,7 @@ export function PackagesTab() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-left">
               <caption className="sr-only">{t('config.uploads')}</caption>
-              <thead className="text-[12px] text-muted">
+              <thead className="text-meta text-muted">
                 <tr className="border-b border-line">
                   <th className="px-[var(--pad-card)] py-2 font-medium">{t('config.package')}</th>
                   <th className="font-medium">{t('config.kind')}</th>
@@ -60,9 +60,9 @@ export function PackagesTab() {
                   <tr key={p.id} className="row-h border-b border-line align-top last:border-0">
                     <td className="px-[var(--pad-card)] py-2">
                       <div className="font-medium">
-                        {p.name} <span className="font-mono text-[12px] text-muted">{p.version}</span>
+                        {p.name} <span className="font-mono text-meta text-muted">{p.version}</span>
                       </div>
-                      <div className="font-mono text-[11.5px] break-all text-muted" title={p.sha256}>
+                      <div className="font-mono text-micro break-all text-muted" title={p.sha256}>
                         {p.filename} · {p.sha256.slice(0, 16)}
                       </div>
                       {!p.approved_by && <Badge tone="warn">{t('config.awaitsApproval')}</Badge>}
@@ -71,13 +71,13 @@ export function PackagesTab() {
                       <Badge>{p.kind}</Badge>
                     </td>
                     <td className="num py-2">{bytes(p.size)}</td>
-                    <td className="py-2 text-[12.5px]">{p.usage.length ? p.usage.join(', ') : <span className="text-muted">{t('config.unused')}</span>}</td>
-                    <td className="py-2 text-[12.5px] text-muted" title={dateTime(p.created_at)}>
+                    <td className="py-2 text-meta">{p.usage.length ? p.usage.join(', ') : <span className="text-muted">{t('config.unused')}</span>}</td>
+                    <td className="py-2 text-meta text-muted" title={dateTime(p.created_at)}>
                       {p.uploaded_by} · {ago(p.created_at)}
                     </td>
                     <td className="py-2 pr-[var(--pad-card)] text-right whitespace-nowrap">
                       {admin && p.approved_by && (
-                        <Link to="/config/library/$id" params={{ id: 'new' }} search={{ type: d.type, from: p.sha256 }} className="btn !h-7 px-2 text-[12.5px]">
+                        <Link to="/config/library/$id" params={{ id: 'new' }} search={{ type: d.type, from: p.sha256 }} className="btn !h-7 px-2 text-meta">
                           <FilePlus2 size={13} aria-hidden /> {t('config.useInItem')}
                         </Link>
                       )}{' '}
@@ -211,7 +211,7 @@ function UploadCard({ kinds, limitMB, fourEyes }: { kinds: string[]; limitMB: nu
           </div>
         )}
         {err && (
-          <p role="alert" className="rounded-lg bg-bad-soft p-3 text-[13px] text-bad md:col-span-2">
+          <p role="alert" className="rounded-lg bg-bad-soft p-3 text-body text-bad md:col-span-2">
             {err}
           </p>
         )}
@@ -219,7 +219,7 @@ function UploadCard({ kinds, limitMB, fourEyes }: { kinds: string[]; limitMB: nu
           {progress !== undefined ? (
             <>
               <progress className="h-2 flex-1" max={1} value={progress} aria-label={t('config.uploading')} />
-              <span className="num text-[12.5px]" aria-live="polite">
+              <span className="num text-meta" aria-live="polite">
                 {Math.round(progress * 100)} %
               </span>
               <button type="button" className="btn" onClick={() => abort.current?.abort()}>
@@ -231,7 +231,7 @@ function UploadCard({ kinds, limitMB, fourEyes }: { kinds: string[]; limitMB: nu
               <Upload size={14} aria-hidden /> {t('config.uploadBtn')}
             </button>
           )}
-          {fourEyes && <span className="text-[12.5px] text-muted">{t('config.uploadFourEyes')}</span>}
+          {fourEyes && <span className="text-meta text-muted">{t('config.uploadFourEyes')}</span>}
         </div>
       </form>
     </Card>
@@ -285,14 +285,14 @@ function StoreSettings({ cfg }: { cfg: PackageConfig }) {
             {s3('prefix', t('config.s3Prefix'))}
             {s3('access_key', t('config.s3Access'))}
             {s3('secret', t('config.s3Secret'), true)}
-            <label className="flex items-center gap-2 text-[13px]">
+            <label className="flex items-center gap-2 text-body">
               <input type="checkbox" checked={!!c.s3?.path_style} onChange={(e) => setC({ ...c, s3: { ...c.s3!, path_style: e.target.checked } })} /> {t('config.s3PathStyle')}
             </label>
           </div>
         )}
-        <p className="text-[12.5px] text-muted">{t('config.storeMoveNote')}</p>
+        <p className="text-meta text-muted">{t('config.storeMoveNote')}</p>
         {err && (
-          <p role="alert" className="rounded-lg bg-bad-soft p-3 text-[13px] text-bad">
+          <p role="alert" className="rounded-lg bg-bad-soft p-3 text-body text-bad">
             {err}
           </p>
         )}

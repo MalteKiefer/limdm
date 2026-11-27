@@ -33,6 +33,21 @@ test('a section form validates, saves and keeps the value', async ({ page }) => 
   expect(csp).toEqual([])
 })
 
+// a 1x1 PNG
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64')
+
+test('the logo preview is drawn from the picked file, within the CSP', async ({ page }) => {
+  const csp: string[] = []
+  page.on('console', (m) => /Content Security Policy/i.test(m.text()) && csp.push(m.text()))
+  await page.goto('/app/settings?s=general')
+  await page.getByLabel('PNG auswählen').setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: png })
+  const preview = page.getByRole('img', { name: 'Vorschau des Logos' })
+  await expect(preview).toBeVisible()
+  expect(await preview.evaluate((e) => e.tagName)).toBe('CANVAS')
+  await expect.poll(() => preview.evaluate((e) => (e as HTMLCanvasElement).width)).toBe(1)
+  expect(csp).toEqual([])
+})
+
 test('a network list rejects what is no address', async ({ page }) => {
   await page.goto('/app/settings?s=access')
   const allow = page.getByLabel('Erlaubte Netze', { exact: true })
@@ -170,4 +185,36 @@ test('the deep links of the first steps land on their screens', async ({ page })
   await expect(page).toHaveURL(/\/app\/$/)
   await page.goto('/library/1')
   await expect(page).toHaveURL(/\/app\/config\/library\/1$/)
+})
+
+test('enrollment limits bound the add device form; certificate domain saves', async ({ page }) => {
+  await page.goto('/app/settings?s=enroll')
+  const max = page.getByLabel('Höchste Zahl an Nutzungen')
+  await max.fill('501')
+  await max.blur()
+  await expect(max).toHaveAttribute('aria-invalid', 'true')
+  await max.fill('10')
+  await page.getByRole('button', { name: 'Speichern' }).click()
+  await expect(page.getByText('Gespeichert und aktiv.').first()).toBeVisible()
+  await page.goto('/app/devices/enroll')
+  const uses = page.getByLabel('Nutzungen', { exact: true })
+  await expect(uses).toHaveValue('1')
+  await uses.fill('11')
+  await expect(page.getByText('1 bis 10 (Einstellungen, Registrierung)')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Token erstellen' })).toBeDisabled()
+  await page.goto('/app/settings?s=enroll')
+  await page.getByLabel('Höchste Zahl an Nutzungen').fill('500')
+  await page.getByRole('button', { name: 'Speichern' }).click()
+  await expect(page.getByText('Gespeichert und aktiv.').first()).toBeVisible()
+
+  await page.goto('/app/settings?s=network')
+  const domain = page.getByLabel('Domain', { exact: true })
+  await domain.fill('Not a domain')
+  await domain.blur()
+  await expect(page.getByText('Eine DNS Domain in Kleinbuchstaben, z. B. devices.example.com')).toBeVisible()
+  await domain.fill('devices.example.com')
+  await page.getByRole('button', { name: 'Speichern' }).click()
+  await expect(page.getByText('Gespeichert und aktiv.').first()).toBeVisible()
+  await page.reload()
+  await expect(page.getByLabel('Domain', { exact: true })).toHaveValue('devices.example.com')
 })

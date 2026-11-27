@@ -21,7 +21,18 @@ ISO/IEC 27001:2022 Annex A.
   (packages, updates, firewall, SSH, sudo, polkit, package sources, certificates, proxy,
   printers, WLAN and VPN profiles, dconf, local accounts, screen lock and more) are assigned
   through blueprints with nested conditions and inheritance. Every change is versioned with
-  diff, review step, rollback and restore.
+  diff, review step, rollback and restore. File content and firewall rules can be templates
+  rendered per device (host name, tags, tenant, custom attributes); scripts run on a schedule.
+* **Patch management:** update rules per source (OS security, all OS updates, vendor
+  repositories, Flatpak), update rings with waves, deferral, pause and approval, pending
+  updates and CVEs per device and fleet wide (Debian, Ubuntu, Arch and Alpine security data,
+  dnf and zypper advisories), package hold and downgrade.
+* **Host firewall** on ufw, firewalld and nftables (Alpine) with zones and optional outbound
+  filtering, and a read only inventory of every rule on the device: adopt, keep or discard
+  foreign rules.
+* **Containers and VMs** (Docker, Podman, LXC, LXD, Incus, Proxmox, libvirt) per device, with
+  start, shut down and restart behind a policy switch.
+* **Host names** from reverse DNS, DNS, the serial number, a template or a fixed name.
 * **Compliance** with automatic remediation, grace periods, automatic lock, custom checks,
   risk exceptions, compliance history and CSV evidence for auditors.
 * **Device commands** for lock and unlock, lost mode, wipe, restart, scripts, updates,
@@ -49,8 +60,8 @@ ISO/IEC 27001:2022 Annex A.
 * **Integrations:** admin REST API with OpenAPI, Prometheus metrics, several server
   instances behind a load balancer.
 * **Security by default:** mTLS only between agent and server (TLS 1.3, private device CA,
-  pinned fingerprint), signed library items, IP allow and block lists for the console,
-  append only audit log.
+  pinned fingerprint, device key in the TPM 2.0 where present), signed library items, IP
+  allow and block lists for the console, append only audit log.
 * **Agent self updates** with signed checksums and automatic rollback; packages for deb,
   rpm, Arch and Alpine, systemd and OpenRC. Console in English and German.
 
@@ -94,9 +105,11 @@ An index of all documents is in [docs/README.md](docs/README.md).
 | [Desktop login](docs/desktop-login.md) | SSO login and session mode, reconfirmation, offline grace |
 | [Disk encryption](docs/disk-encryption.md) | Recovery key escrow, rotation, TPM 2.0 binding |
 | [Network profiles](docs/network.md) | WLAN, 802.1X, WireGuard and OpenVPN profiles, EAP-TLS device certificates, CRL |
+| [Patching](docs/patching.md) | Update rules per source, update rings and waves, pending updates, CVEs, rollback |
 | [Software catalog](docs/software.md) | Self service apps in the desktop app, requests, Flathub and vendor repositories |
 | [Compliance](docs/compliance.md) | Checks with IDs, custom checks, frameworks, policies, exceptions, webhook, evidence |
 | [Remote shell](docs/remote-shell.md) | Audited support terminal from the console to a device |
+| [Containers and VMs](docs/workloads.md) | Docker, Podman, LXC, LXD, Incus, Proxmox and libvirt per device with versions; start, shut down, restart |
 | [Notifications](docs/notifications.md) | Email, Slack, Discord and webhook channels, events |
 | [Security](docs/security.md) | Architecture, mTLS, signed commands, sessions, four eyes, audit log, privacy |
 | [Keys](docs/keys.md) | Key inventory, HSM, rotation runbooks, compromise |
@@ -115,8 +128,9 @@ An index of all documents is in [docs/README.md](docs/README.md).
   (BSI Standard 300-1) need review by an information security officer.
 * Official CIS Benchmarks exist for Ubuntu and Debian; Fedora uses the RHEL
   recommendations as reference.
-* Server keys can live in a PKCS#11 HSM only with the separate `-tags pkcs11` build; agent
-  keys are files (the TPM binds LUKS volumes, not the device key).
+* Server keys can live in a PKCS#11 HSM only with the separate `-tags pkcs11` build. Agent
+  keys live in the TPM 2.0 when one exists, else in a file; the TPM attestation does not check
+  the EK certificate against vendor roots ([agent.md](docs/agent.md#tpm-bound-device-key)).
 * The client secret of the desktop login declaration is sealed on the server but stored in
   plain text on the device (0600, root only).
 * SUSE support, TPM binding and printers are not yet verified on real SUSE, TPM and CUPS

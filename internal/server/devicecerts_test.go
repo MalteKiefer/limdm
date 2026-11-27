@@ -16,6 +16,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,7 +47,7 @@ func TestSignNetworkCSR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	certPEM, row, err := netCA.signNetworkCSR(testCSR(t), "dev1", "pc-1", "alice@example.com")
+	certPEM, row, err := netCA.signNetworkCSR(testCSR(t), "dev1", netCertDNSName("dev1", "devices.example.com"), "alice@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +56,7 @@ func TestSignNetworkCSR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Subject.CommonName != "dev1" || len(c.DNSNames) != 1 || c.DNSNames[0] != "pc-1" || c.EmailAddresses[0] != "alice@example.com" ||
+	if c.Subject.CommonName != "dev1" || len(c.DNSNames) != 1 || c.DNSNames[0] != "dev1.devices.example.com" || c.EmailAddresses[0] != "alice@example.com" ||
 		c.URIs[0].String() != "urn:limdm:device:dev1" || row.Serial != c.SerialNumber.Text(16) {
 		t.Fatalf("template not applied: %v %v %v %v", c.Subject, c.DNSNames, c.EmailAddresses, c.URIs)
 	}
@@ -78,6 +80,14 @@ func TestSignNetworkCSR(t *testing.T) {
 	c, _ = x509.ParseCertificate(b.Bytes)
 	if len(c.DNSNames)+len(c.EmailAddresses) != 0 {
 		t.Fatalf("invalid SANs taken: %v %v", c.DNSNames, c.EmailAddresses)
+	}
+	if netCertDNSName("dev1", "") != "" {
+		t.Fatal("no domain: no DNS SAN")
+	}
+	for d, ok := range map[string]bool{"": true, "devices.example.com": true, "Devices.example.com": false, "a..b": false, "-a.b": false, "a b": false, strings.Repeat("a", 64) + ".com": false} {
+		if validCertDomain(d) != ok {
+			t.Fatalf("validCertDomain(%q) != %v", d, ok)
+		}
 	}
 }
 
@@ -104,7 +114,8 @@ func TestNetworkCertsIssueRevokeCRL(t *testing.T) {
 	}
 	s := &Server{db: db, cmdKey: testCmdKey, netCA: netCA, log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		cfg: Config{PublicURL: "https://mdm.test", SessionKey: bytes.Repeat([]byte{3}, 32)}}
-	if _, err := db.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, users) VALUES ('d1','s',now(),'pc1','[{"username":"bob","email":"bob@example.com"}]')`); err != nil {
+	s.rt.Store(&runtimeState{set: Settings{NetCertDomain: "dev.example.com"}})
+	if _, err := db.Exec(ctx, `INSERT INTO devices(id, cert_serial, cert_not_after, hostname, users) VALUES ('d1','s',now(),'pc1.evil.example','[{"username":"bob","email":"bob@example.com"}]')`); err != nil {
 		t.Fatal(err)
 	}
 	issue := func() *httptest.ResponseRecorder {
@@ -128,16 +139,32 @@ func TestNetworkCertsIssueRevokeCRL(t *testing.T) {
 	if _, err := db.Exec(ctx, `UPDATE blueprints SET tree=$1 WHERE name='default'`, string(tree)); err != nil {
 		t.Fatal(err)
 	}
-	w := issue()
-	if w.Code != http.StatusOK {
-		t.Fatalf("issue: %d %s", w.Code, w.Body)
+	issued := func() *x509.Certificate {
+		t.Helper()
+		w := issue()
+		if w.Code != http.StatusOK {
+			t.Fatalf("issue: %d %s", w.Code, w.Body)
+		}
+		var resp api.EnrollResponse
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		b, _ := pem.Decode([]byte(resp.Cert))
+		cert, err := x509.ParseCertificate(b.Bytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cert
 	}
-	var resp api.EnrollResponse
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	b, _ := pem.Decode([]byte(resp.Cert))
-	cert, err := x509.ParseCertificate(b.Bytes)
-	if err != nil || cert.EmailAddresses[0] != "bob@example.com" {
-		t.Fatalf("certificate: %v %v", err, cert)
+	// neither the reported host name nor a reported user reaches the certificate
+	if c := issued(); len(c.EmailAddresses) != 0 || len(c.DNSNames) != 1 || c.DNSNames[0] != "d1.dev.example.com" {
+		t.Fatalf("SANs from device claims: %v %v", c.DNSNames, c.EmailAddresses)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO dir_users(id, source, user_name, email) VALUES (7, 'scim', 'bob', 'bob@example.com');
+		UPDATE devices SET primary_user_id=7 WHERE id='d1'`); err != nil {
+		t.Fatal(err)
+	}
+	cert := issued()
+	if cert.EmailAddresses[0] != "bob@example.com" {
+		t.Fatalf("directory address missing: %v", cert.EmailAddresses)
 	}
 	crlOf := func(t *testing.T) *x509.RevocationList {
 		t.Helper()
@@ -161,7 +188,7 @@ func TestNetworkCertsIssueRevokeCRL(t *testing.T) {
 	}
 	tx.Commit(ctx)
 	crl := crlOf(t)
-	if len(crl.RevokedCertificateEntries) != 1 || crl.RevokedCertificateEntries[0].SerialNumber.Cmp(cert.SerialNumber) != 0 {
+	if len(crl.RevokedCertificateEntries) != 2 || !slices.ContainsFunc(crl.RevokedCertificateEntries, func(e x509.RevocationListEntry) bool { return e.SerialNumber.Cmp(cert.SerialNumber) == 0 }) {
 		t.Fatalf("revoked certificate missing from the CRL: %+v", crl.RevokedCertificateEntries)
 	}
 	// the RADIUS fetch: bearer token only after it was created
@@ -181,7 +208,7 @@ func TestNetworkCertsIssueRevokeCRL(t *testing.T) {
 	}
 	// the list the network API shows
 	certs, err := s.networkCerts(ctx, "")
-	if err != nil || len(certs) != 1 || certs[0].State() != "revoked" || certs[0].Hostname != "pc1" {
+	if err != nil || len(certs) != 2 || certs[0].State() != "revoked" || certs[0].Hostname != "pc1.evil.example" {
 		t.Fatalf("list: %v %+v", err, certs)
 	}
 }

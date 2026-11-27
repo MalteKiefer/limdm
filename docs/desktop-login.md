@@ -63,7 +63,8 @@ In login mode, set `offline_grace_hours` longer than the trip (for example 360 f
 weeks), or give travellers a **travel** tag whose blueprint condition assigns a login item
 with longer values.
 3. Optional offline lock in `com.limdm.agent`: `"offline_lock_hours": 72`.
-4. On the device page, list the **Desktop users**, one per line: `username email [admin]`.
+4. On the device page (Actions, Edit device details), add the **Desktop users**: pick the person
+   from the directory, take an account of the device or the proposed user name, tick admin.
    The agent creates the accounts (home directory, `/bin/bash`), adds `admin` users to
    `sudo` or `wheel` and removes the right again when the flag is gone.
 

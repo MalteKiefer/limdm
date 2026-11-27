@@ -95,7 +95,7 @@ func init() {
 // applyArtifacts decodes and validates the artifacts type.
 func (d Declaration) applyArtifacts(p *Policy) (bool, error) {
 	if d.Type != TypeArtifacts {
-		return false, nil
+		return d.applyHostname(p) // hostname.go
 	}
 	var v Artifacts
 	if err := strict(d.Payload, &v); err != nil {

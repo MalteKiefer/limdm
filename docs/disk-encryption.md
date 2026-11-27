@@ -162,7 +162,8 @@ without LUKS are refused, because there is no fast way to guarantee deletion; us
 * Only volumes visible to `lsblk` as `crypto_LUKS` are handled.
 * FIDO2 unlock is not managed; such slots are left alone, except in lost mode, which
   removes every slot but the recovery key.
-* The agent device key stays a file (`/etc/limdm/device.pem`); it is not kept in the TPM.
+* The agent's own mTLS key is kept in the TPM independent of LUKS binding
+  ([agent.md](agent.md#tpm-bound-device-key)).
 * Replacing `LIMDM_SESSION_KEY` outright makes stored keys unreadable. Rotate it as
   described in [keys.md](keys.md#session-key) instead: the old key stays listed until every
   recovery key is sealed again.

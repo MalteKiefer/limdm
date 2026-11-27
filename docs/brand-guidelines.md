@@ -31,16 +31,20 @@ No gradients, no glass effects, no coloured shadows. Borders are 1px hairlines.
 
 ## Typography
 
-System font stack (the strict CSP allows no external fonts); `ui-monospace` for
-IDs, hashes, package names and versions. Tabular figures for all numbers.
+Inter and JetBrains Mono, both bundled and served by the server (the strict CSP allows
+no external fonts); the mono face for IDs, hashes, package names and versions. Tabular
+figures for all numbers. The console uses only these size roles, defined as tokens in
+`web/src/styles.css` (Tailwind utilities `text-micro` ... `text-display`); weights are
+500 for labels and controls and 600 for headings.
 
-| Role | Size / weight |
-|---|---|
-| Page title | 20px / 600 |
-| Section title | 15px / 600 |
-| Body, tables | 14px / 400 |
-| Labels, meta | 12px / 500 |
-| Key figures | 28px / 600, tabular |
+| Role (token) | Size / line height | Use |
+|---|---|---|
+| `micro` | 11.5px / 1.4 | IDs, counters, keyboard hints |
+| `meta` | 12.5px / 1.45 | help text, table heads, pills, captions |
+| `body` | 13px / 1.45 | tables, lists, dense content (plain text is 14px, 13px compact) |
+| `title` | 15px / 1.35 | card, sheet and dialog titles |
+| `heading` | 22px / 1.2 | page and device headings |
+| `display` | 28px / 1.1 | key figures, tabular |
 
 ## Mark
 

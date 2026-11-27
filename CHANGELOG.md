@@ -4,6 +4,71 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.19.0 (2026-11-27)
+
+### Upgrade notes
+- Enrollment tokens are limited to 500 uses and 30 days. Existing tokens above these limits are cut down once at the first start.
+- **Breaking:** EAP-TLS device certificates take the DNS SAN from the device ID under the new network certificate domain (Settings, Network; empty leaves it out) and the email SAN only from directory verified addresses. RADIUS policies that matched the reported host name must match the new names (see `docs/network.md`).
+- CVE data feeds (Debian, Ubuntu, Arch, Alpine) are off by default. Switch each on under Settings, CVE data and watch disk and memory during the first import.
+- A firewall declaration without zones, outbound filtering or templates runs exactly the commands it ran before.
+- Agents up to 0.18 reject a firewall item that uses `keep` or `remove` (0.19.0-rc builds reject `remove`); update the agents before keeping or discarding foreign rules. A rule in a `remove` list is deleted in every agent cycle, so it stays gone after a reboot; the agent never reloads the nftables service (that would flush Docker, NetBird and CrowdSec tables).
+
+### Added
+- Update rings with waves, deferral, pause and resume and optional approval (`/api/v1/update-rings`, `/api/v1/update-waves`); devices get an update gate at check in.
+- Update rules per source in `com.limdm.updates` (`os_security`, `os_all`, `third_party` with `repos`, `flatpak`; modes off, notify and install, each with its own window and ring) and `security_max_days`.
+- Pending updates per device with versions, origin, security flag, severity and CVEs, and the last run per source (`GET /api/v1/devices/{id}/updates`).
+- Fleet view of open security updates and CVEs and the installed versions of a package (`/api/v1/updates/fleet`, `/api/v1/updates/package-versions`); console area Updates and the device tab Updates.
+- Daily import of CVE data: Debian Security Tracker, Ubuntu OSV, Arch Security Tracker and Alpine secdb (Settings, CVE data, a switch and URL per feed, download limit; Refresh now under Updates, Security; `GET /api/v1/updates/cve-feeds`, `POST /api/v1/updates/cve-feeds/refresh`). Installed versions are matched with the version rules of dpkg, pacman and apk; dnf and zypper devices report CVEs themselves.
+- Compliance checks `updates.security_age` and `agent.tpm_key`; device commands `package_hold` and `package_downgrade` (four eyes).
+- TPM bound agent key: with a TPM 2.0 the agent keeps its mTLS key in the TPM and the server attests it at enrollment (TPM2_Certify plus credential activation). Tenant and global setting "require TPM bound key"; the device page shows the key type.
+- Settings, Enrollment with enrollment token limits and defaults; network certificate domain setting.
+- Recurring scripts on a schedule (local times, weekdays, per device jitter), at most once per slot and optionally again when they change (`run_on_change`); the library editor lists the last run per device.
+- File content and firewall rules as templates (hostname, ID, tags, tenant, primary user, custom device attributes), rendered per device on the server, with a preview for one device in the library editor.
+- Custom device attributes (device edit dialog, `PATCH /api/v1/devices/{id}` `attributes`).
+- Firewall zones (firewalld zones, interface and source rules on ufw and nftables) and outbound filtering (allow or deny with egress rules; DNS, DHCP, NTP and the LiMDM server stay reachable).
+- Host firewall on Alpine with nftables.
+- The device timeline shows compliance check changes and, with the audit permission, audit entries about the device (`kind=compliance|audit`).
+- The device overview has cards for updates, firewall and connection.
+- Shell transcripts replay in a read only terminal on the session page, with a plain text view and downloads of the raw bytes (.log) and the text (.txt); `GET /api/v1/shell-sessions/{sid}/transcript` returns the raw bytes of an ended session (admins and auditors, audited).
+- Typography tokens (six size roles with line heights) in the console design tokens.
+- Tab bars show a fade and arrow buttons where tabs are cut off.
+- `limdm checks --strict` exits with code 2 when a check fails; checks are listed failing first, then by level and ID.
+
+- Containers and VMs tab on the device page: Docker, Podman, LXC, LXD, Incus, Proxmox (pct, qm) and libvirt workloads with tool versions, a read only inventory per device and a fleet list (`GET /api/v1/devices/{id}/workloads`, `GET /api/v1/workloads`).
+- Start, shut down and restart of containers and VMs (`workload_action`), off by default: needs `workload_control` in `com.limdm.agent` and the admin role (helpdesk when Settings, Approvals allow it), optional four eyes for stop and restart; graceful shutdown only, audited.
+- `com.limdm.hostname` declaration: sets the host name from reverse DNS (forward confirmed), DNS, the DMI serial, a device template or a fixed name, with `/etc/hosts`, `/etc/mailname` and a pretty name; names from DNS apply only when stable over two check ins and at most hourly.
+- Item editor preview of the computed host name for one device with a warning, and a host name card on the device page; agents report `hostname_info` and notes in the declaration status, including a warning when Postfix or Exim keeps another host name.
+- Template variables `.Serial`, `.MAC`, `.Vendor` and `.Model` for file, firewall and hostname templates.
+- Firewall inventory per device: the agent reports backend, default policies and every rule of ufw, firewalld, nftables or iptables (read only); the device page has a Firewall tab grouping managed, foreign and system rules (`GET /api/v1/devices/{id}/firewall`).
+- Foreign firewall rules can be adopted into a firewall library item (a new item goes into a blueprint the admin picks, with a second confirmation for the global default or a blueprint that reaches more devices), kept as an exception (`keep` in `com.limdm.firewall`) or discarded through the new `remove` list of `com.limdm.firewall`: every agent deletes a listed foreign rule in every cycle, so it stays gone after a reboot; rules of LiMDM, container, VPN and protection tools are never removed, and items with a `remove` list need four eyes approval when it is on (`POST /api/v1/devices/{id}/firewall/rules/{rid}/{adopt|keep|remove}`). The signed command `firewall_remove_rule` removes one rule at once (running ruleset only for nftables and iptables).
+
+### Changed
+- Enrollment tokens default to 1 use and 1 day; every use is audited with the token it used.
+- Flatpak is its own update source: mode `all` without rules still updates it, `security` does not.
+- The agent reports the source package of packages (Debian source, Alpine origin, Arch pkgbase); every agent sends its package list once more after the update.
+- Desktop users are edited as rows with directory and device account suggestions instead of free text lines.
+- Device notices are ordered security, compliance, information and fold behind a button.
+- Empty lists use the EmptyState component everywhere, with a next step where one exists.
+- The bulk action bar is fixed to the bottom of the content column, keeps the last row visible and scrolls its actions sideways on phones.
+- The tray shows the device state by badge shape (check mark, exclamation mark, cross) and in its tooltip, not by color alone, with a symbolic logo for light and dark panels.
+- "Check In Now" is "Sync Now" in the tray, desktop app and CLI; the desktop app and the CLI say Blueprint (`limdm blueprint`, `limdm profiles` stays as an alias).
+- Rules of Docker, Podman, libvirt, Kubernetes, VPN agents (NetBird, Tailscale, ZeroTier, wg-quick tables), fail2ban and CrowdSec are system rules in the firewall inventory: shown, never adopted, kept or removed. Rules on addresses of local container bridges (Docker hairpin NAT and masquerade) count as Docker's. LiMDM's own tables, `inet limdm_fw` of early agents included, are managed.
+
+### Fixed
+- An update run without changes is reported as "no updates", not "installed"; unattended-upgrade mail noise is filtered.
+- The neutral status pill meets WCAG AA contrast in light and dark mode.
+- The device header no longer repeats the operating system.
+- Remove buttons in filter chips have a 24 px target.
+- Software removal on the device page uses the console's dialog instead of the browser's confirm().
+- The plain text of shell transcripts applies terminal line editing and strips every escape sequence, so shell redraws collapse to what was visible.
+- The live remote shell terminal no longer triggers CSP violations from xterm's inline styles.
+- The desktop app no longer rebuilds its page every minute and no longer drops typed text.
+
+### Security
+- EAP-TLS certificates no longer take the DNS SAN from the reported host name or the email SAN from device reported users.
+- The desktop socket refuses `shell-end` and journal lines to SSH sessions.
+- Docs state that `allow_scripts` is no protection against administrators and which controls apply instead (four eyes, signed commands, audit).
+
 ## 0.18.1 (2026-11-26)
 
 ### Changed

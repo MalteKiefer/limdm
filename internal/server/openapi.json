@@ -3773,7 +3773,7 @@
       "get": {
         "operationId": "deviceTimeline",
         "summary": "Activity of a device, newest first",
-        "description": "Merges device events, commands, script results, remote shell sessions (the helpdesk sees its own) and diagnostics bundles (admin and helpdesk).",
+        "description": "Merges device events, commands, script results, remote shell sessions (the helpdesk sees its own), diagnostics bundles (admin and helpdesk), compliance check changes (title is the check id, status the new result) and audit entries with the device as target (audit permission; title is the action, by the actor, extra the translated action label).",
         "parameters": [
           {
             "name": "id",
@@ -3800,7 +3800,9 @@
                 "command",
                 "script",
                 "shell",
-                "diagnostics"
+                "diagnostics",
+                "compliance",
+                "audit"
               ]
             }
           }
@@ -4270,6 +4272,54 @@
         }
       }
     },
+    "/api/v1/shell-sessions/{sid}/transcript": {
+      "get": {
+        "operationId": "shellTranscript",
+        "summary": "Raw recorded bytes of an ended remote shell session",
+        "description": "The terminal output as recorded (escape sequences included) for replay in a terminal or download as .log. Admins and auditors; the read is audited like /api/v1/audit. 409 while the session runs.",
+        "parameters": [
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
     "/api/v1/shell-sessions/{sid}/end": {
       "post": {
         "operationId": "endShell",
@@ -4461,7 +4511,7 @@
       "post": {
         "operationId": "createEnrollmentToken",
         "summary": "Create an enrollment token",
-        "description": "The token is in this answer only. Audited as token.create. Role admin.",
+        "description": "The token is in this answer only. Audited as token.create. Role admin. Uses and days are limited by Settings, Enrollment (hard limits 500 and 30).",
         "requestBody": {
           "required": true,
           "content": {
@@ -4479,18 +4529,17 @@
                   "uses": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 10000
+                    "maximum": 500,
+                    "description": "0 or missing: the default of Settings, Enrollment; at most its maximum"
                   },
                   "days": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 90
+                    "maximum": 30,
+                    "description": "0 or missing: the default of Settings, Enrollment; at most its maximum"
                   }
                 },
-                "required": [
-                  "uses",
-                  "days"
-                ]
+                "required": []
               }
             }
           }
@@ -4749,6 +4798,222 @@
           },
           "503": {
             "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/config/library/render": {
+      "post": {
+        "operationId": "configItemRender",
+        "summary": "Render a files, firewall or hostname template for one device",
+        "description": "Admins. Validates the payload like a save, then renders its templates with the values of the device (an ID or hostname in the caller's scope). Nothing is saved. A render error comes back in error with the payload as the agent would get it. For com.limdm.hostname the response adds hostname: the name the declaration computes for the device from its last report (current name, target FQDN, source used or the reason it keeps its name).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "type",
+                  "payload",
+                  "device"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "payload": {
+                    "type": "object"
+                  },
+                  "device": {
+                    "type": "string",
+                    "description": "device ID or hostname"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "payload",
+                    "vars"
+                  ],
+                  "properties": {
+                    "payload": {
+                      "type": "object"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "vars": {
+                      "type": "object",
+                      "required": [
+                        "hostname",
+                        "id",
+                        "tags",
+                        "tenant",
+                        "primary_user",
+                        "attributes"
+                      ],
+                      "properties": {
+                        "hostname": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "tags": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "tenant": {
+                          "type": "string"
+                        },
+                        "primary_user": {
+                          "type": "string"
+                        },
+                        "attributes": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        },
+                        "serial": {
+                          "type": "string",
+                          "description": "DMI serial number, empty for a placeholder"
+                        },
+                        "mac": {
+                          "type": "string",
+                          "description": "MAC address of the primary interface"
+                        },
+                        "vendor": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "hostname": {
+                      "type": "object",
+                      "required": [
+                        "current"
+                      ],
+                      "description": "com.limdm.hostname only",
+                      "properties": {
+                        "current": {
+                          "type": "string",
+                          "description": "host name the device reported"
+                        },
+                        "target": {
+                          "type": "string",
+                          "description": "FQDN (or short name) the declaration computes"
+                        },
+                        "source": {
+                          "type": "string",
+                          "description": "source used, \"template (fallback)\" for the fallback"
+                        },
+                        "error": {
+                          "type": "string",
+                          "description": "why the device keeps its name"
+                        },
+                        "serial": {
+                          "type": "string"
+                        },
+                        "facts": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "description": "hostname_info of the inventory: address, mac, ptr, fqdn, target, source, result, detail, previous, changed_at, warning"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid payload or unknown device"
+          }
+        }
+      }
+    },
+    "/api/v1/config/scripts/results": {
+      "get": {
+        "operationId": "configScriptResults",
+        "summary": "Last run of a recurring script per device",
+        "description": "Role read. The latest result of the named recurring script on every device in the caller's scope that reported one, with the last lines of its output.",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "script name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "device_id",
+                          "hostname",
+                          "exit_code",
+                          "start",
+                          "end",
+                          "output"
+                        ],
+                        "properties": {
+                          "device_id": {
+                            "type": "string"
+                          },
+                          "hostname": {
+                            "type": "string"
+                          },
+                          "exit_code": {
+                            "type": "integer"
+                          },
+                          "start": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "end": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "output": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -6123,7 +6388,7 @@
       "patch": {
         "operationId": "saveSettings",
         "summary": "Save one settings section",
-        "description": "Sections: general (local_login, stale_hours), network (console_allow, console_block, scim_allow), security (password_policy, four_eyes*, geolocation, fallback_dns), remote_shell, sso (oidc_*, allowed_domain, require_mfa, mfa_acr, role_groups, oidc_client_secret, clear_secret), monitoring (webhook_url, notify_private_networks), branding (company_name, logo_png, remove_logo), operations (ops), retention. Fields left out keep their value. The same guards as the console: no self lockout, local login only off with an OIDC admin, four eyes needs two admins, OIDC changes are checked against the provider. Audited as settings.save.",
+        "description": "Sections: general (local_login, stale_hours), network (console_allow, console_block, scim_allow, network_cert_domain), security (password_policy, four_eyes*, geolocation, fallback_dns), remote_shell, sso (oidc_*, allowed_domain, require_mfa, mfa_acr, role_groups, oidc_client_secret, clear_secret), monitoring (webhook_url, notify_private_networks), branding (company_name, logo_png, remove_logo), operations (ops), retention, enrollment (enrollment). Fields left out keep their value. The same guards as the console: no self lockout, local login only off with an OIDC admin, four eyes needs two admins, OIDC changes are checked against the provider. Audited as settings.save.",
         "responses": {
           "200": {
             "description": "OK",
@@ -6186,7 +6451,9 @@
                 "monitoring",
                 "branding",
                 "operations",
-                "retention"
+                "retention",
+                "enrollment",
+                "cve_feeds"
               ]
             },
             "description": ""
@@ -8705,6 +8972,855 @@
           }
         ]
       }
+    },
+    "/api/v1/update-rings": {
+      "get": {
+        "operationId": "listUpdateRings",
+        "summary": "Update rings with their wave and device count, the newest waves",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRingList"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createUpdateRing",
+        "summary": "Create an update ring (admin); audited as update_ring.save",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRingInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRing"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/update-rings/{id}": {
+      "put": {
+        "operationId": "updateUpdateRing",
+        "summary": "Change an update ring (admin); audited as update_ring.save",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRingInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRing"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteUpdateRing",
+        "summary": "Delete an update ring (admin); its devices are in no ring until their next check in",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/update-rings/{id}/{action}": {
+      "post": {
+        "operationId": "updateRingAction",
+        "summary": "Pause, resume or approve an update ring (admin)",
+        "description": "pause stops installs in the ring and the rollout to later rings; approve lets the wave of the ring before it through (rings with require_approval). Audited as update_ring.<action>.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pause",
+                "resume",
+                "approve"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRing"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/update-waves": {
+      "post": {
+        "operationId": "startUpdateWave",
+        "summary": "Start a new update wave in the caller's tenant (admin); the first ring has it at once",
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateWave"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/updates": {
+      "get": {
+        "operationId": "getDeviceUpdates",
+        "summary": "Pending updates, last run per source and update ring of a device",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceUpdates"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/workloads": {
+      "get": {
+        "operationId": "getDeviceWorkloads",
+        "summary": "Containers and VMs of a device, tool versions and whether workload actions are allowed",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceWorkloads"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/workloads": {
+      "get": {
+        "operationId": "listWorkloads",
+        "summary": "Containers and VMs of the fleet in the caller's scope, at most 2000",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "docker",
+                "podman",
+                "lxc",
+                "lxd",
+                "incus",
+                "pct",
+                "qm",
+                "libvirt"
+              ]
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "Exact state, for example running or exited",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "image",
+            "in": "query",
+            "description": "Part of the image reference or OS template, case insensitive",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetWorkloads"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/updates/fleet": {
+      "get": {
+        "operationId": "getUpdatesFleet",
+        "summary": "Open security updates and CVEs of the devices in scope",
+        "description": "CVEs come from the advisories the devices' package managers know (dnf, zypper); a CVE counts as open while an update that fixes it is pending. With ?cve= the answer lists the devices it affects instead.",
+        "parameters": [
+          {
+            "name": "cve",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^CVE-[0-9]{4}-[0-9]{4,7}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/UpdatesFleet"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "hostname": {
+                                "type": "string"
+                              },
+                              "packages": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/updates/package-versions": {
+      "get": {
+        "operationId": "getPackageVersions",
+        "summary": "Installed versions of one package across the devices in scope",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "version": {
+                            "type": "string"
+                          },
+                          "arch": {
+                            "type": "string"
+                          },
+                          "devices": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/updates/cve-feeds": {
+      "get": {
+        "operationId": "getCVEFeeds",
+        "summary": "State of the Debian, Ubuntu, Arch and Alpine security data imports",
+        "description": "Last successful import (time, fixes kept, bytes), last error. A failed import keeps the last data.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "running": {
+                      "type": "boolean"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CVEFeedState"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/updates/cve-feeds/refresh": {
+      "post": {
+        "operationId": "refreshCVEFeeds",
+        "summary": "Import the switched on security data feeds now (admin); audited as cve_feeds.refresh",
+        "description": "Runs in the background; poll GET /api/v1/updates/cve-feeds. 409 while the feeds are off or an import runs.",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "running": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/firewall": {
+      "get": {
+        "operationId": "getDeviceFirewall",
+        "summary": "Firewall inventory of a device: backend, default policies and every rule grouped managed, foreign and system",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceFirewall"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/firewall/rules/{rid}/{action}": {
+      "post": {
+        "operationId": "firewallRuleAction",
+        "summary": "Adopt a foreign firewall rule into a firewall library item, keep it as an exception there, or list it to be removed",
+        "description": "adopt adds the rule in the declaration format, keep adds its match to keep, remove adds its match to remove: every agent that gets the item deletes the rule whenever it finds it, also after a reboot (a rule with a risk needs confirm_risk; an item with a remove list needs four eyes approval when it is on, and a new item is then refused with 409). item_id names an existing com.limdm.firewall item, saved through the library save (validation, signature, audit, four eyes). Without it a new item with name is created (enforce off) and assigned in blueprint_id, one of GET /api/v1/devices/{id}/firewall/targets, in one transaction with both audit entries: nothing is created when the assignment fails. A blueprint that is the global default or reaches more than one device needs confirm (422 on field confirm otherwise). Tenant accounts pick only blueprints of their tenant. System and managed rules are refused. Admins only.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "rule id from the inventory"
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "adopt",
+                "keep",
+                "remove"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "item_id": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "existing firewall item; 0 or missing creates one"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "name of the new item"
+                  },
+                  "blueprint_id": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "blueprint the new item is assigned in (required without item_id)"
+                  },
+                  "confirm": {
+                    "type": "boolean",
+                    "description": "confirms a blueprint that is the global default or reaches more than this device"
+                  },
+                  "confirm_risk": {
+                    "type": "boolean",
+                    "description": "remove: confirms a rule that may cut SSH or the server"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "item_id",
+                    "item_name",
+                    "created"
+                  ],
+                  "properties": {
+                    "item_id": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "item_name": {
+                      "type": "string"
+                    },
+                    "created": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Four eyes: the save waits for another admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approval_id": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/firewall/targets": {
+      "get": {
+        "operationId": "getFirewallTargets",
+        "summary": "Blueprints a new firewall item adopted from this device can be assigned in, with the devices each reaches",
+        "description": "Tenant accounts get the blueprints of their tenant (never the global default); accounts of the whole installation those of the device's tenant and of the default tenant. Admins only.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FirewallTarget"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8875,6 +9991,13 @@
             "type": "object",
             "description": "Inventory as reported by the agent (single device only)"
           },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Custom attributes for file and firewall templates (single device only)"
+          },
           "desktop": {
             "type": "string",
             "description": "Desktop environment, empty on servers"
@@ -8965,6 +10088,13 @@
           "primary_user": {
             "type": "string",
             "description": "Email of a directory person; empty clears it"
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Custom attributes for templates ({{.Attributes.name}}), replacing all; names start with a letter (letters, digits, _), at most 50, values up to 1024 bytes"
           }
         }
       },
@@ -8977,7 +10107,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "description": "A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create"
+            "description": "A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create, package_hold, package_downgrade, workload_action, firewall_remove_rule"
           },
           "params": {
             "type": "object",
@@ -8988,7 +10118,7 @@
                 "boolean"
               ]
             },
-            "description": "The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove). true is sent as on; reason (wipe, lost, script: the reason shown to the approving admin when four eyes approval is on)."
+            "description": "The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove), name and release (package_hold), name and version (package_downgrade), kind, id and action (workload_action: start, stop or restart of a workload of the last inventory), rule_id and confirm_risk (firewall_remove_rule: a foreign rule of the inventory; confirm_risk for a rule that may cut SSH or the server). true is sent as on; reason (wipe, lost, script, package_downgrade, firewall_remove_rule, workload_action stop and restart: the reason shown to the approving admin when four eyes approval is on)."
           }
         }
       },
@@ -11607,7 +12737,9 @@
               "command",
               "script",
               "shell",
-              "diagnostics"
+              "diagnostics",
+              "compliance",
+              "audit"
             ]
           },
           "id": {
@@ -11852,6 +12984,9 @@
           },
           "release_repo": {
             "type": "string"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/EnrollSettings"
           }
         },
         "required": [
@@ -11859,7 +12994,8 @@
           "agent_url",
           "public_url",
           "fingerprint",
-          "release_repo"
+          "release_repo",
+          "limits"
         ]
       },
       "DeviceDetail": {
@@ -11900,6 +13036,13 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "info": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "notes of the reported state (com.limdm.hostname: target, source, result, warnings)"
                     }
                   },
                   "required": [
@@ -12406,6 +13549,14 @@
                     "at"
                   ]
                 }
+              },
+              "tpm_bound": {
+                "type": "boolean",
+                "description": "The mTLS key was attested as held by a TPM 2.0"
+              },
+              "tpm_ek_sha256": {
+                "type": "string",
+                "description": "SHA-256 of the TPM endorsement key's public area, when bound"
               }
             },
             "required": [
@@ -12447,7 +13598,9 @@
               "shell",
               "four_eyes_commands",
               "four_eyes_recovery",
-              "diagnostics"
+              "diagnostics",
+              "tpm_bound",
+              "tpm_ek_sha256"
             ]
           }
         ]
@@ -13600,6 +14753,14 @@
           "four_eyes_shell": {
             "type": "boolean"
           },
+          "four_eyes_workloads": {
+            "type": "boolean",
+            "description": "Stopping and restarting containers and VMs waits for a second admin (needs four_eyes)"
+          },
+          "workloads_helpdesk": {
+            "type": "boolean",
+            "description": "The helpdesk role may start, stop and restart containers and VMs"
+          },
           "require_mfa": {
             "type": "boolean"
           },
@@ -13648,6 +14809,16 @@
           },
           "remove_logo": {
             "type": "boolean"
+          },
+          "network_cert_domain": {
+            "type": "string",
+            "description": "EAP-TLS certificates carry <device ID>.<domain> as DNS SAN; empty: no DNS SAN"
+          },
+          "enrollment": {
+            "$ref": "#/components/schemas/EnrollSettings"
+          },
+          "cve_feeds": {
+            "$ref": "#/components/schemas/CVEFeedSettings"
           }
         },
         "required": []
@@ -13740,6 +14911,14 @@
           "four_eyes_shell": {
             "type": "boolean"
           },
+          "four_eyes_workloads": {
+            "type": "boolean",
+            "description": "Stopping and restarting containers and VMs waits for a second admin (needs four_eyes)"
+          },
+          "workloads_helpdesk": {
+            "type": "boolean",
+            "description": "The helpdesk role may start, stop and restart containers and VMs"
+          },
           "require_mfa": {
             "type": "boolean"
           },
@@ -13798,6 +14977,16 @@
             "items": {
               "$ref": "#/components/schemas/RetentionKind"
             }
+          },
+          "network_cert_domain": {
+            "type": "string",
+            "description": "EAP-TLS certificates carry <device ID>.<domain> as DNS SAN; empty: no DNS SAN"
+          },
+          "enrollment": {
+            "$ref": "#/components/schemas/EnrollSettings"
+          },
+          "cve_feeds": {
+            "$ref": "#/components/schemas/CVEFeedSettings"
           }
         },
         "required": [
@@ -13810,7 +14999,8 @@
           "public_url",
           "redirect_uri",
           "client_ip",
-          "retention_kinds"
+          "retention_kinds",
+          "enrollment"
         ]
       },
       "ConsoleUser": {
@@ -14042,6 +15232,10 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "require_tpm": {
+            "type": "boolean",
+            "description": "Enrollment into this tenant needs a TPM bound key"
           }
         },
         "required": [
@@ -14051,7 +15245,8 @@
           "company_name",
           "color",
           "has_logo",
-          "created_at"
+          "created_at",
+          "require_tpm"
         ]
       },
       "TenantPatch": {
@@ -14076,6 +15271,10 @@
           },
           "remove_logo": {
             "type": "boolean"
+          },
+          "require_tpm": {
+            "type": "boolean",
+            "description": "Tenant admins may only switch it on"
           }
         },
         "required": []
@@ -15320,6 +16519,918 @@
           "states",
           "docs"
         ]
+      },
+      "EnrollSettings": {
+        "type": "object",
+        "description": "Limits of new enrollment tokens (hard limits 500 uses and 30 days) and the TPM requirement for every tenant",
+        "properties": {
+          "default_uses": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "default_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "max_uses": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "max_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "require_tpm": {
+            "type": "boolean",
+            "description": "Refuse enrollments without a TPM bound key"
+          }
+        },
+        "required": [
+          "default_uses",
+          "default_days",
+          "max_uses",
+          "max_days",
+          "require_tpm"
+        ]
+      },
+      "UpdateRingInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "position"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "order of the ring, lowest first"
+          },
+          "deferral_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 90,
+            "description": "days after a wave started before it may reach this ring"
+          },
+          "wave_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 90,
+            "description": "first ring only: start a new wave every N days, 0 is manual"
+          },
+          "require_approval": {
+            "type": "boolean",
+            "description": "a wave reaches this ring only after an admin approved it"
+          },
+          "all_devices": {
+            "type": "boolean",
+            "description": "every device that is in no earlier ring"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "directory groups of the primary user"
+          },
+          "blueprints": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "blueprint IDs; a device matches its blueprint and the ones it inherits from"
+          }
+        }
+      },
+      "UpdateRing": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "order of the ring, lowest first"
+          },
+          "deferral_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 90,
+            "description": "days after a wave started before it may reach this ring"
+          },
+          "wave_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 90,
+            "description": "first ring only: start a new wave every N days, 0 is manual"
+          },
+          "require_approval": {
+            "type": "boolean",
+            "description": "a wave reaches this ring only after an admin approved it"
+          },
+          "all_devices": {
+            "type": "boolean",
+            "description": "every device that is in no earlier ring"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "directory groups of the primary user"
+          },
+          "blueprints": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "blueprint IDs; a device matches its blueprint and the ones it inherits from"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "tenant_id": {
+            "type": "integer"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "approved_wave": {
+            "type": "integer"
+          },
+          "wave": {
+            "type": "integer",
+            "description": "the newest wave that reached the ring"
+          },
+          "wave_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "devices": {
+            "type": "integer",
+            "description": "devices in the ring at their last check in"
+          }
+        }
+      },
+      "UpdateWave": {
+        "type": "object",
+        "properties": {
+          "tenant_id": {
+            "type": "integer"
+          },
+          "wave": {
+            "type": "integer"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "started_by": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateRingList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateRing"
+            }
+          },
+          "waves": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateWave"
+            },
+            "description": "the newest 20"
+          },
+          "unassigned": {
+            "type": "integer",
+            "description": "devices in no ring"
+          }
+        }
+      },
+      "PendingUpdate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "current": {
+            "type": "string"
+          },
+          "candidate": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string",
+            "description": "apt origin, dnf or zypper repo, Flatpak remote"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "os_all",
+              "third_party",
+              "flatpak"
+            ]
+          },
+          "security": {
+            "type": "boolean"
+          },
+          "severity": {
+            "type": "string",
+            "description": "as the advisory states it"
+          },
+          "cves": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "patch": {
+            "type": "boolean",
+            "description": "a SUSE patch, not a package"
+          }
+        }
+      },
+      "UpdateRun": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "os_security",
+              "os_all",
+              "third_party",
+              "flatpak"
+            ]
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "installed",
+              "no_updates",
+              "failed",
+              "unsupported"
+            ]
+          },
+          "count": {
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "wave": {
+            "type": "integer"
+          }
+        }
+      },
+      "WorkloadTool": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "Workload": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "docker",
+              "podman",
+              "lxc",
+              "lxd",
+              "incus",
+              "pct",
+              "qm",
+              "libvirt"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "Container ID, VMID or name: what workload_action takes"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "description": "container or vm"
+          },
+          "image": {
+            "type": "string",
+            "description": "Image reference or OS template"
+          },
+          "image_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "description": "The tool's state in lower case, for example running, exited, stopped, paused, shut off"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "started": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "restart": {
+            "type": "string",
+            "description": "Restart policy or autostart"
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "project": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "cpus": {
+            "type": "integer"
+          },
+          "memory_mb": {
+            "type": "integer"
+          }
+        }
+      },
+      "Workloads": {
+        "type": "object",
+        "properties": {
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkloadTool"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Workload"
+            }
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DeviceWorkloads": {
+        "type": "object",
+        "properties": {
+          "reports": {
+            "type": "boolean",
+            "description": "The device has reported workloads"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the inventory last changed"
+          },
+          "inventory": {
+            "$ref": "#/components/schemas/Workloads"
+          },
+          "control": {
+            "type": "object",
+            "properties": {
+              "policy": {
+                "type": "boolean",
+                "description": "The device's policy allows workload actions (com.limdm.agent workload_control)"
+              },
+              "allowed": {
+                "type": "boolean",
+                "description": "The caller's role may send workload actions"
+              },
+              "four_eyes": {
+                "type": "boolean",
+                "description": "Stop and restart wait for a second admin"
+              }
+            }
+          }
+        }
+      },
+      "FleetWorkloads": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "device_id": {
+                  "type": "string"
+                },
+                "hostname": {
+                  "type": "string"
+                },
+                "workload": {
+                  "$ref": "#/components/schemas/Workload"
+                }
+              }
+            }
+          }
+        }
+      },
+      "DeviceUpdates": {
+        "type": "object",
+        "properties": {
+          "ring": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UpdateRing"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reports": {
+            "type": "boolean",
+            "description": "the agent reports its update status"
+          },
+          "status": {
+            "type": "object",
+            "properties": {
+              "pending": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PendingUpdate"
+                }
+              },
+              "pending_error": {
+                "type": "string"
+              },
+              "runs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/UpdateRun"
+                }
+              },
+              "ring": {
+                "type": "string"
+              },
+              "security_since": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          },
+          "vulnerabilities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "cve": {
+                  "type": "string"
+                },
+                "package": {
+                  "type": "string"
+                },
+                "installed": {
+                  "type": "string"
+                },
+                "fixed": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "CVEs matched from the Debian and Ubuntu security data: the installed version is older than the fixed one"
+          }
+        }
+      },
+      "UpdatesFleet": {
+        "type": "object",
+        "properties": {
+          "reporting": {
+            "type": "integer"
+          },
+          "security_devices": {
+            "type": "integer"
+          },
+          "pending_devices": {
+            "type": "integer"
+          },
+          "security_no_cve": {
+            "type": "integer",
+            "description": "pending security updates without CVE IDs (apt)"
+          },
+          "devices_by_source": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "cves": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string"
+                },
+                "devices": {
+                  "type": "integer"
+                },
+                "packages": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "security": {
+                  "type": "boolean"
+                },
+                "severity": {
+                  "type": "string"
+                },
+                "devices": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "CVEFeedSettings": {
+        "type": "object",
+        "description": "Security data of Debian, Ubuntu, Arch and Alpine; every feed is off by default",
+        "properties": {
+          "debian": {
+            "type": "boolean",
+            "description": "import the Debian Security Tracker daily"
+          },
+          "ubuntu": {
+            "type": "boolean",
+            "description": "import the Ubuntu OSV export daily"
+          },
+          "arch": {
+            "type": "boolean",
+            "description": "import the Arch Security Tracker daily"
+          },
+          "alpine": {
+            "type": "boolean",
+            "description": "import the Alpine secdb of the branches the Alpine devices run daily"
+          },
+          "debian_url": {
+            "type": "string",
+            "description": "https URL of the Debian Security Tracker JSON; empty is https://security-tracker.debian.org/tracker/data/json"
+          },
+          "ubuntu_url": {
+            "type": "string",
+            "description": "https URL of the Ubuntu OSV export (zip); empty is https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip"
+          },
+          "arch_url": {
+            "type": "string",
+            "description": "https URL of the Arch tracker's AVG list; empty is https://security.archlinux.org/issues/all.json"
+          },
+          "alpine_url": {
+            "type": "string",
+            "description": "https base URL of the Alpine secdb (…/v3.20/main.json); empty is https://secdb.alpinelinux.org"
+          },
+          "max_mb": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4096,
+            "description": "download limit per feed in MB, 1024 when 0"
+          }
+        }
+      },
+      "CVEFeedState": {
+        "type": "object",
+        "properties": {
+          "distro": {
+            "type": "string",
+            "enum": [
+              "debian",
+              "ubuntu",
+              "arch",
+              "alpine"
+            ]
+          },
+          "url": {
+            "type": "string"
+          },
+          "fetched_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "rows": {
+            "type": "integer"
+          },
+          "bytes": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "error_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "FirewallInventoryRule": {
+        "type": "object",
+        "required": [
+          "id",
+          "match",
+          "source",
+          "origin",
+          "raw"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "identity of the rule now; a removal names it"
+          },
+          "match": {
+            "type": "string",
+            "description": "stable text of the rule (tool, place, raw text without counters); keep entries store it"
+          },
+          "source": {
+            "type": "string",
+            "description": "tool it was read with: ufw, firewalld, nftables, iptables, ip6tables"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "managed",
+              "foreign",
+              "system"
+            ]
+          },
+          "table": {
+            "type": "string"
+          },
+          "chain": {
+            "type": "string"
+          },
+          "zone": {
+            "type": "string",
+            "description": "firewalld zone or policy"
+          },
+          "direction": {
+            "type": "string",
+            "description": "in, out or forward"
+          },
+          "action": {
+            "type": "string"
+          },
+          "proto": {
+            "type": "string"
+          },
+          "port": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "iface": {
+            "type": "string"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "raw": {
+            "type": "string",
+            "description": "the rule as the tool shows it"
+          },
+          "handle": {
+            "type": "string",
+            "description": "nftables rule handle"
+          },
+          "risk": {
+            "type": "string",
+            "description": "ssh or server: removing it may cut remote access; a removal needs confirm_risk"
+          }
+        }
+      },
+      "DeviceFirewallRule": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/FirewallInventoryRule"
+          },
+          {
+            "type": "object",
+            "required": [
+              "kept"
+            ],
+            "properties": {
+              "kept": {
+                "type": "boolean",
+                "description": "listed in keep of the device's firewall declaration"
+              },
+              "adopt_error": {
+                "type": "string",
+                "description": "why the rule cannot be adopted"
+              }
+            }
+          }
+        ]
+      },
+      "DeviceFirewall": {
+        "type": "object",
+        "required": [
+          "reports",
+          "updated_at",
+          "inventory",
+          "rules",
+          "managed"
+        ],
+        "properties": {
+          "reports": {
+            "type": "boolean",
+            "description": "the agent reported a firewall inventory"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "managed": {
+            "type": "boolean",
+            "description": "a firewall declaration applies to the device"
+          },
+          "inventory": {
+            "type": "object",
+            "required": [
+              "backend",
+              "active",
+              "policy"
+            ],
+            "properties": {
+              "backend": {
+                "type": "string",
+                "description": "ufw, firewalld, nftables, iptables; empty when none was found"
+              },
+              "active": {
+                "type": "boolean"
+              },
+              "default_zone": {
+                "type": "string"
+              },
+              "policy": {
+                "type": "object",
+                "properties": {
+                  "in": {
+                    "type": "string"
+                  },
+                  "out": {
+                    "type": "string"
+                  },
+                  "forward": {
+                    "type": "string"
+                  }
+                }
+              },
+              "truncated": {
+                "type": "boolean"
+              },
+              "errors": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "bridge_nets": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "subnets of the local container and VM bridges; rules on these addresses are system rules"
+              }
+            }
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceFirewallRule"
+            }
+          }
+        }
+      },
+      "FirewallTarget": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "devices",
+          "global_default",
+          "device"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "devices": {
+            "type": "integer",
+            "description": "active devices the blueprint reaches, children included"
+          },
+          "global_default": {
+            "type": "boolean",
+            "description": "the default blueprint of the whole installation"
+          },
+          "device": {
+            "type": "boolean",
+            "description": "the device's own effective blueprint"
+          }
+        }
       }
     }
   }

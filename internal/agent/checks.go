@@ -36,7 +36,7 @@ type check struct {
 // CatalogVersion identifies the check catalog and its framework mapping. It
 // is reported with every result; raise it whenever a check, its level or a
 // reference changes, so evidence can be tied to the mapping it was made with.
-const CatalogVersion = "2026.11.1"
+const CatalogVersion = "2026.11.2"
 
 // cisBenchmark is the benchmark edition the CIS recommendation numbers refer
 // to. The titles are shared by the Debian and RHEL family benchmarks, whose
@@ -97,14 +97,17 @@ var catalog = []check{
 	{ID: "updates.auto", Title: "Automatic updates are declared", Level: 1,
 		Refs: refs(l(bsiClient, bsiPatch, bsiUpdatesAuto, bsiPatchRegul), l("A.8.8", "A.8.32")),
 		Run: func(a *Agent) (string, string) {
-			if m := a.pol.Updates.Mode; m == "" || m == "off" {
-				return fail, "updates mode is off or not declared"
+			if !a.pol.Updates.Installs() {
+				return fail, "no rule installs OS updates, or updates are not declared"
 			}
-			return pass, "mode " + a.pol.Updates.Mode + ", window " + a.pol.Updates.Window
+			return pass, rulesSummary(a.pol.Updates)
 		}},
 	{ID: "updates.security", Title: "Security updates are installed", Level: 1,
 		Refs: refs(l(bsiClient, bsiLinux, bsiPatch, bsiUpdates, bsiPatchRegul), l("A.8.8"), "1.2.2.1 Ensure updates, patches, and additional security software are installed"),
 		Run:  runSecurityUpdates},
+	{ID: "updates.security_age", Title: "No security update pending longer than allowed", Level: 1,
+		Refs: refs(l(bsiPatch, bsiPatchRegul), l("A.8.8")),
+		Run:  runSecurityAge},
 	{ID: "updates.reboot", Title: "No pending reboot older than 7 days", Level: 1,
 		Refs: refs(l(bsiPatch, bsiPatchRegul), l("A.8.8")),
 		Run:  runRebootPending},
@@ -126,6 +129,9 @@ var catalog = []check{
 	{ID: "disk.tpm", Title: "LUKS volumes are bound to the TPM", Level: 1,
 		Refs: refs(l(bsiCrypto, bsiClient), l("A.8.24", "A.7.10")),
 		Run:  runTPMBinding},
+	{ID: "agent.tpm_key", Title: "Device key is held in the TPM", Level: 2,
+		Refs: refs(l(bsiCrypto, bsiCryptoAlgo), l("A.8.24", "A.5.17")),
+		Run:  runTPMKey},
 	{ID: "boot.password", Title: "Boot loader is password protected", Level: 1,
 		Refs: refs(l(bsiClient, bsiLinux), l("A.8.2", "A.8.9"), "1.4.1 Ensure bootloader password is set", "1.4.2 Ensure access to bootloader config is configured"),
 		Run:  runBootPassword},
@@ -724,11 +730,12 @@ func runSecurityUpdates(a *Agent) (string, string) {
 		return fail, "update status unknown: " + err.Error()
 	}
 	detail := fmt.Sprintf("%d security updates, %d updates in total pending", sec, all)
+	a.securitySince(sec, time.Now())
 	if sec == 0 {
 		return pass, detail
 	}
 	// Patch process working: pending updates are tolerated until the next window run.
-	if m := a.pol.Updates.Mode; m != "" && m != "off" && time.Since(a.state.LastUpdateRun) < updateGap(a.pol.Updates) {
+	if a.pol.Updates.Installs() && time.Since(a.state.LastUpdateRun) < updateGap(a.pol.Updates) {
 		return pass, detail + ", installed in the next maintenance window"
 	}
 	return fail, detail
@@ -824,8 +831,16 @@ func fixFirewall(a *Agent) error {
 }
 
 func (a *Agent) applyFirewall() error {
-	if a.host.family == "alpine" {
-		return errors.New("firewall management is not supported on Alpine yet; use nftables or awall")
+	if a.pol.Firewall.Template {
+		return errUnrendered
+	}
+	if a.host.family == "alpine" { // nftables with LiMDM's own table (firewall_nft.go)
+		if !hasCmd("nft") {
+			if err := a.host.install("nftables"); err != nil {
+				return err
+			}
+		}
+		return a.syncNftables() // never starts or reloads nftables: that would flush every other table
 	}
 	if a.host.family == "debian" {
 		// A hand written nftables ruleset (VPN clients such as NetBird add their own

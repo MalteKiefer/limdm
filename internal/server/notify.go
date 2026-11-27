@@ -215,8 +215,12 @@ func discordBody(n notice) ([]byte, error) {
 // from devices (host names, command output) cannot add headers or SMTP lines.
 func emailMessage(from string, to []string, n notice) []byte {
 	var b bytes.Buffer
+	rcpt := make([]string, 0, len(to))
+	for _, t := range to {
+		rcpt = append(rcpt, headerAddress(t))
+	}
 	fmt.Fprintf(&b, "From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nMIME-Version: 1.0\r\n",
-		from, strings.Join(to, ", "), mime.QEncoding.Encode("utf-8", "[LiMDM] "+cleanText(n.Title)), n.At.Format(time.RFC1123Z))
+		headerAddress(from), strings.Join(rcpt, ", "), mime.QEncoding.Encode("utf-8", "[LiMDM] "+oneLine(cleanText(n.Title))), n.At.Format(time.RFC1123Z))
 	b.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n")
 	body := cleanText(n.Text)
 	if n.URL != "" {
@@ -226,6 +230,16 @@ func emailMessage(from string, to []string, n notice) []byte {
 	_, _ = qp.Write([]byte(strings.ReplaceAll(body, "\n", "\r\n")))
 	_ = qp.Close()
 	return b.Bytes()
+}
+
+// headerAddress is an address as a header value: parsed with net/mail and
+// written back by it (names encoded), never raw text; one line in any case.
+func headerAddress(s string) string {
+	a, err := mail.ParseAddress(s)
+	if err != nil {
+		return ""
+	}
+	return oneLine(a.String())
 }
 
 // cleanText keeps printable text, line feeds and tabs.
@@ -488,17 +502,36 @@ func sendEmail(ctx context.Context, cfg channelConfig, password string, n notice
 			return err
 		}
 	}
-	w, err := c.Data()
+	if err := smtpData(c, emailMessage(cfg.From, cfg.To, n)); err != nil {
+		return err
+	}
+	return c.Quit()
+}
+
+// smtpData sends the DATA command with msg, as smtp.Client.Data and its
+// writer's Close do. msg comes from emailMessage only: every header value is
+// one line (addresses written by net/mail, the subject Q encoded) and the
+// body is quoted-printable, so device text cannot add headers or recipients.
+func smtpData(c *smtp.Client, msg []byte) error {
+	id, err := c.Text.Cmd("DATA")
 	if err != nil {
 		return err
 	}
-	if _, err := w.Write(emailMessage(cfg.From, cfg.To, n)); err != nil {
+	c.Text.StartResponse(id)
+	_, _, err = c.Text.ReadResponse(354)
+	c.Text.EndResponse(id)
+	if err != nil {
+		return err
+	}
+	w := c.Text.DotWriter()
+	if _, err := w.Write(msg); err != nil {
 		return err
 	}
 	if err := w.Close(); err != nil {
 		return err
 	}
-	return c.Quit()
+	_, _, err = c.Text.ReadResponse(250)
+	return err
 }
 
 func (s *Server) deliver(ctx context.Context, c channel, n notice) error {
