@@ -4,7 +4,13 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
-## 0.23.0 (unreleased date: 2026-11-27)
+## 0.23.1 (2026-11-27)
+
+### Fixed
+- French texts: hyphens restored (pare-feu, au-delà, en-têtes, ci-dessous, ci-dessus, elle-même, non-conformité).
+- Changelog heading of 0.23.0.
+
+## 0.23.0 (2026-11-27)
 
 ### Added
 - French, Spanish, Italian and Russian next to German and English in the console, the server texts, e-mails, the GTK app, the tray, `limdm` and agent notifications. Russian has the one, few and many plural forms.

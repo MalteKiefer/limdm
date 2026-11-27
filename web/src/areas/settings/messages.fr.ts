@@ -53,7 +53,7 @@ export default {
   'settings.general.devices': 'Appareils',
   'settings.general.devicesHelp': 'Quand un appareil est considéré comme obsolète.',
   'settings.general.stale': 'Appareil obsolète après (heures)',
-  'settings.general.staleHelp': 'Sans synchronisation au delà de ce délai, la console affiche obsolète. 1 à 2160.',
+  'settings.general.staleHelp': 'Sans synchronisation au-delà de ce délai, la console affiche obsolète. 1 à 2160.',
   'settings.general.staleRange': '1 à 2160 heures',
   'settings.general.publicUrl': 'URL publique',
   'settings.branding.title': 'Image de marque',

@@ -46,7 +46,7 @@ msgid "Software updates"
 msgstr "Mises à jour logicielles"
 
 msgid "Firewall"
-msgstr "Pare feu"
+msgstr "Pare-feu"
 
 msgid "Packages"
 msgstr "Paquets"
@@ -425,7 +425,7 @@ msgstr "L’ASLR complet est activé"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Host firewall is active"
-msgstr "Le pare feu de l’hôte est actif"
+msgstr "Le pare-feu de l’hôte est actif"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "ICMP redirects and source routing are disabled"
@@ -461,7 +461,7 @@ msgstr "Aucun redémarrage en attente depuis plus de 7 jours"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "No security update pending longer than allowed"
-msgstr "Aucune mise à jour de sécurité en attente au delà du délai autorisé"
+msgstr "Aucune mise à jour de sécurité en attente au-delà du délai autorisé"
 
 #. compliance check title sent by the agent (internal/agent/checks.go)
 msgid "Only root has UID 0"
