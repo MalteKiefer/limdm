@@ -85,6 +85,7 @@ type Settings struct {
 	// Enroll limits new enrollment tokens and can require TPM bound keys.
 	Enroll   EnrollSettings  `json:"enrollment"`
 	CVEFeeds CVEFeedSettings `json:"cve_feeds"` // Debian and Ubuntu security data (app_patch_cve.go)
+	Logs     LogSettings     `json:"logs"`      // log management (logs.go)
 }
 
 // OpsSettings are the runtime operations of every instance (Settings,
@@ -468,7 +469,7 @@ func consoleAllowed(rt *runtimeState, ip string) bool {
 // ---- settings page ----
 
 // settingsSections are the sections saveSettings accepts.
-var settingsSections = []string{"general", "sso", "monitoring", "network", "branding", "security", "remote_shell", "operations", "retention", "enrollment", "cve_feeds"}
+var settingsSections = []string{"general", "sso", "monitoring", "network", "branding", "security", "remote_shell", "operations", "retention", "enrollment", "cve_feeds", "logs"}
 
 // saveSettings stores the fields of one settings section taken from in and
 // makes them active. The console form and the admin API both call it, so
@@ -564,6 +565,18 @@ func (s *Server) saveSettings(ctx context.Context, sess session, ip, section str
 			return reject(in, msg)
 		}
 		set.CVEFeeds = in.CVEFeeds
+	case "logs":
+		in.Logs.ArchiveTarget = strings.TrimSpace(in.Logs.ArchiveTarget)
+		in.Logs = in.Logs.withDefaults()
+		if msg := in.Logs.validate(); msg != "" {
+			return reject(in, msg)
+		}
+		if in.Logs.Archive {
+			if _, err := s.logTarget(ctx, in.Logs.ArchiveTarget); err != nil {
+				return reject(in, "logs: "+err.Error())
+			}
+		}
+		set.Logs = in.Logs
 	}
 	// never lock the admin who saves out of the console
 	if rt, err := (&Server{}).netsOnly(set); err == nil && !consoleAllowed(rt, ip) {
@@ -598,7 +611,7 @@ func (s *Server) saveSettings(ctx context.Context, sess session, ip, section str
 		fmt.Sprintf(" enrollment=%+v", set.Enroll.withDefaults()) +
 		fmt.Sprintf(" log_level=%s access_log=%v audit_api_reads=%s update_downloads=%d max_checkins=%d agent_proxy_protocol=%q syslog=%q syslog_ca_bytes=%d",
 			set.Ops.LogLevel, set.Ops.AccessLog, set.Ops.AuditAPIReads, set.Ops.UpdateDownloads, set.Ops.MaxCheckins, set.Ops.AgentProxyFrom, set.Ops.Syslog, len(set.Ops.SyslogCA)) +
-		fmt.Sprintf(" cve_feeds=%+v", set.CVEFeeds) +
+		fmt.Sprintf(" cve_feeds=%+v", set.CVEFeeds) + fmt.Sprintf(" logs=%+v", set.Logs.withDefaults()) +
 		fmt.Sprintf(" four_eyes_workloads=%v workloads_helpdesk=%v", set.FourEyesWorkloads, set.WorkloadsHelpdesk)
 	err = s.auditAction(ctx, sess.Email, "settings.save", "server", detail, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO settings(key, value) VALUES ('server', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()

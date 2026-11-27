@@ -29,7 +29,7 @@ func (s *Server) reseal(ctx context.Context, dry bool) (int, error) {
 	total := 0
 	var errs []error
 	for _, step := range []func(context.Context, bool) (int, error){
-		s.resealSettings, s.resealChannels, s.resealRecovery, s.resealItems, s.resealItemVersions,
+		s.resealSettings, s.resealChannels, s.resealRecovery, s.resealItems, s.resealItemVersions, s.resealLogKeys,
 	} {
 		n, err := step(ctx, dry)
 		total += n

@@ -121,7 +121,7 @@ func parseJournal(out []byte) ([]api.LogLine, string) {
 			var nums []int
 			if json.Unmarshal(e[k], &nums) == nil {
 				for _, n := range nums {
-					b = append(b, byte(n))
+					b = append(b, byte(n)) //nolint:gosec // journal byte values, 0 to 255
 				}
 			}
 			return strings.ToValidUTF8(string(b), "?")

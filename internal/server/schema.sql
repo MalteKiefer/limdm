@@ -1064,3 +1064,84 @@ CREATE TABLE IF NOT EXISTS cve_acceptances (
     revoked_by TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS cve_acceptances_cve ON cve_acceptances(cve) WHERE revoked_at IS NULL;
+-- R5-L log management (logs.go, docs/logs.md): device log lines in daily
+-- partitions (created and dropped by the logs job), usage per device and
+-- day for quotas, archive data keys, archived days, restores and alerts
+DO $$ BEGIN
+    CREATE EXTENSION IF NOT EXISTS pg_trgm;
+EXCEPTION WHEN insufficient_privilege OR undefined_file OR feature_not_supported THEN
+    RAISE NOTICE 'pg_trgm is not available: log text search runs without its index';
+END $$;
+CREATE TABLE IF NOT EXISTS device_logs (
+    at        TIMESTAMPTZ NOT NULL,
+    device_id TEXT NOT NULL,
+    tenant_id BIGINT NOT NULL,
+    source    TEXT NOT NULL,
+    unit      TEXT NOT NULL DEFAULT '',
+    priority  SMALLINT NOT NULL,
+    host      TEXT NOT NULL DEFAULT '',
+    message   TEXT NOT NULL,
+    fields    JSONB,
+    dedup     BYTEA NOT NULL,
+    UNIQUE (device_id, dedup, at)
+) PARTITION BY RANGE (at);
+CREATE INDEX IF NOT EXISTS device_logs_tenant_at ON device_logs (tenant_id, at DESC);
+CREATE INDEX IF NOT EXISTS device_logs_device_at ON device_logs (device_id, at DESC);
+CREATE INDEX IF NOT EXISTS device_logs_unit ON device_logs (tenant_id, unit, at DESC);
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') THEN
+        CREATE INDEX IF NOT EXISTS device_logs_message ON device_logs USING gin (message gin_trgm_ops);
+    END IF;
+END $$;
+CREATE TABLE IF NOT EXISTS log_usage (
+    device_id TEXT NOT NULL,
+    day       DATE NOT NULL,
+    tenant_id BIGINT NOT NULL,
+    bytes     BIGINT NOT NULL DEFAULT 0,
+    lines     BIGINT NOT NULL DEFAULT 0,
+    dropped   BIGINT NOT NULL DEFAULT 0,
+    last_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (device_id, day)
+);
+CREATE INDEX IF NOT EXISTS log_usage_tenant ON log_usage (tenant_id, day);
+CREATE TABLE IF NOT EXISTS log_keys (
+    id         TEXT PRIMARY KEY,
+    tenant_id  BIGINT NOT NULL,
+    wrapped    BYTEA NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    active     BOOLEAN NOT NULL DEFAULT true
+);
+CREATE UNIQUE INDEX IF NOT EXISTS log_keys_active ON log_keys (tenant_id) WHERE active;
+CREATE TABLE IF NOT EXISTS log_archives (
+    tenant_id   BIGINT NOT NULL,
+    day         DATE NOT NULL,
+    target      TEXT NOT NULL,
+    manifest    TEXT NOT NULL,
+    sha256      TEXT NOT NULL,
+    objects     INT NOT NULL,
+    lines       BIGINT NOT NULL,
+    bytes       BIGINT NOT NULL,
+    key_id      TEXT NOT NULL,
+    verified_at TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, day)
+);
+CREATE TABLE IF NOT EXISTS log_restores (
+    day         DATE PRIMARY KEY,
+    until       TIMESTAMPTZ NOT NULL,
+    restored_by TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS log_alerts (
+    id             BIGSERIAL PRIMARY KEY,
+    tenant_id      BIGINT REFERENCES tenants(id) ON DELETE CASCADE,
+    name           TEXT NOT NULL,
+    query          TEXT NOT NULL,
+    threshold      INT NOT NULL,
+    window_minutes INT NOT NULL,
+    severity       TEXT NOT NULL DEFAULT 'warning',
+    enabled        BOOLEAN NOT NULL DEFAULT true,
+    created_by     TEXT NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_count     INT,
+    last_fired_at  TIMESTAMPTZ
+);

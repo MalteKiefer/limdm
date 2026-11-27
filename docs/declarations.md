@@ -680,6 +680,39 @@ identity does not depend on the host name: the device ID, the mTLS client certif
 (common name is the device ID) and the network certificate (DNS name derived from the device
 ID by the server) stay the same, so a device keeps checking in under its new name.
 
+### `com.limdm.logging`
+
+Console: **Log collection**. Off unless an item enables it; see [logs.md](logs.md) for
+the whole data flow, storage, archive and privacy.
+
+```json
+{"enabled": true, "journald": true, "exclude_units": ["systemd-logind.service"], "min_priority": "info",
+ "containers": true, "exclude_containers": ["*-tmp"], "files": ["/var/log/nginx/error.log"],
+ "exclude": ["healthcheck"], "mask": ["customer-[0-9]+"], "lines_per_second": 20, "mb_per_day": 100, "buffer_mb": 32}
+```
+
+| Field | Type | Rules |
+|---|---|---|
+| `enabled` | true or false | collect and ship logs; needs at least one source |
+| `allow_personal` | true or false | also on devices marked personal (tag `personal` or attribute `ownership=personal`); without it those devices get the item switched off |
+| `journald` | true or false | the systemd journal |
+| `units`, `exclude_units` | list of text | journal units to include (empty: all) and exclude; `*` matches any text |
+| `min_priority` | text | `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info` (default) or `debug`: this priority and more severe ones, for every source |
+| `containers` | true or false | Docker and Podman containers |
+| `container_names`, `container_labels`, `compose_projects` | list of text | only containers whose name (`*` as wildcard), label (`key=value`) or compose project matches; none of them: all containers |
+| `exclude_containers` | list of text | container names to leave out |
+| `files` | list of text | absolute paths of plain text log files, at most 50; not below `/proc`, `/sys`, `/dev`, `/run` or LiMDM's own directories |
+| `include`, `exclude` | list of text | regular expressions (RE2) on the message: with `include` only matching lines are shipped, `exclude` drops matching lines |
+| `mask_builtin` | true or false | default true: passwords, tokens, `Authorization` headers, private keys, JWTs, AWS access key IDs and credentials in URLs become `***` |
+| `mask` | list of text | further regular expressions; the matched text becomes `***` |
+| `lines_per_second` | number | 1 to 1000, default 20; bursts of ten seconds |
+| `mb_per_day` | number | 1 to 10240, default 100 |
+| `buffer_mb` | number | spool on disk while the server is not reachable, 1 to 1024, default 32; when full the oldest lines go first and are counted as dropped |
+
+Not a list type: the item evaluated last wins. Collection starts at the end of each source:
+the agent does not ship the history that was there before. It never changes journald,
+Docker or Podman settings and never ships LiMDM's own log lines.
+
 ## Security
 
 ### `com.limdm.firewall` (list)

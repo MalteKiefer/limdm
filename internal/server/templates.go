@@ -38,7 +38,8 @@ func deviceTemplateVars(ctx context.Context, q querier, deviceID string) (api.Te
 // hasTemplate reports whether an item needs rendering.
 func hasTemplate(it api.LibraryItem) bool {
 	return (it.Type == api.TypeFiles || it.Type == api.TypeFirewall) && strings.Contains(string(it.Payload), `"template":true`) ||
-		it.Type == api.TypeHostname && api.IsTemplate(string(it.Payload))
+		it.Type == api.TypeHostname && api.IsTemplate(string(it.Payload)) ||
+		it.Type == api.TypeLogging // off on personal devices (logs_decl.go)
 }
 
 // renderItems returns items with their templates rendered for the device.
@@ -57,6 +58,10 @@ func renderItems(ctx context.Context, q querier, deviceID string, items []api.Li
 				return nil, err
 			}
 			vars, out = &v, append([]api.LibraryItem(nil), items...)
+		}
+		if it.Type == api.TypeLogging {
+			out[i].Payload = refuseLogging(it.Payload, *vars)
+			continue
 		}
 		p, err := api.RenderPayload(it.Type, it.Payload, *vars)
 		if err != nil {
