@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "LiMDM admin API",
+    "title": "LiMDM Admin API",
     "version": "1",
     "description": "REST API of the LiMDM console. Every action runs through the same functions as the console, with the same role rules, validation and audit entries. Authenticate with an API token from the console (Administration, API tokens) as a bearer token. The console app (/app/) uses the session cookie instead: every request must come from the console origin (Origin, Sec-Fetch-Site) and every state change must carry the CSRF token of GET /api/v1/me in the X-CSRF-Token header. Errors are RFC 9457 problem details. Lists are paged with limit and an opaque cursor. Each token may send 600 requests per minute; failed authentications are limited to 20 per client address in five minutes. Tenants: a token created in a tenant (multi tenancy, see docs/tenants.md) sees and changes only that tenant's devices, commands, library items, blueprints, tags and audit entries; shared library items and blueprints of the Default tenant are readable but not writable, and objects of other tenants answer 404. Global tokens see every tenant. Metrics need a global token. List conventions (devices is the reference): filter takes the query language (free words, key:value, key:\"quoted value\", every term must match), sort takes a field with - for descending, cursor continues a page from next_cursor, and <list>/facets answers counts per value for the same filter. Trying it out: the reference at /api/v1/docs sends real requests to this server under your role, tenant and scope, with the same audit rules as the console. Start with GET calls; calls marked Warning change devices or delete data."
   },

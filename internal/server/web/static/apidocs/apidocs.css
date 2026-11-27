@@ -34,5 +34,5 @@ body { font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica N
 .swagger-ui .scheme-container { background: var(--surface); box-shadow: none; border-bottom: 1px solid var(--line); }
 .swagger-ui .btn.authorize { color: var(--accent); border-color: var(--accent); }
 .swagger-ui .btn.authorize svg { fill: var(--accent); }
-.swagger-ui .btn.execute { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+html .swagger-ui .opblock .btn.execute { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .swagger-ui .opblock-tag { border-bottom-color: var(--line); }
