@@ -57,6 +57,7 @@ files ────┘                                                      │
 The agent reads files as root, so a file source is held to these rules (on the server when
 the item is saved, and on the device before every read):
 
+* An entry is a path, a pattern with `*` and `?` (one path component each, as in `/var/log/*.log` or `/srv/*/logs/*.log`) or a directory ending in `/` for every file directly in it. A pattern must stay inside the allowed locations with every wildcard replaced by a plain name; the agent checks each match again like a plain path, skips rotated and compressed copies (`x.1`, `x.2.gz`, `x-20261127`) and links, and reads at most 200 files per entry.
 * Only below `/var/log/`, `/srv/<name>/log/` or a custom root of the item (`roots`), clean
   absolute paths without wildcards. Secret locations are refused anywhere (`/etc/shadow`,
   `/etc/gshadow`, `/etc/ssh/`, `/root/`, `/home/*/.ssh`, `/etc/ssl/private/`,

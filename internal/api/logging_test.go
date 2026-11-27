@@ -29,7 +29,7 @@ func TestLoggingValidate(t *testing.T) {
 		`{"roots": ["/home/u/.ssh"]}`,
 		`{"roots": ["/opt/app/../../etc"]}`,
 		`{"roots": ["/boot/grub"]}`,
-		`{"files": ["/var/log/*.log"]}`,
+		`{"files": ["/var/log/[ab].log"]}`,
 		`{"include": ["("]}`,
 		`{"units": ["a b"]}`,
 		`{"container_labels": ["novalue"]}`,
@@ -101,5 +101,20 @@ func TestLogGlob(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(LogPriorities, ","), "warning") || LogPriority("WARNING") != 4 {
 		t.Error("priorities")
+	}
+}
+
+func TestLogFilePattern(t *testing.T) {
+	for p, ok := range map[string]bool{
+		"/var/log/*.log": true, "/var/log/nginx/": true, "/var/log/app?.log": true, "/srv/*/logs/": true, "/srv/*/log/*.log": true,
+		"/var/*/x.log": false, "/*/log/x": false, "/etc/*": false, "/srv/*/data/": false, "/var/log/[ab].log": false,
+		"/var/log/../shadow": false, "/var/log/*/../../etc/x": false, "var/log/*": false,
+	} {
+		if _, got := LogFilePattern(p, nil); got != ok {
+			t.Errorf("%s: want %v", p, ok)
+		}
+	}
+	if _, ok := LogFilePattern("/opt/app/logs/*.log", []string{"/opt/app/logs"}); !ok {
+		t.Error("pattern below a custom root")
 	}
 }
