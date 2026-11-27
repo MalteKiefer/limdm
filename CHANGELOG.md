@@ -40,7 +40,7 @@ change behavior they rely on.
 - Item editor preview of the computed host name for one device with a warning, and a host name card on the device page; agents report `hostname_info` and notes in the declaration status, including a warning when Postfix or Exim keeps another host name.
 - Template variables `.Serial`, `.MAC`, `.Vendor` and `.Model` for file, firewall and hostname templates.
 - Firewall inventory per device: the agent reports backend, default policies and every rule of ufw, firewalld, nftables or iptables (read only); the device page has a Firewall tab grouping managed, foreign and system rules (`GET /api/v1/devices/{id}/firewall`).
-- Foreign firewall rules can be adopted into a firewall library item, kept as an exception (`keep` in `com.limdm.firewall`) or discarded with the signed command `firewall_remove_rule` (admins, four eyes, a second confirmation when SSH or the server may be cut; `POST /api/v1/devices/{id}/firewall/rules/{rid}/{adopt|keep}`).
+- Foreign firewall rules can be adopted into a firewall library item (a new item goes into a blueprint the admin picks, with a second confirmation for the global default or a blueprint that reaches more devices), kept as an exception (`keep` in `com.limdm.firewall`) or discarded with the signed command `firewall_remove_rule` (admins, four eyes, a second confirmation when SSH or the server may be cut; `POST /api/v1/devices/{id}/firewall/rules/{rid}/{adopt|keep}`).
 
 ### Changed
 - Enrollment tokens default to 1 use and 1 day; every use is audited with the token it used.

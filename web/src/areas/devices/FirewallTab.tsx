@@ -26,11 +26,15 @@ const useFirewall = (id: string) => useQuery({ queryKey: ['devices', 'firewall',
 function useRuleAction(id: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ rid, action, item_id, name }: { rid: string; action: 'adopt' | 'keep'; item_id?: number; name?: string }) =>
-      unwrap(api.POST('/api/v1/devices/{id}/firewall/rules/{rid}/{action}', { params: { path: { id, rid, action } }, body: { item_id, name } })) as Promise<{ approval_id?: number }>,
+    mutationFn: ({ rid, action, ...body }: { rid: string; action: 'adopt' | 'keep'; item_id?: number; name?: string; blueprint_id?: number; confirm?: boolean }) =>
+      unwrap(api.POST('/api/v1/devices/{id}/firewall/rules/{rid}/{action}', { params: { path: { id, rid, action } }, body })) as Promise<{ approval_id?: number }>,
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['devices'] }),
   })
 }
+
+/** Blueprints a new item can be assigned in, with the devices each reaches. */
+const useTargets = (id: string, on: boolean) =>
+  useQuery({ queryKey: ['devices', 'firewall', id, 'targets'], queryFn: () => unwrap(api.GET('/api/v1/devices/{id}/firewall/targets', { params: { path: { id } } })), enabled: on })
 
 const mono = (v?: string) => <span className="font-mono text-meta break-all">{v ?? ''}</span>
 const raw = (v?: string) => <pre className="overflow-x-auto rounded bg-surface-2 p-2 font-mono text-meta break-all whitespace-pre-wrap">{v}</pre>
@@ -47,6 +51,14 @@ export function FirewallTab({ d }: { d: DeviceDetail }) {
   const [ack, setAck] = useState(false)
   const [item, setItem] = useState('')
   const [name, setName] = useState('')
+  const [bp, setBp] = useState('')
+  const [sure, setSure] = useState(false)
+  const targets = useTargets(d.id, !!pick && item === 'new')
+  // preselected: the device's own blueprint, never the global default
+  const own = targets.data?.items.find((x) => x.device && !x.global_default)
+  const chosen = bp || (own ? String(own.id) : '')
+  const target = targets.data?.items.find((x) => String(x.id) === chosen)
+  const needsSure = !!target && (target.global_default || target.devices > 1)
   const items = d.items.filter((i) => i.type === 'com.limdm.firewall')
   if (fw.error) return <ErrorState error={fw.error} onRetry={() => void fw.refetch()} />
   if (!fw.data) return <LoadingState rows={6} />
@@ -63,11 +75,13 @@ export function FirewallTab({ d }: { d: DeviceDetail }) {
   const openPick = (rule: Rule, action: 'adopt' | 'keep') => {
     setItem(items[0] ? String(items[0].id) : 'new')
     setName('')
+    setBp('')
+    setSure(false)
     setPick({ rule, action })
   }
   const savePick = () => {
     if (!pick) return
-    const body = item === 'new' ? { name: name.trim() } : { item_id: Number(item) }
+    const body = item === 'new' ? { name: name.trim(), blueprint_id: Number(chosen), confirm: sure } : { item_id: Number(item) }
     act.mutate(
       { rid: pick.rule.id, action: pick.action, ...body },
       {
@@ -194,7 +208,7 @@ export function FirewallTab({ d }: { d: DeviceDetail }) {
             <button type="button" className="btn" onClick={() => setPick(null)}>
               {t('common.cancel')}
             </button>
-            <button type="button" className="btn btn-primary" disabled={act.isPending || (item === 'new' && !name.trim())} onClick={savePick}>
+            <button type="button" className="btn btn-primary" disabled={act.isPending || (item === 'new' && (!name.trim() || !target || (needsSure && !sure)))} onClick={savePick}>
               {t(pick?.action === 'keep' ? 'devices.fw.keep' : 'devices.fw.adopt')}
             </button>
           </>
@@ -218,6 +232,35 @@ export function FirewallTab({ d }: { d: DeviceDetail }) {
             <Field label={t('devices.fw.itemName')} help={t('devices.fw.itemNameHelp')} required>
               {({ id, describedBy }) => <input id={id} className="field" aria-describedby={describedBy} maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />}
             </Field>
+          )}
+          {item === 'new' && (
+            <Field label={t('devices.fw.blueprint')} help={t('devices.fw.blueprintHelp')} required>
+              {({ id, describedBy }) => (
+                <select
+                  id={id}
+                  className="field"
+                  aria-describedby={describedBy}
+                  value={chosen}
+                  onChange={(e) => (setBp(e.target.value), setSure(false))}
+                >
+                  <option value="">{t('devices.fw.blueprintPick')}</option>
+                  {(targets.data?.items ?? []).map((x) => (
+                    <option key={x.id} value={String(x.id)}>
+                      {t(x.global_default ? 'devices.fw.blueprintGlobal' : 'devices.fw.blueprintOption', { name: x.name, n: fmt(x.devices) })}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
+          )}
+          {item === 'new' && needsSure && target && (
+            <div className="flex flex-col gap-2 rounded border border-warn p-2">
+              <p className="text-body">{target.global_default ? t('devices.fw.reachGlobal') : t('devices.fw.reachMany', { n: fmt(target.devices) })}</p>
+              <label className="flex items-center gap-2 text-body">
+                <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} />
+                {t('devices.fw.reachAck')}
+              </label>
+            </div>
           )}
         </div>
       </Modal>

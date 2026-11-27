@@ -781,8 +781,11 @@ rules for `docker0` and `br-*` are system rules.
 
 On the **Firewall** tab of a device an admin decides per foreign rule:
 
-* **Adopt**: the rule is added to a firewall library item of the device's blueprint (an
-  existing one, or a new one that is assigned in the blueprint and has `enforce` off) in this
+* **Adopt**: the rule is added to a firewall library item (an existing one, or a new one
+  with `enforce` off that is assigned in a blueprint the admin picks; the device's own
+  blueprint is preselected unless it is the global default, the dialog shows how many devices
+  the blueprint reaches and asks a second time for the global default or a blueprint that
+  reaches more than this device; tenant admins see only the blueprints of their tenant) in this
   format: a port of the default zone goes to `allow`, a port with a source to `rules`, a port
   on an interface or in another firewalld zone (with that zone's interfaces and sources) to
   `zones`, an outbound allow rule to `outbound.allow` (only into an item that already has an

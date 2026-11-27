@@ -387,10 +387,16 @@ the raw text, `risk` (`ssh` or `server`), `kept` (listed in `keep` of the device
 declaration) and `adopt_error` when it cannot be adopted.
 
 `POST /api/v1/devices/{id}/firewall/rules/{rid}/adopt` and `.../keep` (admins) take
-`{"item_id": 12}` or `{"name": "Adopted rules"}`. Adopt adds the rule to that
-`com.limdm.firewall` item in the declaration format, keep adds its `match` to `keep`; a new
-item (enforce off) is assigned in the device's blueprint. Both are a normal library save
-(validation, signature, version, audit, four eyes) plus an audit entry `firewall.adopt` or
+`{"item_id": 12}` or `{"name": "Adopted rules", "blueprint_id": 4, "confirm": true}`. Adopt
+adds the rule to that `com.limdm.firewall` item in the declaration format, keep adds its
+`match` to `keep`. An existing item is a normal library save (validation, signature,
+version, audit, four eyes). A new item (enforce off) is created and assigned in
+`blueprint_id` in one transaction with both versions and audit entries, so nothing is left
+behind when the assignment fails. `GET /api/v1/devices/{id}/firewall/targets` lists the
+blueprints the caller may pick with the devices each reaches (`devices`, `global_default`,
+`device`): tenant accounts only those of their tenant, never the global default. A blueprint
+that is the global default or reaches more than one device answers `422` on `confirm`
+without `"confirm": true`. Every adopt and keep adds an audit entry `firewall.adopt` or
 `firewall.keep` on the device.
 
 `firewall_remove_rule` (command, admins, four eyes) deletes one foreign rule on the device:

@@ -2962,9 +2962,29 @@ export interface paths {
         put?: never;
         /**
          * Adopt a foreign firewall rule into a firewall library item, or keep it as an exception there
-         * @description adopt adds the rule in the declaration format, keep adds its match to keep. item_id names an existing com.limdm.firewall item; without it a new item with name is created (enforce off) and assigned in the device's blueprint. Both go through the library save (validation, signature, audit, four eyes). System and managed rules are refused. Admins only.
+         * @description adopt adds the rule in the declaration format, keep adds its match to keep. item_id names an existing com.limdm.firewall item, saved through the library save (validation, signature, audit, four eyes). Without it a new item with name is created (enforce off) and assigned in blueprint_id, one of GET /api/v1/devices/{id}/firewall/targets, in one transaction with both audit entries: nothing is created when the assignment fails. A blueprint that is the global default or reaches more than one device needs confirm (422 on field confirm otherwise). Tenant accounts pick only blueprints of their tenant. System and managed rules are refused. Admins only.
          */
         post: operations["firewallRuleAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/firewall/targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Blueprints a new firewall item adopted from this device can be assigned in, with the devices each reaches
+         * @description Tenant accounts get the blueprints of their tenant (never the global default); accounts of the whole installation those of the device's tenant and of the default tenant. Admins only.
+         */
+        get: operations["getFirewallTargets"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5034,6 +5054,17 @@ export interface components {
                 errors?: string[];
             };
             rules: components["schemas"]["DeviceFirewallRule"][];
+        };
+        FirewallTarget: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /** @description active devices the blueprint reaches, children included */
+            devices: number;
+            /** @description the default blueprint of the whole installation */
+            global_default: boolean;
+            /** @description the device's own effective blueprint */
+            device: boolean;
         };
     };
     responses: {
@@ -10575,6 +10606,13 @@ export interface operations {
                     item_id?: number;
                     /** @description name of the new item */
                     name?: string;
+                    /**
+                     * Format: int64
+                     * @description blueprint the new item is assigned in (required without item_id)
+                     */
+                    blueprint_id?: number;
+                    /** @description confirms a blueprint that is the global default or reaches more than this device */
+                    confirm?: boolean;
                 };
             };
         };
@@ -10610,6 +10648,32 @@ export interface operations {
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+        };
+    };
+    getFirewallTargets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FirewallTarget"][];
+                    };
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
 }

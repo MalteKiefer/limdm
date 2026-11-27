@@ -9647,7 +9647,7 @@
       "post": {
         "operationId": "firewallRuleAction",
         "summary": "Adopt a foreign firewall rule into a firewall library item, or keep it as an exception there",
-        "description": "adopt adds the rule in the declaration format, keep adds its match to keep. item_id names an existing com.limdm.firewall item; without it a new item with name is created (enforce off) and assigned in the device's blueprint. Both go through the library save (validation, signature, audit, four eyes). System and managed rules are refused. Admins only.",
+        "description": "adopt adds the rule in the declaration format, keep adds its match to keep. item_id names an existing com.limdm.firewall item, saved through the library save (validation, signature, audit, four eyes). Without it a new item with name is created (enforce off) and assigned in blueprint_id, one of GET /api/v1/devices/{id}/firewall/targets, in one transaction with both audit entries: nothing is created when the assignment fails. A blueprint that is the global default or reaches more than one device needs confirm (422 on field confirm otherwise). Tenant accounts pick only blueprints of their tenant. System and managed rules are refused. Admins only.",
         "parameters": [
           {
             "name": "id",
@@ -9694,6 +9694,15 @@
                   "name": {
                     "type": "string",
                     "description": "name of the new item"
+                  },
+                  "blueprint_id": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "blueprint the new item is assigned in (required without item_id)"
+                  },
+                  "confirm": {
+                    "type": "boolean",
+                    "description": "confirms a blueprint that is the global default or reaches more than this device"
                   }
                 }
               }
@@ -9757,6 +9766,52 @@
             "$ref": "#/components/responses/Problem"
           },
           "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/firewall/targets": {
+      "get": {
+        "operationId": "getFirewallTargets",
+        "summary": "Blueprints a new firewall item adopted from this device can be assigned in, with the devices each reaches",
+        "description": "Tenant accounts get the blueprints of their tenant (never the global default); accounts of the whole installation those of the device's tenant and of the default tenant. Admins only.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FirewallTarget"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -17331,6 +17386,37 @@
             "items": {
               "$ref": "#/components/schemas/DeviceFirewallRule"
             }
+          }
+        }
+      },
+      "FirewallTarget": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "devices",
+          "global_default",
+          "device"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "devices": {
+            "type": "integer",
+            "description": "active devices the blueprint reaches, children included"
+          },
+          "global_default": {
+            "type": "boolean",
+            "description": "the default blueprint of the whole installation"
+          },
+          "device": {
+            "type": "boolean",
+            "description": "the device's own effective blueprint"
           }
         }
       }

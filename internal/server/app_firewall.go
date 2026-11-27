@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -28,6 +29,7 @@ func init() {
 
 func (s *Server) appFirewallRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/devices/{id}/firewall", s.need("read", s.apiDeviceFirewall))
+	m.HandleFunc("GET /api/v1/devices/{id}/firewall/targets", s.need("admin", s.apiFirewallTargets))
 	m.HandleFunc("POST /api/v1/devices/{id}/firewall/rules/{rid}/{action}", s.need("admin", s.apiFirewallRuleAction))
 }
 
@@ -208,8 +210,11 @@ func (s *Server) firewallRemovePayload(r *http.Request, deviceID string) ([]byte
 
 // apiFirewallRuleAction adopts a foreign rule into a firewall library item
 // or keeps it as an exception there. item_id 0 creates the item (name) and
-// assigns it in the device's blueprint. Both go through the normal library
-// save: validation, signature, audit and four eyes.
+// assigns it in the blueprint blueprint_id the caller picked (firewallTargets):
+// item and assignment are written in one transaction, so a failure leaves
+// no item behind. A blueprint that is the global default or reaches more
+// devices than this one needs confirm. An existing item goes through the
+// normal library save: validation, signature, audit and four eyes.
 func (s *Server) apiFirewallRuleAction(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	id, action := r.PathValue("id"), r.PathValue("action")
 	if action != "adopt" && action != "keep" {
@@ -225,8 +230,10 @@ func (s *Server) apiFirewallRuleAction(w http.ResponseWriter, r *http.Request, c
 		return
 	}
 	var body struct {
-		ItemID int64  `json:"item_id"`
-		Name   string `json:"name"`
+		ItemID      int64  `json:"item_id"`
+		Name        string `json:"name"`
+		BlueprintID int64  `json:"blueprint_id"`
+		Confirm     bool   `json:"confirm"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -280,19 +287,18 @@ func (s *Server) apiFirewallRuleAction(w http.ResponseWriter, r *http.Request, c
 		return
 	}
 	created := it.ID == 0
-	if err := s.saveLibraryItem(ctx, c.actor(), &it); err != nil {
+	if created {
+		if err := s.adoptIntoNewItem(ctx, c.actor(), id, &it, body.BlueprintID, body.Confirm); err != nil {
+			s.apiFail(w, err)
+			return
+		}
+	} else if err := s.saveLibraryItem(ctx, c.actor(), &it); err != nil {
 		if aid, ok := pendingApproval(err); ok { // four eyes: another admin decides
 			writeJSONStatus(w, http.StatusAccepted, map[string]any{"approval_id": aid, "status": "pending"})
 			return
 		}
 		s.apiFail(w, err)
 		return
-	}
-	if created {
-		if err := s.assignToDeviceBlueprint(ctx, c.actor(), id, it.ID); err != nil {
-			s.apiFail(w, err)
-			return
-		}
 	}
 	if err := s.auditAction(ctx, c.actor(), "firewall."+action, id, fmt.Sprintf("item %d %s: %s", it.ID, it.Name, fr.Match), nil); err != nil {
 		s.apiFail(w, err)
@@ -301,24 +307,172 @@ func (s *Server) apiFirewallRuleAction(w http.ResponseWriter, r *http.Request, c
 	writeJSON(w, map[string]any{"item_id": it.ID, "item_name": it.Name, "created": created})
 }
 
-// assignToDeviceBlueprint adds an item to the blueprint the device resolves
-// to (the last of its chain), through the normal blueprint save.
-func (s *Server) assignToDeviceBlueprint(ctx context.Context, actor, deviceID string, itemID int64) error {
-	var bp blueprintRec
-	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
-		res, err := resolveDevice(ctx, tx, deviceID)
+// firewallTarget is a blueprint a new firewall item can be assigned in.
+type firewallTarget struct {
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	Devices       int    `json:"devices"`        // active devices the blueprint reaches, its children included
+	GlobalDefault bool   `json:"global_default"` // the default blueprint of the whole installation
+	Device        bool   `json:"device"`         // the device's own effective blueprint
+}
+
+// firewallTargets are the blueprints the caller may assign a new firewall
+// item in for the device: for a tenant account only blueprints of its own
+// tenant (never the global default), for the whole installation those of
+// the device's tenant and of the default tenant.
+func firewallTargets(ctx context.Context, q pgx.Tx, deviceID string) ([]firewallTarget, error) {
+	var devTenant, eff int64
+	if err := q.QueryRow(ctx, `SELECT d.tenant_id, `+effectiveBlueprintSQL+` FROM devices d WHERE d.id=$1`, deviceID).Scan(&devTenant, &eff); err != nil {
+		return nil, err
+	}
+	reach := map[int64]int{}
+	rows, err := q.Query(ctx, `SELECT `+effectiveBlueprintSQL+`, count(*)::int FROM devices d WHERE NOT d.retired GROUP BY 1`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var b *int64
+		var n int
+		if err := rows.Scan(&b, &n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if b != nil {
+			reach[*b] = n
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	type bp struct {
+		firewallTarget
+		parent *int64
+		tenant int64
+	}
+	var all []bp
+	rows, err = q.Query(ctx, `SELECT id, name, parent_id, tenant_id FROM blueprints ORDER BY name, id`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var b bp
+		if err := rows.Scan(&b.ID, &b.Name, &b.parent, &b.tenant); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		b.GlobalDefault = b.Name == "default" && b.tenant == defaultTenant
+		b.Device = b.ID == eff
+		all = append(all, b)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// a blueprint reaches its own devices and those of every descendant
+	var count func(id int64, depth int) int
+	count = func(id int64, depth int) int {
+		n := reach[id]
+		for _, c := range all {
+			if c.parent != nil && *c.parent == id && depth < 10 {
+				n += count(c.ID, depth+1)
+			}
+		}
+		return n
+	}
+	t := ctxTenant(ctx)
+	out := []firewallTarget{}
+	for _, b := range all {
+		if t != 0 && (b.tenant != t || b.GlobalDefault) || t == 0 && b.tenant != devTenant && b.tenant != defaultTenant {
+			continue
+		}
+		b.Devices = count(b.ID, 0)
+		out = append(out, b.firewallTarget)
+	}
+	return out, nil
+}
+
+func (s *Server) apiFirewallTargets(w http.ResponseWriter, r *http.Request, c apiCaller) {
+	id := r.PathValue("id")
+	if _, ok := s.deviceFound(w, r, c, id); !ok {
+		return
+	}
+	var list []firewallTarget
+	err := pgx.BeginFunc(r.Context(), s.db, func(tx pgx.Tx) error {
+		var err error
+		list, err = firewallTargets(r.Context(), tx, id)
+		return err
+	})
+	if err != nil {
+		s.apiFail(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"items": list})
+}
+
+// adoptIntoNewItem writes the new firewall item and its assignment in the
+// picked blueprint in one transaction with both audit entries and versions.
+// It checks the blueprint against firewallTargets before anything is
+// written. Firewall items never wait for four eyes (not a root type); if
+// that changes, the request is refused instead of leaving a lone item.
+func (s *Server) adoptIntoNewItem(ctx context.Context, actor, deviceID string, it *api.LibraryItem, blueprintID int64, confirm bool) error {
+	if err := it.Validate(); err != nil {
+		return invalid(itemField(*it, err), err)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, it.Payload); err != nil {
+		return invalid("payload", err)
+	}
+	it.Payload = compact.Bytes()
+	if s.itemNeedsApproval(*it) {
+		return &userError{http.StatusConflict, "this item needs four eyes approval: adopt the rule into an existing firewall item"}
+	}
+	return pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		targets, err := firewallTargets(ctx, tx, deviceID)
 		if err != nil {
 			return err
 		}
-		if len(res.Chain) == 0 {
-			return errors.New("the device has no blueprint")
+		i := slices.IndexFunc(targets, func(t firewallTarget) bool { return t.ID == blueprintID })
+		if i < 0 {
+			return invalid("blueprint_id", errors.New("pick a blueprint of your tenant that this device can use"))
 		}
-		bp = res.Chain[len(res.Chain)-1]
-		return nil
+		target := targets[i]
+		if (target.GlobalDefault || target.Devices > 1) && !confirm {
+			what := ""
+			if target.GlobalDefault {
+				what = " (the default blueprint of the whole installation)"
+			}
+			return invalid("confirm", fmt.Errorf("blueprint %s reaches %d devices%s: confirm to assign the new item there", target.Name, target.Devices, what))
+		}
+		if err := writeItem(ctx, tx, actor, "save", it, false); err != nil {
+			return err
+		}
+		if err := audit(ctx, tx, actor, "library.save", it.Name, itemDetail(*it, "save")); err != nil {
+			return err
+		}
+		var name string
+		var raw []byte
+		if err := tx.QueryRow(ctx, `SELECT name, tree FROM blueprints WHERE id=$1 FOR UPDATE`, blueprintID).Scan(&name, &raw); err != nil {
+			return err
+		}
+		var tree []api.Node
+		if err := json.Unmarshal(raw, &tree); err != nil {
+			return err
+		}
+		tree = append(tree, api.Node{Kind: "assign", Items: []int64{it.ID}})
+		if err := api.ValidateTree(tree, func(int64) bool { return true }); err != nil { // the other items were valid before
+			return invalid("tree", err)
+		}
+		if err := ensureBlueprintBaseline(ctx, tx, blueprintID); err != nil {
+			return err
+		}
+		b, _ := json.Marshal(tree)
+		if _, err := tx.Exec(ctx, `UPDATE blueprints SET tree=$2, updated_at=now() WHERE id=$1`, blueprintID, string(b)); err != nil {
+			return err
+		}
+		if err := recordBlueprintVersion(ctx, tx, blueprintID, actor, "save", false); err != nil {
+			return err
+		}
+		return audit(ctx, tx, actor, "blueprint.save", name, string(b))
 	})
-	if err != nil {
-		return err
-	}
-	bp.Tree = append(bp.Tree, api.Node{Kind: "assign", Items: []int64{itemID}})
-	return s.saveBlueprint(ctx, actor, &bp)
 }

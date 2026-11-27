@@ -77,7 +77,43 @@ func TestAppFirewall(t *testing.T) {
 	if code, body := call(dashAdmin, "POST", "/api/v1/devices/d1/firewall/rules/"+docker.ID+"/adopt", `{"name":"adopted"}`); code != 422 {
 		t.Fatalf("system adopt: %d %s", code, body)
 	}
-	code, body = call(dashAdmin, "POST", "/api/v1/devices/d1/firewall/rules/"+web.ID+"/adopt", `{"name":"adopted"}`)
+	items := func() int {
+		t.Helper()
+		var n int
+		if err := db.QueryRow(ctx, `SELECT count(*) FROM library_items`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before := items()
+	var def int64
+	if err := db.QueryRow(ctx, `SELECT id FROM blueprints WHERE name='default' AND tenant_id=1`).Scan(&def); err != nil {
+		t.Fatal(err)
+	}
+	code, body = call(dashAdmin, "GET", "/api/v1/devices/d1/firewall/targets", ``)
+	if code != 200 || !strings.Contains(body, `"global_default":true`) || !strings.Contains(body, `"device":true`) {
+		t.Fatalf("targets: %d %s", code, body)
+	}
+	adopt := func(sess session, dev, rule, body string) (int, string) {
+		return call(sess, "POST", "/api/v1/devices/"+dev+"/firewall/rules/"+rule+"/adopt", body)
+	}
+	// a new item needs a picked blueprint, and the global default a confirmation
+	for _, b := range []string{`{"name":"adopted"}`, `{"name":"adopted","blueprint_id":` + itoa(def) + `}`, `{"name":"adopted","blueprint_id":999999,"confirm":true}`} {
+		if code, body := adopt(dashAdmin, "d1", web.ID, b); code != 422 || items() != before {
+			t.Fatalf("adopt %s: %d %s, items %d", b, code, body, items())
+		}
+	}
+	// a failing assignment leaves no item behind
+	if _, err := db.Exec(ctx, `UPDATE blueprints SET tree='{"broken":true}' WHERE id=$1`, def); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := adopt(dashAdmin, "d1", web.ID, `{"name":"adopted","blueprint_id":`+itoa(def)+`,"confirm":true}`); code == 200 || items() != before {
+		t.Fatalf("broken blueprint: %d, items %d", code, items())
+	}
+	if _, err := db.Exec(ctx, `UPDATE blueprints SET tree='[]' WHERE id=$1`, def); err != nil {
+		t.Fatal(err)
+	}
+	code, body = adopt(dashAdmin, "d1", web.ID, `{"name":"adopted","blueprint_id":`+itoa(def)+`,"confirm":true}`)
 	var res struct {
 		ItemID  int64 `json:"item_id"`
 		Created bool
@@ -90,6 +126,41 @@ func TestAppFirewall(t *testing.T) {
 	if err := db.QueryRow(ctx, `SELECT payload::text, EXISTS(SELECT 1 FROM blueprints WHERE name='default' AND tree::text LIKE '%'||$2||'%') FROM library_items WHERE id=$1`,
 		res.ItemID, itoa(res.ItemID)).Scan(&raw, &assigned); err != nil || !strings.Contains(raw, `"8080/tcp"`) || !strings.Contains(raw, `"enforce": false`) || !assigned {
 		t.Fatalf("item %s assigned=%v %v", raw, assigned, err)
+	}
+	// a tenant admin picks only blueprints of its tenant, never the global default
+	var own, foreign int64
+	if err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO tenants(id, name) VALUES (2, 'two'), (3, 'three') ON CONFLICT DO NOTHING;
+			INSERT INTO console_users(email, role, tenant_id) VALUES ('t2@firma.de', 'admin', 2);
+			INSERT INTO devices(id, cert_serial, cert_not_after, hostname, tenant_id) VALUES ('t2d', 's', now(), 'twodev', 2)`); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO blueprints(name, tenant_id) VALUES ('two', 2) RETURNING id`).Scan(&own); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `INSERT INTO blueprints(name, tenant_id) VALUES ('three', 3) RETURNING id`).Scan(&foreign)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		_, err := storeFirewall(ctx, tx, "t2d", api.CheckinRequest{Firewall: inv, FirewallHash: "h3"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tadmin := session{Email: "t2@firma.de", Role: "admin", Tenant: 2}
+	code, body = call(tadmin, "GET", "/api/v1/devices/t2d/firewall/targets", ``)
+	if code != 200 || !strings.Contains(body, `"name":"two"`) || strings.Contains(body, `"default"`) || strings.Contains(body, `"three"`) {
+		t.Fatalf("tenant targets: %d %s", code, body)
+	}
+	before = items()
+	for _, bp := range []int64{def, foreign} {
+		if code, body := adopt(tadmin, "t2d", web.ID, `{"name":"t2 item","blueprint_id":`+itoa(bp)+`,"confirm":true}`); code != 422 || items() != before {
+			t.Fatalf("tenant admin into blueprint %d: %d %s", bp, code, body)
+		}
+	}
+	if code, body := adopt(tadmin, "t2d", web.ID, `{"name":"t2 item","blueprint_id":`+itoa(own)+`}`); code != 200 || items() != before+1 {
+		t.Fatalf("tenant admin into own blueprint: %d %s", code, body)
 	}
 	// keep into the same item; the page lists it as accepted
 	if code, body := call(dashAdmin, "POST", "/api/v1/devices/d1/firewall/rules/"+ssh.ID+"/keep", `{"item_id":`+itoa(res.ItemID)+`}`); code != 200 {
