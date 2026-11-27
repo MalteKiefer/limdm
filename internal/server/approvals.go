@@ -43,7 +43,7 @@ type commandApproval struct {
 
 // needsApproval: commands four eyes approval covers.
 func (s *Server) needsApproval(typ string) bool {
-	return s.settings().FourEyes && (typ == "wipe" || typ == "lost" || typ == "script" || typ == "package_downgrade")
+	return s.settings().FourEyes && (typ == "wipe" || typ == "lost" || typ == "script" || typ == "package_downgrade" || typ == "firewall_remove_rule")
 }
 
 // requestApproval stores a request, audits and announces it, and returns its ID.

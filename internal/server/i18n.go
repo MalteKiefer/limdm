@@ -808,4 +808,7 @@ var deCatalog = map[string]string{
 	"Update wave reached ring":                       "Updatewelle hat Ring erreicht",
 	"No security update pending longer than allowed": "Kein Sicherheitsupdate länger als erlaubt ausstehend",
 	"CVE data import started":                        "Import der CVE Daten gestartet",
+	// R3-F
+	"Firewall rule adopted":           "Firewall Regel übernommen",
+	"Firewall rule kept as exception": "Firewall Regel als Ausnahme behalten",
 }

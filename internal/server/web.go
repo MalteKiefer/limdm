@@ -514,6 +514,12 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 			return "", http.StatusBadRequest, err.Error()
 		}
 		payload = string(b)
+	case typ == "firewall_remove_rule": // R3-F, app_firewall.go
+		b, err := s.firewallRemovePayload(r, id)
+		if err != nil {
+			return "", http.StatusBadRequest, err.Error()
+		}
+		payload = string(b)
 	case typ == "software_remove":
 		sr := api.SoftwareRemove{Kind: r.FormValue("kind"), Name: r.FormValue("name"), Installation: r.FormValue("installation")}
 		if err := sr.Validate(); err != nil {

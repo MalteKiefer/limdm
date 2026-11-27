@@ -614,6 +614,7 @@ Console: **Firewall**.
 | `outbound.allow[].to` | text | destination network (CIDR) or address, empty is any |
 | `outbound.allow[].port` | text | as in `allow`, empty is any; `to` or `port` is required |
 | `template` | true or false | render every rule text per device (see [Templates](#templates)) |
+| `keep` | list of text | exceptions: rules LiMDM did not add that stay on the device (the `match` of the [firewall inventory](#firewall-inventory)); agents of 0.18 and before refuse an item with `keep` |
 
 Merged as a union; `enforce` is on when any item sets it, zones of the same name are
 combined, and outbound `deny` wins over `allow`. `allow` opens ports for everybody, `rules`
@@ -659,6 +660,59 @@ new rules are added first, rules it added earlier and that are no longer declare
 deleted. Rules added by hand or by agents before 0.16 are never deleted. Without a firewall
 declaration (or with `enforce` off) the rules are left as they are, so a dropped item cannot
 lock out SSH. The default library item "Host firewall, SSH allowed" allows `22/tcp`.
+
+#### Firewall inventory
+
+At every check in the agent reads the host firewall, without changing anything, and sends
+it when it changed (a hash, like the package list). Backend is the first found of a running
+firewalld, an active ufw, nftables and iptables:
+
+* firewalld: `firewall-cmd --permanent --list-all-zones` and `--list-all-policies`, one rule
+  per interface or source binding, service, port, protocol, forward port and rich rule. The
+  raw text is the `firewall-cmd` option that adds it.
+* ufw: `ufw status verbose` (default policies) and `ufw show added`.
+* nftables: `nft -j list ruleset` for the fields, `nft -a list ruleset` for the text and handle.
+* iptables: `iptables-save` and `ip6tables-save`, only when nothing else is there.
+
+Beside ufw and firewalld the agent also lists the nftables tables (or iptables rules) they do
+not own, which is where Docker, libvirt and fail2ban put theirs. Each tool runs at most
+20 seconds; the inventory holds up to 2000 rules.
+
+Every rule has an origin: `managed` (added by LiMDM from this declaration, or the Alpine
+table `inet limdm`), `system` or `foreign`. System rules belong to container,
+virtualization and intrusion prevention tools: names starting with docker, br-, veth,
+podman, cni, netavark, nv_, libvirt, virbr, kube, cali, flannel, cilium, weave, f2b-,
+fail2ban or crowdsec in table, chain, zone, interface, jump target, comment or text. They are
+shown and never adopted, kept or removed; the server classifies every rule again and does
+not trust the agent's word. On a Docker host every Docker chain, the jumps into it and the
+rules for `docker0` and `br-*` are system rules.
+
+On the **Firewall** tab of a device an admin decides per foreign rule:
+
+* **Adopt**: the rule is added to a firewall library item of the device's blueprint (an
+  existing one, or a new one that is assigned in the blueprint and has `enforce` off) in this
+  format: a port of the default zone goes to `allow`, a port with a source to `rules`, a port
+  on an interface or in another firewalld zone (with that zone's interfaces and sources) to
+  `zones`, an outbound allow rule to `outbound.allow` (only into an item that already has an
+  outbound policy, so adopting never changes the device's outbound default). Deny rules,
+  rules without TCP or UDP port and firewalld services without a known port cannot be
+  adopted; the tab says why.
+* **Exception**: the rule's `match` (tool, place and text without counters or handles) is
+  added to `keep` of a firewall item. The rule stays and is listed as accepted.
+* **Discard**: the signed command `firewall_remove_rule` (admins, four eyes like other
+  destructive commands, confirm dialog with the raw rule) deletes exactly this rule. The agent
+  reads the firewall again and refuses when the rule changed, when it is managed or a system
+  rule, and when removing it may cut SSH (an inbound rule letting port 22 through while the
+  inbound policy is not accept) or the server (an outbound rule for the server's port while
+  the outbound policy is not accept) unless the admin confirmed that risk a second time. The
+  command uses `ufw --force delete`, `firewall-cmd --permanent --remove-…` plus `--reload`,
+  `nft delete rule … handle N` or `iptables -D`. Removals with nftables and iptables change
+  the running ruleset only: a rule loaded from `/etc/nftables.conf` or a saved iptables file
+  comes back at the next boot unless it is removed there too.
+
+Adopt and exception are normal library saves (signature, version, audit, four eyes for the
+item) plus an audit entry `firewall.adopt` or `firewall.keep` on the device; the result of a
+discard shows in the device timeline.
 
 ### `com.limdm.ssh` (list), `com.limdm.banner`
 
