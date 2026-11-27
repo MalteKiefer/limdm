@@ -363,6 +363,7 @@ export const de = {
   'settings.keys.kind.command': 'Befehlssignatur',
   'settings.keys.kind.session': 'Sitzungsschlüssel',
   'settings.keys.kind.webhook': 'Webhook Signaturgeheimnis',
+  'settings.keys.kind.logs': 'Logarchiv Schlüssel',
 
   'settings.notify.sub': 'Kanäle senden gewählte Ereignisse an Slack, Discord, E Mail oder einen signierten Webhook; drei Versuche, jeder protokolliert.',
   'settings.notify.add': 'Kanal hinzufügen',
@@ -1067,6 +1068,7 @@ export const en: Record<keyof typeof de, Msg> = {
   'settings.keys.kind.command': 'Command signing key',
   'settings.keys.kind.session': 'Session key',
   'settings.keys.kind.webhook': 'Webhook signing secret',
+  'settings.keys.kind.logs': 'Log archive key',
 
   'settings.notify.sub': 'Channels send the events you choose to Slack, Discord, email or a signed webhook; three attempts, each logged.',
   'settings.notify.add': 'Add channel',

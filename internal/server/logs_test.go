@@ -325,6 +325,12 @@ func TestLogs(t *testing.T) {
 	}
 
 	// partitions: an old day is archived (encrypted, verified), then dropped, then restored
+	keyDir := t.TempDir()
+	kekA, err := loadLogKEK(KeyProvider{}, keyDir, "logs", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.kr.logKEK = kekA
 	store := &memStore{m: map[string][]byte{}}
 	logTargetHook = func(string) blobStore { return store }
 	defer func() { logTargetHook = nil }()
@@ -372,6 +378,38 @@ func TestLogs(t *testing.T) {
 	}
 	if body := get(dashAuditor, "/api/v1/logs/status", 200); strings.Count(body, `"active":true`) != 1 || strings.Count(body, `"active":false`) != 1 || !strings.Contains(body, `"verified_at":"`) {
 		t.Fatalf("status: %s", body)
+	}
+	// rotation of the key kind logs: after the restart the new key is active,
+	// the old one retiring; the data keys are rewrapped and the archive of the
+	// old key is restored with the old data key
+	kekB, err := loadLogKEK(KeyProvider{}, keyDir, "logs-2", true)
+	if err != nil || kekB.id == kekA.id {
+		t.Fatalf("second key: %v", err)
+	}
+	// a data key of an earlier build, wrapped with the session key
+	sa, _ := s.aead(infoLogKeys)
+	exec(`INSERT INTO log_keys(id, tenant_id, wrapped, active, kek_id) VALUES ('lk-9-legacy', 9, $1, false, '')`, seal(sa, bytes.Repeat([]byte{5}, 32), []byte("lk-9-legacy")))
+	s.kr.logKEK, s.kr.logPrev = kekB, kekA
+	if n, err := s.rewrapLogKeys(ctx); err != nil || n != 3 {
+		t.Fatalf("rewrap: %d %v", n, err)
+	}
+	var left int
+	db.QueryRow(ctx, `SELECT count(*) FROM log_keys WHERE kek_id <> $1`, kekB.id).Scan(&left)
+	if left != 0 {
+		t.Fatal("data keys left on the old key")
+	}
+	if k, err := s.openLogKey(ctx, "lk-9-legacy"); err != nil || !bytes.Equal(k, bytes.Repeat([]byte{5}, 32)) {
+		t.Fatalf("legacy key: %v", err)
+	}
+	s.kr.logPrev = nil // rotation finished: the old key file is gone
+	store.m[logObjectName(1, "d1", old)] = obj
+	if n, err := s.restoreLogDay(ctx, "test", old, 0); err != nil || n != 1 {
+		t.Fatalf("restore after the rotation: %d %v", n, err)
+	}
+	// without any loaded key encryption key nothing opens
+	s.kr.logKEK = nil
+	if _, err := s.openLogKey(ctx, "lk-9-legacy"); err == nil {
+		t.Fatal("data key opened without its key encryption key")
 	}
 	get(tenant2, "/api/v1/logs/status", 403)
 }

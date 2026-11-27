@@ -1112,6 +1112,9 @@ CREATE TABLE IF NOT EXISTS log_keys (
     active     BOOLEAN NOT NULL DEFAULT true
 );
 CREATE UNIQUE INDEX IF NOT EXISTS log_keys_active ON log_keys (tenant_id) WHERE active;
+-- the key encryption key (key kind logs, keys.go) that wraps a data key;
+-- empty: wrapped with the session key by earlier builds, rewrapped at start
+ALTER TABLE log_keys ADD COLUMN IF NOT EXISTS kek_id TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS log_archives (
     tenant_id   BIGINT NOT NULL,
     day         DATE NOT NULL,

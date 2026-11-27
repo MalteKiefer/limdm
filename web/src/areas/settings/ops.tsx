@@ -26,7 +26,7 @@ export function Keys() {
   const [act, setAct] = useState<{ kind: string; op: 'rotate' | 'finish' } | null>(null)
   const [name, setName] = useState('')
   const [force, setForce] = useState(false)
-  const run = useAction(['settings', 'keys'], (v: { kind: 'ca' | 'netca' | 'command' | 'session' | 'webhook'; op: 'rotate' | 'finish'; name: string; force: boolean }) =>
+  const run = useAction(['settings', 'keys'], (v: { kind: 'ca' | 'netca' | 'command' | 'session' | 'webhook' | 'logs'; op: 'rotate' | 'finish'; name: string; force: boolean }) =>
     unwrap(api.POST('/api/v1/keys/{kind}/{op}', { params: { path: { kind: v.kind, op: v.op } }, body: { name: v.name, force: v.force } })),
     (r) => r.message || t('settings.saved'),
   )

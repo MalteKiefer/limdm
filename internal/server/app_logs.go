@@ -445,6 +445,7 @@ func (s *Server) apiLogStatus(w http.ResponseWriter, r *http.Request, c apiCalle
 		Tenant  int64     `json:"tenant_id"`
 		Created time.Time `json:"created_at"`
 		Active  bool      `json:"active"`
+		KEK     string    `json:"kek_id"` // key encryption key (key kind logs) that wraps it
 	}
 	type archive struct {
 		Tenant   int64      `json:"tenant_id"`
@@ -494,12 +495,12 @@ func (s *Server) apiLogStatus(w http.ResponseWriter, r *http.Request, c apiCalle
 		if pct := diskFreePct(ctx, s.db); pct >= 0 {
 			out.FreePct = &pct
 		}
-		rows, err = s.db.Query(ctx, `SELECT id, tenant_id, created_at, active FROM log_keys ORDER BY created_at DESC LIMIT 200`)
+		rows, err = s.db.Query(ctx, `SELECT id, tenant_id, created_at, active, kek_id FROM log_keys ORDER BY created_at DESC LIMIT 200`)
 	}
 	if err == nil {
 		out.Keys, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (key, error) {
 			var k key
-			return k, row.Scan(&k.ID, &k.Tenant, &k.Created, &k.Active)
+			return k, row.Scan(&k.ID, &k.Tenant, &k.Created, &k.Active, &k.KEK)
 		})
 	}
 	if err == nil {

@@ -211,15 +211,20 @@ logs/t<tenant>/manifests/<YYYY-MM-DD>.json
   64 KiB sealed with AES-256-GCM. The nonce is the prefix and the chunk number; the
   additional data binds the header and marks the last chunk, so changed, reordered,
   removed or appended chunks fail to open.
-* Each tenant has its own random 256 bit data key. Data keys are wrapped with a key
-  derived from `LIMDM_SESSION_KEY` (HKDF, purpose "limdm log archive keys v1") and stored
-  in the database with their ID (`lk-<tenant>-<random>`). They are not in the bucket:
-  whoever holds the bucket alone cannot read the logs.
-* Rotation: **Rotate keys** (Settings, Logs) gives every tenant a new active data key;
-  older archives keep naming their key and stay readable. A rotation of the session key
-  (`limdm-server keys rotate session`, [keys.md](keys.md)) wraps the data keys again.
-* The data keys are part of the database backup. Without the database (or its backup)
-  and the session key, archives cannot be decrypted.
+* Each tenant has its own random 256 bit data key, stored in the database with its ID
+  (`lk-<tenant>-<random>`), wrapped (AES-256-GCM) with a key encryption key of the server
+  key management: the key kind `logs` ([keys.md](keys.md#log-archive-key)), an Ed25519 key
+  in the CA directory or in the HSM (PKCS#11), the same root as the CA and command keys.
+  It is independent of `LIMDM_SESSION_KEY`: a session key rotation or a leaked session key
+  does not touch the archive. The key encryption key ID is stored with every data key.
+* Data keys are not in the bucket: whoever holds the bucket alone cannot read the logs.
+* Rotation of data keys: **Rotate keys** (Settings, Logs) gives every tenant a new active
+  data key; older archives keep naming their key and stay readable.
+* Rotation of the key encryption key: **Settings, Keys**, `logs` (or `limdm-server keys
+  rotate logs`). After the restart every data key is wrapped again with the new key; then
+  `finish` removes the old one. Archived days stay readable throughout.
+* Decrypting an archive needs the database (or its backup, for the data keys) and the CA
+  directory or HSM (for the key encryption key).
 
 ### Restore
 

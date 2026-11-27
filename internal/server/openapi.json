@@ -7146,7 +7146,8 @@
                 "netca",
                 "command",
                 "session",
-                "webhook"
+                "webhook",
+                "logs"
               ]
             },
             "description": ""
@@ -16464,7 +16465,8 @@
               "netca",
               "command",
               "session",
-              "webhook"
+              "webhook",
+              "logs"
             ]
           },
           "active": {
@@ -19338,7 +19340,8 @@
                 "id",
                 "tenant_id",
                 "created_at",
-                "active"
+                "active",
+                "kek_id"
               ],
               "properties": {
                 "id": {
@@ -19353,6 +19356,10 @@
                 },
                 "active": {
                   "type": "boolean"
+                },
+                "kek_id": {
+                  "type": "string",
+                  "description": "key encryption key (key kind logs) that wraps the data key"
                 }
               }
             }

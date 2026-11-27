@@ -165,6 +165,7 @@ function Status({ archiveOn }: { archiveOn: boolean }) {
             {d.keys.map((k) => (
               <li key={k.id} className="flex flex-wrap items-center gap-2">
                 <span className="font-mono">{k.id}</span>
+                <span className="font-mono text-muted">{k.kek_id}</span>
                 <span className="text-muted">{dateTime(k.created_at)}</span>
                 {k.active ? <Badge tone="ok">{t('logs.st.active')}</Badge> : <Badge tone="off">{t('logs.st.retired')}</Badge>}
               </li>

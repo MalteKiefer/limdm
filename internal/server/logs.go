@@ -377,6 +377,12 @@ func (s *Server) logsLoop(ctx context.Context) {
 			return
 		}
 		last = time.Now()
+		// at start and after a rotation of the key kind logs (keys.go)
+		if n, err := s.rewrapLogKeys(ctx); err != nil {
+			s.log.Error("log archive keys", "err", err)
+		} else if n > 0 {
+			s.log.Info("log archive data keys rewrapped", "keys", n)
+		}
 		if err := s.maintainLogs(ctx, time.Now()); err != nil {
 			s.log.Error("log partitions", "err", err)
 		}

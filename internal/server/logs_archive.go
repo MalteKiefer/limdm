@@ -7,6 +7,8 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ed25519"
+	"crypto/hkdf"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
@@ -33,9 +35,11 @@ import (
 // Log archive (docs/logs.md#archive). Each finished day is exported per
 // tenant and device as gzip compressed NDJSON, encrypted before upload with
 // AES-256-GCM in 64 KiB chunks under a data key of the tenant. Data keys are
-// random, wrapped with a key derived from LIMDM_SESSION_KEY (crypto.go) and
-// stored in log_keys with an ID; rotating starts a new key per tenant, old
-// keys stay for reading. A manifest per tenant and day lists every object
+// random and stored in log_keys with an ID, wrapped with a key encryption
+// key derived from the key kind logs of the server key management (keys.go:
+// a file in the CA directory or an HSM object), independent of
+// LIMDM_SESSION_KEY. Rotating data keys starts a new key per tenant, old
+// ones stay for reading; rotating the key kind logs rewraps every data key. A manifest per tenant and day lists every object
 // with its SHA-256; every upload is read back and compared before the day
 // counts as archived, and a day's partition is dropped only then.
 //
@@ -44,6 +48,8 @@ import (
 //	logs/t<tenant>/<device>/<YYYY-MM-DD>.ndjson.gz.enc
 //	logs/t<tenant>/manifests/<YYYY-MM-DD>.json
 
+// infoLogKeys sealed data keys with the session key in earlier builds; such
+// rows (empty kek_id) are rewrapped at start (rewrapLogKeys).
 const infoLogKeys = "limdm log archive keys v1"
 
 // logArchiveMagic starts every encrypted object (format version 1).
@@ -196,16 +202,80 @@ func (o *logOpener) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-// ---- data keys ----
+// ---- key encryption keys and data keys ----
+
+// logKEKLabel is signed to derive a key encryption key: Ed25519 signatures
+// are deterministic (RFC 8032), so the signature over this label, never
+// published, is a secret only the key holder computes, also in an HSM
+// (as the audit key, audit.go).
+const logKEKLabel = "limdm log archive kek v1"
+
+// logKEK wraps the data keys; id names it in log_keys.kek_id.
+type logKEK struct {
+	id   string
+	aead cipher.AEAD
+}
+
+// loadLogKEK opens the key kind logs named name (the file <name>.key in the
+// CA directory, created when missing and create is set, or the HSM object
+// limdm-<name>) and derives its key encryption key.
+func loadLogKEK(p KeyProvider, dir, name string, create bool) (*logKEK, error) {
+	gen := genEd25519
+	if !create {
+		gen = nil
+	}
+	key, err := p.signer(dir, name, gen)
+	if err != nil {
+		return nil, fmt.Errorf("log archive key %q: %w", name, err)
+	}
+	if _, ok := key.Public().(ed25519.PublicKey); !ok {
+		return nil, fmt.Errorf("log archive key %q: not an Ed25519 key", name)
+	}
+	a, err := signEd25519(key, []byte(logKEKLabel))
+	if err != nil {
+		return nil, err
+	}
+	b, err := signEd25519(key, []byte(logKEKLabel))
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(a, b) {
+		return nil, fmt.Errorf("log archive key %q signs non deterministically", name)
+	}
+	k, err := hkdf.Key(sha256.New, a, nil, logKEKLabel, 32)
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(k)
+	if err != nil {
+		return nil, err
+	}
+	g, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	return &logKEK{id: "kek-" + pubHex(key)[:16], aead: g}, nil
+}
+
+// activeLogKEK is the key encryption key new data keys are wrapped with.
+func (s *Server) activeLogKEK() (*logKEK, error) {
+	if s.kr.logKEK == nil {
+		if s.kr.logErr != nil {
+			return nil, s.kr.logErr
+		}
+		return nil, errors.New("the log archive key (key kind logs) is not loaded")
+	}
+	return s.kr.logKEK, nil
+}
 
 // logDataKey returns the active data key of a tenant, creating one.
 func (s *Server) logDataKey(ctx context.Context, tenant int64) (string, []byte, error) {
 	for range 2 {
-		var id string
+		var id, kek string
 		var wrapped []byte
-		err := s.db.QueryRow(ctx, `SELECT id, wrapped FROM log_keys WHERE tenant_id = $1 AND active`, tenant).Scan(&id, &wrapped)
+		err := s.db.QueryRow(ctx, `SELECT id, kek_id, wrapped FROM log_keys WHERE tenant_id = $1 AND active`, tenant).Scan(&id, &kek, &wrapped)
 		if err == nil {
-			k, err := s.unwrapLogKey(id, wrapped)
+			k, err := s.unwrapLogKey(id, kek, wrapped)
 			return id, k, err
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -220,32 +290,45 @@ func (s *Server) logDataKey(ctx context.Context, tenant int64) (string, []byte, 
 
 // newLogKey stores a new active data key (none when one is active already).
 func (s *Server) newLogKey(ctx context.Context, q execer, tenant int64) error {
-	key := make([]byte, 32)
-	rand.Read(key)
-	id := fmt.Sprintf("lk-%d-%s", tenant, randToken(6))
-	a, err := s.aead(infoLogKeys)
+	kek, err := s.activeLogKEK()
 	if err != nil {
 		return err
 	}
-	_, err = q.Exec(ctx, `INSERT INTO log_keys(id, tenant_id, wrapped) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, id, tenant, seal(a, key, []byte(id)))
+	key := make([]byte, 32)
+	rand.Read(key)
+	id := fmt.Sprintf("lk-%d-%s", tenant, randToken(6))
+	_, err = q.Exec(ctx, `INSERT INTO log_keys(id, tenant_id, wrapped, kek_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+		id, tenant, seal(kek.aead, key, []byte(id)), kek.id)
 	return err
 }
 
-func (s *Server) unwrapLogKey(id string, wrapped []byte) ([]byte, error) {
-	a, err := s.aead(infoLogKeys)
-	if err != nil {
-		return nil, err
+// unwrapLogKey opens a data key with the key encryption key that wrapped
+// it: the active or the retiring one, or, for an empty kek_id, the session
+// key of earlier builds.
+func (s *Server) unwrapLogKey(id, kekID string, wrapped []byte) ([]byte, error) {
+	if kekID == "" {
+		a, err := s.aead(infoLogKeys)
+		if err != nil {
+			return nil, err
+		}
+		return open(a, wrapped, []byte(id))
 	}
-	return open(a, wrapped, []byte(id))
+	for _, k := range []*logKEK{s.kr.logKEK, s.kr.logPrev} {
+		if k != nil && k.id == kekID {
+			return open(k.aead, wrapped, []byte(id))
+		}
+	}
+	return nil, fmt.Errorf("data key %s: its key encryption key %s is not loaded", id, kekID)
 }
 
 // openLogKey looks a data key up by ID (any, active or not).
 func (s *Server) openLogKey(ctx context.Context, id string) ([]byte, error) {
+	var kek string
 	var wrapped []byte
-	if err := s.db.QueryRow(ctx, `SELECT wrapped FROM log_keys WHERE id = $1`, id).Scan(&wrapped); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT kek_id, wrapped FROM log_keys WHERE id = $1`, id).Scan(&kek, &wrapped); err != nil {
 		return nil, err
 	}
-	return s.unwrapLogKey(id, wrapped)
+	return s.unwrapLogKey(id, kek, wrapped)
 }
 
 // rotateLogKeys gives every tenant with a key a new active one; archives
@@ -272,45 +355,46 @@ func (s *Server) rotateLogKeys(ctx context.Context, actor string) (int, error) {
 	return n, err
 }
 
-// resealLogKeys wraps data keys again with the first session key.
-func (s *Server) resealLogKeys(ctx context.Context, dry bool) (int, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, wrapped FROM log_keys`)
+// rewrapLogKeys wraps every data key with the active key encryption key:
+// after a rotation of the key kind logs (the retiring key is still
+// loaded) and for data keys of earlier builds wrapped with the session key.
+// The data keys stay the same, so every archive stays readable; once all
+// are rewrapped the rotation can finish.
+func (s *Server) rewrapLogKeys(ctx context.Context) (int, error) {
+	kek, err := s.activeLogKEK()
+	if err != nil {
+		return 0, err
+	}
+	rows, err := s.db.Query(ctx, `SELECT id, kek_id, wrapped FROM log_keys WHERE kek_id <> $1`, kek.id)
 	if err != nil {
 		return 0, err
 	}
 	type k struct {
-		id      string
+		id, kek string
 		wrapped []byte
 	}
 	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (k, error) {
 		var v k
-		return v, r.Scan(&v.id, &v.wrapped)
+		return v, r.Scan(&v.id, &v.kek, &v.wrapped)
 	})
 	if err != nil {
 		return 0, err
 	}
 	n := 0
-	a, err := s.aead(infoLogKeys)
-	if err != nil {
-		return 0, err
-	}
+	var errs []error
 	for _, v := range list {
-		if s.openableWithPrimary(infoLogKeys, v.wrapped, []byte(v.id)) {
-			continue
-		}
-		n++
-		if dry {
-			continue
-		}
-		plain, err := open(a, v.wrapped, []byte(v.id))
+		plain, err := s.unwrapLogKey(v.id, v.kek, v.wrapped)
 		if err != nil {
-			return n, fmt.Errorf("log key %s: no session key opens it: %w", v.id, err)
+			errs = append(errs, err)
+			continue
 		}
-		if _, err := s.db.Exec(ctx, `UPDATE log_keys SET wrapped = $3 WHERE id = $1 AND wrapped = $2`, v.id, v.wrapped, seal(a, plain, []byte(v.id))); err != nil {
+		if _, err := s.db.Exec(ctx, `UPDATE log_keys SET wrapped = $3, kek_id = $4 WHERE id = $1 AND wrapped = $2`,
+			v.id, v.wrapped, seal(kek.aead, plain, []byte(v.id)), kek.id); err != nil {
 			return n, err
 		}
+		n++
 	}
-	return n, nil
+	return n, errors.Join(errs...)
 }
 
 // ---- archive ----

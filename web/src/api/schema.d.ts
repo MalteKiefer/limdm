@@ -4778,7 +4778,7 @@ export interface components {
         };
         KeyStatus: {
             /** @enum {string} */
-            kind: "ca" | "netca" | "command" | "session" | "webhook";
+            kind: "ca" | "netca" | "command" | "session" | "webhook" | "logs";
             active: string;
             previous: string;
             /** Format: date-time */
@@ -5646,6 +5646,8 @@ export interface components {
                 /** Format: date-time */
                 created_at: string;
                 active: boolean;
+                /** @description key encryption key (key kind logs) that wraps the data key */
+                kek_id: string;
             }[];
             archives: {
                 tenant_id: number;
@@ -9731,7 +9733,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                kind: "ca" | "netca" | "command" | "session" | "webhook";
+                kind: "ca" | "netca" | "command" | "session" | "webhook" | "logs";
                 op: "rotate" | "finish";
             };
             cookie?: never;
