@@ -8,10 +8,11 @@ import * as home from '../areas/home/messages'
 import * as inbox from '../areas/inbox/messages'
 import * as reports from '../areas/reports/messages'
 import * as settings from '../areas/settings/messages'
+import * as updates from '../areas/updates/messages'
 import * as core from './core'
 import type { Catalog } from './types'
 
-const parts = [core, home, inbox, devices, compliance, config, activity, reports, settings]
+const parts = [core, home, inbox, devices, compliance, config, activity, reports, settings, updates]
 
 type DE = typeof core.de &
   typeof home.de &
@@ -21,7 +22,8 @@ type DE = typeof core.de &
   typeof config.de &
   typeof activity.de &
   typeof reports.de &
-  typeof settings.de
+  typeof settings.de &
+  typeof updates.de
 
 export type MessageKey = keyof DE & string
 

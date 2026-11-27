@@ -31,6 +31,7 @@ function WithSettings({ children }: { children: (s: Settings, save: (section: Se
     operations: useSaveSection('operations'),
     retention: useSaveSection('retention'),
     enrollment: useSaveSection('enrollment'),
+    cve_feeds: useSaveSection('cve_feeds'),
   }
   if (q.isPending) return <LoadingState rows={6} />
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />

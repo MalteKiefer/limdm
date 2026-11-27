@@ -16,8 +16,9 @@ import { DeviceDialog, useDeviceMenu, useRun, type Dialog, type Target } from '.
 import { useDetail, type DeviceDetail } from './api'
 import { protectiveAlarm, usedPct } from './logic'
 import { ActivityTab, InventoryTab, SoftwareTab } from './tabs'
+import { UpdatesTab } from './UpdatesTab'
 
-const tabs = ['overview', 'compliance', 'config', 'software', 'inventory', 'activity'] as const
+const tabs = ['overview', 'compliance', 'config', 'software', 'updates', 'inventory', 'activity'] as const
 type Tab = (typeof tabs)[number]
 
 export function DevicePage() {
@@ -54,6 +55,7 @@ export function DevicePage() {
         {tab === 'compliance' && <Compliance d={d} />}
         {tab === 'config' && <Config d={d} />}
         {tab === 'software' && <SoftwareTab d={d} sub={search.sub} setSub={setSub} open={setDialog} />}
+        {tab === 'updates' && <UpdatesTab d={d} />}
         {tab === 'inventory' && <InventoryTab d={d} sub={search.sub} setSub={setSub} open={setDialog} />}
         {tab === 'activity' && <ActivityTab d={d} />}
       </TabPanel>

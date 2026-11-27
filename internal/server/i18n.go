@@ -798,4 +798,14 @@ var deCatalog = map[string]string{
 	"this enrollment needs a TPM bound key":                                        "Diese Registrierung braucht einen an das TPM gebundenen Schlüssel",
 	"this device needs a TPM bound key":                                            "Dieses Gerät braucht einen an das TPM gebundenen Schlüssel",
 	"TPM credential activation failed":                                             "TPM Credential Activation fehlgeschlagen",
+	// R3-P
+	"Update ring saved":                              "Updatering gespeichert",
+	"Update ring deleted":                            "Updatering gelöscht",
+	"Update ring paused":                             "Updatering angehalten",
+	"Update ring resumed":                            "Updatering fortgesetzt",
+	"Update ring approved":                           "Updatering freigegeben",
+	"Update wave started":                            "Updatewelle gestartet",
+	"Update wave reached ring":                       "Updatewelle hat Ring erreicht",
+	"No security update pending longer than allowed": "Kein Sicherheitsupdate länger als erlaubt ausstehend",
+	"CVE data import started":                        "Import der CVE Daten gestartet",
 }

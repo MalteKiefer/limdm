@@ -97,14 +97,17 @@ var catalog = []check{
 	{ID: "updates.auto", Title: "Automatic updates are declared", Level: 1,
 		Refs: refs(l(bsiClient, bsiPatch, bsiUpdatesAuto, bsiPatchRegul), l("A.8.8", "A.8.32")),
 		Run: func(a *Agent) (string, string) {
-			if m := a.pol.Updates.Mode; m == "" || m == "off" {
-				return fail, "updates mode is off or not declared"
+			if !a.pol.Updates.Installs() {
+				return fail, "no rule installs OS updates, or updates are not declared"
 			}
-			return pass, "mode " + a.pol.Updates.Mode + ", window " + a.pol.Updates.Window
+			return pass, rulesSummary(a.pol.Updates)
 		}},
 	{ID: "updates.security", Title: "Security updates are installed", Level: 1,
 		Refs: refs(l(bsiClient, bsiLinux, bsiPatch, bsiUpdates, bsiPatchRegul), l("A.8.8"), "1.2.2.1 Ensure updates, patches, and additional security software are installed"),
 		Run:  runSecurityUpdates},
+	{ID: "updates.security_age", Title: "No security update pending longer than allowed", Level: 1,
+		Refs: refs(l(bsiPatch, bsiPatchRegul), l("A.8.8")),
+		Run:  runSecurityAge},
 	{ID: "updates.reboot", Title: "No pending reboot older than 7 days", Level: 1,
 		Refs: refs(l(bsiPatch, bsiPatchRegul), l("A.8.8")),
 		Run:  runRebootPending},
@@ -727,11 +730,12 @@ func runSecurityUpdates(a *Agent) (string, string) {
 		return fail, "update status unknown: " + err.Error()
 	}
 	detail := fmt.Sprintf("%d security updates, %d updates in total pending", sec, all)
+	a.securitySince(sec, time.Now())
 	if sec == 0 {
 		return pass, detail
 	}
 	// Patch process working: pending updates are tolerated until the next window run.
-	if m := a.pol.Updates.Mode; m != "" && m != "off" && time.Since(a.state.LastUpdateRun) < updateGap(a.pol.Updates) {
+	if a.pol.Updates.Installs() && time.Since(a.state.LastUpdateRun) < updateGap(a.pol.Updates) {
 		return pass, detail + ", installed in the next maintenance window"
 	}
 	return fail, detail

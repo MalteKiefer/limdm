@@ -218,6 +218,16 @@ that missed the change notification loads it on reconnect):
 
 The environment variables of the same name are only the values until the first save here.
 
+### CVE data
+
+Daily import of the security data on the leading instance, per feed on or off (each off
+by default, they download from third parties) with its URL (empty: the public one; https
+only): Debian Security Tracker, Ubuntu OSV export, Arch Security Tracker (`issues/all.json`),
+Alpine secdb (base address). One download limit per feed in MB (1024 when empty, at most
+4096). Section `cve_feeds` of `PATCH /api/v1/settings/{section}` with `debian`, `ubuntu`,
+`arch`, `alpine`, `debian_url`, `ubuntu_url`, `arch_url`, `alpine_url`, `max_mb`. Details in
+[patching.md](patching.md#cve-data-for-debian-ubuntu-arch-and-alpine).
+
 ### Backup
 
 Targets (local directory, S3 with Object Lock, Backblaze B2, SFTP, WebDAV) with a connection test,

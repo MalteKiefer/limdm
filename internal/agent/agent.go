@@ -114,6 +114,9 @@ type State struct {
 	ManagedFileSums     map[string]string         `json:"managed_file_sums,omitempty"` // path -> SHA-256 of the content written; removal only when it still matches
 	FirewallRules       []api.FirewallRule        `json:"firewall_rules,omitempty"`    // allow rules LiMDM added
 	LocalUsers          map[string]localUserState `json:"local_users,omitempty"`       // accounts com.limdm.localusers manages
+	UpdateRuns          map[string]api.UpdateRun  `json:"update_runs,omitempty"`       // last run per update source
+	UpdateGate          *api.UpdateGate           `json:"update_gate,omitempty"`       // the device's update ring as the server last sent it
+	SecuritySince       time.Time                 `json:"security_since,omitzero"`     // security updates pending since
 }
 
 type Agent struct {
@@ -666,7 +669,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	a.lastFlatpaks = inv.Flatpaks
 	a.lastSystem = DesktopSystem{OS: strings.TrimSpace(inv.OSName + " " + inv.OSVersion), Kernel: inv.Kernel, Arch: inv.Arch,
 		Inventory: inv.Source, Vendor: inv.Vendor, Model: inv.Model, Serial: inv.Serial}
-	status := api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus(), CatalogVersion: CatalogVersion}
+	status := api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus(), CatalogVersion: CatalogVersion, Updates: a.updateStatus()}
 	statusHash := statusHashOf(status)
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
 		StatusHash: statusHash, Results: a.state.Results, Events: a.pendingEvents(), Metrics: metrics(), BrandingHash: a.state.BrandingHash,
@@ -766,6 +769,7 @@ func (a *Agent) cycle(ctx context.Context) {
 		a.state.Users = users
 		a.syncNow = true
 	}
+	a.state.UpdateGate = resp.UpdateGate
 	a.compose()
 	if resp.DeviceCAs != "" {
 		a.updateTrustAnchors(resp.DeviceCAs)
@@ -888,36 +892,6 @@ func inWindow(now time.Time, window string) bool {
 	return m >= f || m < t
 }
 
-// maintenance installs updates once per window and reboots if declared.
-func (a *Agent) maintenance(now time.Time) {
-	u := a.pol.Updates
-	if u.Mode == "" || u.Mode == "off" || !inWindow(now, u.Window) || !updateDay(now, u.Window, u.Days) {
-		return
-	}
-	if now.Sub(a.state.LastUpdateRun) > 20*time.Hour {
-		out, err := a.host.upgrade(u.Mode == "security")
-		a.state.LastUpdateRun = now.Round(0) // wall clock: the monotonic one stops during suspend
-		if err != nil {
-			a.problem(api.TypeUpdates, "updates (%s) failed: %v", u.Mode, err)
-		} else {
-			a.event("updates (%s) installed: %s", u.Mode, lastLines(out, 3))
-			if u.Autoremove {
-				if out, err := a.host.autoremove(); err != nil {
-					a.problem(api.TypeUpdates, "autoremove failed: %v", err)
-				} else if strings.TrimSpace(out) != "" {
-					a.event("autoremove: %s", lastLines(out, 3))
-				}
-			}
-		}
-	}
-	// Schedule once: a new shutdown call would replace and postpone the pending one.
-	if u.Reboot && !a.rebootPending(now) && a.host.rebootRequired() {
-		if err := a.scheduleReboot(now, u.RebootDefer); err != nil {
-			a.problem(api.TypeUpdates, "reboot after updates: %v", err)
-		}
-	}
-}
-
 func (a *Agent) execute(c api.Command) api.CommandResult {
 	r := api.CommandResult{ID: c.ID}
 	var out string
@@ -927,7 +901,17 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out = "ok"
 	case "update":
 		out, err = a.host.upgrade(false)
+		if fo, ferr := flatpakUpgrade(); ferr != nil {
+			out += "\nflatpak: " + ferr.Error()
+		} else if fo != "" {
+			out += "\n" + lastLines(fo, 10)
+		}
+		out = cleanUpgradeOutput(out)
 		a.state.LastUpdateRun = time.Now().Round(0)
+	case "package_hold":
+		out, err = a.packageHold(c.Payload)
+	case "package_downgrade":
+		out, err = a.packageDowngrade(c.Payload)
 	case "reboot", "shutdown":
 		out, err = a.powerAction(c.Type, c.Payload, c.CreatedAt)
 	case "lock":

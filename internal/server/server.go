@@ -450,7 +450,7 @@ func (s *Server) Close() {
 func (s *Server) Background(ctx context.Context) {
 	for name, loop := range map[string]func(context.Context){"google sync": s.googleSyncLoop, "history": s.historyLoop,
 		"catalog icons": s.iconLoop, "syslog": s.syslogLoop, "reseal": s.resealLoop, "backup": s.backupLoop,
-		"reports": s.reportLoop} {
+		"reports": s.reportLoop, "update rings": s.ringLoop, "cve feeds": s.cveLoop} {
 		go s.background(ctx, name, loop, true)
 	}
 	// every instance serves agent packages from its own release directory
@@ -1063,6 +1063,10 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			s.failAPI(w, err)
 			return
 		}
+		if err := storeUpdateStatus(ctx, tx, id, st.Updates); err != nil { // app_patch.go
+			s.failAPI(w, err)
+			return
+		}
 		statusHash = req.StatusHash
 	}
 	if err := recordMetrics(ctx, tx, id, req.Metrics); err != nil {
@@ -1075,6 +1079,10 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Packages != nil {
 		if err := savePackages(ctx, tx, id, req.Packages, truncate(req.PackagesHash, 128)); err != nil {
+			s.failAPI(w, err)
+			return
+		}
+		if err := matchDeviceCVEs(ctx, tx, id); err != nil { // app_patch_cve.go
 			s.failAPI(w, err)
 			return
 		}
@@ -1137,6 +1145,10 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := resolveDevice(ctx, tx, id)
 	if err != nil {
+		s.failAPI(w, err)
+		return
+	}
+	if resp.UpdateGate, err = updateGate(ctx, tx, id, res.Chain); err != nil { // app_patch.go
 		s.failAPI(w, err)
 		return
 	}

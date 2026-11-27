@@ -79,9 +79,13 @@ func TestInWindow(t *testing.T) {
 }
 
 func TestAptPending(t *testing.T) {
-	out := "Inst libssl3 [3.0.1] (3.0.2 Debian-Security:12/stable-security [amd64])\nInst vim [9.0] (9.1 Debian:12.6/stable [amd64])\nConf vim\n"
-	if all, sec := countAptPending(out); all != 2 || sec != 1 {
-		t.Fatalf("all=%d sec=%d", all, sec)
+	out := "Inst libssl3 [3.0.1] (3.0.2 Debian-Security:12/stable-security [amd64])\nInst vim [9.0] (9.1 Debian:12.6/stable [amd64])\nConf vim\n" +
+		"Inst docker-ce [5:27.0] (5:27.1-1~debian.12~bookworm Docker:bookworm [amd64])\nInst linux-image-6.1.0-30-amd64 (6.1.124-1 Debian:12.9/stable, Debian-Security:12/stable-security [amd64])\n"
+	l := parseAptPending(out, "debian")
+	if len(l) != 4 || l[0].Name != "libssl3" || l[0].Current != "3.0.1" || l[0].Candidate != "3.0.2" || !l[0].Security || l[0].Origin != "Debian-Security" ||
+		l[1].Security || l[1].Source != api.SourceOSAll || l[2].Source != api.SourceThirdParty || l[2].Origin != "Docker" || l[2].Candidate != "5:27.1-1~debian.12~bookworm" ||
+		l[3].Current != "" || !l[3].Security {
+		t.Fatalf("%+v", l)
 	}
 }
 
@@ -1118,15 +1122,23 @@ func TestDistributionFamilies(t *testing.T) {
 func TestCountDnfSecurity(t *testing.T) {
 	dnf4 := "FEDORA-2024-1a2b3c Important/Sec. openssl-3.1.4-1.fc39.x86_64\nRHSA-2024:1234 Moderate/Sec. curl-8.0-1.el9.x86_64\n"
 	dnf5 := "Name               Type     Severity  Package                           Issued\nFEDORA-2025-ab12cd security Important openssl-3.2.2-1.fc41.x86_64 2025-01-02 10:00:00\n"
-	if countDnfLines(dnf4) != 2 || countDnfLines(dnf5) != 1 || countDnfLines("") != 0 {
-		t.Fatalf("dnf4 %d dnf5 %d", countDnfLines(dnf4), countDnfLines(dnf5))
+	if _, sev, name, ok := dnfAdvisoryLine(strings.Split(dnf5, "\n")[1]); !ok || sev != "Important" || name != "openssl" {
+		t.Fatalf("dnf5: %s %s", sev, name)
 	}
-	if countDnfLines("FEDORA-EPEL-2024-5fd0ca6e30 Important/Sec. nginx-1.26-1.el9.x86_64\n") != 1 {
-		t.Error("EPEL advisory not counted")
+	if _, _, name, ok := dnfAdvisoryLine("FEDORA-EPEL-2024-5fd0ca6e30 Important/Sec. nginx-1.26-1.el9.x86_64"); !ok || name != "nginx" {
+		t.Error("EPEL advisory not read")
 	}
-	checkUpdate := "\nkernel.x86_64    6.11.4-301.fc41    updates\nopenssl.x86_64   1:3.2.2-9.fc41     updates\nObsoleting Packages\n"
-	if countDnfPackages(checkUpdate) != 2 {
-		t.Errorf("check-update count %d", countDnfPackages(checkUpdate))
+	checkUpdate := "\nkernel.x86_64    6.11.4-301.fc41    updates\nopenssl.x86_64   1:3.2.2-9.fc41     updates\ncurl.x86_64 8.0-2.el9 epel\nObsoleting Packages\n"
+	l := parseDnfCheckUpdate(checkUpdate)
+	if len(l) != 3 || l[1].Name != "openssl" || l[1].Candidate != "1:3.2.2-9.fc41" || l[1].Source != api.SourceOSAll || l[2].Source != api.SourceThirdParty {
+		t.Fatalf("check-update %+v", l)
+	}
+	markDnfSecurity(l, dnf4, "CVE-2024-1234 Important/Sec. openssl-3.1.4-1.fc39.x86_64\nCVE-2024-9999 Moderate/Sec. curl-8.0-1.el9.x86_64\n")
+	if !l[1].Security || l[1].Severity != "Important" || len(l[1].CVEs) != 1 || l[0].Security || !l[2].Security || l[2].Severity != "Moderate" {
+		t.Fatalf("security %+v", l)
+	}
+	if !dnfDistroRepo("rhel-9-for-x86_64-baseos-rpms") || !dnfDistroRepo("ol9_baseos_latest") || dnfDistroRepo("docker-ce-stable") || dnfDistroRepo("epel") {
+		t.Error("distribution repos")
 	}
 }
 

@@ -943,3 +943,66 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS tpm_bound BOOLEAN NOT NULL DEFAULT 
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS tpm_ak BYTEA;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS tpm_ek_sha256 TEXT NOT NULL DEFAULT '';
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS require_tpm BOOLEAN NOT NULL DEFAULT false;
+-- R3-P
+-- update rings (app_patch.go): ordered per tenant; a wave starts at the
+-- first ring and reaches ring N once it is deferral_days old, the ring
+-- before has it and nothing is paused (or approved, with require_approval)
+CREATE TABLE IF NOT EXISTS update_rings (
+    id               BIGSERIAL PRIMARY KEY,
+    tenant_id        BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id) ON DELETE CASCADE,
+    name             TEXT NOT NULL,
+    position         INT NOT NULL,
+    deferral_days    INT NOT NULL DEFAULT 0,
+    wave_days        INT NOT NULL DEFAULT 0,
+    paused           BOOLEAN NOT NULL DEFAULT false,
+    require_approval BOOLEAN NOT NULL DEFAULT false,
+    approved_wave    INT NOT NULL DEFAULT 0,
+    all_devices      BOOLEAN NOT NULL DEFAULT false,
+    tags             TEXT[] NOT NULL DEFAULT '{}',
+    groups           TEXT[] NOT NULL DEFAULT '{}',
+    blueprints       BIGINT[] NOT NULL DEFAULT '{}',
+    wave             INT NOT NULL DEFAULT 0,
+    wave_at          TIMESTAMPTZ,
+    UNIQUE (tenant_id, name)
+);
+CREATE TABLE IF NOT EXISTS update_waves (
+    tenant_id  BIGINT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    wave       INT NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_by TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, wave)
+);
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS update_ring_id BIGINT REFERENCES update_rings(id) ON DELETE SET NULL;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS updates JSONB;
+-- Debian and Ubuntu security data (app_patch_cve.go): fixed versions per
+-- distribution, release, source package and CVE, the state of each feed,
+-- and the CVEs matched against the installed packages of each device
+ALTER TABLE device_packages ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS cve_fixes (
+    distro   TEXT NOT NULL,
+    release  TEXT NOT NULL,
+    package  TEXT NOT NULL,
+    cve      TEXT NOT NULL,
+    fixed    TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (distro, release, package, cve)
+);
+CREATE TABLE IF NOT EXISTS cve_feeds (
+    distro     TEXT PRIMARY KEY,
+    url        TEXT NOT NULL DEFAULT '',
+    fetched_at TIMESTAMPTZ,
+    rows       INT NOT NULL DEFAULT 0,
+    bytes      BIGINT NOT NULL DEFAULT 0,
+    error      TEXT NOT NULL DEFAULT '',
+    error_at   TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS device_cves (
+    device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    cve       TEXT NOT NULL,
+    package   TEXT NOT NULL,
+    installed TEXT NOT NULL,
+    fixed     TEXT NOT NULL,
+    severity  TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (device_id, cve, package)
+);
+CREATE INDEX IF NOT EXISTS device_cves_cve ON device_cves(cve);

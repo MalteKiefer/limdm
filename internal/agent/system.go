@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -66,9 +65,9 @@ func (h *host) pkgDBStamp() string {
 }
 
 type pendingCache struct {
-	at            time.Time
-	all, security int
-	err           error
+	at   time.Time
+	list []api.PendingUpdate
+	err  error
 }
 
 func detectHost() (*host, error) {
@@ -221,7 +220,7 @@ func (h *host) installedPackages() ([]api.Package, string, error) {
 	sum := sha256.New()
 	names := make(map[string]bool, len(pkgs))
 	for _, p := range pkgs {
-		fmt.Fprintf(sum, "%s=%s=%s\n", p.Name, p.Version, p.Arch)
+		fmt.Fprintf(sum, "%s=%s=%s=%s\n", p.Name, p.Version, p.Arch, p.Source)
 		names[p.Name] = true
 	}
 	h.pkgs = pkgCache{stamp: stamp, list: pkgs, hash: hex.EncodeToString(sum.Sum(nil)), names: names}
@@ -233,12 +232,20 @@ func (h *host) nativePackages() ([]api.Package, error) {
 	var err error
 	switch h.family {
 	case "arch":
-		return parsePacmanQ(run(time.Minute, "pacman", "-Q"))
+		pkgs, err := parsePacmanQ(run(time.Minute, "pacman", "-Q"))
+		for i := range pkgs { // the security tracker lists pkgbase for split packages
+			pkgs[i].Source = sourceName(pkgs[i].Name, pacmanBase(readFile(filepath.Join(pacmanLocal, pkgs[i].Name+"-"+pkgs[i].Version, "desc"))))
+		}
+		return pkgs, err
 	case "alpine":
+		// apk list -I carries the origin (the secdb's package); apk info -v is the fallback
+		if pkgs, err := parseApkList(run(time.Minute, "apk", "list", "-I")); err == nil && len(pkgs) > 0 {
+			return pkgs, nil
+		}
 		return parseApkInfo(run(time.Minute, "apk", "info", "-v"))
 	}
 	if h.family == "debian" {
-		out, err = run(time.Minute, "dpkg-query", "-W", "-f", "${db:Status-Abbrev}\t${Package}\t${Version}\t${Architecture}\n")
+		out, err = run(time.Minute, "dpkg-query", "-W", "-f", "${db:Status-Abbrev}\t${Package}\t${Version}\t${Architecture}\t${source:Package}\n")
 	} else {
 		out, err = run(time.Minute, "rpm", "-qa", "--qf", "ii \t%{NAME}\t%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}\t%|ARCH?{%{ARCH}}|\n")
 	}
@@ -248,8 +255,12 @@ func (h *host) nativePackages() ([]api.Package, error) {
 	var pkgs []api.Package
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Split(line, "\t")
-		if len(f) == 4 && strings.HasPrefix(f[0], "ii") && f[1] != "gpg-pubkey" {
-			pkgs = append(pkgs, api.Package{Name: f[1], Version: f[2], Arch: f[3]})
+		if len(f) >= 4 && strings.HasPrefix(f[0], "ii") && f[1] != "gpg-pubkey" {
+			p := api.Package{Name: f[1], Version: f[2], Arch: f[3]}
+			if len(f) > 4 {
+				p.Source = sourceName(p.Name, f[4])
+			}
+			pkgs = append(pkgs, p)
 		}
 	}
 	return pkgs, nil
@@ -353,21 +364,21 @@ func (h *host) remove(pkgs ...string) error {
 	return err
 }
 
-// upgrade installs updates. securityOnly uses unattended-upgrades on Debian
-// family (security origins by default) and dnf's security filter on Fedora.
+// upgrade installs OS updates. securityOnly uses unattended-upgrades on
+// Debian family (security origins by default), dnf's security filter on
+// Fedora and security patches on SUSE. Flatpak is its own source
+// (flatpakUpgrade).
 func (h *host) upgrade(securityOnly bool) (string, error) {
 	h.pkgMu.Lock()
 	defer h.pkgMu.Unlock()
 	h.pending = pendingCache{}
 	switch h.family { // rolling releases have no separate security channel: always everything
 	case "arch":
-		out, err := run(2*time.Hour, "pacman", "-Syu", "--noconfirm")
-		return out + flatpakUpgrade(), err
+		return run(2*time.Hour, "pacman", "-Syu", "--noconfirm")
 	case "alpine":
-		out, err := run(2*time.Hour, "apk", "upgrade", "--update-cache", "--no-interactive")
-		return out + flatpakUpgrade(), err
+		return run(2*time.Hour, "apk", "upgrade", "--update-cache", "--no-interactive")
 	case "suse":
-		return h.zypperUpgrade(securityOnly)
+		return h.zypperUpgrade(securityOnly, nil)
 	}
 	if h.family == "debian" {
 		h.aptUpdated = time.Time{}
@@ -383,132 +394,22 @@ func (h *host) upgrade(securityOnly bool) (string, error) {
 			return run(2*time.Hour, "unattended-upgrade", "-v")
 		}
 		// wait for dpkg instead of failing while unattended-upgrades or PackageKit holds it
-		out, err := run(2*time.Hour, "apt-get", "upgrade", "-y", "-q", "--with-new-pkgs", "-o", "DPkg::Lock::Timeout=900",
+		return run(2*time.Hour, "apt-get", "upgrade", "-y", "-q", "--with-new-pkgs", "-o", "DPkg::Lock::Timeout=900",
 			"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold")
-		return out + flatpakUpgrade(), err
 	}
 	args := []string{"upgrade", "-y", "-q", "--refresh"}
 	if securityOnly {
 		args = append(args, "--security")
 	}
-	out, err := run(2*time.Hour, "dnf", args...)
-	if !securityOnly {
-		out += flatpakUpgrade()
-	}
-	return out, err
+	return run(2*time.Hour, "dnf", args...)
 }
 
-// flatpakUpgrade updates system wide Flatpak apps and runtimes too, so
-// "install all updates" means all; its errors are reported, not fatal.
-func flatpakUpgrade() string {
+// flatpakUpgrade updates system wide Flatpak apps and runtimes.
+func flatpakUpgrade() (string, error) {
 	if !hasCmd("flatpak") {
-		return ""
+		return "", nil
 	}
-	out, err := run(time.Hour, "flatpak", "update", "-y", "--noninteractive", "--system")
-	if err != nil {
-		return "\nflatpak: " + err.Error()
-	}
-	return "\n" + lastLines(out, 10)
-}
-
-// pendingUpdates counts available updates; cached for an hour because it hits the mirrors.
-func (h *host) pendingUpdates() (all, security int, err error) {
-	if time.Since(h.pending.at) < time.Hour {
-		return h.pending.all, h.pending.security, h.pending.err
-	}
-	defer func() { h.pending = pendingCache{at: time.Now(), all: all, security: security, err: err} }()
-	switch h.family {
-	case "arch":
-		// checkupdates (pacman-contrib) uses its own database copy; pacman -Sy would
-		// leave the system in a partial upgrade state
-		if !hasCmd("checkupdates") {
-			return 0, 0, errors.New("checkupdates (pacman-contrib) missing")
-		}
-		out, cerr := run(10*time.Minute, "checkupdates")
-		var ee *exec.ExitError
-		if cerr != nil && (!errors.As(cerr, &ee) || ee.ExitCode() != 2) { // 2: nothing to update
-			return 0, 0, cerr
-		}
-		n := countLines(out) // rolling release: every pending update can carry security fixes
-		return n, n, nil
-	case "alpine":
-		if _, err = run(10*time.Minute, "apk", "update", "-q"); err != nil {
-			return
-		}
-		out, verr := run(5*time.Minute, "apk", "version", "-l", "<")
-		if verr != nil {
-			return 0, 0, verr
-		}
-		n := max(countLines(out)-1, 0) // first line is a header; no separate security channel
-		return n, n, nil
-	case "suse":
-		return h.zypperPending()
-	}
-	if h.family == "debian" {
-		h.pkgMu.Lock()
-		err = h.aptUpdate()
-		h.pkgMu.Unlock()
-		if err != nil {
-			return
-		}
-		var out string
-		if out, err = run(5*time.Minute, "apt-get", "-s", "-o", "Debug::NoLocking=1", "upgrade", "--with-new-pkgs"); err != nil {
-			return
-		}
-		all, security = countAptPending(out)
-		return
-	}
-	// dnf check-update exits 100 when updates exist.
-	out, cerr := run(10*time.Minute, "dnf", "-q", "check-update", "--refresh")
-	var ee *exec.ExitError
-	if cerr != nil && (!errors.As(cerr, &ee) || ee.ExitCode() != 100) {
-		return 0, 0, cerr
-	}
-	all = countDnfPackages(out)
-	sec, serr := run(10*time.Minute, "dnf", "-q", "updateinfo", "list", "--security")
-	if serr != nil {
-		return all, 0, serr
-	}
-	security = countDnfLines(sec)
-	return
-}
-
-func countAptPending(out string) (all, security int) {
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "Inst ") {
-			all++
-			if strings.Contains(strings.ToLower(line), "-security") {
-				security++
-			}
-		}
-	}
-	return
-}
-
-// advisoryRe matches the advisory ID that starts every package line of
-// "dnf updateinfo list" (dnf4: ID, severity, package) and of dnf5's
-// "advisory list" table (ID, type, severity, package, issued).
-var advisoryRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*(-[A-Z][A-Z0-9]*)*-[0-9]{4}[:-][0-9A-Za-z]+`) // FEDORA-, FEDORA-EPEL-, RHSA- …
-
-// countDnfPackages counts "name.arch version repo" lines of dnf check-update.
-func countDnfPackages(out string) int {
-	n := 0
-	for _, line := range strings.Split(out, "\n") {
-		if f := strings.Fields(line); len(f) == 3 && strings.Contains(f[0], ".") && !strings.HasSuffix(line, ":") {
-			n++
-		}
-	}
-	return n
-}
-
-func countDnfLines(out string) int {
-	n := 0
-	for _, line := range strings.Split(out, "\n") {
-		if f := strings.Fields(line); len(f) >= 3 && advisoryRe.MatchString(f[0]) {
-			n++
-		}
-	}
-	return n
+	return run(time.Hour, "flatpak", "update", "-y", "--noninteractive", "--system")
 }
 
 func (h *host) rebootRequired() bool {
@@ -700,12 +601,36 @@ func parseApkInfo(out string, err error) ([]api.Package, error) {
 	return pkgs, nil
 }
 
-func countLines(s string) int {
-	n := 0
-	for _, l := range strings.Split(s, "\n") {
-		if strings.TrimSpace(l) != "" {
-			n++
-		}
+// pacmanLocal is pacman's local database, one directory per package.
+const pacmanLocal = "/var/lib/pacman/local"
+
+// pacmanBase reads %BASE% of a local database desc file.
+func pacmanBase(desc string) string {
+	_, rest, ok := strings.Cut(desc, "%BASE%\n")
+	if !ok {
+		return ""
 	}
-	return n
+	base, _, _ := strings.Cut(rest, "\n")
+	return strings.TrimSpace(base)
+}
+
+// parseApkList reads apk list -I: "name-version-rN arch {origin} (license) [installed]".
+func parseApkList(out string, err error) ([]api.Package, error) {
+	if err != nil {
+		return nil, err
+	}
+	var pkgs []api.Package
+	for _, l := range strings.Split(out, "\n") {
+		f := strings.Fields(l)
+		if len(f) < 3 || !strings.HasPrefix(f[2], "{") || !strings.HasSuffix(f[2], "}") {
+			continue
+		}
+		p, _ := parseApkInfo(f[0], nil)
+		if len(p) != 1 {
+			continue
+		}
+		p[0].Arch, p[0].Source = f[1], sourceName(p[0].Name, strings.Trim(f[2], "{}"))
+		pkgs = append(pkgs, p[0])
+	}
+	return pkgs, nil
 }

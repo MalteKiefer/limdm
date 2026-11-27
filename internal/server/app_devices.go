@@ -365,7 +365,7 @@ func (s *Server) apiDeviceDetail(w http.ResponseWriter, r *http.Request, c apiCa
 	d.Shell = apiShellSettings{Enabled: set.RemoteShell.Enabled, Allowed: set.RemoteShell.allows(c.Role) && c.can("helpdesk"),
 		AllowRoot: set.RemoteShell.AllowRoot, Max: maxM, Idle: idleM, FourEyes: set.FourEyesShell, Policy: shellPolicy}
 	d.FourEyesCommands = []string{}
-	for _, t := range []string{"wipe", "lost", "script"} {
+	for _, t := range []string{"wipe", "lost", "script", "package_downgrade"} {
 		if s.needsApproval(t) {
 			d.FourEyesCommands = append(d.FourEyesCommands, t)
 		}
@@ -434,7 +434,7 @@ func (s *Server) apiDevicePackages(w http.ResponseWriter, r *http.Request, c api
 	}
 	out := make([]pkg, len(list))
 	for i, p := range list {
-		out[i] = pkg(p)
+		out[i] = pkg{p.Name, p.Version, p.Arch}
 	}
 	writeJSON(w, listPage{Items: out})
 }

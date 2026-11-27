@@ -507,6 +507,13 @@ func (s *Server) commandPayload(r *http.Request, sess session, id, typ string) (
 		}
 		b, _ := json.Marshal(u) //nolint:gosec // signed command payload over mTLS, cleared from the database once applied
 		payload = string(b)
+	case typ == "package_hold" || typ == "package_downgrade": // R3-P, app_patch.go
+		var b []byte
+		var err error
+		if b, err = packageCommandPayload(r, typ); err != nil {
+			return "", http.StatusBadRequest, err.Error()
+		}
+		payload = string(b)
 	case typ == "software_remove":
 		sr := api.SoftwareRemove{Kind: r.FormValue("kind"), Name: r.FormValue("name"), Installation: r.FormValue("installation")}
 		if err := sr.Validate(); err != nil {

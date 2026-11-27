@@ -45,6 +45,7 @@ export const de = {
   'settings.nav.directory': 'Verzeichnis',
   'settings.nav.network': 'Netzwerkzertifikate',
   'settings.nav.agents': 'Agents und Updates',
+  'settings.nav.cve': 'CVE Daten',
 
   'settings.general.sub': 'Grundeinstellungen der Installation und das Erscheinungsbild in Konsole und Dialogen auf Geräten.',
   'settings.general.devices': 'Geräte',
@@ -744,6 +745,7 @@ export const en: Record<keyof typeof de, Msg> = {
   'settings.nav.directory': 'Directory',
   'settings.nav.network': 'Network certificates',
   'settings.nav.agents': 'Agents and updates',
+  'settings.nav.cve': 'CVE data',
 
   'settings.general.sub': 'Basic settings of the installation and the look in the console and in dialogs on devices.',
   'settings.general.devices': 'Devices',

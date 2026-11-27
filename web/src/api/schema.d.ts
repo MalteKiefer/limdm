@@ -2673,6 +2673,173 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/update-rings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Update rings with their wave and device count, the newest waves */
+        get: operations["listUpdateRings"];
+        put?: never;
+        /** Create an update ring (admin); audited as update_ring.save */
+        post: operations["createUpdateRing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/update-rings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Change an update ring (admin); audited as update_ring.save */
+        put: operations["updateUpdateRing"];
+        post?: never;
+        /** Delete an update ring (admin); its devices are in no ring until their next check in */
+        delete: operations["deleteUpdateRing"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/update-rings/{id}/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause, resume or approve an update ring (admin)
+         * @description pause stops installs in the ring and the rollout to later rings; approve lets the wave of the ring before it through (rings with require_approval). Audited as update_ring.<action>.
+         */
+        post: operations["updateRingAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/update-waves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a new update wave in the caller's tenant (admin); the first ring has it at once */
+        post: operations["startUpdateWave"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pending updates, last run per source and update ring of a device */
+        get: operations["getDeviceUpdates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/updates/fleet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open security updates and CVEs of the devices in scope
+         * @description CVEs come from the advisories the devices' package managers know (dnf, zypper); a CVE counts as open while an update that fixes it is pending. With ?cve= the answer lists the devices it affects instead.
+         */
+        get: operations["getUpdatesFleet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/updates/package-versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Installed versions of one package across the devices in scope */
+        get: operations["getPackageVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/updates/cve-feeds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * State of the Debian, Ubuntu, Arch and Alpine security data imports
+         * @description Last successful import (time, fixes kept, bytes), last error. A failed import keeps the last data.
+         */
+        get: operations["getCVEFeeds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/updates/cve-feeds/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import the switched on security data feeds now (admin); audited as cve_feeds.refresh
+         * @description Runs in the background; poll GET /api/v1/updates/cve-feeds. 409 while the feeds are off or an import runs.
+         */
+        post: operations["refreshCVEFeeds"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2742,9 +2909,9 @@ export interface components {
             primary_user?: string;
         };
         CommandRequest: {
-            /** @description A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create */
+            /** @description A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create, package_hold, package_downgrade */
             type: string;
-            /** @description The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove). true is sent as on; reason (wipe, lost, script: the reason shown to the approving admin when four eyes approval is on). */
+            /** @description The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove), name and release (package_hold), name and version (package_downgrade). true is sent as on; reason (wipe, lost, script, package_downgrade: the reason shown to the approving admin when four eyes approval is on). */
             params?: {
                 [key: string]: string | number | boolean;
             };
@@ -3991,6 +4158,7 @@ export interface components {
             /** @description EAP-TLS certificates carry <device ID>.<domain> as DNS SAN; empty: no DNS SAN */
             network_cert_domain?: string;
             enrollment?: components["schemas"]["EnrollSettings"];
+            cve_feeds?: components["schemas"]["CVEFeedSettings"];
         };
         RetentionKind: {
             key: string;
@@ -4038,6 +4206,7 @@ export interface components {
             /** @description EAP-TLS certificates carry <device ID>.<domain> as DNS SAN; empty: no DNS SAN */
             network_cert_domain?: string;
             enrollment: components["schemas"]["EnrollSettings"];
+            cve_feeds?: components["schemas"]["CVEFeedSettings"];
         };
         ConsoleUser: {
             /** @description Email (OIDC) or local:name */
@@ -4434,6 +4603,170 @@ export interface components {
             max_days: number;
             /** @description Refuse enrollments without a TPM bound key */
             require_tpm: boolean;
+        };
+        UpdateRingInput: {
+            name: string;
+            /** @description order of the ring, lowest first */
+            position: number;
+            /** @description days after a wave started before it may reach this ring */
+            deferral_days?: number;
+            /** @description first ring only: start a new wave every N days, 0 is manual */
+            wave_days?: number;
+            /** @description a wave reaches this ring only after an admin approved it */
+            require_approval?: boolean;
+            /** @description every device that is in no earlier ring */
+            all_devices?: boolean;
+            tags?: string[];
+            /** @description directory groups of the primary user */
+            groups?: string[];
+            /** @description blueprint IDs; a device matches its blueprint and the ones it inherits from */
+            blueprints?: number[];
+        };
+        UpdateRing: {
+            name?: string;
+            /** @description order of the ring, lowest first */
+            position?: number;
+            /** @description days after a wave started before it may reach this ring */
+            deferral_days?: number;
+            /** @description first ring only: start a new wave every N days, 0 is manual */
+            wave_days?: number;
+            /** @description a wave reaches this ring only after an admin approved it */
+            require_approval?: boolean;
+            /** @description every device that is in no earlier ring */
+            all_devices?: boolean;
+            tags?: string[];
+            /** @description directory groups of the primary user */
+            groups?: string[];
+            /** @description blueprint IDs; a device matches its blueprint and the ones it inherits from */
+            blueprints?: number[];
+            id?: number;
+            tenant_id?: number;
+            paused?: boolean;
+            approved_wave?: number;
+            /** @description the newest wave that reached the ring */
+            wave?: number;
+            /** Format: date-time */
+            wave_at?: string | null;
+            /** @description devices in the ring at their last check in */
+            devices?: number;
+        };
+        UpdateWave: {
+            tenant_id?: number;
+            wave?: number;
+            /** Format: date-time */
+            started_at?: string;
+            started_by?: string;
+        };
+        UpdateRingList: {
+            items?: components["schemas"]["UpdateRing"][];
+            /** @description the newest 20 */
+            waves?: components["schemas"]["UpdateWave"][];
+            /** @description devices in no ring */
+            unassigned?: number;
+        };
+        PendingUpdate: {
+            name?: string;
+            current?: string;
+            candidate?: string;
+            /** @description apt origin, dnf or zypper repo, Flatpak remote */
+            origin?: string;
+            /** @enum {string} */
+            source?: "os_all" | "third_party" | "flatpak";
+            security?: boolean;
+            /** @description as the advisory states it */
+            severity?: string;
+            cves?: string[];
+            /** @description a SUSE patch, not a package */
+            patch?: boolean;
+        };
+        UpdateRun: {
+            /** @enum {string} */
+            source?: "os_security" | "os_all" | "third_party" | "flatpak";
+            /** Format: date-time */
+            at?: string;
+            /** @enum {string} */
+            result?: "installed" | "no_updates" | "failed" | "unsupported";
+            count?: number;
+            detail?: string;
+            wave?: number;
+        };
+        DeviceUpdates: {
+            ring?: components["schemas"]["UpdateRing"] | null;
+            /** @description the agent reports its update status */
+            reports?: boolean;
+            status?: {
+                pending?: components["schemas"]["PendingUpdate"][];
+                pending_error?: string;
+                runs?: components["schemas"]["UpdateRun"][];
+                ring?: string;
+                /** Format: date-time */
+                security_since?: string | null;
+            };
+            /** @description CVEs matched from the Debian and Ubuntu security data: the installed version is older than the fixed one */
+            vulnerabilities?: {
+                cve?: string;
+                package?: string;
+                installed?: string;
+                fixed?: string;
+                severity?: string;
+            }[];
+        };
+        UpdatesFleet: {
+            reporting?: number;
+            security_devices?: number;
+            pending_devices?: number;
+            /** @description pending security updates without CVE IDs (apt) */
+            security_no_cve?: number;
+            devices_by_source?: {
+                [key: string]: number;
+            };
+            cves?: {
+                id?: string;
+                severity?: string;
+                devices?: number;
+                packages?: string[];
+            }[];
+            packages?: {
+                name?: string;
+                source?: string;
+                security?: boolean;
+                severity?: string;
+                devices?: number;
+            }[];
+        };
+        /** @description Security data of Debian, Ubuntu, Arch and Alpine; every feed is off by default */
+        CVEFeedSettings: {
+            /** @description import the Debian Security Tracker daily */
+            debian?: boolean;
+            /** @description import the Ubuntu OSV export daily */
+            ubuntu?: boolean;
+            /** @description import the Arch Security Tracker daily */
+            arch?: boolean;
+            /** @description import the Alpine secdb of the branches the Alpine devices run daily */
+            alpine?: boolean;
+            /** @description https URL of the Debian Security Tracker JSON; empty is https://security-tracker.debian.org/tracker/data/json */
+            debian_url?: string;
+            /** @description https URL of the Ubuntu OSV export (zip); empty is https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip */
+            ubuntu_url?: string;
+            /** @description https URL of the Arch tracker's AVG list; empty is https://security.archlinux.org/issues/all.json */
+            arch_url?: string;
+            /** @description https base URL of the Alpine secdb (…/v3.20/main.json); empty is https://secdb.alpinelinux.org */
+            alpine_url?: string;
+            /** @description download limit per feed in MB, 1024 when 0 */
+            max_mb?: number;
+        };
+        CVEFeedState: {
+            /** @enum {string} */
+            distro?: "debian" | "ubuntu" | "arch" | "alpine";
+            url?: string;
+            /** Format: date-time */
+            fetched_at?: string | null;
+            rows?: number;
+            bytes?: number;
+            error?: string;
+            /** Format: date-time */
+            error_at?: string | null;
+            enabled?: boolean;
         };
     };
     responses: {
@@ -7949,7 +8282,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                section: "general" | "network" | "security" | "remote_shell" | "sso" | "monitoring" | "branding" | "operations" | "retention" | "enrollment";
+                section: "general" | "network" | "security" | "remote_shell" | "sso" | "monitoring" | "branding" | "operations" | "retention" | "enrollment" | "cve_feeds";
             };
             cookie?: never;
         };
@@ -9421,6 +9754,319 @@ export interface operations {
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listUpdateRings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateRingList"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    createUpdateRing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRingInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateRing"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    updateUpdateRing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRingInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateRing"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deleteUpdateRing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    updateRingAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                action: "pause" | "resume" | "approve";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateRing"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    startUpdateWave: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateWave"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getDeviceUpdates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceUpdates"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getUpdatesFleet: {
+        parameters: {
+            query?: {
+                cve?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdatesFleet"] | {
+                        items?: {
+                            id?: string;
+                            hostname?: string;
+                            packages?: string[];
+                        }[];
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getPackageVersions: {
+        parameters: {
+            query: {
+                name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items?: {
+                            version?: string;
+                            arch?: string;
+                            devices?: number;
+                        }[];
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getCVEFeeds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        enabled?: boolean;
+                        running?: boolean;
+                        items?: components["schemas"]["CVEFeedState"][];
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    refreshCVEFeeds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        running?: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
         };

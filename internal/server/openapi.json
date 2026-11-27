@@ -6186,7 +6186,8 @@
                 "branding",
                 "operations",
                 "retention",
-                "enrollment"
+                "enrollment",
+                "cve_feeds"
               ]
             },
             "description": ""
@@ -8705,6 +8706,531 @@
           }
         ]
       }
+    },
+    "/api/v1/update-rings": {
+      "get": {
+        "operationId": "listUpdateRings",
+        "summary": "Update rings with their wave and device count, the newest waves",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRingList"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createUpdateRing",
+        "summary": "Create an update ring (admin); audited as update_ring.save",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRingInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRing"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/update-rings/{id}": {
+      "put": {
+        "operationId": "updateUpdateRing",
+        "summary": "Change an update ring (admin); audited as update_ring.save",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRingInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRing"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteUpdateRing",
+        "summary": "Delete an update ring (admin); its devices are in no ring until their next check in",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/update-rings/{id}/{action}": {
+      "post": {
+        "operationId": "updateRingAction",
+        "summary": "Pause, resume or approve an update ring (admin)",
+        "description": "pause stops installs in the ring and the rollout to later rings; approve lets the wave of the ring before it through (rings with require_approval). Audited as update_ring.<action>.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pause",
+                "resume",
+                "approve"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRing"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/update-waves": {
+      "post": {
+        "operationId": "startUpdateWave",
+        "summary": "Start a new update wave in the caller's tenant (admin); the first ring has it at once",
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateWave"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/updates": {
+      "get": {
+        "operationId": "getDeviceUpdates",
+        "summary": "Pending updates, last run per source and update ring of a device",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceUpdates"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/updates/fleet": {
+      "get": {
+        "operationId": "getUpdatesFleet",
+        "summary": "Open security updates and CVEs of the devices in scope",
+        "description": "CVEs come from the advisories the devices' package managers know (dnf, zypper); a CVE counts as open while an update that fixes it is pending. With ?cve= the answer lists the devices it affects instead.",
+        "parameters": [
+          {
+            "name": "cve",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^CVE-[0-9]{4}-[0-9]{4,7}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/UpdatesFleet"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "hostname": {
+                                "type": "string"
+                              },
+                              "packages": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/updates/package-versions": {
+      "get": {
+        "operationId": "getPackageVersions",
+        "summary": "Installed versions of one package across the devices in scope",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "version": {
+                            "type": "string"
+                          },
+                          "arch": {
+                            "type": "string"
+                          },
+                          "devices": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/updates/cve-feeds": {
+      "get": {
+        "operationId": "getCVEFeeds",
+        "summary": "State of the Debian, Ubuntu, Arch and Alpine security data imports",
+        "description": "Last successful import (time, fixes kept, bytes), last error. A failed import keeps the last data.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "running": {
+                      "type": "boolean"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CVEFeedState"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/updates/cve-feeds/refresh": {
+      "post": {
+        "operationId": "refreshCVEFeeds",
+        "summary": "Import the switched on security data feeds now (admin); audited as cve_feeds.refresh",
+        "description": "Runs in the background; poll GET /api/v1/updates/cve-feeds. 409 while the feeds are off or an import runs.",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "running": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8977,7 +9503,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "description": "A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create"
+            "description": "A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create, package_hold, package_downgrade"
           },
           "params": {
             "type": "object",
@@ -8988,7 +9514,7 @@
                 "boolean"
               ]
             },
-            "description": "The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove). true is sent as on; reason (wipe, lost, script: the reason shown to the approving admin when four eyes approval is on)."
+            "description": "The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove), name and release (package_hold), name and version (package_downgrade). true is sent as on; reason (wipe, lost, script, package_downgrade: the reason shown to the approving admin when four eyes approval is on)."
           }
         }
       },
@@ -13669,6 +14195,9 @@
           },
           "enrollment": {
             "$ref": "#/components/schemas/EnrollSettings"
+          },
+          "cve_feeds": {
+            "$ref": "#/components/schemas/CVEFeedSettings"
           }
         },
         "required": []
@@ -13826,6 +14355,9 @@
           },
           "enrollment": {
             "$ref": "#/components/schemas/EnrollSettings"
+          },
+          "cve_feeds": {
+            "$ref": "#/components/schemas/CVEFeedSettings"
           }
         },
         "required": [
@@ -15395,6 +15927,496 @@
           "max_days",
           "require_tpm"
         ]
+      },
+      "UpdateRingInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "position"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "order of the ring, lowest first"
+          },
+          "deferral_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 90,
+            "description": "days after a wave started before it may reach this ring"
+          },
+          "wave_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 90,
+            "description": "first ring only: start a new wave every N days, 0 is manual"
+          },
+          "require_approval": {
+            "type": "boolean",
+            "description": "a wave reaches this ring only after an admin approved it"
+          },
+          "all_devices": {
+            "type": "boolean",
+            "description": "every device that is in no earlier ring"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "directory groups of the primary user"
+          },
+          "blueprints": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "blueprint IDs; a device matches its blueprint and the ones it inherits from"
+          }
+        }
+      },
+      "UpdateRing": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "order of the ring, lowest first"
+          },
+          "deferral_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 90,
+            "description": "days after a wave started before it may reach this ring"
+          },
+          "wave_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 90,
+            "description": "first ring only: start a new wave every N days, 0 is manual"
+          },
+          "require_approval": {
+            "type": "boolean",
+            "description": "a wave reaches this ring only after an admin approved it"
+          },
+          "all_devices": {
+            "type": "boolean",
+            "description": "every device that is in no earlier ring"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "directory groups of the primary user"
+          },
+          "blueprints": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "blueprint IDs; a device matches its blueprint and the ones it inherits from"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "tenant_id": {
+            "type": "integer"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "approved_wave": {
+            "type": "integer"
+          },
+          "wave": {
+            "type": "integer",
+            "description": "the newest wave that reached the ring"
+          },
+          "wave_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "devices": {
+            "type": "integer",
+            "description": "devices in the ring at their last check in"
+          }
+        }
+      },
+      "UpdateWave": {
+        "type": "object",
+        "properties": {
+          "tenant_id": {
+            "type": "integer"
+          },
+          "wave": {
+            "type": "integer"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "started_by": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateRingList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateRing"
+            }
+          },
+          "waves": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateWave"
+            },
+            "description": "the newest 20"
+          },
+          "unassigned": {
+            "type": "integer",
+            "description": "devices in no ring"
+          }
+        }
+      },
+      "PendingUpdate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "current": {
+            "type": "string"
+          },
+          "candidate": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string",
+            "description": "apt origin, dnf or zypper repo, Flatpak remote"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "os_all",
+              "third_party",
+              "flatpak"
+            ]
+          },
+          "security": {
+            "type": "boolean"
+          },
+          "severity": {
+            "type": "string",
+            "description": "as the advisory states it"
+          },
+          "cves": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "patch": {
+            "type": "boolean",
+            "description": "a SUSE patch, not a package"
+          }
+        }
+      },
+      "UpdateRun": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "os_security",
+              "os_all",
+              "third_party",
+              "flatpak"
+            ]
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "installed",
+              "no_updates",
+              "failed",
+              "unsupported"
+            ]
+          },
+          "count": {
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "wave": {
+            "type": "integer"
+          }
+        }
+      },
+      "DeviceUpdates": {
+        "type": "object",
+        "properties": {
+          "ring": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UpdateRing"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reports": {
+            "type": "boolean",
+            "description": "the agent reports its update status"
+          },
+          "status": {
+            "type": "object",
+            "properties": {
+              "pending": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PendingUpdate"
+                }
+              },
+              "pending_error": {
+                "type": "string"
+              },
+              "runs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/UpdateRun"
+                }
+              },
+              "ring": {
+                "type": "string"
+              },
+              "security_since": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          },
+          "vulnerabilities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "cve": {
+                  "type": "string"
+                },
+                "package": {
+                  "type": "string"
+                },
+                "installed": {
+                  "type": "string"
+                },
+                "fixed": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "CVEs matched from the Debian and Ubuntu security data: the installed version is older than the fixed one"
+          }
+        }
+      },
+      "UpdatesFleet": {
+        "type": "object",
+        "properties": {
+          "reporting": {
+            "type": "integer"
+          },
+          "security_devices": {
+            "type": "integer"
+          },
+          "pending_devices": {
+            "type": "integer"
+          },
+          "security_no_cve": {
+            "type": "integer",
+            "description": "pending security updates without CVE IDs (apt)"
+          },
+          "devices_by_source": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "cves": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string"
+                },
+                "devices": {
+                  "type": "integer"
+                },
+                "packages": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "security": {
+                  "type": "boolean"
+                },
+                "severity": {
+                  "type": "string"
+                },
+                "devices": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "CVEFeedSettings": {
+        "type": "object",
+        "description": "Security data of Debian, Ubuntu, Arch and Alpine; every feed is off by default",
+        "properties": {
+          "debian": {
+            "type": "boolean",
+            "description": "import the Debian Security Tracker daily"
+          },
+          "ubuntu": {
+            "type": "boolean",
+            "description": "import the Ubuntu OSV export daily"
+          },
+          "arch": {
+            "type": "boolean",
+            "description": "import the Arch Security Tracker daily"
+          },
+          "alpine": {
+            "type": "boolean",
+            "description": "import the Alpine secdb of the branches the Alpine devices run daily"
+          },
+          "debian_url": {
+            "type": "string",
+            "description": "https URL of the Debian Security Tracker JSON; empty is https://security-tracker.debian.org/tracker/data/json"
+          },
+          "ubuntu_url": {
+            "type": "string",
+            "description": "https URL of the Ubuntu OSV export (zip); empty is https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip"
+          },
+          "arch_url": {
+            "type": "string",
+            "description": "https URL of the Arch tracker's AVG list; empty is https://security.archlinux.org/issues/all.json"
+          },
+          "alpine_url": {
+            "type": "string",
+            "description": "https base URL of the Alpine secdb (…/v3.20/main.json); empty is https://secdb.alpinelinux.org"
+          },
+          "max_mb": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4096,
+            "description": "download limit per feed in MB, 1024 when 0"
+          }
+        }
+      },
+      "CVEFeedState": {
+        "type": "object",
+        "properties": {
+          "distro": {
+            "type": "string",
+            "enum": [
+              "debian",
+              "ubuntu",
+              "arch",
+              "alpine"
+            ]
+          },
+          "url": {
+            "type": "string"
+          },
+          "fetched_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "rows": {
+            "type": "integer"
+          },
+          "bytes": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "error_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
       }
     }
   }
