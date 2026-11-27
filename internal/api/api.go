@@ -65,8 +65,9 @@ var Types = map[string]string{
 // A zero section means "not managed".
 type Policy struct {
 	CheckinSeconds    int               `json:"checkin_seconds"`
-	OfflineLockHours  int               `json:"offline_lock_hours"`     // lock the device when the server was unreachable this long, 0 = off
-	RemoteShell       bool              `json:"remote_shell,omitempty"` // remote shell sessions allowed (com.limdm.agent)
+	OfflineLockHours  int               `json:"offline_lock_hours"`         // lock the device when the server was unreachable this long, 0 = off
+	RemoteShell       bool              `json:"remote_shell,omitempty"`     // remote shell sessions allowed (com.limdm.agent)
+	WorkloadControl   bool              `json:"workload_control,omitempty"` // containers and VMs may be started, stopped, restarted (com.limdm.agent)
 	Compliance        Compliance        `json:"compliance"`
 	Updates           Updates           `json:"updates"`
 	Packages          Packages          `json:"packages"`
@@ -85,6 +86,9 @@ type agentPayload struct {
 	CheckinSeconds   int  `json:"checkin_seconds"`
 	OfflineLockHours int  `json:"offline_lock_hours,omitempty"`
 	RemoteShell      bool `json:"remote_shell,omitempty"` // devices accept remote shell sessions
+	// WorkloadControl lets the console start, stop and restart containers
+	// and VMs on devices (workload_action); off by default.
+	WorkloadControl bool `json:"workload_control,omitempty"`
 }
 
 type Compliance struct {
@@ -357,7 +361,7 @@ func (d Declaration) apply(p *Policy) error {
 		if v.OfflineLockHours < 0 || v.OfflineLockHours > 8760 {
 			bad("offline_lock_hours must be 0 (off) up to 8760")
 		}
-		p.CheckinSeconds, p.OfflineLockHours, p.RemoteShell = v.CheckinSeconds, v.OfflineLockHours, v.RemoteShell
+		p.CheckinSeconds, p.OfflineLockHours, p.RemoteShell, p.WorkloadControl = v.CheckinSeconds, v.OfflineLockHours, v.RemoteShell, v.WorkloadControl
 	case TypeCompliance:
 		if err := strict(d.Payload, &p.Compliance); err != nil {
 			return err
@@ -930,6 +934,8 @@ type Status struct {
 	CatalogVersion string `json:"catalog_version,omitempty"`
 	// Updates are the pending updates and the last run per update source.
 	Updates *UpdateStatus `json:"updates,omitempty"`
+	// Workloads are the containers and VMs on the device (workloads.go).
+	Workloads *Workloads `json:"workloads,omitempty"`
 }
 
 type Command struct {
@@ -948,7 +954,7 @@ type Command struct {
 // CommandTypes are the one off actions an admin can send.
 var CommandTypes = []string{"sync", "update", "reboot", "shutdown", "lock", "unlock", "script", "lost", "found", "wipe", "allow_uninstall", "message", "app_install", "app_remove",
 	"user_create", "user_admin", "user_lock", "user_unlock", "user_password", "user_delete", "software_remove", "diagnostics",
-	"package_hold", "package_downgrade"}
+	"package_hold", "package_downgrade", "workload_action"}
 
 // PollResponse answers the agent's frequent poll (POST /api/v1/poll).
 type PollResponse struct {
