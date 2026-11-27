@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/maltekiefer/limdm/internal/api"
 )
@@ -194,5 +195,41 @@ func TestWorkloadActionGate(t *testing.T) {
 	cmd.Payload = `{"kind":"qm","id":"200","action":"stop"}`
 	if _, err := a.workloadAction(cmd); err == nil || !strings.Contains(err.Error(), "command signing key") {
 		t.Fatalf("no key: %v", err)
+	}
+}
+
+func TestSettleWorkload(t *testing.T) {
+	fakeWorkloads(t, func(k string) bool { return k == "docker" })
+	step, limit := workloadSettleStep, workloadSettle
+	t.Cleanup(func() { workloadSettleStep, workloadSettle = step, limit })
+	workloadSettleStep, workloadSettle = time.Millisecond, 20*time.Millisecond
+	// the fixture has paperless running and redis exited
+	if got := settleWorkload(api.WorkloadAction{Kind: "docker", ID: dockerID1, Action: "restart"}); got != "state: running" {
+		t.Fatalf("restart: %q", got)
+	}
+	if got := settleWorkload(api.WorkloadAction{Kind: "docker", ID: dockerID2, Action: "stop"}); got != "state: exited" {
+		t.Fatalf("stop: %q", got)
+	}
+	if got := settleWorkload(api.WorkloadAction{Kind: "docker", ID: dockerID2, Action: "start"}); !strings.HasPrefix(got, "state: exited (not yet running") {
+		t.Fatalf("start not settled: %q", got)
+	}
+	// still shutting down on the first two looks, stopped on the third
+	looks := 0
+	workloadRun = func(name string, args ...string) (string, error) {
+		if name == "virsh" && args[0] == "list" {
+			looks++
+			state := "in shutdown"
+			if looks >= 3 {
+				state = "shut off"
+			}
+			return " Id   Name    State\n 1    vm-a    " + state + "\n", nil
+		}
+		return "", nil
+	}
+	if got := settleWorkload(api.WorkloadAction{Kind: "libvirt", ID: "vm-a", Action: "stop"}); got != "state: shut off" || looks != 3 {
+		t.Fatalf("stop after polling: %q (%d looks)", got, looks)
+	}
+	if got := settleWorkload(api.WorkloadAction{Kind: "libvirt", ID: "vm-b", Action: "stop"}); got != "state: gone" {
+		t.Fatalf("gone: %q", got)
 	}
 }

@@ -1318,6 +1318,11 @@ func (a *Agent) runCommands(cmds []api.Command) {
 		}
 		a.state.Results = append(a.state.Results, a.execute(c))
 		a.syncNow = true
+		if c.Type == "workload_action" {
+			// the console waits for the new state: report the result and
+			// the inventory now, not after the jitter of syncNow
+			a.kickCheckin()
+		}
 	}
 }
 
