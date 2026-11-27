@@ -74,14 +74,16 @@ function useDone() {
   return () => void qc.invalidateQueries({ queryKey: ['devices'] })
 }
 
-export type CommandResult = { approval: boolean }
+/** id is the queued command (absent when it waits for an approval). */
+export type CommandResult = { approval: boolean; id?: number }
 
 export function useCommand(id: string) {
   const done = useDone()
   return useMutation({
     mutationFn: async ({ type, params }: { type: string; params?: Params }): Promise<CommandResult> => {
       const r = await unwrap(api.POST('/api/v1/devices/{id}/commands', { params: { path: { id } }, body: { type, params } }))
-      return { approval: (r as { status?: string }).status === 'pending' && 'approval_id' in (r as object) }
+      const approval = (r as { status?: string }).status === 'pending' && 'approval_id' in (r as object)
+      return { approval, id: approval ? undefined : (r as { id?: number }).id }
     },
     onSuccess: done,
   })

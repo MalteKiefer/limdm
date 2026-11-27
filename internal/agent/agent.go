@@ -148,8 +148,10 @@ type Agent struct {
 	checkinFailures             int       // failed check ins in a row (checkinWait)
 	osqueryTried                time.Time // last osquery install attempt
 	syncNow                     bool
-	renewNow, renewNetNow       bool // the server asked for new certificates (CA rotation)
-	proxySet                    bool // a proxy declaration set the environment of this process
+	renewNow, renewNetNow       bool           // the server asked for new certificates (CA rotation)
+	proxySet                    bool           // a proxy declaration set the environment of this process
+	wl                          *api.Workloads // last workload inventory and when it was read (workloads.go)
+	wlAt                        time.Time
 	// for the desktop tray
 	lastCheckin  *time.Time
 	lastError    string
@@ -686,7 +688,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	a.lastSystem = DesktopSystem{OS: strings.TrimSpace(inv.OSName + " " + inv.OSVersion), Kernel: inv.Kernel, Arch: inv.Arch,
 		Inventory: inv.Source, Vendor: inv.Vendor, Model: inv.Model, Serial: inv.Serial}
 	status := api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus(), CatalogVersion: CatalogVersion, Updates: a.updateStatus(),
-		Workloads: collectWorkloads()}
+		Workloads: a.workloads()}
 	statusHash := statusHashOf(status)
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
 		StatusHash: statusHash, Results: a.state.Results, Events: a.pendingEvents(), Metrics: metrics(), BrandingHash: a.state.BrandingHash,
@@ -1318,6 +1320,11 @@ func (a *Agent) runCommands(cmds []api.Command) {
 		}
 		a.state.Results = append(a.state.Results, a.execute(c))
 		a.syncNow = true
+		if c.Type == "workload_action" {
+			// the console waits for the new state: report the result and
+			// the inventory now, not after the jitter of syncNow
+			a.kickCheckin()
+		}
 	}
 }
 

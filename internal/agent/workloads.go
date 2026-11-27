@@ -73,6 +73,19 @@ func workloadCmd(kind string) string {
 	return kind
 }
 
+// workloadsEvery coalesces inventories: check ins in quick succession (sync
+// now clicked again and again) read the tools at most once in this time.
+const workloadsEvery = 15 * time.Second
+
+// workloads is the inventory for a check in, read again only after
+// workloadsEvery or a workload action.
+func (a *Agent) workloads() *api.Workloads {
+	if a.wlAt.IsZero() || time.Since(a.wlAt) >= workloadsEvery {
+		a.wl, a.wlAt = collectWorkloads(), time.Now()
+	}
+	return a.wl
+}
+
 // collectWorkloads reads every installed tool; nil when there is none.
 func collectWorkloads() *api.Workloads {
 	w := &api.Workloads{Tools: []api.WorkloadTool{}, Items: []api.Workload{}}
@@ -522,5 +535,51 @@ func (a *Agent) workloadAction(c api.Command) (string, error) {
 	argv := workloadArgv(w)
 	out, err := run(6*time.Minute, argv[0], argv[1:]...)
 	a.event("workload %s %s (%s): %s, error=%v", w.Kind, it.Name, w.ID, w.Action, err)
-	return strings.TrimSpace(fmt.Sprintf("%s %s %s\n%s", w.Action, w.Kind, it.Name, out)), err
+	a.wlAt = time.Time{} // the next check in reports the new state
+	res := strings.TrimSpace(fmt.Sprintf("%s %s %s\n%s", w.Action, w.Kind, it.Name, out))
+	if err == nil {
+		res += "\n" + settleWorkload(w)
+	}
+	return res, err
+}
+
+// workloadSettle bounds the wait for a workload to reach the state of its
+// action, polled every workloadSettleStep; variables for tests.
+var workloadSettle, workloadSettleStep = 30 * time.Second, 2 * time.Second
+
+// settleWorkload waits until the workload is in the state its action
+// leads to (running after start and restart, stopped after stop) and
+// returns the state line of the command result. The next check in, which
+// follows at once, then reports the inventory with that state.
+func settleWorkload(w api.WorkloadAction) string {
+	end := time.Now().Add(workloadSettle)
+	for {
+		live := &api.Workloads{}
+		collectKind(live, w.Kind)
+		it, ok := live.Find(w.Kind, w.ID)
+		if !ok {
+			return "state: gone"
+		}
+		state := it.State
+		if settled(w.Action, state) {
+			return "state: " + state
+		}
+		if time.Now().Add(workloadSettleStep).After(end) {
+			want := "running"
+			if w.Action == "stop" {
+				want = "stopped"
+			}
+			return fmt.Sprintf("state: %s (not yet %s after %s)", state, want, workloadSettle)
+		}
+		time.Sleep(workloadSettleStep)
+	}
+}
+
+// settled reports whether state is the end state of action: docker and
+// podman say exited, Proxmox, LXC and Incus stopped, libvirt shut off.
+func settled(action, state string) bool {
+	if action == "stop" {
+		return slices.Contains([]string{"exited", "stopped", "shut off", "created", "dead"}, state)
+	}
+	return state == "running"
 }

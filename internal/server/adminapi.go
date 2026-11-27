@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"net/http"
 	"net/netip"
@@ -816,6 +817,19 @@ func (s *Server) apiCommandCreate(w http.ResponseWriter, r *http.Request, c apiC
 	if retired {
 		problem(w, http.StatusConflict, "the device is retired")
 		return
+	}
+	if body.Type == "sync" { // one sync per device and cooldown (app_workloads.go)
+		wait, err := s.syncWait(ctx, id)
+		if err != nil {
+			s.apiFail(w, err)
+			return
+		}
+		if wait > 0 {
+			secs := int(math.Ceil(wait.Seconds()))
+			w.Header().Set("Retry-After", strconv.Itoa(secs))
+			problem(w, http.StatusTooManyRequests, fmt.Sprintf("the device was asked to sync less than %d seconds ago: try again in %d seconds", int(syncCooldown.Seconds()), secs))
+			return
+		}
 	}
 	fr := r.Clone(ctx)
 	fr.Form, fr.PostForm = form, form

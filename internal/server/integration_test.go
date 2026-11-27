@@ -340,6 +340,26 @@ func TestIntegration(t *testing.T) {
 	call(dev, "/api/v1/checkin", api.CheckinRequest{DeclarationsToken: cr.DeclarationsToken, StatusHash: "s1", PackagesHash: "p1",
 		Results: []api.CommandResult{{ID: cr.Commands[0].ID, OK: true, Output: "ok"}}, Events: []string{"remediated kernel.aslr"}}, nil)
 
+	// a workload action reports its result together with the new inventory
+	// in one check in: the console sees both at once
+	var wlCmd int64
+	if err := db.QueryRow(ctx, `INSERT INTO commands(device_id, type, payload, status, created_by) VALUES ($1, 'workload_action', '{"kind":"qm","id":"200","action":"stop"}', 'sent', 'admin') RETURNING id`,
+		er.DeviceID).Scan(&wlCmd); err != nil {
+		t.Fatal(err)
+	}
+	wlStatus := *status
+	wlStatus.Workloads = &api.Workloads{Tools: []api.WorkloadTool{{Kind: "qm"}}, Items: []api.Workload{{Kind: "qm", ID: "200", Name: "win11", State: "stopped"}}}
+	if code := call(dev, "/api/v1/checkin", api.CheckinRequest{DeclarationsToken: cr.DeclarationsToken, StatusHash: "s1", PackagesHash: "p1", Status: &wlStatus,
+		Results: []api.CommandResult{{ID: wlCmd, OK: true, Output: "stop qm win11\nstate: stopped"}}}, nil); code != 200 {
+		t.Fatalf("workload result checkin: %d", code)
+	}
+	var wlState, wlOut, wlCmdStatus string
+	db.QueryRow(ctx, `SELECT status, output FROM commands WHERE id=$1`, wlCmd).Scan(&wlCmdStatus, &wlOut)
+	db.QueryRow(ctx, `SELECT inventory->'items'->0->>'state' FROM device_workloads WHERE device_id=$1`, er.DeviceID).Scan(&wlState)
+	if wlCmdStatus != "ok" || !strings.HasSuffix(wlOut, "state: stopped") || wlState != "stopped" {
+		t.Fatalf("workload result: %s %q, inventory state %q", wlCmdStatus, wlOut, wlState)
+	}
+
 	// script results and diagnostics bundles are stored per device; bundles download for admins
 	command("diagnostics", "", adminSess)
 	if code, body := command("script", `"payload":"echo $A","params":"A=1"`, adminSess); code != http.StatusAccepted {

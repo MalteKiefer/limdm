@@ -73,7 +73,7 @@ export interface paths {
         put?: never;
         /**
          * Queue a command
-         * @description Same commands and rules as the console: scripts, lost mode, wipe, allow_uninstall, user, software and app commands need the admin role; lost and wipe need confirm set to the host name. Audited as command.<type>. Roles admin and helpdesk, not read only. With four eyes approval on (wipe, lost mode, scripts) nothing is queued: the answer is 202 with the approval_id of a pending request that another admin decides in the console or through /api/v1/approvals/{id}.
+         * @description Same commands and rules as the console: scripts, lost mode, wipe, allow_uninstall, user, software and app commands need the admin role; lost and wipe need confirm set to the host name. Audited as command.<type>. Roles admin and helpdesk, not read only. With four eyes approval on (wipe, lost mode, scripts) nothing is queued: the answer is 202 with the approval_id of a pending request that another admin decides in the console or through /api/v1/approvals/{id}. sync is accepted once per device and 30 seconds (429 with Retry-After otherwise); workload_action is refused with 409 while another action for the same workload or 5 actions in all wait for the device.
          */
         post: operations["enqueueCommand"];
         delete?: never;
@@ -4996,6 +4996,13 @@ export interface components {
              * @description When the inventory last changed
              */
             updated_at?: string | null;
+            /**
+             * Format: date-time
+             * @description The device's last check in: an unchanged inventory is not sent again, so it is current as of then
+             */
+            checked_at?: string | null;
+            /** @description Seconds until a sync command for this device is accepted again (one per device and 30 seconds, 0 when allowed now) */
+            sync_wait?: number;
             inventory?: components["schemas"]["Workloads"];
             control?: {
                 /** @description The device's policy allows workload actions (com.limdm.agent workload_control) */

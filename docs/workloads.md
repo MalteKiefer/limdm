@@ -65,6 +65,35 @@ Stop always shuts down gracefully. A VM is never killed; Docker and Podman stop 
 with SIGKILL only after the 60 second grace period, as `docker stop` does. Every command is
 audited (`command.workload_action`) and its result appears in the device's activity.
 
+### Feedback in the console
+
+A queued command reaches the agent with its next poll (about once a minute, plus up to 10 s
+jitter). After the action the agent reads the state of that workload every 2 seconds for up to
+30 seconds until it is the end state (running after start and restart; exited, stopped or shut
+off after stop) and ends the result with `state: <state>` (or `state: <state> (not yet ... after
+30s)`). It then checks in at once, without the usual jitter, so the result and the new inventory
+arrive in the same check in and the server stores both together.
+
+On the **Containers and VMs** tab the row of a sent action shows a spinner with the action and
+its buttons are disabled. The tab polls the command and the inventory until the command is done
+or failed, then shows the new state and a message (the agent's error text on failure). After 3
+minutes without a result it stops waiting and says so; the command stays queued until the device
+picks it up. Stop and restart under four eyes wait for the approval first, so there is nothing to
+follow yet. **Refresh** reloads the tab and, for roles that may send commands, asks the device to
+sync now. **As of** shows the device's last check in (`checked_at`): an unchanged inventory is not
+sent again, so it is current as of then.
+
+### Limits
+
+So that neither the console nor a busy admin floods a device:
+
+| Where | Limit |
+|---|---|
+| Console | polls only while one of its commands waits, every 2 s for the first 10 s, then every 3 s up to 30 s, 5 s up to 1 min, then 10 s; stops after 3 minutes; never polls a hidden tab; at most one request per query in flight |
+| Server, sync now | one `sync` per device and 30 seconds, whoever sends it: another answers `429` with `Retry-After`; `sync_wait` in the workloads answer is the rest, the **Refresh** button counts it down |
+| Server, workload actions | `409` while another action for the same workload waits (pending or sent), and while 5 actions wait for the device |
+| Agent | the settle wait after an action reads one kind every 2 s for at most 30 s; the full inventory is read at most every 15 s, so check ins in quick succession reuse it (an action marks it stale) |
+
 Nothing acts on its own: the agent never starts, stops or restarts a workload without an
 explicit command from the console, so a host that runs important containers (for example a
 document archive) keeps running exactly as it is while it is inventoried.

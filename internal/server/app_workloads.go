@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -133,6 +135,9 @@ func (s *Server) workloadCommandPayload(r *http.Request, id string) (string, int
 	if _, ok := inv.Find(w.Kind, w.ID); !ok {
 		return "", http.StatusBadRequest, "unknown workload: it is not in the device's last inventory"
 	}
+	if code, msg := s.workloadQueueFull(r.Context(), id, w); code != 0 {
+		return "", code, msg
+	}
 	pol, err := devicePolicy(r.Context(), s, id)
 	if err != nil {
 		return "", http.StatusInternalServerError, "policy unavailable"
@@ -144,6 +149,47 @@ func (s *Server) workloadCommandPayload(r *http.Request, id string) (string, int
 	return string(b), 0, ""
 }
 
+// Guard rails against piling up work on a device: one waiting action per
+// workload, a few per device, one sync per device and cooldown.
+const (
+	maxWorkloadQueue = 5
+	syncCooldown     = 30 * time.Second
+)
+
+// workloadQueueFull refuses a workload action (409) while another one for
+// the same workload waits for the device, or maxWorkloadQueue already do.
+func (s *Server) workloadQueueFull(ctx context.Context, id string, w api.WorkloadAction) (int, string) {
+	payloads, err := collect(ctx, s.db, pgx.RowTo[string], `SELECT payload FROM commands
+		WHERE device_id=$1 AND type='workload_action' AND status IN ('pending','sent')`, id)
+	if err != nil {
+		return http.StatusInternalServerError, "command queue unavailable"
+	}
+	if len(payloads) >= maxWorkloadQueue {
+		return http.StatusConflict, fmt.Sprintf("%d workload actions already wait for this device: try again when they are done", len(payloads))
+	}
+	for _, p := range payloads {
+		var q api.WorkloadAction
+		if json.Unmarshal([]byte(p), &q) == nil && q.Kind == w.Kind && q.ID == w.ID {
+			return http.StatusConflict, "an action for this workload still waits for the device"
+		}
+	}
+	return 0, ""
+}
+
+// syncWait is how long a device must wait for the next sync command: at
+// most one per syncCooldown across all users, so a refresh button cannot
+// flood the agent with check ins.
+func (s *Server) syncWait(ctx context.Context, id string) (time.Duration, error) {
+	var last *time.Time
+	if err := s.db.QueryRow(ctx, `SELECT max(created_at) FROM commands WHERE device_id=$1 AND type='sync'`, id).Scan(&last); err != nil {
+		return 0, err
+	}
+	if last == nil {
+		return 0, nil
+	}
+	return max(0, syncCooldown-time.Since(*last)), nil
+}
+
 type apiWorkloadControl struct {
 	Policy   bool `json:"policy"`    // the device's policy allows actions (com.limdm.agent workload_control)
 	Allowed  bool `json:"allowed"`   // the caller's role may send them
@@ -151,10 +197,14 @@ type apiWorkloadControl struct {
 }
 
 type apiDeviceWorkloads struct {
-	Reports   bool               `json:"reports"` // the device has reported workloads
-	UpdatedAt *time.Time         `json:"updated_at"`
+	Reports   bool       `json:"reports"` // the device has reported workloads
+	UpdatedAt *time.Time `json:"updated_at"`
+	// CheckedAt is the last check in: an unchanged inventory is not sent
+	// again, so the inventory is current as of then.
+	CheckedAt *time.Time         `json:"checked_at"`
 	Inventory api.Workloads      `json:"inventory"`
 	Control   apiWorkloadControl `json:"control"`
+	SyncWait  int                `json:"sync_wait"` // seconds until "sync now" is allowed again
 }
 
 func (s *Server) apiDeviceWorkloads(w http.ResponseWriter, r *http.Request, c apiCaller) {
@@ -176,7 +226,17 @@ func (s *Server) apiDeviceWorkloads(w http.ResponseWriter, r *http.Request, c ap
 		FourEyes: s.settings().FourEyesWorkloads}}
 	if inv != nil {
 		out.Reports, out.UpdatedAt, out.Inventory = true, &at, *inv
+		if err := s.db.QueryRow(r.Context(), `SELECT last_seen FROM devices WHERE id=$1`, id).Scan(&out.CheckedAt); err != nil {
+			s.apiFail(w, err)
+			return
+		}
 	}
+	wait, err := s.syncWait(r.Context(), id)
+	if err != nil {
+		s.apiFail(w, err)
+		return
+	}
+	out.SyncWait = int(math.Ceil(wait.Seconds()))
 	out.Inventory.Tools, out.Inventory.Items = nonNilSlice(out.Inventory.Tools), nonNilSlice(out.Inventory.Items)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, out)

@@ -41,6 +41,7 @@ import {
   useRecoveryView,
   useRetire,
   useShellStart,
+  type CommandResult,
   type DeviceDetail,
   type Params,
 } from './api'
@@ -64,13 +65,13 @@ export function useRun(target: Target) {
   const cmd = useCommand(target.id)
   return {
     pending: cmd.isPending,
-    run: (type: string, params?: Params, after?: () => void) =>
+    run: (type: string, params?: Params, after?: (r: CommandResult) => void) =>
       cmd.mutate(
         { type, params },
         {
           onSuccess: (r) => {
             toast(r.approval ? t('devices.toast.approval') : t('devices.toast.queued', { name: target.hostname }))
-            after?.()
+            after?.(r)
           },
           onError: (e) => toast(errorText(e), 'error'),
         },
