@@ -4805,8 +4805,8 @@
     "/api/v1/config/library/render": {
       "post": {
         "operationId": "configItemRender",
-        "summary": "Render a files or firewall template for one device",
-        "description": "Admins. Validates the payload like a save, then renders its templates with the values of the device (an ID or hostname in the caller's scope). Nothing is saved. A render error comes back in error with the payload as the agent would get it.",
+        "summary": "Render a files, firewall or hostname template for one device",
+        "description": "Admins. Validates the payload like a save, then renders its templates with the values of the device (an ID or hostname in the caller's scope). Nothing is saved. A render error comes back in error with the payload as the agent would get it. For com.limdm.hostname the response adds hostname: the name the declaration computes for the device from its last report (current name, target FQDN, source used or the reason it keeps its name).",
         "requestBody": {
           "required": true,
           "content": {
@@ -4886,6 +4886,53 @@
                           "additionalProperties": {
                             "type": "string"
                           }
+                        },
+                        "serial": {
+                          "type": "string",
+                          "description": "DMI serial number, empty for a placeholder"
+                        },
+                        "mac": {
+                          "type": "string",
+                          "description": "MAC address of the primary interface"
+                        },
+                        "vendor": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "hostname": {
+                      "type": "object",
+                      "required": [
+                        "current"
+                      ],
+                      "description": "com.limdm.hostname only",
+                      "properties": {
+                        "current": {
+                          "type": "string",
+                          "description": "host name the device reported"
+                        },
+                        "target": {
+                          "type": "string",
+                          "description": "FQDN (or short name) the declaration computes"
+                        },
+                        "source": {
+                          "type": "string",
+                          "description": "source used, \"template (fallback)\" for the fallback"
+                        },
+                        "error": {
+                          "type": "string",
+                          "description": "why the device keeps its name"
+                        },
+                        "serial": {
+                          "type": "string"
+                        },
+                        "facts": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "description": "hostname_info of the inventory: address, mac, ptr, fqdn, target, source, result, detail, previous, changed_at, warning"
                         }
                       }
                     }
@@ -12665,6 +12712,13 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "info": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "notes of the reported state (com.limdm.hostname: target, source, result, warnings)"
                     }
                   },
                   "required": [

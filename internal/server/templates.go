@@ -21,18 +21,24 @@ import (
 // deviceTemplateVars loads the values a template of the device can use.
 func deviceTemplateVars(ctx context.Context, q querier, deviceID string) (api.TemplateVars, error) {
 	v := api.TemplateVars{ID: deviceID}
-	err := q.QueryRow(ctx, `SELECT d.hostname, d.tags, d.attributes, coalesce(t.name, ''), coalesce(u.email, '')
+	err := q.QueryRow(ctx, `SELECT d.hostname, d.tags, d.attributes, coalesce(t.name, ''), coalesce(u.email, ''),
+			coalesce(d.inventory->>'serial', ''), coalesce(d.inventory->'hostname_info'->>'mac', ''),
+			coalesce(d.inventory->>'vendor', ''), coalesce(d.inventory->>'model', '')
 		FROM devices d LEFT JOIN tenants t ON t.id = d.tenant_id LEFT JOIN dir_users u ON u.id = d.primary_user_id
-		WHERE d.id = $1`, deviceID).Scan(&v.Hostname, &v.Tags, &v.Attributes, &v.Tenant, &v.PrimaryUser)
+		WHERE d.id = $1`, deviceID).Scan(&v.Hostname, &v.Tags, &v.Attributes, &v.Tenant, &v.PrimaryUser, &v.Serial, &v.MAC, &v.Vendor, &v.Model)
 	if v.Tags == nil {
 		v.Tags = []string{}
+	}
+	if api.PlaceholderDMI(v.Serial) {
+		v.Serial = ""
 	}
 	return v, err
 }
 
 // hasTemplate reports whether an item needs rendering.
 func hasTemplate(it api.LibraryItem) bool {
-	return (it.Type == api.TypeFiles || it.Type == api.TypeFirewall) && strings.Contains(string(it.Payload), `"template":true`)
+	return (it.Type == api.TypeFiles || it.Type == api.TypeFirewall) && strings.Contains(string(it.Payload), `"template":true`) ||
+		it.Type == api.TypeHostname && api.IsTemplate(string(it.Payload))
 }
 
 // renderItems returns items with their templates rendered for the device.
@@ -61,8 +67,8 @@ func renderItems(ctx context.Context, q querier, deviceID string, items []api.Li
 	return out, nil
 }
 
-// apiConfigItemRender renders a files or firewall payload, as edited, for
-// one device: the preview of the item editor. device is an ID or a
+// apiConfigItemRender renders a files, firewall or hostname payload, as
+// edited, for one device: the preview of the item editor. device is an ID or a
 // hostname in the caller's scope.
 func (s *Server) apiConfigItemRender(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	ctx := r.Context()
@@ -97,12 +103,19 @@ func (s *Server) apiConfigItemRender(w http.ResponseWriter, r *http.Request, c a
 	}
 	out, rerr := api.RenderPayload(body.Type, body.Payload, vars)
 	res := struct {
-		Payload json.RawMessage  `json:"payload"`
-		Error   string           `json:"error,omitempty"`
-		Vars    api.TemplateVars `json:"vars"`
+		Payload  json.RawMessage  `json:"payload"`
+		Error    string           `json:"error,omitempty"`
+		Vars     api.TemplateVars `json:"vars"`
+		Hostname *hostnamePreview `json:"hostname,omitempty"` // com.limdm.hostname: the name it computes (hostname.go)
 	}{Payload: out, Vars: vars}
 	if rerr != nil {
 		res.Error = rerr.Error()
+	}
+	if body.Type == api.TypeHostname {
+		if res.Hostname, err = previewHostname(ctx, s.db, id, out); err != nil {
+			s.apiFail(w, err)
+			return
+		}
 	}
 	writeJSON(w, res)
 }

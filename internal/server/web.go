@@ -373,6 +373,7 @@ type declRow struct {
 	State      string   `json:"state"` // pending | invalid | not achieved | active
 	Class      string   `json:"-"`
 	Reasons    []string `json:"reasons"`
+	Info       []string `json:"info,omitempty"` // notes of a reported state, failure or not (com.limdm.hostname)
 }
 
 // declarationRows compares the declarations a device should have with what
@@ -386,6 +387,9 @@ func declarationRows(want []api.Declaration, got []api.DeclarationStatus) []decl
 	for _, dcl := range want {
 		row := declRow{Identifier: dcl.Identifier, Type: dcl.Type, Reasons: []string{}}
 		st, ok := reported[dcl.Identifier]
+		if ok && st.ServerToken == dcl.ServerToken {
+			row.Info = st.Info
+		}
 		switch {
 		case !ok || st.ServerToken != dcl.ServerToken:
 			row.State, row.Class = "pending", "warn"

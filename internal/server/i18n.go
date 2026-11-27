@@ -808,4 +808,7 @@ var deCatalog = map[string]string{
 	"Update wave reached ring":                       "Updatewelle hat Ring erreicht",
 	"No security update pending longer than allowed": "Kein Sicherheitsupdate länger als erlaubt ausstehend",
 	"CVE data import started":                        "Import der CVE Daten gestartet",
+	// R3-H
+	"Host name": "Hostname",
+	"Host name from reverse DNS, DNS, the serial number, a template or a fixed name, with /etc/hosts and /etc/mailname.": "Hostname aus Reverse DNS, DNS, Seriennummer, Vorlage oder festem Namen, mit /etc/hosts und /etc/mailname.",
 }
