@@ -32,8 +32,14 @@ func safeNext(v string) string {
 			return defaultNext
 		}
 	}
-	// a path on this host: always "/" plus the checked path and query
-	return "/" + strings.TrimPrefix(u.RequestURI(), "/")
+	// only pages of the console app: the target is rebuilt behind the constant
+	// prefix /app/, so it can never leave this host (old page addresses
+	// redirect to /app/ before the sign in, see classicPaths)
+	rest, ok := strings.CutPrefix(u.RequestURI(), defaultNext)
+	if !ok {
+		return defaultNext
+	}
+	return defaultNext + strings.TrimLeft(rest, "/")
 }
 
 // oneLine keeps a value from a request on one log line.

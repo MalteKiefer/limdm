@@ -4,6 +4,15 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.19.1 (2026-11-27)
+
+### Fixed
+- A CVE feed switched on in the settings starts within five minutes instead of at the next full hour.
+- Form fields of one row line up even when one of them shows an error; the required name of a new library item is flagged only after it was touched.
+
+### Security
+- The sign in return target only accepts pages of the console app (`/app/...`) and is rebuilt behind that prefix.
+
 ## 0.19.0 (2026-11-27)
 
 ### Upgrade notes

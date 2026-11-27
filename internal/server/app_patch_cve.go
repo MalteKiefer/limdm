@@ -659,7 +659,9 @@ func (s *Server) cveFeedsDue(ctx context.Context) (bool, error) {
 }
 
 func (s *Server) cveLoop(ctx context.Context) {
-	t := time.NewTicker(time.Hour)
+	// the due check is one cheap query: a feed switched on in the settings
+	// starts within minutes, not at the next full hour
+	t := time.NewTicker(5 * time.Minute)
 	defer t.Stop()
 	for {
 		if len(s.settings().CVEFeeds.enabled()) > 0 {
