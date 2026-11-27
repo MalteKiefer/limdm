@@ -183,7 +183,7 @@ Limits and failures:
 * A failed import (unreachable, too large, no data) keeps the last data
   and records the error; **Updates, Security** shows each feed, whether
   it is on, the age of its data, the last error and **Refresh now**
-  (admins, imports the switched on feeds; audited as
+  (admins of the whole installation, imports the switched on feeds; audited as
   `cve_feeds.refresh`). After a failure the next attempt is six hours
   later. Switching a feed off stops its imports; its last data stays.
 
