@@ -9232,6 +9232,108 @@
         }
       }
     },
+    "/api/v1/devices/{id}/workloads": {
+      "get": {
+        "operationId": "getDeviceWorkloads",
+        "summary": "Containers and VMs of a device, tool versions and whether workload actions are allowed",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceWorkloads"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/workloads": {
+      "get": {
+        "operationId": "listWorkloads",
+        "summary": "Containers and VMs of the fleet in the caller's scope, at most 2000",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["docker", "podman", "lxc", "lxd", "incus", "pct", "qm", "libvirt"]
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "Exact state, for example running or exited",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "image",
+            "in": "query",
+            "description": "Part of the image reference or OS template, case insensitive",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetWorkloads"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
     "/api/v1/updates/fleet": {
       "get": {
         "operationId": "getUpdatesFleet",
@@ -9736,7 +9838,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "description": "A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create, package_hold, package_downgrade"
+            "description": "A command type of the console, for example sync, update, reboot, shutdown, lock, unlock, message, lost, found, wipe, script, app_install, user_create, package_hold, package_downgrade, workload_action"
           },
           "params": {
             "type": "object",
@@ -9747,7 +9849,7 @@
                 "boolean"
               ]
             },
-            "description": "The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove), name and release (package_hold), name and version (package_downgrade). true is sent as on; reason (wipe, lost, script, package_downgrade: the reason shown to the approving admin when four eyes approval is on)."
+            "description": "The console form fields: minutes (reboot, shutdown), confirm and message (lost, wipe), title and text (message), payload (script), app (app_install, app_remove), username, full_name, password, admin, keep_home (user commands), kind, name, installation (software_remove), name and release (package_hold), name and version (package_downgrade), kind, id and action (workload_action: start, stop or restart of a workload of the last inventory). true is sent as on; reason (wipe, lost, script, package_downgrade, workload_action stop and restart: the reason shown to the approving admin when four eyes approval is on)."
           }
         }
       },
@@ -14375,6 +14477,14 @@
           "four_eyes_shell": {
             "type": "boolean"
           },
+          "four_eyes_workloads": {
+            "type": "boolean",
+            "description": "Stopping and restarting containers and VMs waits for a second admin (needs four_eyes)"
+          },
+          "workloads_helpdesk": {
+            "type": "boolean",
+            "description": "The helpdesk role may start, stop and restart containers and VMs"
+          },
           "require_mfa": {
             "type": "boolean"
           },
@@ -14524,6 +14634,14 @@
           },
           "four_eyes_shell": {
             "type": "boolean"
+          },
+          "four_eyes_workloads": {
+            "type": "boolean",
+            "description": "Stopping and restarting containers and VMs waits for a second admin (needs four_eyes)"
+          },
+          "workloads_helpdesk": {
+            "type": "boolean",
+            "description": "The helpdesk role may start, stop and restart containers and VMs"
           },
           "require_mfa": {
             "type": "boolean"
@@ -16420,6 +16538,160 @@
           },
           "wave": {
             "type": "integer"
+          }
+        }
+      },
+      "WorkloadTool": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "Workload": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["docker", "podman", "lxc", "lxd", "incus", "pct", "qm", "libvirt"]
+          },
+          "id": {
+            "type": "string",
+            "description": "Container ID, VMID or name: what workload_action takes"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "description": "container or vm"
+          },
+          "image": {
+            "type": "string",
+            "description": "Image reference or OS template"
+          },
+          "image_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "description": "The tool's state in lower case, for example running, exited, stopped, paused, shut off"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "started": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "restart": {
+            "type": "string",
+            "description": "Restart policy or autostart"
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "project": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "cpus": {
+            "type": "integer"
+          },
+          "memory_mb": {
+            "type": "integer"
+          }
+        }
+      },
+      "Workloads": {
+        "type": "object",
+        "properties": {
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkloadTool"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Workload"
+            }
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DeviceWorkloads": {
+        "type": "object",
+        "properties": {
+          "reports": {
+            "type": "boolean",
+            "description": "The device has reported workloads"
+          },
+          "updated_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the inventory last changed"
+          },
+          "inventory": {
+            "$ref": "#/components/schemas/Workloads"
+          },
+          "control": {
+            "type": "object",
+            "properties": {
+              "policy": {
+                "type": "boolean",
+                "description": "The device's policy allows workload actions (com.limdm.agent workload_control)"
+              },
+              "allowed": {
+                "type": "boolean",
+                "description": "The caller's role may send workload actions"
+              },
+              "four_eyes": {
+                "type": "boolean",
+                "description": "Stop and restart wait for a second admin"
+              }
+            }
+          }
+        }
+      },
+      "FleetWorkloads": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "device_id": {
+                  "type": "string"
+                },
+                "hostname": {
+                  "type": "string"
+                },
+                "workload": {
+                  "$ref": "#/components/schemas/Workload"
+                }
+              }
+            }
           }
         }
       },
