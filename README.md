@@ -106,6 +106,7 @@ An index of all documents is in [docs/README.md](docs/README.md).
 | [Disk encryption](docs/disk-encryption.md) | Recovery key escrow, rotation, TPM 2.0 binding |
 | [Network profiles](docs/network.md) | WLAN, 802.1X, WireGuard and OpenVPN profiles, EAP-TLS device certificates, CRL |
 | [Patching](docs/patching.md) | Update rules per source, update rings and waves, pending updates, CVEs, rollback |
+| [Vulnerabilities](docs/vulnerabilities.md) | CVE findings of the fleet with severity, CVSS, CISA KEV, remediation and risk acceptance |
 | [Software catalog](docs/software.md) | Self service apps in the desktop app, requests, Flathub and vendor repositories |
 | [Compliance](docs/compliance.md) | Checks with IDs, custom checks, frameworks, policies, exceptions, webhook, evidence |
 | [Remote shell](docs/remote-shell.md) | Audited support terminal from the console to a device |

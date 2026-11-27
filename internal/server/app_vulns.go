@@ -475,6 +475,8 @@ func (s *Server) apiVulnSummary(w http.ResponseWriter, r *http.Request, c apiCal
 		Findings     map[string]int   `json:"findings"` // device and CVE pairs per status
 		TopPackages  []vulnTopPackage `json:"top_packages"`
 		FeedsEnabled bool             `json:"feeds_enabled"` // any CVE data switched on (Settings, CVE data)
+		OS           []string         `json:"os"`            // os_id of the devices with findings, for the filter
+		Devices      []vulnDeviceRef  `json:"devices"`       // up to 500 devices with findings, for the filter
 	}{Severity: map[string]int{}, Findings: map[string]int{}}
 	for _, n := range severityNames {
 		out.Severity[n] = 0
@@ -511,7 +513,23 @@ func (s *Server) apiVulnSummary(w http.ResponseWriter, r *http.Request, c apiCal
 	}
 	out.TopPackages = nonNilSlice(top)
 	out.FeedsEnabled = len(s.settings().CVEFeeds.enabled()) > 0
+	scope, args := scopeCond(c.sess(), 0)
+	withFindings := `FROM devices d WHERE NOT d.retired AND EXISTS (SELECT 1 FROM device_cves c WHERE c.device_id = d.id) AND ` + scope
+	if out.OS, err = collect(ctx, s.db, pgx.RowTo[string], `SELECT DISTINCT d.inventory->>'os_id' `+withFindings+` AND d.inventory->>'os_id' IS NOT NULL ORDER BY 1`, args...); err != nil {
+		s.apiFail(w, err)
+		return
+	}
+	if out.Devices, err = collect(ctx, s.db, pgx.RowToStructByPos[vulnDeviceRef], `SELECT d.id, d.hostname `+withFindings+` ORDER BY d.hostname, d.id LIMIT 500`, args...); err != nil {
+		s.apiFail(w, err)
+		return
+	}
+	out.OS, out.Devices = nonNilSlice(out.OS), nonNilSlice(out.Devices)
 	writeJSON(w, out)
+}
+
+type vulnDeviceRef struct {
+	ID       string `json:"id"`
+	Hostname string `json:"hostname"`
 }
 
 type vulnTopPackage struct {

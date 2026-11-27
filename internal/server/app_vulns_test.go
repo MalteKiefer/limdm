@@ -143,7 +143,8 @@ func TestVulnerabilities(t *testing.T) {
 		t.Fatalf("accept: %d %s", code, body)
 	}
 	code, body = call(dashAuditor, "GET", "/api/v1/vulnerabilities/summary", ``)
-	if code != 200 || !strings.Contains(body, `"findings":{"accepted":1,"active":0,"remediated":2}`) || !strings.Contains(body, `"top_packages":[]`) {
+	if code != 200 || !strings.Contains(body, `"findings":{"accepted":1,"active":0,"remediated":2}`) || !strings.Contains(body, `"top_packages":[]`) ||
+		!strings.Contains(body, `"os":["debian","fedora"]`) || !strings.Contains(body, `"hostname":"beta"`) {
 		t.Fatalf("summary: %d %s", code, body)
 	}
 	code, body = call(dashHelpdesk, "GET", "/api/v1/vulnerabilities/CVE-2024-9681", ``)

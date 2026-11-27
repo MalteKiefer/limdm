@@ -17920,6 +17920,28 @@
           "feeds_enabled": {
             "type": "boolean",
             "description": "any CVE data feed is switched on"
+          },
+          "os": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "os_id of the devices with findings"
+          },
+          "devices": {
+            "type": "array",
+            "description": "up to 500 devices with findings",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "hostname": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },
