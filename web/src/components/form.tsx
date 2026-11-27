@@ -17,9 +17,11 @@ export function Field({ label, help, error, required, children, htmlFor }: { lab
   const helpId = help ? `${id}-help` : undefined
   const errId = error ? `${id}-err` : undefined
   return (
-    <div className="flex flex-col gap-1">
-      {/* label and help grow, so the inputs of a row line up when help texts differ in height */}
-      <div className="flex grow flex-col gap-1">
+    // three subgrid rows (label and help, control, error): in a grid of fields
+    // the controls of one row line up, whatever the help or error texts above
+    // and below them; outside a grid the rows are just stacked
+    <div className="row-span-3 grid grid-rows-subgrid content-start gap-1">
+      <div className="flex flex-col gap-1">
         <label htmlFor={id} className="text-body font-medium">
           {label}
           {required && (

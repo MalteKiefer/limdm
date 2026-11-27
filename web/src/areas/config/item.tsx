@@ -89,6 +89,7 @@ function ItemEditor({ stored, type, prefill }: { stored?: ItemInput & { used_by:
   const readOnly = !admin || !!stored?.read_only
   const initial = useMemo(() => ({ name: stored?.name ?? '', description: stored?.description ?? '', payload: (stored?.payload ?? {}) as Obj }), [stored])
   const [name, setName] = useState(prefill?.name ?? initial.name)
+  const [nameTouched, setNameTouched] = useState(false) // no error on a form nobody touched yet
   const [desc, setDesc] = useState(prefill?.description ?? initial.description)
   const [payload, setPayload] = useState<Obj>(prefill?.payload ?? initial.payload)
   const [mode, setMode] = useState<'form' | 'json'>('form')
@@ -180,8 +181,8 @@ function ItemEditor({ stored, type, prefill }: { stored?: ItemInput & { used_by:
         <fieldset disabled={readOnly} className="flex min-w-0 flex-col gap-[var(--gap)]">
           <legend className="sr-only">{t('config.itemSettings')}</legend>
           <div className="card grid gap-4 p-[var(--pad-card)] md:grid-cols-2">
-            <Field label={t('config.name')} required error={!name.trim() ? t('schema.required') : serverErr?.field === 'name' ? serverErr.msg : undefined}>
-              {({ id, describedBy, invalid }) => <input id={id} aria-describedby={describedBy} aria-invalid={invalid || undefined} aria-required className="field" maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />}
+            <Field label={t('config.name')} required error={!name.trim() && (nameTouched || dirty) ? t('schema.required') : serverErr?.field === 'name' ? serverErr.msg : undefined}>
+              {({ id, describedBy, invalid }) => <input id={id} aria-describedby={describedBy} aria-invalid={invalid || undefined} aria-required className="field" maxLength={100} value={name} onChange={(e) => setName(e.target.value)} onBlur={() => setNameTouched(true)} />}
             </Field>
             <Field label={t('config.description')}>{({ id }) => <input id={id} className="field" maxLength={300} value={desc} onChange={(e) => setDesc(e.target.value)} />}</Field>
           </div>
