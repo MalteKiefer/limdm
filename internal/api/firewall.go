@@ -72,6 +72,9 @@ func (f Firewall) validate() []error {
 			port(a)
 		}
 	}
+	if err := validKeep(f.Keep); err != nil {
+		errs = append(errs, err)
+	}
 	if o := f.Outbound; o != nil {
 		if o.Policy != "allow" && o.Policy != "deny" {
 			bad("outbound policy must be allow or deny")
@@ -130,5 +133,5 @@ func mergeFirewall(x, y Firewall) Firewall {
 			out = &o
 		}
 	}
-	return Firewall{Enforce: x.Enforce || y.Enforce, Allow: union(x.Allow, y.Allow), Rules: rules, Zones: zones, Outbound: out, Template: x.Template || y.Template}
+	return Firewall{Enforce: x.Enforce || y.Enforce, Allow: union(x.Allow, y.Allow), Rules: rules, Zones: zones, Outbound: out, Template: x.Template || y.Template, Keep: union(x.Keep, y.Keep)}
 }

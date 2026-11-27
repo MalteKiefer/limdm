@@ -140,6 +140,7 @@ type Agent struct {
 	reasons    map[string][]string // declaration type -> why it is not active
 
 	sentStatusHash, sentPkgHash string
+	sentFwHash                  string    // firewall inventory (firewall_inventory.go)
 	failedUpdate                string    // release version whose update already failed, reported once
 	busy                        backoff   // the server asked to come back later (503, 429)
 	checkinFailures             int       // failed check ins in a row (checkinWait)
@@ -703,6 +704,11 @@ func (a *Agent) cycle(ctx context.Context) {
 	if pkgHash != a.sentPkgHash {
 		req.Packages = pkgs
 	}
+	fw := a.collectFirewall()
+	req.FirewallHash = firewallHash(fw)
+	if req.FirewallHash != a.sentFwHash {
+		req.Firewall = &fw
+	}
 
 	var resp api.CheckinResponse
 	if err := a.post(ctx, "/api/v1/checkin", req, &resp); err != nil {
@@ -758,6 +764,12 @@ func (a *Agent) cycle(ctx context.Context) {
 	}
 	if resp.NeedPackages {
 		a.sentPkgHash = ""
+	}
+	if req.Firewall != nil {
+		a.sentFwHash = req.FirewallHash
+	}
+	if resp.NeedFirewall {
+		a.sentFwHash = ""
 	}
 	// The server omits unchanged declarations; a new token with none means "nothing declared".
 	if resp.DeclarationsToken != "" && resp.DeclarationsToken != a.state.DeclToken {
@@ -914,6 +926,8 @@ func (a *Agent) execute(c api.Command) api.CommandResult {
 		out, err = a.packageHold(c.Payload)
 	case "package_downgrade":
 		out, err = a.packageDowngrade(c.Payload)
+	case "firewall_remove_rule":
+		out, err = a.firewallRemoveRule(c.Payload)
 	case "reboot", "shutdown":
 		out, err = a.powerAction(c.Type, c.Payload, c.CreatedAt)
 	case "lock":
