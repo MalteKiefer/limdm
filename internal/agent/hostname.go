@@ -199,7 +199,7 @@ func reverseName(ctx context.Context, r lookuper, ip net.IP, cur string) string 
 // UDP connect only selects the route; nothing is sent.
 func primaryAddr() net.IP {
 	for _, dst := range []string{"192.0.2.1:9", "[2001:db8::1]:9"} {
-		c, err := net.Dial("udp", dst)
+		c, err := (&net.Dialer{}).DialContext(context.Background(), "udp", dst)
 		if err != nil {
 			continue
 		}
