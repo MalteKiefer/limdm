@@ -72,7 +72,7 @@ func literalProblems(t *testing.T) map[string]string {
 						if kv, ok := e.(*ast.KeyValueExpr); ok {
 							e = kv.Value
 						}
-						if s, ok := lit(e); ok && !(id.Name == "fieldError" && !strings.ContainsAny(s, " :")) {
+						if s, ok := lit(e); ok && (id.Name != "fieldError" || strings.ContainsAny(s, " :")) {
 							out[s] = fset.Position(n.Pos()).String()
 						}
 					}
