@@ -52,15 +52,24 @@ import (
 // rows (empty kek_id) are rewrapped at start (rewrapLogKeys).
 const infoLogKeys = "limdm log archive keys v1"
 
-// logArchiveMagic starts every encrypted object (format version 1).
-const logArchiveMagic = "LIMDMLG1"
+// logArchiveMagic starts every encrypted object (format version 2);
+// logArchiveMagicV1 objects are still read.
+const (
+	logArchiveMagic   = "LIMDMLG2"
+	logArchiveMagicV1 = "LIMDMLG1"
+	logObjectInfo     = "limdm log object v2"
+)
 
 const logChunk = 64 << 10
 
-// logSealer encrypts a stream: a header (magic, key ID, nonce prefix),
-// then chunks of a 4 byte length and the sealed chunk. The nonce is the
-// prefix and a chunk counter; the additional data binds the header and
-// marks the last chunk, so reordering, truncation and appending fail.
+// logSealer encrypts a stream: a header (magic, key ID, a random 32 byte
+// salt, the object name), then chunks of a 4 byte length and the sealed
+// chunk. Every object gets its own AES-256 key, HKDF-SHA256 of the tenant's
+// data key and the salt, so the chunk counter alone is a unique nonce under
+// that key and no nonce repeats across objects. The additional data binds
+// the header (and with it tenant, device and day of the object name) and
+// marks the last chunk, so reordering, truncation, appending and moving an
+// object to another name fail.
 type logSealer struct {
 	w      io.Writer
 	aead   cipher.AEAD
@@ -70,26 +79,40 @@ type logSealer struct {
 	buf    []byte
 }
 
-func newLogSealer(w io.Writer, keyID string, key []byte) (*logSealer, error) {
-	if len(keyID) == 0 || len(keyID) > 255 {
-		return nil, errors.New("invalid key ID")
+func newLogSealer(w io.Writer, keyID string, key []byte, name string) (*logSealer, error) {
+	if len(keyID) == 0 || len(keyID) > 255 || len(name) > 1024 {
+		return nil, errors.New("invalid key ID or object name")
 	}
-	block, err := aes.NewCipher(key)
+	salt := make([]byte, 32)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, err
+	}
+	a, err := logObjectAEAD(key, salt)
 	if err != nil {
 		return nil, err
 	}
-	a, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	prefix := make([]byte, 4)
-	rand.Read(prefix)
 	h := append([]byte(logArchiveMagic), byte(len(keyID))) //nolint:gosec // checked above: at most 255
-	h = append(append(h, keyID...), prefix...)
+	h = append(append(h, keyID...), salt...)
+	h = binary.BigEndian.AppendUint16(h, uint16(len(name))) //nolint:gosec // checked above: at most 1024
+	h = append(h, name...)
 	if _, err := w.Write(h); err != nil {
 		return nil, err
 	}
-	return &logSealer{w: w, aead: a, header: h, prefix: prefix}, nil
+	return &logSealer{w: w, aead: a, header: h, prefix: make([]byte, 4)}, nil
+}
+
+// logObjectAEAD derives the AES-256-GCM key of one object from the data key
+// and the object's salt.
+func logObjectAEAD(key, salt []byte) (cipher.AEAD, error) {
+	k, err := hkdf.Key(sha256.New, key, salt, logObjectInfo, 32)
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(k)
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(block)
 }
 
 func (s *logSealer) seal(chunk []byte, last bool) error {
@@ -138,31 +161,64 @@ type logOpener struct {
 }
 
 // openLogArchive reads the header and returns a reader of the plain text
-// and the key ID; key looks the data key up.
-func openLogArchive(r io.Reader, key func(id string) ([]byte, error)) (io.Reader, string, error) {
+// and the key ID; key looks the data key up. name is the object's name in
+// the store: a version 2 object written under another name is refused.
+func openLogArchive(r io.Reader, key func(id string) ([]byte, error), name string) (io.Reader, string, error) {
 	br := bufio.NewReader(r)
 	head := make([]byte, len(logArchiveMagic)+1)
-	if _, err := io.ReadFull(br, head); err != nil || string(head[:len(logArchiveMagic)]) != logArchiveMagic {
+	if _, err := io.ReadFull(br, head); err != nil {
 		return nil, "", errors.New("not a LiMDM log archive")
 	}
-	rest := make([]byte, int(head[len(head)-1])+4)
+	v1 := string(head[:len(logArchiveMagic)]) == logArchiveMagicV1
+	if !v1 && string(head[:len(logArchiveMagic)]) != logArchiveMagic {
+		return nil, "", errors.New("not a LiMDM log archive")
+	}
+	idLen := int(head[len(head)-1])
+	if v1 { // key ID and a 4 byte nonce prefix under the data key itself
+		rest := make([]byte, idLen+4)
+		if _, err := io.ReadFull(br, rest); err != nil {
+			return nil, "", errors.New("truncated archive header")
+		}
+		id := string(rest[:idLen])
+		k, err := key(id)
+		if err != nil {
+			return nil, id, fmt.Errorf("key %s: %w", id, err)
+		}
+		block, err := aes.NewCipher(k)
+		if err != nil {
+			return nil, id, err
+		}
+		a, err := cipher.NewGCM(block)
+		if err != nil {
+			return nil, id, err
+		}
+		return &logOpener{r: br, aead: a, header: append(head, rest...), prefix: rest[idLen:]}, id, nil
+	}
+	rest := make([]byte, idLen+32+2)
 	if _, err := io.ReadFull(br, rest); err != nil {
 		return nil, "", errors.New("truncated archive header")
 	}
-	id := string(rest[:len(rest)-4])
+	id, salt := string(rest[:idLen]), rest[idLen:idLen+32]
+	stored := make([]byte, binary.BigEndian.Uint16(rest[idLen+32:]))
+	if len(stored) > 1024 {
+		return nil, id, errors.New("invalid archive header")
+	}
+	if _, err := io.ReadFull(br, stored); err != nil {
+		return nil, id, errors.New("truncated archive header")
+	}
+	if name != "" && string(stored) != name {
+		return nil, id, errors.New("the object belongs to another tenant, device or day")
+	}
 	k, err := key(id)
 	if err != nil {
 		return nil, id, fmt.Errorf("key %s: %w", id, err)
 	}
-	block, err := aes.NewCipher(k)
+	a, err := logObjectAEAD(k, salt)
 	if err != nil {
 		return nil, id, err
 	}
-	a, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, id, err
-	}
-	return &logOpener{r: br, aead: a, header: append(head, rest...), prefix: rest[len(rest)-4:]}, id, nil
+	h := append(append(head, rest...), stored...)
+	return &logOpener{r: br, aead: a, header: h, prefix: make([]byte, 4)}, id, nil
 }
 
 func (o *logOpener) Read(p []byte) (int, error) {
@@ -582,11 +638,12 @@ func (s *Server) archiveDay(ctx context.Context, st blobStore, target string, te
 	var total, size int64
 	for i, dev := range devices {
 		file := filepath.Join(dir, strconv.Itoa(i))
-		obj, err := s.writeLogObject(ctx, file, part, tenant, dev, keyID, key)
+		name := logObjectName(tenant, dev, day)
+		obj, err := s.writeLogObject(ctx, file, part, name, tenant, dev, keyID, key)
 		if err != nil {
 			return err
 		}
-		obj.Name = logObjectName(tenant, dev, day)
+		obj.Name = name
 		if err := putVerified(ctx, st, obj.Name, file, obj.SHA256); err != nil {
 			return err
 		}
@@ -627,7 +684,7 @@ func (c *countHash) Write(p []byte) (int, error) {
 }
 
 // writeLogObject writes the encrypted object of one device and day.
-func (s *Server) writeLogObject(ctx context.Context, file, part string, tenant int64, device, keyID string, key []byte) (logObject, error) {
+func (s *Server) writeLogObject(ctx context.Context, file, part, name string, tenant int64, device, keyID string, key []byte) (logObject, error) {
 	obj := logObject{Device: device}
 	f, err := os.OpenFile(file, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -635,7 +692,7 @@ func (s *Server) writeLogObject(ctx context.Context, file, part string, tenant i
 	}
 	defer f.Close()
 	ch := &countHash{w: f, h: sha256.New()}
-	sealer, err := newLogSealer(ch, keyID, key)
+	sealer, err := newLogSealer(ch, keyID, key, name)
 	if err != nil {
 		return obj, err
 	}
@@ -819,7 +876,7 @@ func (s *Server) restoreObject(ctx context.Context, st blobStore, dir string, te
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return 0, err
 	}
-	plain, _, err := openLogArchive(f, func(id string) ([]byte, error) { return s.openLogKey(ctx, id) })
+	plain, _, err := openLogArchive(f, func(id string) ([]byte, error) { return s.openLogKey(ctx, id) }, o.Name)
 	if err != nil {
 		return 0, err
 	}
