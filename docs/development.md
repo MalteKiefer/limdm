@@ -83,6 +83,11 @@ configuration in `.golangci.yml` (`nolintlint` is on: an exception is a
   detail needs a German entry in `deCatalog` in `internal/server/i18n.go`
   (`TestGermanCatalogComplete`) and a French, Spanish, Italian and Russian one in
   `i18n_<lang>.go` (`TestCatalogsComplete`); see [Languages](i18n.md).
+* Device side texts (`limdm`, `limdm-desktop`, agent notifications and the PAM prompt) are
+  English keys passed to `tr`, `trn` or `locale.T`/`locale.N`, translated in
+  `internal/locale/catalog/<lang>.json`; the GTK app uses `_()` and `ngettext()` with
+  `packaging/locale/<lang>.po`. `TestCatalogs` and `TestPoFiles` in `internal/locale` fail
+  on a missing text, wrong plural forms or changed printf verbs. See [i18n.md](i18n.md).
 * `internal/server/schema.sql` runs at every start, so every statement must be idempotent
   (`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `CREATE OR REPLACE`, guarded
   constraints). The integration test applies the schema twice and fails when the second run

@@ -447,8 +447,8 @@ func (a *Agent) notifyEscrow() {
 		time.Since(a.state.EscrowNotified) < 24*time.Hour {
 		return
 	}
-	sent := a.notifyUsers("Disk recovery key required",
-		a.company()+" needs a recovery key for your disk encryption. A dialog asks for your disk password; it is also in the applications menu as \"Disk recovery key\".", "critical")
+	sent := a.notifyUsers(urgent, "Disk recovery key required",
+		"%s needs a recovery key for your disk encryption. A dialog asks for your disk password; it is also in the applications menu as \"Disk recovery key\".", a.company())
 	// open the dialog right away: compositors like sway do not run the
 	// helper's XDG autostart entry
 	for _, s := range graphicalSessions() {

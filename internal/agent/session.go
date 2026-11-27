@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/maltekiefer/limdm/internal/api"
+	"github.com/maltekiefer/limdm/internal/locale"
 )
 
 // sessionVars are the variables a GUI program needs to reach the user's
@@ -252,22 +253,31 @@ func procSessions() []graphicalSession {
 	return res
 }
 
+// Notification urgencies of notify-send.
+const (
+	urgent = "critical"
+	normal = "normal"
+)
+
 // notifyUsers shows a desktop notification in every graphical session.
-func (a *Agent) notifyUsers(title, body, urgency string) bool {
-	return notifyAs(a.company(), title, body, urgency)
+func (a *Agent) notifyUsers(urgency, title, body string, args ...any) bool {
+	return notifyAs(a.company(), urgency, title, body, args...)
 }
 
 // notifyAs is notifyUsers for goroutines that must not read the agent state.
-func notifyAs(company, title, body, urgency string) bool {
+// title and body are English catalog keys (internal/locale), translated to
+// the language of each session; body is formatted with args.
+func notifyAs(company, urgency, title, body string, args ...any) bool {
 	sent := false
 	for _, s := range graphicalSessions() {
-		args := append([]string{"-u", s.user, "--", "env"}, s.env...)
-		args = append(args, "notify-send", "--urgency="+urgency, "--app-name="+company)
+		lang := locale.FromEnv(s.env)
+		cmd := append([]string{"-u", s.user, "--", "env"}, s.env...)
+		cmd = append(cmd, "notify-send", "--urgency="+urgency, "--app-name="+company)
 		if _, err := os.Stat(brandingLogo); err == nil {
-			args = append(args, "--icon="+brandingLogo)
+			cmd = append(cmd, "--icon="+brandingLogo)
 		}
-		args = append(args, title, body)
-		if _, err := run(15*time.Second, "runuser", args...); err == nil {
+		cmd = append(cmd, locale.T(lang, title), locale.T(lang, body, args...))
+		if _, err := run(15*time.Second, "runuser", cmd...); err == nil {
 			sent = true
 		}
 	}
@@ -281,14 +291,17 @@ func (a *Agent) showMessage(payload string) (string, error) {
 	if err := json.Unmarshal([]byte(payload), &m); err != nil || strings.TrimSpace(m.Text) == "" {
 		return "", errors.New("message needs a text")
 	}
-	if m.Title == "" {
-		m.Title = "Message from " + a.company()
-	}
 	sessions := graphicalSessions()
 	if len(sessions) == 0 {
 		return "", errors.New("nobody is signed in to a graphical session")
 	}
-	a.notifyUsers(m.Title, m.Text, "normal")
+	// texts of IT are shown as written; the default title is translated,
+	// here and by the dialog of limdm-desktop
+	if m.Title == "" {
+		a.notifyUsers(normal, "Message from IT", m.Text)
+	} else {
+		a.notifyUsers(normal, m.Title, m.Text)
+	}
 	var shown []string
 	for _, s := range sessions {
 		if launchInSession(s.user, s.env, "/usr/bin/limdm-desktop", "--message-title="+m.Title, "--message="+m.Text) == nil {

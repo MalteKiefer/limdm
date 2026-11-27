@@ -93,15 +93,15 @@ func (a *Agent) runShell(ctx context.Context, rs *runningShell, sc api.ShellComm
 	ctx, cancel := context.WithTimeoutCause(ctx, time.Duration(sc.MaxMinutes)*time.Minute, errors.New("maximum duration reached"))
 	defer cancel()
 	a.event("remote shell as %s opened by %s", account, sc.By)
-	notifyAs(company, "Remote support session started",
-		fmt.Sprintf("%s (%s) opened a terminal on this device as %s. It ends after at most %d minutes. To end it now, run: limdm support end",
-			company, sc.By, account, sc.MaxMinutes), "critical")
+	notifyAs(company, urgent, "Remote support session started",
+		"%s (%s) opened a terminal on this device as %s. It ends after at most %d minutes. To end it now, run: limdm support end",
+		company, sc.By, account, sc.MaxMinutes)
 	err := a.relayShell(ctx, rs.cancel, sc, account)
 	if err == nil {
 		err = context.Cause(ctx)
 	}
 	a.event("remote shell as %s opened by %s ended: %v", account, sc.By, err)
-	notifyAs(company, "Remote support session ended", fmt.Sprintf("The terminal opened by %s has ended.", sc.By), "normal")
+	notifyAs(company, normal, "Remote support session ended", "The terminal opened by %s has ended.", sc.By)
 }
 
 // relayShell runs the login shell and copies between the PTY and the server

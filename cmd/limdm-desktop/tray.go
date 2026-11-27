@@ -36,23 +36,23 @@ func runTray() {
 		systray.SetTitle("LiMDM")
 		t.header = systray.AddMenuItem("LiMDM", "")
 		t.header.Disable()
-		t.status = systray.AddMenuItem(tr("Checking status…", "Status wird geprüft…"), "")
+		t.status = systray.AddMenuItem(tr("Checking status…"), "")
 		t.status.Disable()
 		t.checkin = systray.AddMenuItem("", "")
 		t.checkin.Disable()
 		systray.AddSeparator()
-		t.open = systray.AddMenuItem(tr("Open LiMDM…", "LiMDM öffnen…"), "")
-		t.software = systray.AddMenuItem(tr("Install Software…", "Software installieren…"), "")
-		t.compliance = systray.AddMenuItem(tr("Compliance…", "Compliance…"), "")
-		t.recovery = systray.AddMenuItem(tr("Set Up Recovery Key…", "Wiederherstellungsschlüssel einrichten…"), "")
+		t.open = systray.AddMenuItem(tr("Open LiMDM…"), "")
+		t.software = systray.AddMenuItem(tr("Install Software…"), "")
+		t.compliance = systray.AddMenuItem(tr("Compliance…"), "")
+		t.recovery = systray.AddMenuItem(tr("Set Up Recovery Key…"), "")
 		t.recovery.Hide()
-		t.sso = systray.AddMenuItem(tr("Confirm Company Account…", "Firmenkonto bestätigen…"), "")
+		t.sso = systray.AddMenuItem(tr("Confirm Company Account…"), "")
 		t.sso.Hide()
 		systray.AddSeparator()
-		t.sync = systray.AddMenuItem(tr("Sync Now", "Jetzt synchronisieren"), "")
-		t.logs = systray.AddMenuItem(tr("Agent Log…", "Agent Protokoll…"), "")
+		t.sync = systray.AddMenuItem(tr("Sync Now"), "")
+		t.logs = systray.AddMenuItem(tr("Agent Log…"), "")
 		systray.AddSeparator()
-		t.about = systray.AddMenuItem(tr("Agent version unknown", "Agent Version unbekannt"), "")
+		t.about = systray.AddMenuItem(tr("Agent version unknown"), "")
 		t.about.Disable()
 		go t.loop()
 		go reminders()
@@ -79,18 +79,18 @@ func (t *tray) loop() {
 			go func() {
 				switch {
 				case err != nil:
-					d.message(tr("Agent Not Reachable", "Agent nicht erreichbar"), err.Error(), true)
+					d.message(tr("Agent Not Reachable"), err.Error(), true)
 				case !resp.OK:
-					d.message(tr("Sync Not Started", "Synchronisierung nicht gestartet"), resp.Error, true)
+					d.message(tr("Sync Not Started"), tr(resp.Error), true)
 				default:
-					d.message(tr("Sync Started", "Synchronisierung gestartet"), tr("The device reports to the server within a minute.", "Das Gerät meldet sich innerhalb einer Minute beim Server."), false)
+					d.message(tr("Sync Started"), tr("The device reports to the server within a minute."), false)
 				}
 			}()
 			time.AfterFunc(20*time.Second, t.refresh)
 		case <-t.recovery.ClickedCh:
 			go openApp("disk", t.last, func(last agent.DesktopResponse) {
 				if err := run(true); err != nil {
-					dialogsFor(last).message(tr("Recovery Key", "Wiederherstellungsschlüssel"), err.Error(), true)
+					dialogsFor(last).message(tr("Recovery Key"), err.Error(), true)
 				}
 			})
 		case <-t.sso.ClickedCh:
@@ -105,36 +105,36 @@ func (t *tray) refresh() {
 	resp, err := call(agent.DesktopRequest{Op: "info"})
 	if err != nil || resp.Status == nil {
 		systray.SetIcon(iconBad)
-		systray.SetTooltip(tr("LiMDM agent not reachable", "LiMDM Agent nicht erreichbar"))
-		t.status.SetTitle("✕ " + tr("Agent not reachable", "Agent nicht erreichbar"))
+		systray.SetTooltip(tr("LiMDM agent not reachable"))
+		t.status.SetTitle("✕ " + tr("Agent not reachable"))
 		t.checkin.SetTitle("")
-		t.about.SetTitle(tr("Agent version unknown", "Agent Version unbekannt"))
+		t.about.SetTitle(tr("Agent version unknown"))
 		return
 	}
 	t.last = resp
 	st := resp.Status
 	if resp.Company != "" {
-		t.header.SetTitle(fmt.Sprintf(tr("Managed by %s", "Verwaltet von %s"), resp.Company))
+		t.header.SetTitle(fmt.Sprintf(tr("Managed by %s"), resp.Company))
 	}
-	t.about.SetTitle(fmt.Sprintf(tr("LiMDM agent %s", "LiMDM Agent %s"), st.Version))
-	icon, mark, line := iconOK, "✓ ", tr("Device is compliant", "Gerät ist konform")
+	t.about.SetTitle(fmt.Sprintf(tr("LiMDM agent %s"), st.Version))
+	icon, mark, line := iconOK, "✓ ", tr("Device is compliant")
 	switch {
 	case st.RemoteShell != "":
-		icon, mark, line = iconWarn, "! ", tr("IT remote support session running", "Fernwartung durch die IT läuft")
+		icon, mark, line = iconWarn, "! ", tr("IT remote support session running")
 	case st.Locked:
-		icon, mark, line = iconBad, "✕ ", tr("Device is locked", "Gerät ist gesperrt")
+		icon, mark, line = iconBad, "✕ ", tr("Device is locked")
 	case st.LastError != "":
-		icon, mark, line = iconBad, "✕ ", tr("No contact to the server", "Keine Verbindung zum Server")
+		icon, mark, line = iconBad, "✕ ", tr("No contact to the server")
 	case len(st.Failing) > 0:
-		icon, mark, line = iconWarn, "! ", fmt.Sprintf(tr("%d checks failing", "%d Prüfungen fehlgeschlagen"), len(st.Failing))
+		icon, mark, line = iconWarn, "! ", trn(len(st.Failing), "%d check failing", "%d checks failing")
 	}
 	systray.SetIcon(icon)
-	systray.SetTooltip(resp.Company + ": " + line + " · " + tr("agent", "Agent") + " " + st.Version)
+	systray.SetTooltip(resp.Company + ": " + line + " · " + tr("LiMDM agent %s", st.Version))
 	t.status.SetTitle(mark + line)
 	if st.LastCheckin != nil {
-		t.checkin.SetTitle(tr("Last sync ", "Letzte Synchronisierung ") + st.LastCheckin.Local().Format("15:04"))
+		t.checkin.SetTitle(tr("Last sync %s", st.LastCheckin.Local().Format("15:04")))
 	} else {
-		t.checkin.SetTitle(tr("Not synced yet", "Noch nicht synchronisiert"))
+		t.checkin.SetTitle(tr("Not synced yet"))
 	}
 	if len(resp.Need) > 0 {
 		t.recovery.Show()
@@ -147,7 +147,7 @@ func (t *tray) refresh() {
 func dialogsFor(last agent.DesktopResponse) *dialogs {
 	company := last.Company
 	if company == "" {
-		company = tr("Your IT department", "Ihre IT")
+		company = tr("Your IT department")
 	}
 	d, err := newDialogs(company, last.Logo)
 	if err != nil {
@@ -161,30 +161,34 @@ func showDetails(last agent.DesktopResponse) {
 	st := last.Status
 	d := dialogsFor(last)
 	if st == nil {
-		d.message(tr("Agent Not Reachable", "Agent nicht erreichbar"), tr("The LiMDM agent does not respond.", "Der LiMDM Agent antwortet nicht."), true)
+		d.message(tr("Agent Not Reachable"), tr("The LiMDM agent does not respond."), true)
 		return
 	}
-	seen := tr("never", "nie")
+	seen := tr("never")
 	if st.LastCheckin != nil {
 		seen = st.LastCheckin.Local().Format("2006-01-02 15:04")
 	}
-	state := tr("Compliant", "Konform")
+	state := tr("Compliant")
 	if len(st.Failing) > 0 {
-		state = strings.Join(st.Failing, "\n")
+		failing := make([]string, len(st.Failing))
+		for i, f := range st.Failing {
+			failing[i] = tr(f)
+		}
+		state = strings.Join(failing, "\n")
 	}
 	rows := [][2]string{
-		{tr("Device", "Gerät"), st.Hostname},
-		{tr("Compliance", "Compliance"), state},
-		{tr("Last sync", "Letzte Synchronisierung"), seen},
-		{tr("Agent version", "Agent Version"), st.Version},
-		{tr("Server", "Server"), st.Server},
-		{tr("Recovery keys", "Wiederherstellungsschlüssel"), fmt.Sprint(st.Escrowed)},
-		{tr("Device ID", "Geräte ID"), st.DeviceID},
+		{tr("Device"), st.Hostname},
+		{tr("Compliance"), state},
+		{tr("Last sync"), seen},
+		{tr("Agent version"), st.Version},
+		{tr("Server"), st.Server},
+		{tr("Recovery keys"), fmt.Sprint(st.Escrowed)},
+		{tr("Device ID"), st.DeviceID},
 	}
 	if st.LastError != "" {
-		rows = append(rows, [2]string{tr("Last error", "Letzter Fehler"), st.LastError})
+		rows = append(rows, [2]string{tr("Last error"), st.LastError})
 	}
-	d.sheet("computer", tr("Device Details", "Gerätedetails"), fmt.Sprintf(tr("Managed by %s with LiMDM.", "Verwaltet von %s mit LiMDM."), last.Company), rows, "")
+	d.sheet("computer", tr("Device Details"), fmt.Sprintf(tr("Managed by %s with LiMDM."), last.Company), rows, "")
 }
 
 func showLog(last agent.DesktopResponse) {
@@ -194,10 +198,10 @@ func showLog(last agent.DesktopResponse) {
 		lines = lines[len(lines)-15:]
 	}
 	if len(lines) == 0 {
-		d.sheet("emblem-ok-symbolic", tr("Agent Log", "Agent Protokoll"), tr("No warnings or errors recorded.", "Keine Warnungen oder Fehler aufgezeichnet."), nil, "")
+		d.sheet("emblem-ok-symbolic", tr("Agent Log"), tr("No warnings or errors recorded."), nil, "")
 		return
 	}
-	d.sheet("utilities-terminal", tr("Agent Log", "Agent Protokoll"), tr("Latest warnings and errors of the agent.", "Letzte Warnungen und Fehler des Agenten."), nil, strings.Join(lines, "\n"))
+	d.sheet("utilities-terminal", tr("Agent Log"), tr("Latest warnings and errors of the agent."), nil, strings.Join(lines, "\n"))
 }
 
 // showMessage displays a message an admin sent from the console.
@@ -205,7 +209,7 @@ func showMessage(title, text string) {
 	resp, _ := call(agent.DesktopRequest{Op: "status"})
 	d := dialogsFor(resp)
 	if title == "" {
-		title = tr("Message from IT", "Nachricht der IT")
+		title = tr("Message from IT")
 	}
 	d.sheet("mail-unread", title, text, nil, "")
 }
@@ -215,19 +219,19 @@ func showMessage(title, text string) {
 func offerRebootDefer(at string, left, minutes int) {
 	resp, _ := call(agent.DesktopRequest{Op: "status"})
 	d := dialogsFor(resp)
-	body := fmt.Sprintf(tr("The device restarts at %s to finish updates. Save your work. You can postpone the restart %d more times.",
-		"Das Gerät startet um %s neu, um Updates abzuschließen. Speichern Sie Ihre Arbeit. Sie können den Neustart noch %d Mal verschieben."), at, left)
-	if !d.ask(tr("Restart scheduled", "Neustart geplant"), body, fmt.Sprintf(tr("Postpone %d minutes", "%d Minuten verschieben"), minutes), tr("Restart as planned", "Wie geplant neu starten")) {
+	body := tr("The device restarts at %s to finish updates. Save your work.", at) + " " +
+		trn(left, "You can postpone the restart %d more time.", "You can postpone the restart %d more times.")
+	if !d.ask(tr("Restart scheduled"), body, trn(minutes, "Postpone %d minute", "Postpone %d minutes"), tr("Restart as planned")) {
 		return
 	}
 	r, err := call(agent.DesktopRequest{Op: "reboot-defer"})
 	switch {
 	case err != nil:
-		d.message(tr("Restart not postponed", "Neustart nicht verschoben"), err.Error(), true)
+		d.message(tr("Restart not postponed"), err.Error(), true)
 	case r.Error != "":
-		d.message(tr("Restart not postponed", "Neustart nicht verschoben"), r.Error, true)
+		d.message(tr("Restart not postponed"), tr(r.Error), true)
 	default:
-		d.message(tr("Restart postponed", "Neustart verschoben"), fmt.Sprintf(tr("The device restarts at %s.", "Das Gerät startet um %s neu."), r.RebootAt), false)
+		d.message(tr("Restart postponed"), fmt.Sprintf(tr("The device restarts at %s."), r.RebootAt), false)
 	}
 }
 
@@ -268,11 +272,11 @@ func (t *tray) refreshSSO() {
 		return
 	}
 	t.ssoNotified = time.Now()
-	body := tr("Confirm your company account to keep using this device.", "Bestätigen Sie Ihr Firmenkonto, um das Gerät weiter zu nutzen.")
+	body := tr("Confirm your company account to keep using this device.")
 	if dl := resp.SSO.Deadline; dl != nil {
-		body += " " + fmt.Sprintf(tr("Without it the password stops working after %s.", "Ohne Bestätigung funktioniert das Passwort ab %s nicht mehr."), dl.Local().Format("2006-01-02 15:04"))
+		body += " " + fmt.Sprintf(tr("Without it the password stops working after %s."), dl.Local().Format("2006-01-02 15:04"))
 	}
-	_ = exec.CommandContext(ctx, "notify-send", "--app-name=LiMDM", "--urgency=normal", tr("Company Account", "Firmenkonto"), body).Run()
+	_ = exec.CommandContext(ctx, "notify-send", "--app-name=LiMDM", "--urgency=normal", tr("Company Account"), body).Run()
 }
 
 // confirmAccount runs the confirmation: the agent starts it, the browser
@@ -282,15 +286,15 @@ func confirmAccount(last agent.DesktopResponse) {
 	resp, err := call(agent.DesktopRequest{Op: "sso-confirm"})
 	switch {
 	case err != nil:
-		d.message(tr("Agent Not Reachable", "Agent nicht erreichbar"), err.Error(), true)
+		d.message(tr("Agent Not Reachable"), err.Error(), true)
 		return
 	case resp.Error != "" || resp.SSO == nil || resp.SSO.URI == "":
-		d.message(tr("Confirmation Not Started", "Bestätigung nicht gestartet"), firstNonEmpty(resp.Error, tr("The identity provider did not answer.", "Der Identity Provider hat nicht geantwortet.")), true)
+		d.message(tr("Confirmation Not Started"), firstNonEmpty(tr(resp.Error), tr("The identity provider did not answer.")), true)
 		return
 	}
 	_ = exec.CommandContext(ctx, "xdg-open", resp.SSO.URI).Start()
-	go d.message(tr("Confirm Your Company Account", "Firmenkonto bestätigen"),
-		fmt.Sprintf(tr("Sign in on the page that opened (%s) and enter the code %s.", "Melden Sie sich auf der geöffneten Seite (%s) an und geben Sie den Code %s ein."), resp.SSO.URI, resp.SSO.Code), false)
+	go d.message(tr("Confirm Your Company Account"),
+		fmt.Sprintf(tr("Sign in on the page that opened (%s) and enter the code %s."), resp.SSO.URI, resp.SSO.Code), false)
 	for i := 0; i < 120; i++ { // up to ten minutes
 		time.Sleep(5 * time.Second)
 		st, err := call(agent.DesktopRequest{Op: "sso-status"})
@@ -298,9 +302,9 @@ func confirmAccount(last agent.DesktopResponse) {
 			continue
 		}
 		if st.SSO.Error != "" {
-			d.message(tr("Confirmation Failed", "Bestätigung fehlgeschlagen"), st.SSO.Error, true)
+			d.message(tr("Confirmation Failed"), tr(st.SSO.Error), true)
 		} else {
-			d.message(tr("Company Account Confirmed", "Firmenkonto bestätigt"), tr("Thank you. Nothing else to do.", "Danke. Es ist nichts weiter zu tun."), false)
+			d.message(tr("Company Account Confirmed"), tr("Thank you. Nothing else to do."), false)
 		}
 		return
 	}

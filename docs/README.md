@@ -42,6 +42,7 @@ The documents for LiMDM 0.18 and the unreleased changes in the changelog. Start 
 
 | Document | Content |
 |---|---|
+| [i18n.md](i18n.md) | Languages, how texts are translated on device and console, glossary |
 | [agent.md](agent.md) | Agent installation, `enroll.conf`, `limdm-agent`, `limdm` and `limdm-desktop` commands, files on the device, updates |
 | [desktop-login.md](desktop-login.md) | SSO desktop login, session mode, offline grace |
 

@@ -6,10 +6,13 @@
 #
 # Exit codes: 0 done, 3 GTK 4 or libadwaita 1.4 missing (the tray then falls
 # back to simple dialogs).
+import ast
+import gettext
+import io
 import json
-import locale
 import os
 import socket
+import struct
 import sys
 import threading
 from datetime import datetime
@@ -29,26 +32,107 @@ SOCKET = "/run/limdm/agent.sock"
 APP_ID = "io.github.maltekiefer.LiMDM"
 
 
-def _german():
-    for k in ("LC_ALL", "LC_MESSAGES", "LANG"):
-        v = os.environ.get(k)
-        if v:
-            return v.startswith("de")
-    try:
-        with open("/etc/locale.conf") as f:
-            for line in f:
-                if line.startswith("LANG="):
-                    return line.split("=", 1)[1].strip().strip("\"'").startswith("de")
-    except OSError:
-        pass
-    return False
+LANGUAGES = ("de", "fr", "es", "it", "ru")  # besides English, the msgids
 
 
-DE = _german()
+def _language():
+    """The session's language like gettext picks it (LC_ALL, LC_MESSAGES,
+    LANG, the system locale, then LANGUAGE unless the locale is C); English
+    when none is supported."""
+    def base(v):
+        for sep in "_.@-":
+            v = v.split(sep)[0]
+        return v.strip().lower()
+
+    loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+    if not loc:
+        for path in ("/etc/locale.conf", "/etc/default/locale"):
+            try:
+                with open(path) as f:
+                    loc = next((ln.split("=", 1)[1].strip().strip("\"'") for ln in f if ln.startswith("LANG=")), "")
+            except OSError:
+                continue
+            if loc:
+                break
+    if base(loc) not in ("c", "posix"):
+        for lang in os.environ.get("LANGUAGE", "").split(":"):
+            if base(lang) in LANGUAGES or base(lang) == "en":
+                return base(lang)
+    return base(loc) if base(loc) in LANGUAGES else "en"
 
 
-def tr(en, de):
-    return de if DE else en
+def _po_to_mo(text):
+    """Compile a .po file (msgid, msgid_plural, msgstr, msgstr[n]) to .mo
+    bytes, so gettext reads it without msgfmt at build time."""
+    entries, cur, last = {}, None, None
+
+    def flush():
+        if cur and "msgstr" in cur:
+            key = cur["msgid"] + ("\0" + cur["msgid_plural"] if "msgid_plural" in cur else "")
+            entries[key] = "\0".join(cur["msgstr"])
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith('"'):  # continuation of the previous string
+            if last == "msgstr":
+                cur["msgstr"][-1] += ast.literal_eval(line)
+            else:
+                cur[last] += ast.literal_eval(line)
+            continue
+        kw, _, rest = line.partition(" ")
+        if kw == "msgid":
+            flush()
+            cur = {}
+        if kw.startswith("msgstr"):
+            cur.setdefault("msgstr", []).append(ast.literal_eval(rest))
+            last = "msgstr"
+        else:
+            cur[kw] = ast.literal_eval(rest)
+            last = kw
+    flush()
+    keys = sorted(entries)
+    ids = [k.encode() for k in keys]
+    strs = [entries[k].encode() for k in keys]
+    n = len(keys)
+    off = 28 + 16 * n
+    table_ids, table_strs, data = [], [], b""
+    for b in ids:
+        table_ids += [len(b), off + len(data)]
+        data += b + b"\0"
+    for b in strs:
+        table_strs += [len(b), off + len(data)]
+        data += b + b"\0"
+    head = struct.pack("<7I", 0x950412DE, 0, n, 28, 28 + 8 * n, 0, 0)
+    return head + struct.pack(f"<{4 * n}I", *table_ids, *table_strs) + data
+
+
+def _translations():
+    """gettext translations from <lang>.po next to this script (source tree)
+    or in /usr/share/limdm/locale (packages); English without one."""
+    lang = _language()
+    if lang == "en":
+        return gettext.NullTranslations()
+    here = os.path.join(os.path.dirname(os.path.realpath(__file__)), "locale")
+    for d in (here, "/usr/share/limdm/locale"):
+        try:
+            with open(os.path.join(d, lang + ".po"), encoding="utf-8") as f:
+                return gettext.GNUTranslations(io.BytesIO(_po_to_mo(f.read())))
+        except (OSError, ValueError, SyntaxError):
+            continue
+    return gettext.NullTranslations()
+
+
+_T = _translations()
+_ = _T.gettext
+ngettext = _T.ngettext
+
+
+def tr_data(text):
+    """Translate a text the agent sends (a check title, an error) when the
+    catalog knows it; anything else, such as titles set by IT, as is."""
+    return _(text) if text else text
 
 
 def agent(req, timeout=120):
@@ -81,7 +165,7 @@ def in_background(work, done):
 
 def when(ts):
     if not ts:
-        return tr("never", "nie")
+        return _("never")
     try:
         t = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone()
     except ValueError:
@@ -90,28 +174,28 @@ def when(ts):
 
 
 PAGES = [
-    ("overview", "computer-symbolic", tr("Overview", "Übersicht")),
-    ("software", "system-software-install-symbolic", tr("Software", "Software")),
-    ("compliance", "security-high-symbolic", tr("Compliance", "Compliance")),
-    ("blueprint", "emblem-documents-symbolic", tr("Blueprint", "Blueprint")),
-    ("certificates", "channel-secure-symbolic", tr("Certificates", "Zertifikate")),
-    ("disk", "drive-harddisk-system-symbolic", tr("Disk Encryption", "Verschlüsselung")),
-    ("log", "utilities-terminal-symbolic", tr("Agent Log", "Agent Protokoll")),
-    ("about", "help-about-symbolic", tr("About", "Info")),
+    ("overview", "computer-symbolic", _("Overview")),
+    ("software", "system-software-install-symbolic", _("Software")),
+    ("compliance", "security-high-symbolic", _("Compliance")),
+    ("blueprint", "emblem-documents-symbolic", _("Blueprint")),
+    ("certificates", "channel-secure-symbolic", _("Certificates")),
+    ("disk", "drive-harddisk-system-symbolic", _("Disk Encryption")),
+    ("log", "utilities-terminal-symbolic", _("Agent Log")),
+    ("about", "help-about-symbolic", _("About")),
 ]
 
 TYPE_NAMES = {
-    "com.limdm.agent": tr("Agent", "Agent"), "com.limdm.compliance": tr("Compliance baseline", "Compliance Basis"),
-    "com.limdm.updates": tr("Software updates", "Softwareupdates"), "com.limdm.firewall": tr("Firewall", "Firewall"),
-    "com.limdm.packages": tr("Packages", "Pakete"), "com.limdm.services": tr("Services", "Dienste"),
-    "com.limdm.files": tr("Files", "Dateien"), "com.limdm.users": tr("Users", "Benutzer"),
-    "com.limdm.osversion": tr("OS versions", "Betriebssystemversionen"), "com.limdm.screenlock": tr("Screen lock", "Bildschirmsperre"),
-    "com.limdm.privacy": tr("Privacy", "Datenschutz"), "com.limdm.login": tr("Desktop login", "Desktop Anmeldung"),
-    "com.limdm.diskencryption": tr("Disk encryption", "Festplattenverschlüsselung"), "com.limdm.certificates": tr("Certificates", "Zertifikate"),
-    "com.limdm.repositories": tr("Package sources", "Paketquellen"), "com.limdm.flatpak": tr("Flatpak", "Flatpak"),
-    "com.limdm.polkit": tr("polkit rules", "polkit Regeln"), "com.limdm.sudo": tr("sudo rules", "sudo Regeln"),
-    "com.limdm.ssh": tr("SSH server", "SSH Server"), "com.limdm.dns": tr("DNS", "DNS"), "com.limdm.ntp": tr("Time servers", "Zeitserver"),
-    "com.limdm.proxy": tr("Proxy", "Proxy"), "com.limdm.scripts": tr("Scripts", "Skripte"), "com.limdm.bootloader": tr("Boot loader", "Bootloader"),
+    "com.limdm.agent": _("Agent"), "com.limdm.compliance": _("Compliance baseline"),
+    "com.limdm.updates": _("Software updates"), "com.limdm.firewall": _("Firewall"),
+    "com.limdm.packages": _("Packages"), "com.limdm.services": _("Services"),
+    "com.limdm.files": _("Files"), "com.limdm.users": _("Users"),
+    "com.limdm.osversion": _("OS versions"), "com.limdm.screenlock": _("Screen lock"),
+    "com.limdm.privacy": _("Privacy"), "com.limdm.login": _("Desktop login"),
+    "com.limdm.diskencryption": _("Disk encryption"), "com.limdm.certificates": _("Certificates"),
+    "com.limdm.repositories": _("Package sources"), "com.limdm.flatpak": _("Flatpak"),
+    "com.limdm.polkit": _("polkit rules"), "com.limdm.sudo": _("sudo rules"),
+    "com.limdm.ssh": _("SSH server"), "com.limdm.dns": _("DNS"), "com.limdm.ntp": _("Time servers"),
+    "com.limdm.proxy": _("Proxy"), "com.limdm.scripts": _("Scripts"), "com.limdm.bootloader": _("Boot loader"),
 }
 
 CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "limdm", "desktop.json")
@@ -134,9 +218,9 @@ def save_config(cfg):
         pass  # a preference, not worth an error
 
 
-SCHEMES = {"system": (Adw.ColorScheme.DEFAULT, "weather-few-clouds-symbolic", tr("Appearance: system", "Darstellung: System")),
-           "dark": (Adw.ColorScheme.FORCE_DARK, "weather-clear-night-symbolic", tr("Appearance: dark", "Darstellung: dunkel")),
-           "light": (Adw.ColorScheme.FORCE_LIGHT, "weather-clear-symbolic", tr("Appearance: light", "Darstellung: hell"))}
+SCHEMES = {"system": (Adw.ColorScheme.DEFAULT, "weather-few-clouds-symbolic", _("Appearance: system")),
+           "dark": (Adw.ColorScheme.FORCE_DARK, "weather-clear-night-symbolic", _("Appearance: dark")),
+           "light": (Adw.ColorScheme.FORCE_LIGHT, "weather-clear-symbolic", _("Appearance: light"))}
 
 
 def logo_image(path, size):
@@ -188,7 +272,7 @@ class Window(Adw.ApplicationWindow):
         # content: header with refresh, preferences page per section
         self.content = Adw.ToolbarView()
         self.header = Adw.HeaderBar()
-        refresh = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text=tr("Refresh", "Aktualisieren"))
+        refresh = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text=_("Refresh"))
         refresh.connect("clicked", lambda _b: self.refresh())
         self.header.pack_end(refresh)
         self.content.add_top_bar(self.header)
@@ -213,7 +297,7 @@ class Window(Adw.ApplicationWindow):
 
     def _loaded(self, res, err):
         if err or not res or res.get("error") and not res.get("status"):
-            self.info = {"error": str(err or res.get("error") or tr("no answer", "keine Antwort"))}
+            self.info = {"error": str(err or tr_data(res.get("error")) or _("no answer"))}
         else:
             self.info = res
         company = self.info.get("company") or "LiMDM"
@@ -224,7 +308,7 @@ class Window(Adw.ApplicationWindow):
             if child:
                 self.logo.remove(child)
             self.logo.append(logo_image(self.logo_path, 24))
-        self.side_title.set_subtitle(tr("Managed device", "Verwaltetes Gerät"))
+        self.side_title.set_subtitle(_("Managed device"))
         # Rebuild the page only when its data changed and the user does not
         # work in it; the software page loads its own data.
         if self.shown is None or (self.current != "software" and self.info != self.shown and not self._holds_input()):
@@ -269,9 +353,8 @@ class Window(Adw.ApplicationWindow):
         self.split.set_show_content(True)
 
     def _unreachable(self):
-        page = Adw.StatusPage(icon_name="network-offline-symbolic", title=tr("Agent Not Reachable", "Agent nicht erreichbar"),
-                              description=tr("The LiMDM agent on this device does not respond. IT has been informed when it comes back.",
-                                             "Der LiMDM Agent auf diesem Gerät antwortet nicht.") + "\n" + self.info.get("error", ""))
+        page = Adw.StatusPage(icon_name="network-offline-symbolic", title=_("Agent Not Reachable"),
+                              description=_("The LiMDM agent on this device does not respond. IT has been informed when it comes back.") + "\n" + self.info.get("error", ""))
         return page
 
     def page_overview(self):
@@ -280,17 +363,17 @@ class Window(Adw.ApplicationWindow):
             return self._unreachable()
         failing = st.get("failing") or []
         if st.get("locked"):
-            icon, title, desc, css = "system-lock-screen-symbolic", tr("Device Locked", "Gerät gesperrt"), \
-                tr("IT locked this device.", "Die IT hat dieses Gerät gesperrt."), "error"
+            icon, title, desc, css = "system-lock-screen-symbolic", _("Device Locked"), \
+                _("IT locked this device."), "error"
         elif st.get("last_error"):
-            icon, title, desc, css = "network-offline-symbolic", tr("No Connection to the Server", "Keine Verbindung zum Server"), \
+            icon, title, desc, css = "network-offline-symbolic", _("No Connection to the Server"), \
                 st["last_error"], "warning"
         elif failing:
-            icon, title, css = "dialog-warning-symbolic", tr("Action Needed", "Handlung erforderlich"), "warning"
-            desc = tr("%d checks failing", "%d Prüfungen fehlgeschlagen") % len(failing)
+            icon, title, css = "dialog-warning-symbolic", _("Action Needed"), "warning"
+            desc = ngettext("%d check failing", "%d checks failing", len(failing)) % len(failing)
         else:
-            icon, title, desc, css = "object-select-symbolic", tr("Device Is Compliant", "Gerät ist konform"), \
-                tr("All checks passed.", "Alle Prüfungen bestanden."), "success"
+            icon, title, desc, css = "object-select-symbolic", _("Device Is Compliant"), \
+                _("All checks passed."), "success"
         page = Adw.PreferencesPage()
         status = Adw.StatusPage(icon_name=icon, title=title, description=desc, css_classes=["compact"])
         status.add_css_class(css)
@@ -298,20 +381,20 @@ class Window(Adw.ApplicationWindow):
         top.add(status)
         page.add(top)
 
-        dev = Adw.PreferencesGroup(title=tr("Device", "Gerät"))
-        dev.add(self._row(tr("Name", "Name"), st.get("hostname", ""), "computer-symbolic"))
-        dev.add(self._row(tr("Managed by", "Verwaltet von"), self.info.get("company", ""), "system-users-symbolic"))
-        sync = Gtk.Button(label=tr("Sync Now", "Jetzt synchronisieren"), valign=Gtk.Align.CENTER, css_classes=["suggested-action"])
+        dev = Adw.PreferencesGroup(title=_("Device"))
+        dev.add(self._row(_("Name"), st.get("hostname", ""), "computer-symbolic"))
+        dev.add(self._row(_("Managed by"), self.info.get("company", ""), "system-users-symbolic"))
+        sync = Gtk.Button(label=_("Sync Now"), valign=Gtk.Align.CENTER, css_classes=["suggested-action"])
         sync.connect("clicked", self._sync)
-        last = self._row(tr("Last sync", "Letzte Synchronisierung"), when(st.get("last_checkin")), "emblem-synchronizing-symbolic")
+        last = self._row(_("Last sync"), when(st.get("last_checkin")), "emblem-synchronizing-symbolic")
         last.add_suffix(sync)
         dev.add(last)
         page.add(dev)
 
         if self.info.get("need"):
-            g = Adw.PreferencesGroup(title=tr("Needs Your Attention", "Ihre Mithilfe nötig"))
-            row = Adw.ActionRow(title=tr("Disk recovery key missing", "Wiederherstellungsschlüssel fehlt"),
-                                subtitle=tr("IT needs a recovery key for your encrypted disk.", "Die IT benötigt einen Schlüssel für Ihre verschlüsselte Festplatte."),
+            g = Adw.PreferencesGroup(title=_("Needs Your Attention"))
+            row = Adw.ActionRow(title=_("Disk recovery key missing"),
+                                subtitle=_("IT needs a recovery key for your encrypted disk."),
                                 activatable=True)
             row.add_prefix(Gtk.Image(icon_name="drive-harddisk-system-symbolic"))
             row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
@@ -327,10 +410,10 @@ class Window(Adw.ApplicationWindow):
         page = Adw.PreferencesPage()
         checks = st.get("check_list") or []
         order = {"fail": 0, "excepted": 1, "na": 2, "pass": 3}
-        checks.sort(key=lambda c: (order.get(c.get("status"), 4), c.get("title", "")))
+        checks.sort(key=lambda c: (order.get(c.get("status"), 4), tr_data(c.get("title", ""))))
         groups = {}
-        names = {"fail": tr("Failing", "Fehlgeschlagen"), "excepted": tr("Exceptions", "Ausnahmen"),
-                 "na": tr("Not applicable", "Nicht anwendbar"), "pass": tr("Passed", "Bestanden")}
+        names = {"fail": _("Failing"), "excepted": _("Exceptions"),
+                 "na": _("Not applicable"), "pass": _("Passed")}
         icons = {"fail": ("dialog-warning-symbolic", "warning"), "pass": ("object-select-symbolic", "success"),
                  "excepted": ("action-unavailable-symbolic", "dim-label"), "na": ("action-unavailable-symbolic", "dim-label")}
         for c in checks:
@@ -339,7 +422,7 @@ class Window(Adw.ApplicationWindow):
             if g is None:
                 g = groups[s] = Adw.PreferencesGroup(title=names.get(s, s))
                 page.add(g)
-            row = Adw.ActionRow(title=GLib.markup_escape_text(c.get("title", "")),
+            row = Adw.ActionRow(title=GLib.markup_escape_text(tr_data(c.get("title", ""))),
                                 subtitle=GLib.markup_escape_text(c.get("detail", "")), subtitle_lines=3)
             icon, css = icons.get(s, icons["na"])
             img = Gtk.Image(icon_name=icon)
@@ -348,7 +431,7 @@ class Window(Adw.ApplicationWindow):
             g.add(row)
         if not checks:
             g = Adw.PreferencesGroup()
-            g.add(Adw.StatusPage(icon_name="security-high-symbolic", title=tr("No Checks Yet", "Noch keine Prüfungen"),
+            g.add(Adw.StatusPage(icon_name="security-high-symbolic", title=_("No Checks Yet"),
                                  css_classes=["compact"]))
             page.add(g)
         return page
@@ -361,18 +444,17 @@ class Window(Adw.ApplicationWindow):
         need = self.info.get("need") or []
         if not need:
             g = Adw.PreferencesGroup()
-            g.add(Adw.StatusPage(icon_name="channel-secure-symbolic", title=tr("Recovery Keys Stored", "Schlüssel hinterlegt"),
-                                 description=tr("%d disk recovery keys are stored with IT. Nothing to do.",
-                                                "%d Wiederherstellungsschlüssel sind bei der IT hinterlegt. Nichts zu tun.") % st.get("escrowed", 0),
+            g.add(Adw.StatusPage(icon_name="channel-secure-symbolic", title=_("Recovery Keys Stored"),
+                                 description=ngettext("%d disk recovery key is stored with IT. Nothing to do.",
+                                                     "%d disk recovery keys are stored with IT. Nothing to do.", st.get("escrowed", 0)) % st.get("escrowed", 0),
                                  css_classes=["compact"]))
             page.add(g)
             return page
         for vol in need:
             g = Adw.PreferencesGroup(title=vol.get("device", ""),
-                                     description=tr("IT needs a recovery key for this encrypted disk, so access can be restored if the passphrase is ever lost. Enter the passphrase you type when the computer starts; it stays unchanged.",
-                                                    "Die IT benötigt einen Wiederherstellungsschlüssel für diese verschlüsselte Festplatte, damit der Zugriff bei verlorener Passphrase wiederhergestellt werden kann. Geben Sie die Passphrase ein, die Sie beim Start eingeben; sie bleibt unverändert."))
-            entry = Adw.PasswordEntryRow(title=tr("Disk passphrase", "Festplatten Passphrase"))
-            button = Gtk.Button(label=tr("Store Key", "Schlüssel hinterlegen"), valign=Gtk.Align.CENTER, css_classes=["suggested-action"])
+                                     description=_("IT needs a recovery key for this encrypted disk, so access can be restored if the passphrase is ever lost. Enter the passphrase you type when the computer starts; it stays unchanged."))
+            entry = Adw.PasswordEntryRow(title=_("Disk passphrase"))
+            button = Gtk.Button(label=_("Store Key"), valign=Gtk.Align.CENTER, css_classes=["suggested-action"])
             button.connect("clicked", self._escrow, vol.get("uuid"), entry)
             entry.connect("entry-activated", lambda e, b=button: b.emit("clicked"))
             entry.add_suffix(button)
@@ -386,11 +468,10 @@ class Window(Adw.ApplicationWindow):
         only = Gtk.Switch(active=self.log_problems_only, valign=Gtk.Align.CENTER)
         only.connect("notify::active", self._log_filter)
         head = Gtk.Box(spacing=8)
-        head.append(Gtk.Label(label=tr("Only warnings and errors", "Nur Warnungen und Fehler"), css_classes=["dim-label"]))
+        head.append(Gtk.Label(label=_("Only warnings and errors"), css_classes=["dim-label"]))
         head.append(only)
-        g = Adw.PreferencesGroup(title=tr("Agent Log", "Agent Protokoll"),
-                                 description=tr("Latest entries of the agent and its watchdog, newest first.",
-                                                "Letzte Einträge des Agenten und seines Watchdogs, neueste zuerst."),
+        g = Adw.PreferencesGroup(title=_("Agent Log"),
+                                 description=_("Latest entries of the agent and its watchdog, newest first."),
                                  header_suffix=head)
         icons = {"error": ("dialog-error-symbolic", "error"), "warning": ("dialog-warning-symbolic", "warning"),
                  "info": ("dialog-information-symbolic", "dim-label")}
@@ -407,7 +488,7 @@ class Window(Adw.ApplicationWindow):
             g.add(row)
             shown += 1
         if not shown:
-            g.add(Adw.StatusPage(icon_name="object-select-symbolic", title=tr("Nothing Recorded", "Nichts aufgezeichnet"), css_classes=["compact"]))
+            g.add(Adw.StatusPage(icon_name="object-select-symbolic", title=_("Nothing Recorded"), css_classes=["compact"]))
         page.add(g)
         return page
 
@@ -418,14 +499,13 @@ class Window(Adw.ApplicationWindow):
     def page_blueprint(self):
         page = Adw.PreferencesPage()
         profiles = self.info.get("profiles") or []
-        g = Adw.PreferencesGroup(title=tr("Settings of Your Blueprint", "Einstellungen Ihres Blueprints"),
-                                 description=tr("Settings IT applies to this device through its blueprint. Secrets are hidden.",
-                                                "Einstellungen, die die IT über den Blueprint auf diesem Gerät anwendet. Geheimnisse sind ausgeblendet."))
+        g = Adw.PreferencesGroup(title=_("Settings of Your Blueprint"),
+                                 description=_("Settings IT applies to this device through its blueprint. Secrets are hidden."))
         for pr in profiles:
             row = Adw.ExpanderRow(title=GLib.markup_escape_text(pr.get("identifier", "")),
                                   subtitle=GLib.markup_escape_text(TYPE_NAMES.get(pr.get("type"), pr.get("type", ""))))
             row.add_prefix(Gtk.Image(icon_name="emblem-documents-symbolic"))
-            badge = Gtk.Label(label=tr("Active", "Aktiv") if pr.get("active") else tr("Not applied", "Nicht angewendet"),
+            badge = Gtk.Label(label=_("Active") if pr.get("active") else _("Not applied"),
                               css_classes=["success" if pr.get("active") else "warning", "caption"], valign=Gtk.Align.CENTER)
             row.add_suffix(badge)
             for reason in pr.get("reasons") or []:
@@ -436,21 +516,20 @@ class Window(Adw.ApplicationWindow):
             row.add_row(view)
             g.add(row)
         if not profiles:
-            g.add(Adw.StatusPage(icon_name="emblem-documents-symbolic", title=tr("No Settings", "Keine Einstellungen"), css_classes=["compact"]))
+            g.add(Adw.StatusPage(icon_name="emblem-documents-symbolic", title=_("No Settings"), css_classes=["compact"]))
         page.add(g)
         return page
 
     def page_certificates(self):
         page = Adw.PreferencesPage()
         certs = self.info.get("certificates") or []
-        g = Adw.PreferencesGroup(title=tr("Trusted Certificates", "Vertrauenswürdige Zertifikate"),
-                                 description=tr("CA certificates IT installed in the system trust store.",
-                                                "CA Zertifikate, die die IT im Zertifikatsspeicher des Systems installiert hat."))
+        g = Adw.PreferencesGroup(title=_("Trusted Certificates"),
+                                 description=_("CA certificates IT installed in the system trust store."))
         for c in certs:
             row = Adw.ExpanderRow(title=GLib.markup_escape_text(c.get("name", "")), subtitle=GLib.markup_escape_text(c.get("subject", "")))
             row.add_prefix(Gtk.Image(icon_name="channel-secure-symbolic"))
-            for label, key in ((tr("Subject", "Inhaber"), "subject"), (tr("Issuer", "Aussteller"), "issuer"),
-                               (tr("Valid from", "Gültig ab"), "not_before"), (tr("Valid until", "Gültig bis"), "not_after"),
+            for label, key in ((_("Subject"), "subject"), (_("Issuer"), "issuer"),
+                               (_("Valid from"), "not_before"), (_("Valid until"), "not_after"),
                                ("SHA-256", "sha256")):
                 value = c.get(key, "")
                 if key in ("not_before", "not_after"):
@@ -458,8 +537,8 @@ class Window(Adw.ApplicationWindow):
                 row.add_row(Adw.ActionRow(title=label, subtitle=GLib.markup_escape_text(value), subtitle_selectable=True, css_classes=["property"]))
             g.add(row)
         if not certs:
-            g.add(Adw.StatusPage(icon_name="channel-secure-symbolic", title=tr("No Certificates", "Keine Zertifikate"),
-                                 description=tr("IT has not installed any certificates.", "Die IT hat keine Zertifikate installiert."),
+            g.add(Adw.StatusPage(icon_name="channel-secure-symbolic", title=_("No Certificates"),
+                                 description=_("IT has not installed any certificates."),
                                  css_classes=["compact"]))
         page.add(g)
         return page
@@ -471,14 +550,14 @@ class Window(Adw.ApplicationWindow):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=12, margin_bottom=12)
         box.append(logo_image(self.info.get("logo"), 96))
         box.append(Gtk.Label(label="LiMDM", css_classes=["title-1"]))
-        box.append(Gtk.Label(label=tr("Device management for Linux", "Geräteverwaltung für Linux"), css_classes=["dim-label"]))
+        box.append(Gtk.Label(label=_("Device management for Linux"), css_classes=["dim-label"]))
         head.add(box)
         page.add(head)
-        g = Adw.PreferencesGroup(title=tr("Agent", "Agent"))
-        g.add(self._row(tr("Version", "Version"), st.get("version", ""), None, True))
-        g.add(self._row(tr("Server", "Server"), st.get("server", ""), None, True))
-        g.add(self._row(tr("Device ID", "Geräte ID"), st.get("device_id", ""), None, True))
-        g.add(self._row(tr("Managed by", "Verwaltet von"), self.info.get("company", ""), None))
+        g = Adw.PreferencesGroup(title=_("Agent"))
+        g.add(self._row(_("Version"), st.get("version", ""), None, True))
+        g.add(self._row(_("Server"), st.get("server", ""), None, True))
+        g.add(self._row(_("Device ID"), st.get("device_id", ""), None, True))
+        g.add(self._row(_("Managed by"), self.info.get("company", ""), None))
         page.add(g)
         return page
 
@@ -532,17 +611,16 @@ class Window(Adw.ApplicationWindow):
         apps = res.get("apps") or []
         store = res.get("store") or {}
         if store.get("read_only"):
-            box.append(Adw.Banner(title=tr("Software is installed through this catalog. Other app stores are read only.",
-                                           "Software wird über diesen Katalog installiert. Andere App Stores sind nur lesbar."), revealed=True))
+            box.append(Adw.Banner(title=_("Software is installed through this catalog. Other app stores are read only."), revealed=True))
         bar = Gtk.Box(spacing=12, margin_top=18, margin_bottom=6, margin_start=24, margin_end=24)
-        search = Gtk.SearchEntry(placeholder_text=tr("Search apps", "Apps durchsuchen"), hexpand=True, text=self.sw_query)
-        cats = [tr("All categories", "Alle Kategorien")] + sorted({a.get("category") for a in apps if a.get("category")})
+        search = Gtk.SearchEntry(placeholder_text=_("Search apps"), hexpand=True, text=self.sw_query)
+        cats = [_("All categories")] + sorted({a.get("category") for a in apps if a.get("category")})
         drop = Gtk.DropDown.new_from_strings(cats)
         if self.sw_category in cats:
             drop.set_selected(cats.index(self.sw_category))
         bar.append(search)
         bar.append(drop)
-        other = Gtk.Button(icon_name="list-add-symbolic", tooltip_text=tr("Request another app", "Andere App anfragen"))
+        other = Gtk.Button(icon_name="list-add-symbolic", tooltip_text=_("Request another app"))
         other.connect("clicked", lambda _b: self._other_app_dialog())
         bar.append(other)
         box.append(bar)
@@ -573,8 +651,8 @@ class Window(Adw.ApplicationWindow):
         search.connect("search-changed", on_search)
         drop.connect("notify::selected", on_category)
         if not apps:
-            box.append(Adw.StatusPage(icon_name="system-software-install-symbolic", title=tr("No Apps Yet", "Noch keine Apps"),
-                                      description=tr("IT has not published any apps for this device.", "Die IT hat für dieses Gerät noch keine Apps freigegeben.")))
+            box.append(Adw.StatusPage(icon_name="system-software-install-symbolic", title=_("No Apps Yet"),
+                                      description=_("IT has not published any apps for this device.")))
         else:
             content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
             content.append(flow)
@@ -609,7 +687,7 @@ class Window(Adw.ApplicationWindow):
         inner.append(summary)
         inner.append(self._app_action(app))
         if app.get("error"):
-            inner.append(Gtk.Label(label=app["error"], css_classes=["error", "caption"], wrap=True, max_width_chars=24))
+            inner.append(Gtk.Label(label=tr_data(app["error"]), css_classes=["error", "caption"], wrap=True, max_width_chars=24))
         card.append(inner)
         return card
 
@@ -618,69 +696,67 @@ class Window(Adw.ApplicationWindow):
         if busy:
             b = Gtk.Box(spacing=8, halign=Gtk.Align.CENTER)
             b.append(Gtk.Spinner(spinning=True))
-            b.append(Gtk.Label(label=tr("Installing…", "Wird installiert…") if busy == "install" else tr("Removing…", "Wird entfernt…")))
+            b.append(Gtk.Label(label=_("Installing…") if busy == "install" else _("Removing…")))
             return b
         if app.get("installed"):
             b = Gtk.Box(spacing=6, halign=Gtk.Align.CENTER)
             flatpak = next((x.get("flatpak") for x in app.get("sources") or [] if x.get("kind") == "flatpak"), "")
             if app.get("via") == "flatpak" and flatpak:
-                o = Gtk.Button(label=tr("Open", "Öffnen"), css_classes=["suggested-action", "pill"])
+                o = Gtk.Button(label=_("Open"), css_classes=["suggested-action", "pill"])
                 o.connect("clicked", lambda _b: Gio.Subprocess.new(["flatpak", "run", flatpak], Gio.SubprocessFlags.NONE))
                 b.append(o)
             else:
-                b.append(Gtk.Label(label=tr("Installed", "Installiert"), css_classes=["success"]))
+                b.append(Gtk.Label(label=_("Installed"), css_classes=["success"]))
             if mode == "available":
-                r = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text=tr("Remove", "Entfernen"), css_classes=["flat", "circular"])
+                r = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text=_("Remove"), css_classes=["flat", "circular"])
                 r.connect("clicked", lambda _b: self._app_op("app-remove", app))
                 b.append(r)
             return b
         if mode == "required":
-            return Gtk.Label(label=tr("Installed by IT soon", "Wird von der IT installiert"), css_classes=["dim-label"])
+            return Gtk.Label(label=_("Installed by IT soon"), css_classes=["dim-label"])
         if mode == "request" and app.get("request") != "approved":
             if app.get("request") == "pending":
-                return Gtk.Label(label=tr("Requested", "Angefragt"), css_classes=["dim-label"])
-            label = tr("Request Again", "Erneut anfragen") if app.get("request") == "denied" else tr("Request", "Anfragen")
+                return Gtk.Label(label=_("Requested"), css_classes=["dim-label"])
+            label = _("Request Again") if app.get("request") == "denied" else _("Request")
             q = Gtk.Button(label=label, css_classes=["pill"], halign=Gtk.Align.CENTER)
             q.connect("clicked", lambda _b: self._request_dialog(app))
             return q
-        i = Gtk.Button(label=tr("Install", "Installieren"), css_classes=["suggested-action", "pill"], halign=Gtk.Align.CENTER)
+        i = Gtk.Button(label=_("Install"), css_classes=["suggested-action", "pill"], halign=Gtk.Align.CENTER)
         i.connect("clicked", lambda _b: self._app_op("app-install", app))
         return i
 
     def _app_op(self, op, app, note=""):
         def done(res, err):
             if err or not res.get("ok"):
-                self.toast((res or {}).get("error") or str(err))
+                self.toast(tr_data((res or {}).get("error")) or str(err))
             elif op == "app-request":
-                self.toast(tr("Request sent to IT", "Anfrage an die IT gesendet"))
+                self.toast(_("Request sent to IT"))
             self._load_catalog()
             return False
 
         in_background(lambda: agent({"op": op, "app": app.get("id"), "note": note}, timeout=20), done)
 
     def _request_dialog(self, app):
-        dlg = Adw.MessageDialog(transient_for=self, heading=tr("Request %s", "%s anfragen") % app.get("name", ""),
-                                body=tr("IT decides on your request. The app installs by itself once approved.",
-                                        "Die IT entscheidet über die Anfrage. Nach der Freigabe installiert sich die App von selbst."))
-        entry = Gtk.Entry(placeholder_text=tr("Why do you need it? (optional)", "Wofür brauchen Sie die App? (optional)"))
+        dlg = Adw.MessageDialog(transient_for=self, heading=_("Request %s") % app.get("name", ""),
+                                body=_("IT decides on your request. The app installs by itself once approved."))
+        entry = Gtk.Entry(placeholder_text=_("Why do you need it? (optional)"))
         dlg.set_extra_child(entry)
-        dlg.add_response("cancel", tr("Cancel", "Abbrechen"))
-        dlg.add_response("send", tr("Send Request", "Anfrage senden"))
+        dlg.add_response("cancel", _("Cancel"))
+        dlg.add_response("send", _("Send Request"))
         dlg.set_response_appearance("send", Adw.ResponseAppearance.SUGGESTED)
         dlg.connect("response", lambda d, r: self._app_op("app-request", app, entry.get_text()) if r == "send" else None)
         dlg.present()
 
     # ---- apps outside the catalog ----
 
-    STATUS = {"pending": tr("waiting for IT", "wartet auf die IT"), "approved": tr("approved", "freigegeben"),
-              "denied": tr("declined", "abgelehnt")}
+    STATUS = {"pending": _("waiting for IT"), "approved": _("approved"),
+              "denied": _("declined")}
 
     def _my_requests(self, reqs):
         if not reqs:
             return None
-        group = Adw.PreferencesGroup(title=tr("My Requests", "Meine Anfragen"),
-                                     description=tr("Apps you asked IT to add. Approved apps appear in the catalog above.",
-                                                    "Apps, die Sie bei der IT angefragt haben. Freigegebene Apps erscheinen oben im Katalog."),
+        group = Adw.PreferencesGroup(title=_("My Requests"),
+                                     description=_("Apps you asked IT to add. Approved apps appear in the catalog above."),
                                      margin_start=24, margin_end=24, margin_bottom=24)
         for r in reqs:
             row = Adw.ActionRow(title=GLib.markup_escape_text(r.get("name") or r.get("flatpak", "")),
@@ -693,21 +769,20 @@ class Window(Adw.ApplicationWindow):
 
     def _other_app_dialog(self):
         win = Adw.Window(transient_for=self, modal=True, default_width=560, default_height=620,
-                         title=tr("Request Another App", "Andere App anfragen"))
+                         title=_("Request Another App"))
         view = Adw.ToolbarView()
         view.add_top_bar(Adw.HeaderBar())
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_top=12, margin_bottom=12, margin_start=18, margin_end=18)
-        body.append(Gtk.Label(label=tr("Search Flathub. IT decides on your request; the app installs by itself once approved.",
-                                       "Flathub durchsuchen. Die IT entscheidet über die Anfrage; nach der Freigabe installiert sich die App von selbst."),
+        body.append(Gtk.Label(label=_("Search Flathub. IT decides on your request; the app installs by itself once approved."),
                               wrap=True, xalign=0, css_classes=["dim-label"]))
-        entry = Gtk.SearchEntry(placeholder_text=tr("e.g. Krita, Obsidian, Zotero", "z. B. Krita, Obsidian, Zotero"), search_delay=600)
+        entry = Gtk.SearchEntry(placeholder_text=_("e.g. Krita, Obsidian, Zotero"), search_delay=600)
         body.append(entry)
         results = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"], valign=Gtk.Align.START)
         stack = Gtk.Stack(vexpand=True)
-        stack.add_named(Adw.StatusPage(icon_name="system-search-symbolic", title=tr("Find an App", "App suchen")), "empty")
+        stack.add_named(Adw.StatusPage(icon_name="system-search-symbolic", title=_("Find an App")), "empty")
         stack.add_named(Gtk.Spinner(spinning=True, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER, width_request=32), "busy")
         stack.add_named(Gtk.ScrolledWindow(child=results), "results")
-        none = Adw.StatusPage(icon_name="edit-find-symbolic", title=tr("Nothing Found", "Nichts gefunden"))
+        none = Adw.StatusPage(icon_name="edit-find-symbolic", title=_("Nothing Found"))
         stack.add_named(none, "none")
         body.append(stack)
         view.set_content(body)
@@ -719,7 +794,7 @@ class Window(Adw.ApplicationWindow):
             while results.get_first_child():
                 results.remove(results.get_first_child())
             if err or not res.get("ok"):
-                none.set_description((res or {}).get("error") or tr("The agent does not respond.", "Der Agent antwortet nicht."))
+                none.set_description(tr_data((res or {}).get("error")) or _("The agent does not respond."))
                 stack.set_visible_child_name("none")
                 return False
             hits = res.get("hits") or []
@@ -729,11 +804,11 @@ class Window(Adw.ApplicationWindow):
                 img = Gtk.Image.new_from_file(h["icon"]) if h.get("icon") and os.path.isfile(h["icon"]) else Gtk.Image(icon_name="application-x-executable")
                 img.set_pixel_size(40)
                 row.add_prefix(img)
-                ask = Gtk.Button(label=tr("Request", "Anfragen"), valign=Gtk.Align.CENTER, css_classes=["pill"])
+                ask = Gtk.Button(label=_("Request"), valign=Gtk.Align.CENTER, css_classes=["pill"])
                 ask.connect("clicked", lambda _b, h=h: self._request_new_dialog(win, h))
                 row.add_suffix(ask)
                 results.append(row)
-            none.set_description(tr("Apps already in the catalog are not listed here.", "Apps, die schon im Katalog sind, erscheinen hier nicht."))
+            none.set_description(_("Apps already in the catalog are not listed here."))
             stack.set_visible_child_name("results" if hits else "none")
             return False
 
@@ -749,20 +824,19 @@ class Window(Adw.ApplicationWindow):
         win.present()
 
     def _request_new_dialog(self, parent, hit):
-        dlg = Adw.MessageDialog(transient_for=parent, heading=tr("Request %s", "%s anfragen") % hit.get("name", ""),
-                                body=tr("IT reviews the app and adds it to the catalog for you.",
-                                        "Die IT prüft die App und nimmt sie für Sie in den Katalog auf."))
-        entry = Gtk.Entry(placeholder_text=tr("Why do you need it? (optional)", "Wofür brauchen Sie die App? (optional)"))
+        dlg = Adw.MessageDialog(transient_for=parent, heading=_("Request %s") % hit.get("name", ""),
+                                body=_("IT reviews the app and adds it to the catalog for you."))
+        entry = Gtk.Entry(placeholder_text=_("Why do you need it? (optional)"))
         dlg.set_extra_child(entry)
-        dlg.add_response("cancel", tr("Cancel", "Abbrechen"))
-        dlg.add_response("send", tr("Send Request", "Anfrage senden"))
+        dlg.add_response("cancel", _("Cancel"))
+        dlg.add_response("send", _("Send Request"))
         dlg.set_response_appearance("send", Adw.ResponseAppearance.SUGGESTED)
 
         def done(res, err):
             if err or not res.get("ok"):
-                self.toast((res or {}).get("error") or str(err))
+                self.toast(tr_data((res or {}).get("error")) or str(err))
             else:
-                self.toast(tr("Request sent to IT", "Anfrage an die IT gesendet"))
+                self.toast(_("Request sent to IT"))
                 parent.close()
             self._load_catalog()
             return False
@@ -784,9 +858,9 @@ class Window(Adw.ApplicationWindow):
         def done(res, err):
             button.set_sensitive(True)
             if err or not res.get("ok"):
-                self.toast((res or {}).get("error") or str(err))
+                self.toast(tr_data((res or {}).get("error")) or str(err))
             else:
-                self.toast(tr("Sync started", "Synchronisierung gestartet"))
+                self.toast(_("Sync started"))
                 GLib.timeout_add_seconds(15, lambda: (self.refresh(), False)[1])
             return False
 
@@ -804,14 +878,14 @@ class Window(Adw.ApplicationWindow):
             entry.set_sensitive(True)
             button.set_sensitive(True)
             if err:
-                self.toast(tr("The agent does not respond.", "Der Agent antwortet nicht."))
+                self.toast(_("The agent does not respond."))
             elif res.get("ok"):
-                self.toast(tr("Recovery key stored. Your passphrase is unchanged.", "Schlüssel hinterlegt. Ihre Passphrase bleibt unverändert."))
+                self.toast(_("Recovery key stored. Your passphrase is unchanged."))
                 self.refresh()
             elif "too many" in res.get("error", ""):
-                self.toast(tr("Too many attempts. Try again later.", "Zu viele Versuche. Bitte später erneut versuchen."))
+                self.toast(_("Too many attempts. Try again later."))
             else:
-                self.toast(tr("The passphrase was not accepted.", "Die Passphrase wurde nicht akzeptiert."))
+                self.toast(_("The passphrase was not accepted."))
             return False
 
         in_background(lambda: agent({"op": "escrow", "uuid": uuid, "passphrase": pw}), done)
@@ -852,13 +926,13 @@ class DialogApp(Adw.Application):
         if extra is not None:
             dlg.set_extra_child(extra)
         if kind in ("ask", "password"):
-            dlg.add_response("cancel", sp.get("no") or tr("Cancel", "Abbrechen"))
-            dlg.add_response("ok", sp.get("yes") or tr("OK", "OK"))
+            dlg.add_response("cancel", sp.get("no") or _("Cancel"))
+            dlg.add_response("ok", sp.get("yes") or _("OK"))
             dlg.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
             dlg.set_default_response("ok")
             dlg.set_close_response("cancel")
         else:
-            dlg.add_response("ok", tr("Close", "Schließen"))
+            dlg.add_response("ok", _("Close"))
 
         def respond(_d, r):
             if r == "ok":

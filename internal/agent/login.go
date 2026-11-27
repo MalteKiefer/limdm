@@ -16,6 +16,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/maltekiefer/limdm/internal/api"
+	"github.com/maltekiefer/limdm/internal/locale"
 )
 
 // Desktop login with an OIDC provider (Google Workspace or any provider that
@@ -322,12 +323,14 @@ func PAMAuth() int {
 		return 1
 	}
 	now := time.Now()
+	// the PAM environment rarely carries LANG: the system locale decides
+	lang := locale.System()
 	if s := readFile(nologinFile); s != "" {
-		fmt.Print(s)
+		fmt.Print(locale.T(lang, s)) // a lost mode text of IT is shown as written
 		return 1
 	}
 	if lastContactOverdue(cfg, now) {
-		fmt.Print(offlineText)
+		fmt.Print(locale.T(lang, offlineText))
 		return 1
 	}
 	if !ssoLockWanted(cfg, username, now) && !passwordLocked(username) {
@@ -335,13 +338,13 @@ func PAMAuth() int {
 	}
 	if cfg.LocalPassword {
 		if err := checkLocalPassword(username, pw); err != nil {
-			fmt.Printf("SSO confirmation required. Enter the password you want to use on this device, then confirm on your phone: %v\n", err)
+			fmt.Println(locale.T(lang, "SSO confirmation required. Enter the password you want to use on this device, then confirm on your phone: %v", locale.T(lang, err.Error())))
 			return 1
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	err := deviceLogin(ctx, cfg.Login, email)
+	err := deviceLogin(ctx, lang, cfg.Login, email)
 	if err == nil && cfg.LocalPassword {
 		if err = setLocalPassword(username, pw); err == nil {
 			err = recordSSO(username, now)
@@ -349,19 +352,19 @@ func PAMAuth() int {
 	}
 	recordAuthEvent(username, email, err)
 	if err != nil {
-		fmt.Println("Login failed:", err)
+		fmt.Println(locale.T(lang, "Login failed: %v", locale.T(lang, err.Error())))
 		return 1
 	}
 	return 0
 }
 
-func deviceLogin(ctx context.Context, cfg api.Login, email string) error {
+func deviceLogin(ctx context.Context, lang string, cfg api.Login, email string) error {
 	flow, err := startDeviceFlow(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	// the mapped email is not shown: the user is not authenticated yet
-	fmt.Printf("Confirm the sign in with your company account:\nOpen %s and enter the code %s\n", flow.URI, flow.Code)
+	fmt.Println(locale.T(lang, "Confirm the sign in with your company account:\nOpen %s and enter the code %s", flow.URI, flow.Code))
 	return flow.finish(ctx, cfg, email)
 }
 

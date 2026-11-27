@@ -26,9 +26,8 @@ import (
 // device is locked through /etc/nologin), and always in pure SSO mode.
 
 const (
-	ssoFile     = stateDir + "/sso-verified.json" // username -> last SSO confirmation
-	offlineText = "This device is locked because it could not reach the LiMDM server for too long.\n" +
-		"Connect it to the network; it unlocks automatically once the server is reachable.\n"
+	ssoFile          = stateDir + "/sso-verified.json" // username -> last SSO confirmation
+	offlineText      = "This device is locked because it could not reach the LiMDM server for too long.\nConnect it to the network; it unlocks automatically once the server is reachable.\n"
 	minLocalPassword = 14
 )
 
