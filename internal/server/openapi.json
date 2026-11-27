@@ -17378,6 +17378,13 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "bridge_nets": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "subnets of the local container and VM bridges; rules on these addresses are system rules"
               }
             }
           },

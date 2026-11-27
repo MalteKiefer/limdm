@@ -52,7 +52,7 @@ change behavior they rely on.
 - The bulk action bar is fixed to the bottom of the content column, keeps the last row visible and scrolls its actions sideways on phones.
 - The tray shows the device state by badge shape (check mark, exclamation mark, cross) and in its tooltip, not by color alone, with a symbolic logo for light and dark panels.
 - "Check In Now" is "Sync Now" in the tray, desktop app and CLI; the desktop app and the CLI say Blueprint (`limdm blueprint`, `limdm profiles` stays as an alias).
-- Rules of Docker, Podman, libvirt, Kubernetes, fail2ban and CrowdSec are system rules in the firewall inventory: shown, never adopted, kept or removed.
+- Rules of Docker, Podman, libvirt, Kubernetes, VPN agents (NetBird, Tailscale, ZeroTier, wg-quick tables), fail2ban and CrowdSec are system rules in the firewall inventory: shown, never adopted, kept or removed. Rules on addresses of local container bridges (Docker hairpin NAT and masquerade) count as Docker's. LiMDM's own tables, `inet limdm_fw` of early agents included, are managed.
 
 ### Fixed
 - An update run without changes is reported as "no updates", not "installed"; unattended-upgrade mail noise is filtered.

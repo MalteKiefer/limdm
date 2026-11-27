@@ -382,7 +382,8 @@ it can approve; once approved, the command is queued with the token as creator.
 `GET /api/v1/devices/{id}/firewall` (read, device scope) returns the latest firewall
 inventory the agent reported: `backend` (ufw, firewalld, nftables, iptables), `active`,
 `policy` (`in`, `out`, `forward`) and `rules`, each with `origin` `managed` (added by LiMDM),
-`foreign` or `system` (Docker, Podman, libvirt, Kubernetes, fail2ban, CrowdSec), its fields,
+`foreign` or `system` (Docker, Podman, libvirt, Kubernetes, NetBird, Tailscale, ZeroTier, wg-quick, fail2ban, CrowdSec,
+and rules on addresses of the local container bridges in `bridge_nets`), its fields,
 the raw text, `risk` (`ssh` or `server`), `kept` (listed in `keep` of the device's firewall
 declaration) and `adopt_error` when it cannot be adopted.
 

@@ -770,14 +770,21 @@ Beside ufw and firewalld the agent also lists the nftables tables (or iptables r
 not own, which is where Docker, libvirt and fail2ban put theirs. Each tool runs at most
 20 seconds; the inventory holds up to 2000 rules.
 
-Every rule has an origin: `managed` (added by LiMDM from this declaration, or the Alpine
-table `inet limdm`), `system` or `foreign`. System rules belong to container,
-virtualization and intrusion prevention tools: names starting with docker, br-, veth,
-podman, cni, netavark, nv_, libvirt, virbr, kube, cali, flannel, cilium, weave, f2b-,
-fail2ban or crowdsec in table, chain, zone, interface, jump target, comment or text. They are
-shown and never adopted, kept or removed; the server classifies every rule again and does
-not trust the agent's word. On a Docker host every Docker chain, the jumps into it and the
-rules for `docker0` and `br-*` are system rules.
+Every rule has an origin: `managed` (added by LiMDM from this declaration, or in a table
+or firewalld zone of LiMDM itself: `inet limdm` on Alpine, `inet limdm_fw` of early agents,
+the policy `limdm-egress`), `system` or `foreign`. System rules belong to container,
+virtualization, VPN and intrusion prevention tools: names starting with docker, br-, veth,
+podman, cni, netavark, nv_, libvirt, virbr, kube, cali, flannel, cilium, weave, netbird,
+nb- (NetBird sets), tailscale, ts-, wg-quick, f2b-, fail2ban or crowdsec, or the VPN
+interfaces `wt0` (NetBird) and `zt...` (ZeroTier), in table, chain, set, zone, interface,
+jump target, comment or text. Rules whose addresses lie in a subnet of a local container or VM
+bridge (docker0, br-*, podman*, cni*, virbr*; the agent reads them from the interface list,
+`bridge_nets`) are system rules too, which covers Docker's hairpin NAT and masquerade
+rules outside its chains. Rules an admin wrote for a `wg*` interface stay foreign: they
+cannot be told from wg-quick PostUp rules. System rules are shown and never adopted, kept
+or removed; the server classifies every rule again, also stored inventories when it reads
+them, and does not trust the agent's word. On a Docker host every Docker chain, the jumps
+into it and the rules for `docker0` and `br-*` are system rules.
 
 On the **Firewall** tab of a device an admin decides per foreign rule:
 

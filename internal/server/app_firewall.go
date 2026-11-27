@@ -73,18 +73,35 @@ func sanitizeFirewall(inv *api.FirewallInventory) {
 			*f = truncate(*f, 200)
 		}
 		r.Comment, r.Raw = truncate(r.Comment, 300), truncate(r.Raw, 1000)
-		origin := r.Origin
-		r.Finish() // ID, match and system class from the reported fields
-		if origin == api.OriginManaged && r.Origin != api.OriginSystem {
-			r.Origin = api.OriginManaged
-		}
 	}
+	classifyFirewall(inv)
 	if inv.Rules == nil {
 		inv.Rules = []api.FirewallInvRule{}
 	}
 }
 
-// loadFirewall reads the stored inventory; ok is false when the device has
+// classifyFirewall sets ID, match and origin of every rule from its fields:
+// LiMDM's own tables, container, VPN and protection tools, addresses in the
+// bridge subnets the agent reported (they can only make rules system, never
+// actionable). The agent's managed claim stays unless the rule is system.
+func classifyFirewall(inv *api.FirewallInventory) {
+	bridges := api.ParseBridgeNets(inv.BridgeNets)
+	inv.BridgeNets = nil
+	for _, b := range bridges {
+		inv.BridgeNets = append(inv.BridgeNets, b.String())
+	}
+	for i := range inv.Rules {
+		r := &inv.Rules[i]
+		origin := r.Origin
+		r.Finish(bridges...)
+		if origin == api.OriginManaged && r.Origin != api.OriginSystem {
+			r.Origin = api.OriginManaged
+		}
+	}
+}
+
+// loadFirewall reads the stored inventory, classified again with the
+// current rules (an inventory stored by an earlier server may be wrong); ok is false when the device has
 // not reported one.
 func loadFirewall(ctx context.Context, q rowQuerier, id string) (api.FirewallInventory, time.Time, bool, error) {
 	var inv api.FirewallInventory
@@ -97,7 +114,11 @@ func loadFirewall(ctx context.Context, q rowQuerier, id string) (api.FirewallInv
 	if err != nil {
 		return inv, at, false, err
 	}
-	return inv, at, true, json.Unmarshal(raw, &inv)
+	if err := json.Unmarshal(raw, &inv); err != nil {
+		return inv, at, true, err
+	}
+	classifyFirewall(&inv)
+	return inv, at, true, nil
 }
 
 type apiFirewallRule struct {

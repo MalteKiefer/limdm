@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
@@ -524,10 +526,7 @@ func parseNft(js, text string) ([]api.FirewallInvRule, api.FirewallPolicies, err
 		if r.Raw == "" {
 			r.Raw = strings.Join(words, " ") // the text listing failed: the expression names
 		}
-		if r.Table == "inet limdm" {
-			r.Origin = api.OriginManaged
-		}
-		rules = append(rules, r)
+		rules = append(rules, r) // LiMDM's own tables: api.LiMDMRule in Finish
 	}
 	for _, d := range []struct {
 		dir string
@@ -742,11 +741,13 @@ func (a *Agent) collectFirewall() api.FirewallInventory {
 		rules, inv.Truncated = rules[:api.MaxFirewallRules], true
 	}
 	port := a.serverPort()
+	inv.BridgeNets = bridgeNets()
+	bridges := api.ParseBridgeNets(inv.BridgeNets)
 	for i := range rules {
 		r := &rules[i]
 		r.Raw = truncateText(r.Raw, 900)
 		r.Comment = truncateText(r.Comment, 200)
-		r.Finish()
+		r.Finish(bridges...)
 		r.Risk = api.RuleRisk(*r, inv.Policy, port)
 	}
 	inv.Rules = rules
@@ -754,6 +755,34 @@ func (a *Agent) collectFirewall() api.FirewallInventory {
 		inv.Rules = []api.FirewallInvRule{}
 	}
 	return inv
+}
+
+// bridgeIface matches the local bridges of container and VM tools.
+var bridgeIface = regexp.MustCompile(`^(docker[0-9]+|br-[0-9a-f]+|podman[0-9]+|cni[0-9-]*|virbr[0-9]+)$`)
+
+// bridgeNets are the subnets of the local container and VM bridges, read
+// from the kernel's interface list (no command runs).
+func bridgeNets() []string {
+	ifs, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, i := range ifs {
+		if !bridgeIface.MatchString(i.Name) {
+			continue
+		}
+		addrs, _ := i.Addrs()
+		for _, a := range addrs {
+			if n, ok := a.(*net.IPNet); ok && n.IP.IsPrivate() {
+				p, err := netip.ParsePrefix(n.String())
+				if err == nil {
+					out = append(out, p.Masked().String())
+				}
+			}
+		}
+	}
+	return out
 }
 
 // firewallHash is the change marker of an inventory.

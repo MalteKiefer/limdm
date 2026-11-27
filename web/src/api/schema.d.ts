@@ -5052,6 +5052,8 @@ export interface components {
                 };
                 truncated?: boolean;
                 errors?: string[];
+                /** @description subnets of the local container and VM bridges; rules on these addresses are system rules */
+                bridge_nets?: string[];
             };
             rules: components["schemas"]["DeviceFirewallRule"][];
         };

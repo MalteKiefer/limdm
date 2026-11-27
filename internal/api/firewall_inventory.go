@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/netip"
 	"regexp"
 	"slices"
 	"strconv"
@@ -23,6 +24,10 @@ type FirewallInventory struct {
 	Rules       []FirewallInvRule `json:"rules"`
 	Truncated   bool              `json:"truncated,omitempty"` // more rules than MaxFirewallRules
 	Errors      []string          `json:"errors,omitempty"`    // tools that failed to answer
+	// BridgeNets are the subnets of the local container and VM bridges
+	// (docker0, br-*, podman*, cni*, virbr*): rules on these addresses
+	// (hairpin NAT, masquerade) belong to the container tools.
+	BridgeNets []string `json:"bridge_nets,omitempty"`
 }
 
 // FirewallPolicies are the default actions per direction (accept, drop,
@@ -71,21 +76,31 @@ const (
 	OriginSystem  = "system"
 )
 
-// systemNames are name prefixes of chains, tables, zones and interfaces
-// that container, virtualization and intrusion prevention tools own:
-// Docker, Podman (CNI, netavark), libvirt, Kubernetes and its CNI plugins,
-// fail2ban and CrowdSec. Their rules are shown but never adopted or removed.
+// systemNames are name prefixes of chains, tables, sets, zones and
+// interfaces that container, virtualization, VPN and intrusion prevention
+// tools own: Docker, Podman (CNI, netavark), libvirt, Kubernetes and its CNI
+// plugins, NetBird (table netbird, chains netbird-*, sets nb-*), Tailscale
+// (chains ts-*, interface tailscale0), wg-quick (table wg-quick-*), fail2ban
+// and CrowdSec. Their rules are shown but never adopted or removed.
 var systemNames = []string{"docker", "br-", "veth", "podman", "cni", "netavark", "nv_", "libvirt", "virbr", "kube", "cali", "flannel",
-	"cilium", "weave", "f2b-", "fail2ban", "crowdsec"}
+	"cilium", "weave", "f2b-", "fail2ban", "crowdsec", "netbird", "nb-", "tailscale", "ts-", "wg-quick"}
+
+// systemIfaces are interface names of VPN agents: NetBird (wt0), ZeroTier
+// (zt plus the network hash).
+var systemIfaces = regexp.MustCompile(`^(wt[0-9]+|zt[0-9a-z]{8,})$`)
 
 var nameToken = regexp.MustCompile(`[A-Za-z0-9_.@-]+`)
 
 // SystemRule reports whether a rule belongs to a container,
-// virtualization or intrusion prevention tool. Every name in the rule
+// virtualization, VPN or intrusion prevention tool. Every name in the rule
 // counts, its comment included: a false positive only hides actions.
 func SystemRule(r FirewallInvRule) bool {
 	text := strings.ToLower(strings.Join([]string{r.Table, r.Chain, r.Zone, r.Iface, r.Action, r.Comment, r.Raw}, " "))
 	for _, tok := range nameToken.FindAllString(text, -1) {
+		tok = strings.TrimLeft(tok, "@") // nftables sets: @nb-...
+		if systemIfaces.MatchString(tok) {
+			return true
+		}
 		for _, p := range systemNames {
 			if strings.HasPrefix(tok, p) {
 				return true
@@ -95,18 +110,74 @@ func SystemRule(r FirewallInvRule) bool {
 	return false
 }
 
+// LiMDMRule reports whether a rule lives in a table or firewalld zone or
+// policy that a LiMDM agent writes: inet limdm (Alpine), inet limdm_fw
+// (agents of 0.1), the firewalld policy limdm-egress.
+func LiMDMRule(r FirewallInvRule) bool {
+	_, table, _ := strings.Cut(r.Table, " ")
+	return strings.HasPrefix(table, "limdm") || strings.HasPrefix(r.Zone, "limdm")
+}
+
+var addrToken = regexp.MustCompile(`[0-9a-fA-F:.]+(?:/[0-9]{1,3})?`)
+
+// BridgeRule reports whether an address of the rule lies in one of the
+// local container bridge subnets.
+func BridgeRule(r FirewallInvRule, nets []netip.Prefix) bool {
+	if len(nets) == 0 {
+		return false
+	}
+	for _, tok := range addrToken.FindAllString(strings.Join([]string{r.From, r.To, r.Raw}, " "), -1) {
+		p, err := netip.ParsePrefix(tok)
+		if err != nil {
+			a, aerr := netip.ParseAddr(tok)
+			if aerr != nil {
+				continue
+			}
+			p = netip.PrefixFrom(a, a.BitLen())
+		}
+		for _, n := range nets {
+			if n.Contains(p.Addr()) && p.Bits() >= n.Bits() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ParseBridgeNets reads BridgeNets, ignoring what is no network and
+// anything wider than a /8 (IPv4) or /16 (IPv6): a bridge never spans that.
+func ParseBridgeNets(list []string) []netip.Prefix {
+	var out []netip.Prefix
+	for _, s := range list {
+		p, err := netip.ParsePrefix(s)
+		if err != nil || p.Addr().Is4() && p.Bits() < 8 || !p.Addr().Is4() && p.Bits() < 16 {
+			continue
+		}
+		out = append(out, p.Masked())
+		if len(out) == 64 {
+			break
+		}
+	}
+	return out
+}
+
 // counterRe matches the counters of nftables and iptables rule texts.
 var counterRe = regexp.MustCompile(`counter packets \d+ bytes \d+|\[\d+:\d+\]`)
 
-// Finish sets Match, ID and, unless already managed, the origin of r.
-func (r *FirewallInvRule) Finish() {
+// Finish sets Match, ID and the origin of r: managed for LiMDM's own
+// tables, system for container, VPN and protection tools (names, or an
+// address in one of the bridge subnets), else managed when the reader
+// recognized a declared rule, else foreign.
+func (r *FirewallInvRule) Finish(bridges ...netip.Prefix) {
 	place := strings.TrimSpace(strings.Join([]string{r.Table, r.Chain, r.Zone}, " "))
 	raw := strings.Join(strings.Fields(counterRe.ReplaceAllString(r.Raw, "counter")), " ")
 	r.Match = r.Source + " " + place + ": " + raw
 	sum := sha256.Sum256([]byte(r.Match + "\x00" + r.Handle))
 	r.ID = hex.EncodeToString(sum[:8])
 	switch {
-	case SystemRule(*r):
+	case LiMDMRule(*r):
+		r.Origin = OriginManaged
+	case SystemRule(*r) || BridgeRule(*r, bridges):
 		r.Origin = OriginSystem
 	case r.Origin != OriginManaged:
 		r.Origin = OriginForeign
