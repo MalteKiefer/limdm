@@ -105,6 +105,7 @@ An index of all documents is in [docs/README.md](docs/README.md).
 | [Software catalog](docs/software.md) | Self service apps in the desktop app, requests, Flathub and vendor repositories |
 | [Compliance](docs/compliance.md) | Checks with IDs, custom checks, frameworks, policies, exceptions, webhook, evidence |
 | [Remote shell](docs/remote-shell.md) | Audited support terminal from the console to a device |
+| [Containers and VMs](docs/workloads.md) | Docker, Podman, LXC, LXD, Incus, Proxmox and libvirt per device with versions; start, shut down, restart |
 | [Notifications](docs/notifications.md) | Email, Slack, Discord and webhook channels, events |
 | [Security](docs/security.md) | Architecture, mTLS, signed commands, sessions, four eyes, audit log, privacy |
 | [Keys](docs/keys.md) | Key inventory, HSM, rotation runbooks, compromise |

@@ -224,7 +224,8 @@ global only.
 wipe, lost mode, scripts, package downgrades, role changes of console users, every change to an administrator
 account (adding one, disabling or enabling one, resetting a local administrator's
 credentials), admin API tokens, risk exceptions (the approving admin is recorded as their
-approver), and optionally recovery key views and remote shell sessions.
+approver), and optionally recovery key views, remote shell sessions and shutting down or
+restarting containers and VMs ([workloads.md](workloads.md)).
 It also covers the declarations that act like a script, so one administrator cannot reach
 root on devices without a second one:
 
