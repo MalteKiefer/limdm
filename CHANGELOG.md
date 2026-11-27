@@ -4,7 +4,7 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
-## Unreleased
+## 0.19.0 (2026-11-27)
 
 ### Upgrade notes
 - Enrollment tokens are limited to 500 uses and 30 days. Existing tokens above these limits are cut down once at the first start.
