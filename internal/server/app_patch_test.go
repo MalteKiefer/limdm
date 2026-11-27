@@ -57,6 +57,14 @@ func TestAppPatch(t *testing.T) {
 	if code, _ := call(dashHelpdesk, "POST", "/api/v1/update-rings", `{"name":"pilot","position":1}`); code != 403 {
 		t.Fatalf("helpdesk created a ring: %d", code)
 	}
+	// the CVE import is installation wide: not for tenant admins
+	if _, err := db.Exec(ctx, `INSERT INTO tenants(id, name) VALUES (2, 'other') ON CONFLICT DO NOTHING;
+		INSERT INTO console_users(email, role, tenant_id) VALUES ('t@firma.de', 'admin', 2)`); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := call(session{Email: "t@firma.de", Role: "admin", Tenant: 2}, "POST", "/api/v1/updates/cve-feeds/refresh", ``); code != 403 {
+		t.Fatalf("tenant admin started the CVE import: %d", code)
+	}
 	if code, body := call(dashAdmin, "POST", "/api/v1/update-rings", `{"name":"","position":1}`); code != 422 || !strings.Contains(body, "name") {
 		t.Fatalf("empty name: %d %s", code, body)
 	}

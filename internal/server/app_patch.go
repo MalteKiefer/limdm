@@ -50,7 +50,7 @@ func (s *Server) appPatchRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/updates/fleet", s.need("read", s.apiUpdatesFleet))
 	m.HandleFunc("GET /api/v1/updates/package-versions", s.need("read", s.apiPackageVersions))
 	m.HandleFunc("GET /api/v1/updates/cve-feeds", s.need("read", s.apiCVEFeeds))
-	m.HandleFunc("POST /api/v1/updates/cve-feeds/refresh", s.need("admin", s.apiCVEFeedsRefresh))
+	m.HandleFunc("POST /api/v1/updates/cve-feeds/refresh", s.need("admin", s.globalOnly(s.apiCVEFeedsRefresh)))
 }
 
 type updateRing struct {
