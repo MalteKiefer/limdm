@@ -90,7 +90,7 @@ export function ActivityPage() {
           </EmptyState>
         ) : (
           <>
-            {!canAudit && <p className="mb-2 text-[12.5px] text-muted">{t('activity.onlyEvents')}</p>}
+            {!canAudit && <p className="mb-2 text-meta text-muted">{t('activity.onlyEvents')}</p>}
             <Timeline label={t('activity.stream')} items={items.map((it) => ({ id: it.id, at: it.at, title: <Entry it={it} onFilter={set} />, meta: <Meta it={it} onFilter={set} /> }))} />
             {stream.hasNextPage && (
               <button type="button" className="btn mt-3" disabled={stream.isFetchingNextPage} onClick={() => void stream.fetchNextPage()}>
@@ -108,7 +108,7 @@ function ChainState({ st }: { st: Schemas['AuditStatus'] }) {
   const t = useT()
   if (st.broken_at)
     return (
-      <p role="alert" className="flex items-start gap-2 rounded-lg bg-bad-soft p-3 text-[13px] text-bad">
+      <p role="alert" className="flex items-start gap-2 rounded-lg bg-bad-soft p-3 text-body text-bad">
         <ShieldX size={16} className="mt-0.5 shrink-0" aria-hidden />
         <span>
           <strong>{t('activity.integrity')}</strong> {t('activity.brokenLong', { id: st.broken_at })}
@@ -116,7 +116,7 @@ function ChainState({ st }: { st: Schemas['AuditStatus'] }) {
       </p>
     )
   return (
-    <p role="status" className="flex items-start gap-2 rounded-lg bg-ok-soft p-3 text-[13px] text-ok">
+    <p role="status" className="flex items-start gap-2 rounded-lg bg-ok-soft p-3 text-body text-ok">
       <ShieldCheck size={16} className="mt-0.5 shrink-0" aria-hidden />
       <span>
         {t('activity.intact')}
@@ -198,13 +198,13 @@ function Entry({ it, onFilter }: { it: Item; onFilter: (p: Partial<ActivitySearc
         <button type="button" className="font-medium hover:text-accent hover:underline" onClick={() => onFilter({ action: it.kind === 'audit' ? it.action : undefined, cat: it.kind === 'audit' ? undefined : 'events' })}>
           {it.label}
         </button>
-        {it.label !== it.action && <span className="font-mono text-[11.5px] text-muted">{it.action}</span>}
+        {it.label !== it.action && <span className="font-mono text-micro text-muted">{it.action}</span>}
         <Badge>{t(`activity.cat.${it.category}` as MessageKey)}</Badge>
       </div>
       {it.detail && (
-        <details className="text-[12.5px] text-muted">
+        <details className="text-meta text-muted">
           <summary className="cursor-pointer truncate">{it.detail.slice(0, 140)}</summary>
-          <pre className="mt-1 max-h-64 overflow-auto rounded bg-surface-2 p-2 font-mono text-[12px] whitespace-pre-wrap">{it.detail}</pre>
+          <pre className="mt-1 max-h-64 overflow-auto rounded bg-surface-2 p-2 font-mono text-meta whitespace-pre-wrap">{it.detail}</pre>
         </details>
       )}
     </div>

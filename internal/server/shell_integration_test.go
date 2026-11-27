@@ -162,6 +162,17 @@ func TestRemoteShellIntegration(t *testing.T) {
 	if code, body := ui("GET", "/api/v1/shell-sessions/"+sid, "", audit); code != 200 || !strings.Contains(body, "hello") || strings.Contains(body, `\u001b`) {
 		t.Fatalf("transcript: %d %s", code, body)
 	}
+	// the raw bytes for replay: admins and auditors only, the read is audited
+	if code, body := ui("GET", "/api/v1/shell-sessions/"+sid+"/transcript", "", audit); code != 200 || !strings.Contains(body, "hello") {
+		t.Fatalf("raw transcript: %d %s", code, body)
+	}
+	if code, _ := ui("GET", "/api/v1/shell-sessions/"+sid+"/transcript", "", help); code != http.StatusForbidden {
+		t.Fatalf("helpdesk raw transcript: %d", code)
+	}
+	db.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action='api.read' AND target LIKE 'GET /api/v1/shell-sessions/%/transcript'`).Scan(&audited)
+	if audited != 1 {
+		t.Fatalf("raw transcript read audited %d times", audited)
+	}
 	if code, body := ui("GET", "/api/v1/devices/d1/shell-sessions", "", help); code != 200 || strings.Contains(body, sid) {
 		t.Fatalf("helpdesk sees other users' sessions: %d", code)
 	}

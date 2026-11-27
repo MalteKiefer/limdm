@@ -10,9 +10,9 @@ export type Col = { label: string; className?: string }
 export function Table({ caption, cols, rows, empty }: { caption: string; cols: Col[]; rows: { key: string; cells: ReactNode[] }[]; empty: ReactNode }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-left text-[13px]">
+      <table className="w-full text-left text-body">
         <caption className="sr-only">{caption}</caption>
-        <thead className="text-[12px] text-muted">
+        <thead className="text-meta text-muted">
           <tr>
             {cols.map((c, i) => (
               <th key={i} scope="col" className={'py-1.5 pr-3 font-medium ' + (c.className ?? '')}>
@@ -45,7 +45,7 @@ export function Table({ caption, cols, rows, empty }: { caption: string; cols: C
   )
 }
 
-export const mono = (v?: string | number) => <span className="font-mono text-[12.5px] break-all">{v ?? ''}</span>
+export const mono = (v?: string | number) => <span className="font-mono text-meta break-all">{v ?? ''}</span>
 
 /** A security flag with the advisory's severity (text, never color alone). */
 export function SecurityTag({ security, severity }: { security?: boolean; severity?: string }) {

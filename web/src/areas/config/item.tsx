@@ -51,7 +51,7 @@ export function LibraryItemPage() {
   if (!isNew && !stored && !deleted) return <EmptyState title={t('state.notFoundTitle')}>{t('state.notFoundBody')}</EmptyState>
   return (
     <div className="pb-24">
-      <Link to="/config" search={{ tab: 'library' }} className="mb-3 inline-flex items-center gap-1 text-[13px] text-muted hover:text-fg">
+      <Link to="/config" search={{ tab: 'library' }} className="mb-3 inline-flex items-center gap-1 text-body text-muted hover:text-fg">
         <ArrowLeft size={14} aria-hidden /> {t('config.tabLibrary')}
       </Link>
       {num && (
@@ -147,7 +147,7 @@ function ItemEditor({ stored, type, prefill }: { stored?: ItemInput & { used_by:
         title={stored?.name || t('config.newOf', { type: info?.title ?? type })}
         sub={
           <span className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-[12.5px]">{type}</span>
+            <span className="font-mono text-meta">{type}</span>
             {info && <span>{info.title}</span>}
             {fourEyes && <Badge tone="info">{t('config.fourEyes')}</Badge>}
             {stored?.read_only && <Badge tone="info">{t('config.sharedReadOnly')}</Badge>}
@@ -174,7 +174,7 @@ function ItemEditor({ stored, type, prefill }: { stored?: ItemInput & { used_by:
           </>
         }
       />
-      {info && <p className="-mt-2 mb-[var(--gap)] text-[13px] text-muted">{info.description}</p>}
+      {info && <p className="-mt-2 mb-[var(--gap)] text-body text-muted">{info.description}</p>}
       <div className="grid gap-[var(--gap)] xl:grid-cols-[minmax(0,1fr)_400px]">
         <fieldset disabled={readOnly} className="flex min-w-0 flex-col gap-[var(--gap)]">
           <legend className="sr-only">{t('config.itemSettings')}</legend>
@@ -185,7 +185,7 @@ function ItemEditor({ stored, type, prefill }: { stored?: ItemInput & { used_by:
             <Field label={t('config.description')}>{({ id }) => <input id={id} className="field" maxLength={300} value={desc} onChange={(e) => setDesc(e.target.value)} />}</Field>
           </div>
           {serverErr && serverErr.field !== 'name' && (
-            <p role="alert" className="rounded-lg bg-bad-soft p-3 text-[13px] text-bad">
+            <p role="alert" className="rounded-lg bg-bad-soft p-3 text-body text-bad">
               {serverErr.msg}
             </p>
           )}
@@ -193,7 +193,7 @@ function ItemEditor({ stored, type, prefill }: { stored?: ItemInput & { used_by:
             <SchemaForm schema={schema.data} value={payload} onChange={setPayload} errors={errors} idPrefix="item" />
           ) : (
             <div className="card p-[var(--pad-card)]">
-              <p className="mb-2 text-[12.5px] text-muted">{t('config.jsonHelp')}</p>
+              <p className="mb-2 text-meta text-muted">{t('config.jsonHelp')}</p>
               <JsonEditor
                 value={json}
                 label={t('config.jsonLabel')}
@@ -224,7 +224,7 @@ function ItemEditor({ stored, type, prefill }: { stored?: ItemInput & { used_by:
           {stored && admin && !stored.read_only && (
             <div className="card p-[var(--pad-card)]">
               <h2 className="font-semibold">{t('config.deleteItem')}</h2>
-              <p className="mb-3 text-[12.5px] text-muted">{stored.used_by.length ? t('config.deleteUsed') : t('config.deleteHint')}</p>
+              <p className="mb-3 text-meta text-muted">{stored.used_by.length ? t('config.deleteUsed') : t('config.deleteHint')}</p>
               <button type="button" className="btn text-bad" disabled={stored.used_by.length > 0} onClick={() => setConfirmDelete(true)}>
                 <Trash2 size={14} aria-hidden /> {t('common.delete')}
               </button>
@@ -235,7 +235,7 @@ function ItemEditor({ stored, type, prefill }: { stored?: ItemInput & { used_by:
       {!readOnly && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface/95 backdrop-blur lg:left-[var(--sb,244px)]" role="region" aria-label={t('form.unsaved')}>
           <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3 px-4 py-2.5 lg:px-6">
-            <span className="text-[13px] text-muted" aria-live="polite">
+            <span className="text-body text-muted" aria-live="polite">
               {errCount ? <span className="font-medium text-bad">{t('config.errors', { count: errCount })}</span> : dirty ? t('form.unsaved') : t('config.noChanges')}
             </span>
             <div className="ml-auto flex gap-2">

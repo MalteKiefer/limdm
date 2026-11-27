@@ -20,7 +20,7 @@ export function Field({ label, help, error, required, children, htmlFor }: { lab
     <div className="flex flex-col gap-1">
       {/* label and help grow, so the inputs of a row line up when help texts differ in height */}
       <div className="flex grow flex-col gap-1">
-        <label htmlFor={id} className="text-[13px] font-medium">
+        <label htmlFor={id} className="text-body font-medium">
           {label}
           {required && (
             <>
@@ -33,14 +33,14 @@ export function Field({ label, help, error, required, children, htmlFor }: { lab
           )}
         </label>
         {help && (
-          <p id={helpId} className="text-[12.5px] text-muted">
+          <p id={helpId} className="text-meta text-muted">
             {help}
           </p>
         )}
       </div>
       {children({ id, describedBy: [helpId, errId].filter(Boolean).join(' ') || undefined, invalid: !!error })}
       {error && (
-        <p id={errId} className="flex items-center gap-1 text-[12.5px] font-medium text-bad">
+        <p id={errId} className="flex items-center gap-1 text-meta font-medium text-bad">
           <OctagonX size={13} aria-hidden /> {error}
         </p>
       )}
@@ -66,7 +66,7 @@ export function FormSection({ title, description, children }: { title: ReactNode
     <section className="grid gap-4 border-b border-line py-6 last:border-0 md:grid-cols-[minmax(200px,280px)_1fr] md:gap-10">
       <div>
         <h3 className="font-semibold">{title}</h3>
-        {description && <p className="mt-1 text-[13px] text-muted">{description}</p>}
+        {description && <p className="mt-1 text-body text-muted">{description}</p>}
       </div>
       <div className="flex max-w-xl min-w-0 flex-col gap-5">{children}</div>
     </section>
@@ -79,7 +79,7 @@ export function SaveBar({ dirty, saving, disabled, onDiscard, saveLabel }: { dir
   if (!dirty) return null
   return (
     <div className="fade-in sticky bottom-0 z-20 -mx-4 mt-4 flex items-center justify-end gap-2 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur lg:-mx-6 lg:px-6" role="region" aria-label={t('form.unsaved')}>
-      <span className="mr-auto text-[13px] text-muted">{t('form.unsaved')}</span>
+      <span className="mr-auto text-body text-muted">{t('form.unsaved')}</span>
       <button type="button" className="btn" onClick={onDiscard}>
         {t('form.discard')}
       </button>

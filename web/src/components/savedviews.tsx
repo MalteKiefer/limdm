@@ -75,7 +75,7 @@ function SaveViewDialog({ list, current, canShare, onClose }: { list: string; cu
       open
       onClose={onClose}
       title={t('views.save')}
-      description={<span className="font-mono text-[12.5px]">{current.query || '–'}</span>}
+      description={<span className="font-mono text-meta">{current.query || '–'}</span>}
       footer={
         <>
           <button type="button" className="btn" onClick={onClose}>
@@ -96,10 +96,10 @@ function SaveViewDialog({ list, current, canShare, onClose }: { list: string; cu
         {canShare && (
           <div className="flex items-start justify-between gap-4">
             <div>
-              <label htmlFor="view-share" className="text-[13px] font-medium">
+              <label htmlFor="view-share" className="text-body font-medium">
                 {t('views.share')}
               </label>
-              <p className="text-[12.5px] text-muted">{t('views.shareHelp')}</p>
+              <p className="text-meta text-muted">{t('views.shareHelp')}</p>
             </div>
             <Switch id="view-share" checked={shared} onChange={setShared} label={t('views.share')} />
           </div>

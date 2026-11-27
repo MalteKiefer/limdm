@@ -105,8 +105,13 @@ command.
   `truncated` beyond), for 365 days like device events. Input is not stored separately:
   what the shell echoes is in the output, password prompts without echo are not.
 * **Transcripts** are shown to admins and auditors (device page, **Remote shell
-  sessions**, **Open**) with control sequences removed. The helpdesk role sees only its own
-  sessions and no transcripts.
+  sessions**, **Open**). The recording is replayed in a read only terminal, so colours,
+  redraws and prompts look as they did; **Plain text** shows the extracted text and both
+  versions download (`.log` raw bytes, `.txt` text). The text applies the terminal's line
+  editing (carriage return overwrites, backspace, erase in line) and drops every escape
+  sequence, so fish and bash redraws collapse to what was visible; full screen programs
+  (vim, top) stay readable only in the replay. Reading the raw bytes is audited. The
+  helpdesk role sees only its own sessions and no transcripts.
 
 ## Limits
 

@@ -85,6 +85,8 @@ change. Never hand code a declaration form; add `x-section`, `x-enumTitles`,
 * Charts: ECharts only through `EChart` and always inside `ChartFrame` with a table; small charts with `Sparkline`, `Bullet`, `StackBar`, `FleetGrid`. Status never by color alone.
 * States: `LoadingState`, `EmptyState` (say what appears and offer the next step), `ErrorState`.
 * WCAG 2.2 AA: every control has a label, errors use `aria-invalid` and `aria-describedby`, keyboard works everywhere (Esc, J/K in sheets, arrows in tabs), contrast via the color tokens only (`text-muted`, `bg-surface`, `text-bad` ...). Never hard code colors.
+* Type sizes only through the role tokens `text-micro`, `text-meta`, `text-body`, `text-title`, `text-heading`, `text-display` (styles.css, docs/brand-guidelines.md); no `text-[13px]`.
+* Confirmations use `Confirm` (components/settingsform) or `Modal`, never `window.confirm`. Notices on a page are ordered security, compliance, information.
 * Light, dark, comfortable and compact come from tokens in `src/styles.css`; use `var(--pad-card)`, `var(--gap)`, `row-h` instead of fixed spacing where density matters. Layouts must work at 390 px.
 
 ## CSP (no exceptions)

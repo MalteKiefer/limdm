@@ -62,7 +62,7 @@ export function SettingsForm<T extends FieldValues>({
         {children(form)}
       </fieldset>
       {error && (
-        <p role="alert" className="mt-4 flex items-start gap-2 rounded-md bg-bad-soft p-3 text-[13px] text-bad">
+        <p role="alert" className="mt-4 flex items-start gap-2 rounded-md bg-bad-soft p-3 text-body text-bad">
           <TriangleAlert size={15} className="mt-0.5 shrink-0" aria-hidden /> {error}
         </p>
       )}
@@ -89,7 +89,7 @@ export function TextField<T extends FieldValues>({ form, name, label, help, requ
           placeholder={placeholder}
           autoComplete={autoComplete ?? 'off'}
           spellCheck={false}
-          className={cx('field', mono && 'font-mono text-[12.5px]', className)}
+          className={cx('field', mono && 'font-mono text-meta', className)}
           {...form.register(name, type === 'number' ? { valueAsNumber: true } : undefined)}
         />
       )}
@@ -101,7 +101,7 @@ export function TextField<T extends FieldValues>({ form, name, label, help, requ
 export function ListField<T extends FieldValues>({ form, name, label, help, placeholder, rows = 3 }: { form: UseFormReturn<T>; name: Path<T>; label: ReactNode; help?: ReactNode; placeholder?: string; rows?: number }) {
   return (
     <Field label={label} help={help} error={fieldErr(form, name)}>
-      {({ id, describedBy, invalid }) => <textarea id={id} rows={rows} aria-describedby={describedBy} aria-invalid={invalid || undefined} placeholder={placeholder} spellCheck={false} className="field font-mono text-[12.5px]" {...form.register(name)} />}
+      {({ id, describedBy, invalid }) => <textarea id={id} rows={rows} aria-describedby={describedBy} aria-invalid={invalid || undefined} placeholder={placeholder} spellCheck={false} className="field font-mono text-meta" {...form.register(name)} />}
     </Field>
   )
 }
@@ -128,11 +128,11 @@ export function Toggle<T extends FieldValues>({ form, name, label, help, disable
   return (
     <div className="flex items-start justify-between gap-6">
       <div>
-        <label htmlFor={id} className="text-[13px] font-medium">
+        <label htmlFor={id} className="text-body font-medium">
           {label}
         </label>
         {help && (
-          <p id={`${id}-help`} className="text-[12.5px] text-muted">
+          <p id={`${id}-help`} className="text-meta text-muted">
             {help}
           </p>
         )}
@@ -167,10 +167,10 @@ export function Confirm({ open, onClose, title, body, confirm, danger, reason, b
       {children}
       {reason && (
         <div className="flex flex-col gap-1">
-          <label htmlFor={id} className="text-[13px] font-medium">
+          <label htmlFor={id} className="text-body font-medium">
             {t('settings.reason')}
           </label>
-          <p id={`${id}-help`} className="text-[12.5px] text-muted">
+          <p id={`${id}-help`} className="text-meta text-muted">
             {t('settings.reasonHelp')}
           </p>
           <input id={id} aria-describedby={`${id}-help`} className="field" maxLength={500} value={text} onChange={(e) => setText(e.target.value)} />
@@ -197,7 +197,7 @@ export function OnceSecret({ title, value, onClose, note }: { title: ReactNode; 
         </button>
       }
     >
-      <pre className="overflow-x-auto rounded-md bg-sunken p-3 font-mono text-[12.5px] whitespace-pre-wrap break-all" aria-label={t('settings.secret')}>
+      <pre className="overflow-x-auto rounded-md bg-sunken p-3 font-mono text-meta whitespace-pre-wrap break-all" aria-label={t('settings.secret')}>
         {value}
       </pre>
       <button
@@ -219,7 +219,7 @@ export function OnceSecret({ title, value, onClose, note }: { title: ReactNode; 
 /** A small key value list for read only facts. */
 export function Facts({ rows }: { rows: [ReactNode, ReactNode][] }) {
   return (
-    <dl className="grid grid-cols-[minmax(120px,auto)_1fr] gap-x-4 gap-y-1.5 text-[13px]">
+    <dl className="grid grid-cols-[minmax(120px,auto)_1fr] gap-x-4 gap-y-1.5 text-body">
       {rows.map(([k, v], i) => (
         <div key={i} className="contents">
           <dt className="text-muted">{k}</dt>
@@ -235,8 +235,8 @@ export function SectionHead({ title, sub, actions }: { title: ReactNode; sub?: R
   return (
     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line py-5">
       <div className="min-w-0">
-        <h2 className="text-[17px] font-semibold">{title}</h2>
-        {sub && <p className="mt-1 max-w-3xl text-[13px] text-muted">{sub}</p>}
+        <h2 className="text-title font-semibold">{title}</h2>
+        {sub && <p className="mt-1 max-w-3xl text-body text-muted">{sub}</p>}
       </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </div>

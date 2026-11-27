@@ -187,7 +187,7 @@ function Rings() {
             {t('updates.rings.noneBody')}
           </EmptyState>
         )}
-        <p className="mt-3 text-[12.5px] text-muted">{t('updates.rings.unassigned', { count: rings.data.unassigned ?? 0 })}</p>
+        <p className="mt-3 text-meta text-muted">{t('updates.rings.unassigned', { count: rings.data.unassigned ?? 0 })}</p>
       </Card>
       <Card title={t('updates.waves.title')} sub={t('updates.waves.sub')}>
         <Table
@@ -330,10 +330,10 @@ function RingForm({ init, onClose }: { init: { id?: number; v: RingInput }; onCl
           {({ id, describedBy }) => <BlueprintSelect id={id} describedBy={describedBy} value={v.blueprints?.[0] ?? 0} noneLabel={t('updates.ring.noBlueprint')} onChange={(b) => set({ blueprints: b ? [b] : [] })} />}
         </Field>
         <div className="flex flex-col gap-3 pt-6">
-          <label className="flex items-center gap-2 text-[13px]">
+          <label className="flex items-center gap-2 text-body">
             <Switch checked={!!v.all_devices} onChange={(x) => set({ all_devices: x })} label={t('updates.ring.all')} /> {t('updates.ring.all')}
           </label>
-          <label className="flex items-center gap-2 text-[13px]">
+          <label className="flex items-center gap-2 text-body">
             <Switch checked={!!v.require_approval} onChange={(x) => set({ require_approval: x })} label={t('updates.ring.requireApproval')} /> {t('updates.ring.requireApproval')}
           </label>
         </div>
@@ -361,8 +361,8 @@ function Security({ cve, setCve }: { cve?: string; setCve: (c?: string) => void 
           ] as const
         ).map(([k, n]) => (
           <Card key={k}>
-            <div className="text-[12.5px] text-muted">{t(k)}</div>
-            <div className="text-[24px] font-semibold tabular-nums">{fmt(n ?? 0)}</div>
+            <div className="text-meta text-muted">{t(k)}</div>
+            <div className="text-heading font-semibold tabular-nums">{fmt(n ?? 0)}</div>
           </Card>
         ))}
       </div>
@@ -375,7 +375,7 @@ function Security({ cve, setCve }: { cve?: string; setCve: (c?: string) => void 
             rows={f.cves.map((c) => ({
               key: c.id!,
               cells: [
-                <button type="button" className="font-mono text-[12.5px] text-accent hover:underline" aria-expanded={cve === c.id} onClick={() => setCve(cve === c.id ? undefined : c.id)}>
+                <button type="button" className="font-mono text-meta text-accent hover:underline" aria-expanded={cve === c.id} onClick={() => setCve(cve === c.id ? undefined : c.id)}>
                   {c.id}
                 </button>,
                 c.severity ? <Badge tone={severityTone(c.severity)}>{c.severity}</Badge> : <span className="text-muted">{t('updates.unknown')}</span>,
@@ -390,7 +390,7 @@ function Security({ cve, setCve }: { cve?: string; setCve: (c?: string) => void 
             {t('updates.cves.noneBody')}
           </EmptyState>
         )}
-        {(f.security_no_cve ?? 0) > 0 && <p className="mt-3 text-[12.5px] text-muted">{t('updates.cves.noIds', { count: f.security_no_cve ?? 0 })}</p>}
+        {(f.security_no_cve ?? 0) > 0 && <p className="mt-3 text-meta text-muted">{t('updates.cves.noIds', { count: f.security_no_cve ?? 0 })}</p>}
       </Card>
       {cve && (
         <Card title={t('updates.cves.devices', { cve })}>
@@ -515,7 +515,7 @@ function Feeds() {
           key: f.distro!,
           cells: [
             <span>
-              {t(`updates.feeds.distro.${f.distro ?? 'debian'}`)} {!f.enabled && <Badge tone="off">{t('updates.feeds.disabled')}</Badge>} <span className="block font-mono text-[11.5px] break-all text-muted">{f.url}</span>
+              {t(`updates.feeds.distro.${f.distro ?? 'debian'}`)} {!f.enabled && <Badge tone="off">{t('updates.feeds.disabled')}</Badge>} <span className="block font-mono text-micro break-all text-muted">{f.url}</span>
             </span>,
             f.fetched_at ? (
               <span title={dateTime(f.fetched_at)}>

@@ -100,7 +100,7 @@ export function Users() {
               card={(u) => (
                 <span className="flex flex-col">
                   <span className="font-mono">{u.login.replace(/^local:/, '')}</span>
-                  <span className="text-[12px] text-muted">
+                  <span className="text-meta text-muted">
                     {t(roleKey(u.role))} · {u.local ? t('settings.users.local') : 'OIDC'}
                   </span>
                 </span>
@@ -121,7 +121,7 @@ export function Users() {
             )
           }
         />
-        <p className="mt-3 text-[12.5px] text-muted">
+        <p className="mt-3 text-meta text-muted">
           {t('settings.users.rolesHelp')}{' '}
           <a className="text-accent underline-offset-2 hover:underline" href="/app/help#roles">
             {t('settings.users.rolesLink')}
@@ -169,7 +169,7 @@ function AddUser({ oidc, localLogin, fourEyes, onClose, onSecret }: { oidc: bool
             <TextField form={f} name="login" label={f.watch('kind') === 'oidc' ? t('settings.users.email') : t('settings.users.name')} required />
             <SelectField form={f} name="role" label={t('settings.users.role')} help={t(`settings.users.roleHelp.${f.watch('role')}` as MessageKey)} options={roleOptions(t)} />
             {fourEyes && f.watch('role') === 'admin' && <TextField form={f} name="reason" label={t('settings.reason')} help={t('settings.reasonHelp')} />}
-            <p className="text-[12.5px] text-muted">
+            <p className="text-meta text-muted">
               {t('settings.users.localNote')} {!localLogin && t('settings.users.localOff')}
             </p>
           </div>
@@ -205,7 +205,7 @@ function UserSheet({ user, fourEyes, onClose, onPrev, onNext, onSecret }: { user
       }
     >
       <Facts rows={[[t('settings.users.last'), user.last_login ? dateTime(user.last_login) : t('settings.never')]]} />
-      {user.self && <p className="mt-3 rounded-md bg-info-soft p-3 text-[13px]">{t('settings.users.selfNote')}</p>}
+      {user.self && <p className="mt-3 rounded-md bg-info-soft p-3 text-body">{t('settings.users.selfNote')}</p>}
       <SettingsForm
         readOnly={ro}
         schema={z.object({ role: z.enum(['admin', 'helpdesk', 'auditor']), disabled: z.boolean(), scope_tags: z.string(), scope_groups: z.string(), reason: z.string().max(500) })}
@@ -279,7 +279,7 @@ export function Tokens() {
   const tokens = (q.data.items ?? []) as Token[]
   const columns: GridColumn<Token>[] = [
     { id: 'name', header: t('settings.tokens.name'), cell: (c) => <span className="font-medium">{c.row.original.name}</span> },
-    { id: 'prefix', header: t('settings.tokens.prefix'), cell: (c) => <code className="font-mono text-[12px]">{c.row.original.prefix}…</code> },
+    { id: 'prefix', header: t('settings.tokens.prefix'), cell: (c) => <code className="font-mono text-meta">{c.row.original.prefix}…</code> },
     {
       id: 'role',
       header: t('settings.users.role'),
@@ -344,7 +344,7 @@ export function Tokens() {
           card={(x) => (
             <span className="flex flex-col">
               <span className="font-medium">{x.name}</span>
-              <span className="text-[12px] text-muted">
+              <span className="text-meta text-muted">
                 {t(roleKey(x.role ?? ''))} · {t(`settings.tokens.${tokenState(x)}` as MessageKey)}
               </span>
             </span>
@@ -403,11 +403,11 @@ function AddToken({ onClose, onSecret }: { onClose: () => void; onSecret: (s: st
                 <>
                   <Toggle form={f} name="read_only" label={t('settings.tokens.readOnly')} help={t('settings.tokens.readOnlyHelp')} />
                   <fieldset className="flex flex-col gap-2">
-                    <legend className="text-[13px] font-medium">{t('settings.tokens.scopes')}</legend>
-                    <p className="text-[12.5px] text-muted">{t('settings.tokens.scopesHelp')}</p>
+                    <legend className="text-body font-medium">{t('settings.tokens.scopes')}</legend>
+                    <p className="text-meta text-muted">{t('settings.tokens.scopesHelp')}</p>
                     <div className="flex flex-wrap gap-x-4 gap-y-2">
                       {scopeList.map((sc) => (
-                        <label key={sc} className="flex items-center gap-1.5 text-[13px]">
+                        <label key={sc} className="flex items-center gap-1.5 text-body">
                           <input type="checkbox" value={sc} {...f.register('scopes')} /> {t(`settings.tokens.scope.${sc}` as MessageKey)}
                         </label>
                       ))}
@@ -566,7 +566,7 @@ function TenantEdit({ id, embedded }: { id: number; embedded?: boolean }) {
               )}
             </Field>
             {check && (
-              <p role="status" className={check.ok ? 'text-[12.5px] text-muted' : 'rounded-md bg-warn-soft p-2 text-[12.5px]'}>
+              <p role="status" className={check.ok ? 'text-meta text-muted' : 'rounded-md bg-warn-soft p-2 text-meta'}>
                 {t('settings.tenants.contrast', { light: check.light.toFixed(1), dark: check.dark.toFixed(1) })} {check.ok ? t('settings.tenants.contrastOk') : t('settings.tenants.contrastLow')}
               </p>
             )}
@@ -651,12 +651,12 @@ function SharedObjects() {
             ([k, list, p]) =>
               list.length > 0 && (
                 <fieldset key={k} className="flex flex-col gap-1.5">
-                  <legend className="mb-1 text-[13px] font-medium">{t(`settings.tenants.shared.${k}` as MessageKey)}</legend>
+                  <legend className="mb-1 text-body font-medium">{t(`settings.tenants.shared.${k}` as MessageKey)}</legend>
                   {list.map((o) => (
-                    <label key={o.id} className="flex items-center gap-2 text-[13px]">
+                    <label key={o.id} className="flex items-center gap-2 text-body">
                       <input type="checkbox" value={`${p}${o.id}`} {...f.register('shared')} />
                       {o.name}
-                      {o.type && <span className="font-mono text-[11.5px] text-muted">{o.type}</span>}
+                      {o.type && <span className="font-mono text-micro text-muted">{o.type}</span>}
                     </label>
                   ))}
                 </fieldset>

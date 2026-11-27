@@ -1009,3 +1009,6 @@ CREATE INDEX IF NOT EXISTS device_cves_cve ON device_cves(cve);
 -- R3-E
 -- custom device attributes for file and firewall templates ({{.Attributes.name}})
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS attributes JSONB NOT NULL DEFAULT '{}';
+-- R3-D
+-- the device timeline reads the audit entries of one device
+CREATE INDEX IF NOT EXISTS audit_log_target ON audit_log(target, id);

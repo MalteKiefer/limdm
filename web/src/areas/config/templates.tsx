@@ -48,8 +48,8 @@ export function TemplatePreview({ type, payload }: { type: string; payload: Obj 
       <h2 id={`${id}-h`} className="font-semibold">
         {t('config.tplPreview')}
       </h2>
-      <p className="mb-3 text-[12.5px] text-muted">{t('config.tplPreviewHelp')}</p>
-      <label htmlFor={`${id}-d`} className="mb-1 block text-[13px] font-medium">
+      <p className="mb-3 text-meta text-muted">{t('config.tplPreviewHelp')}</p>
+      <label htmlFor={`${id}-d`} className="mb-1 block text-body font-medium">
         {t('config.tplDevice')}
       </label>
       <div className="flex gap-2">
@@ -81,18 +81,18 @@ export function TemplatePreview({ type, payload }: { type: string; payload: Obj 
       <div aria-live="polite" className="mt-3">
         {state.busy && <LoadingState rows={2} />}
         {state.error !== undefined && (
-          <p role="alert" className="rounded-lg bg-bad-soft p-3 text-[13px] text-bad">
+          <p role="alert" className="rounded-lg bg-bad-soft p-3 text-body text-bad">
             {errorText(state.error)}
           </p>
         )}
         {state.data && (
           <>
             {state.data.error && (
-              <p role="alert" className="mb-2 rounded-lg bg-bad-soft p-3 text-[13px] text-bad">
+              <p role="alert" className="mb-2 rounded-lg bg-bad-soft p-3 text-body text-bad">
                 {t('config.tplFailed', { error: state.data.error })}
               </p>
             )}
-            <dl className="mb-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[12.5px]">
+            <dl className="mb-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-meta">
               <dt className="text-muted">{t('config.tplVarHost')}</dt>
               <dd className="font-mono">{state.data.vars.hostname}</dd>
               <dt className="text-muted">{t('config.tplVarTags')}</dt>
@@ -107,14 +107,14 @@ export function TemplatePreview({ type, payload }: { type: string; payload: Obj 
             {type === 'com.limdm.files' ? (
               files.map((f) => (
                 <div key={String(f.path)} className="mb-2">
-                  <div className="flex items-center gap-2 font-mono text-[12.5px]">
+                  <div className="flex items-center gap-2 font-mono text-meta">
                     {String(f.path)} {f.template === true && <Badge tone="bad">{t('config.tplNotRendered')}</Badge>}
                   </div>
-                  <pre className="max-h-64 overflow-auto rounded-lg bg-surface-2 p-2 font-mono text-[12px] whitespace-pre-wrap">{String(f.content ?? '')}</pre>
+                  <pre className="max-h-64 overflow-auto rounded-lg bg-surface-2 p-2 font-mono text-meta whitespace-pre-wrap">{String(f.content ?? '')}</pre>
                 </div>
               ))
             ) : (
-              <pre className="max-h-80 overflow-auto rounded-lg bg-surface-2 p-2 font-mono text-[12px]">{JSON.stringify(state.data.payload, null, 2)}</pre>
+              <pre className="max-h-80 overflow-auto rounded-lg bg-surface-2 p-2 font-mono text-meta">{JSON.stringify(state.data.payload, null, 2)}</pre>
             )}
           </>
         )}
@@ -158,7 +158,7 @@ export function ScriptRuns({ payload }: { payload: Obj }) {
         ) : (
           <ul className="flex flex-col gap-2">
             {q.data.items.map((r) => (
-              <li key={r.device_id} className="text-[13px]">
+              <li key={r.device_id} className="text-body">
                 <div className="flex flex-wrap items-center gap-2">
                   <Link to="/devices/$id" params={{ id: r.device_id }} className="font-medium hover:underline">
                     {r.hostname || r.device_id}
@@ -170,8 +170,8 @@ export function ScriptRuns({ payload }: { payload: Obj }) {
                 </div>
                 {r.output && (
                   <details>
-                    <summary className="cursor-pointer text-[12.5px] text-muted">{t('config.runsOutput')}</summary>
-                    <pre className="max-h-48 overflow-auto rounded-lg bg-surface-2 p-2 font-mono text-[12px] whitespace-pre-wrap">{r.output}</pre>
+                    <summary className="cursor-pointer text-meta text-muted">{t('config.runsOutput')}</summary>
+                    <pre className="max-h-48 overflow-auto rounded-lg bg-surface-2 p-2 font-mono text-meta whitespace-pre-wrap">{r.output}</pre>
                   </details>
                 )}
               </li>

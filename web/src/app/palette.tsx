@@ -17,14 +17,14 @@ import { areas } from './areas'
 import { switchTenant, useTenants } from './tenants'
 
 const group =
-  'px-1 [&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:text-muted [&_[cmdk-group-heading]]:uppercase'
+  'px-1 [&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-micro [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:text-muted [&_[cmdk-group-heading]]:uppercase'
 
 function Item({ icon: I, children, onSelect, value, hint }: { icon: LucideIcon; children: ReactNode; onSelect: () => void; value?: string; hint?: string }) {
   return (
     <Command.Item value={value} onSelect={onSelect} className="flex cursor-default items-center gap-2.5 rounded-md px-2.5 py-2 data-[selected=true]:bg-surface-2">
       <I size={16} className="text-muted" aria-hidden />
       <span className="flex-1 truncate">{children}</span>
-      {hint && <span className="text-[12px] text-muted">{hint}</span>}
+      {hint && <span className="text-meta text-muted">{hint}</span>}
     </Command.Item>
   )
 }
@@ -62,7 +62,7 @@ export function Palette({ open, setOpen }: { open: boolean; setOpen: (v: boolean
           <Command label={t('palette.title')} loop>
             <div className="flex items-center gap-2 border-b border-line px-4">
               <Search size={17} className="text-muted" aria-hidden />
-              <Command.Input autoFocus value={search} onValueChange={setSearch} placeholder={t('palette.placeholder')} className="h-12 flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted" />
+              <Command.Input autoFocus value={search} onValueChange={setSearch} placeholder={t('palette.placeholder')} className="h-12 flex-1 bg-transparent text-title outline-none placeholder:text-muted" />
               <span className="kbd">Esc</span>
             </div>
             <Command.List className="max-h-[min(60vh,440px)] overflow-y-auto pb-2">
@@ -99,7 +99,7 @@ export function Palette({ open, setOpen }: { open: boolean; setOpen: (v: boolean
                 <Command.Group heading={t('palette.devices')} className={group}>
                   {devices.data.map((d) => (
                     <Item key={d.id} icon={Laptop} value={`${search} ${d.hostname} ${d.id}`} hint={d.os} onSelect={close(() => void nav({ to: '/devices/$id', params: { id: d.id } }))}>
-                      <span className="font-mono text-[13px]">{d.hostname}</span>
+                      <span className="font-mono text-body">{d.hostname}</span>
                     </Item>
                   ))}
                 </Command.Group>

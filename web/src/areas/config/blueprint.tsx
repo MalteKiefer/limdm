@@ -37,7 +37,7 @@ export function BlueprintPage() {
   const view = deleted ? 'versions' : s.view === 'versions' && num ? 'versions' : 'edit'
   return (
     <div className="pb-24">
-      <Link to="/config" className="mb-3 inline-flex items-center gap-1 text-[13px] text-muted hover:text-fg">
+      <Link to="/config" className="mb-3 inline-flex items-center gap-1 text-body text-muted hover:text-fg">
         <ArrowLeft size={14} aria-hidden /> {t('config.tabBlueprints')}
       </Link>
       {num && (
@@ -163,7 +163,7 @@ function BlueprintEditor({ stored, all, items, fields }: { stored?: BlueprintRow
         }
       />
       {stored?.pilot && (
-        <div className="mb-[var(--gap)] flex flex-wrap items-center gap-3 rounded-lg border border-warn/40 bg-warn-soft p-3 text-[13px]" role="status">
+        <div className="mb-[var(--gap)] flex flex-wrap items-center gap-3 rounded-lg border border-warn/40 bg-warn-soft p-3 text-body" role="status">
           <FlaskConical size={16} aria-hidden />
           <span className="flex-1">{t('config.pilotBanner', { count: stored.pilot.devices.length, by: stored.pilot.by })}</span>
           {admin && (
@@ -204,7 +204,7 @@ function BlueprintEditor({ stored, all, items, fields }: { stored?: BlueprintRow
             </div>
           </div>
           {serverErr && (
-            <p role="alert" className="rounded-lg bg-bad-soft p-3 text-[13px] text-bad">
+            <p role="alert" className="rounded-lg bg-bad-soft p-3 text-body text-bad">
               {serverErr}
             </p>
           )}
@@ -213,7 +213,7 @@ function BlueprintEditor({ stored, all, items, fields }: { stored?: BlueprintRow
               <ol className="flex flex-col gap-3">
                 {chain.map((p) => (
                   <li key={p.id}>
-                    <div className="mb-1 flex items-center gap-2 text-[13px] font-medium">
+                    <div className="mb-1 flex items-center gap-2 text-body font-medium">
                       <GitBranch size={14} className="text-muted" aria-hidden />
                       <Link to="/config/blueprints/$id" params={{ id: String(p.id) }} className="hover:text-accent">
                         {p.name}
@@ -254,7 +254,7 @@ function BlueprintEditor({ stored, all, items, fields }: { stored?: BlueprintRow
               {panel === 'impact' ? <Impact preview={preview.data} busy={preview.busy} error={preview.error} /> : <PreviewDiff preview={preview.data} />}
               {panel === 'impact' && canPilot && dirty && !errCount && (
                 <div className="flex flex-col gap-1.5">
-                  <span className="text-[13px] font-medium">{t('config.rollout')}</span>
+                  <span className="text-body font-medium">{t('config.rollout')}</span>
                   <Segmented
                     label={t('config.rollout')}
                     value={rollout}
@@ -264,12 +264,12 @@ function BlueprintEditor({ stored, all, items, fields }: { stored?: BlueprintRow
                       { value: 'pilot', label: t('config.rolloutPilot', { count: picked.length }) },
                     ]}
                   />
-                  <p className="text-[12.5px] text-muted">{t(rollout === 'pilot' ? 'config.rolloutPilotHelp' : 'config.rolloutAllHelp')}</p>
+                  <p className="text-meta text-muted">{t(rollout === 'pilot' ? 'config.rolloutPilotHelp' : 'config.rolloutAllHelp')}</p>
                   {rollout === 'pilot' && (
                     <fieldset className="flex flex-col gap-1">
-                      <legend className="mb-1 text-[12.5px] font-medium">{t('config.pilotDevices')}</legend>
+                      <legend className="mb-1 text-meta font-medium">{t('config.pilotDevices')}</legend>
                       {sample.map((d) => (
-                        <label key={d.id} className="flex items-center gap-2 font-mono text-[12px]">
+                        <label key={d.id} className="flex items-center gap-2 font-mono text-meta">
                           <input type="checkbox" checked={picked.includes(d.id)} onChange={(e) => setPilotPick(e.target.checked ? [...picked, d.id] : picked.filter((x) => x !== d.id))} />
                           {d.hostname}
                         </label>
@@ -283,7 +283,7 @@ function BlueprintEditor({ stored, all, items, fields }: { stored?: BlueprintRow
           {stored?.deletable && admin && (
             <div className="card p-[var(--pad-card)]">
               <h2 className="font-semibold">{t('config.deleteBlueprint')}</h2>
-              <p className="mb-3 text-[12.5px] text-muted">{t('config.deleteBlueprintHint')}</p>
+              <p className="mb-3 text-meta text-muted">{t('config.deleteBlueprintHint')}</p>
               <button type="button" className="btn text-bad" onClick={() => setConfirm('delete')}>
                 <Trash2 size={14} aria-hidden /> {t('common.delete')}
               </button>
@@ -294,7 +294,7 @@ function BlueprintEditor({ stored, all, items, fields }: { stored?: BlueprintRow
       {!readOnly && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface/95 backdrop-blur lg:left-[var(--sb,244px)]" role="region" aria-label={t('form.unsaved')}>
           <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3 px-4 py-2.5 lg:px-6">
-            <span className="text-[13px] text-muted" aria-live="polite">
+            <span className="text-body text-muted" aria-live="polite">
               {errCount ? <span className="font-medium text-bad">{t('config.errors', { count: errCount })}</span> : dirty ? t('form.unsaved') : t('config.noChanges')}
             </span>
             <div className="ml-auto flex gap-2">
@@ -348,9 +348,9 @@ function BlueprintEditor({ stored, all, items, fields }: { stored?: BlueprintRow
 /** A read only outline of a map: items and conditions. */
 function TreeSummary({ nodes, items }: { nodes: Node[]; items: LibraryRow[] }) {
   const t = useT()
-  if (!nodes.length) return <p className="text-[12.5px] text-muted">{t('config.emptyMap')}</p>
+  if (!nodes.length) return <p className="text-meta text-muted">{t('config.emptyMap')}</p>
   return (
-    <ul className="ml-2 flex flex-col gap-1 border-l border-line pl-3 text-[12.5px]">
+    <ul className="ml-2 flex flex-col gap-1 border-l border-line pl-3 text-meta">
       {nodes.map((n, i) => (
         <li key={i}>
           {n.kind === 'assign' ? (
@@ -383,11 +383,11 @@ function NodeList({ nodes, onChange, ctx, path, depth }: { nodes: Node[]; onChan
   const t = useT()
   return (
     <div className="flex flex-col gap-2">
-      {!nodes.length && <p className="text-[12.5px] text-muted">{t('config.emptyMap')}</p>}
+      {!nodes.length && (depth ? <p className="text-meta text-muted">{t('config.emptyMap')}</p> : <EmptyState compact icon={ListTree} title={t('config.emptyMap')} />)}
       {nodes.map((n, i) => (
         <div key={i} className={cx('rounded-lg border p-3', n.kind === 'if' ? 'border-info/40 bg-info-soft/30' : 'border-line')}>
           <div className="mb-2 flex items-center gap-1">
-            <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-muted">
+            <span className="flex items-center gap-1.5 text-meta font-semibold text-muted">
               {n.kind === 'if' ? <SplitSquareVertical size={14} aria-hidden /> : <ListTree size={14} aria-hidden />}
               {t(n.kind === 'if' ? 'config.condition' : 'config.assign')}
             </span>
@@ -439,20 +439,20 @@ function AssignEditor({ node, onChange, ctx }: { node: Node; onChange: (n: Node)
         {ids.map((id) => {
           const it = ctx.items.find((x) => x.id === id)
           return (
-            <li key={id} className="inline-flex items-center gap-1 rounded-md bg-surface-2 py-0.5 pr-0.5 pl-2 text-[12.5px]">
+            <li key={id} className="inline-flex items-center gap-1 rounded-md bg-surface-2 py-0.5 pr-0.5 pl-2 text-meta">
               <Link to="/config/library/$id" params={{ id: String(id) }} className="hover:text-accent">
                 {it?.name ?? `#${id}`}
               </Link>
-              {it && <span className="font-mono text-[11px] text-muted">{it.type.replace('com.limdm.', '')}</span>}
+              {it && <span className="font-mono text-micro text-muted">{it.type.replace('com.limdm.', '')}</span>}
               {!ctx.readOnly && (
-                <button type="button" className="grid size-5 place-items-center rounded hover:bg-line" aria-label={t('config.removeItem', { name: it?.name ?? String(id) })} onClick={() => onChange({ ...node, items: ids.filter((x) => x !== id) })}>
+                <button type="button" className="grid size-[24px] shrink-0 place-items-center rounded hover:bg-line" aria-label={t('config.removeItem', { name: it?.name ?? String(id) })} onClick={() => onChange({ ...node, items: ids.filter((x) => x !== id) })}>
                   <X size={12} />
                 </button>
               )}
             </li>
           )
         })}
-        {!ids.length && <li className="text-[12.5px] text-muted">{t('config.noItemsYet')}</li>}
+        {!ids.length && <li className="text-meta text-muted">{t('config.noItemsYet')}</li>}
       </ul>
       {!ctx.readOnly && (
         <select className="field max-w-sm" aria-label={t('config.addItem')} value="" onChange={(e) => e.target.value && onChange({ ...node, items: [...ids, Number(e.target.value)] })}>
@@ -480,11 +480,11 @@ function IfEditor({ node, onChange, ctx, path, depth }: { node: Node; onChange: 
   const setBranches = (bs: Branch[]) => onChange({ ...node, branches: bs })
   return (
     <div className="flex flex-col gap-3">
-      {ctx.problems[path] && <p className="text-[12.5px] font-medium text-bad">{t(`config.problem.${ctx.problems[path]}` as MessageKey)}</p>}
+      {ctx.problems[path] && <p className="text-meta font-medium text-bad">{t(`config.problem.${ctx.problems[path]}` as MessageKey)}</p>}
       {branches.map((b, j) => (
         <div key={j} className="rounded-md border border-line bg-surface p-2.5">
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span className="text-[12.5px] font-semibold">{t(j ? 'config.elseIf' : 'config.if')}</span>
+            <span className="text-meta font-semibold">{t(j ? 'config.elseIf' : 'config.if')}</span>
             <Segmented
               label={t('config.match')}
               value={b.match}
@@ -500,7 +500,7 @@ function IfEditor({ node, onChange, ctx, path, depth }: { node: Node; onChange: 
               </button>
             )}
           </div>
-          {ctx.problems[`${path}.b${j}`] && <p className="mb-1 text-[12.5px] font-medium text-bad">{t(`config.problem.${ctx.problems[`${path}.b${j}`]}` as MessageKey)}</p>}
+          {ctx.problems[`${path}.b${j}`] && <p className="mb-1 text-meta font-medium text-bad">{t(`config.problem.${ctx.problems[`${path}.b${j}`]}` as MessageKey)}</p>}
           <ul className="mb-2 flex flex-col gap-1.5">
             {b.rules.map((r, k) => (
               <RuleRow key={k} rule={r} fields={ctx.fields} readOnly={ctx.readOnly} problem={ctx.problems[`${path}.b${j}.r${k}`]} n={k + 1} onChange={(nr) => setBranches(replaceAt(branches, j, { ...b, rules: replaceAt(b.rules, k, nr) }))} onRemove={() => setBranches(replaceAt(branches, j, { ...b, rules: removeAt(b.rules, k) }))} />
@@ -512,7 +512,7 @@ function IfEditor({ node, onChange, ctx, path, depth }: { node: Node; onChange: 
             </button>
           )}
           <div className="ml-2 border-l-2 border-accent/40 pl-3">
-            <div className="mb-1 text-[12px] font-medium text-muted">{t('config.then')}</div>
+            <div className="mb-1 text-meta font-medium text-muted">{t('config.then')}</div>
             <NodeList nodes={b.nodes ?? []} onChange={(ns) => setBranches(replaceAt(branches, j, { ...b, nodes: ns }))} ctx={ctx} path={`${path}.b${j}`} depth={depth + 1} />
           </div>
         </div>
@@ -523,7 +523,7 @@ function IfEditor({ node, onChange, ctx, path, depth }: { node: Node; onChange: 
         </button>
       )}
       <div className="ml-2 border-l-2 border-line pl-3">
-        <div className="mb-1 text-[12px] font-medium text-muted">{t('config.else')}</div>
+        <div className="mb-1 text-meta font-medium text-muted">{t('config.else')}</div>
         <NodeList nodes={node.else ?? []} onChange={(ns) => onChange({ ...node, else: ns })} ctx={ctx} path={`${path}.else`} depth={depth + 1} />
       </div>
     </div>
@@ -561,7 +561,7 @@ function RuleRow({ rule, fields, readOnly, problem, n, onChange, onRemove }: { r
           </button>
         )}
       </div>
-      {problem && <p className="text-[12px] font-medium text-bad">{t(`config.problem.${problem}` as MessageKey)}</p>}
+      {problem && <p className="text-meta font-medium text-bad">{t(`config.problem.${problem}` as MessageKey)}</p>}
     </li>
   )
 }

@@ -44,7 +44,7 @@ export function ProfilePage() {
               ...(me.scope_tags.length || me.scope_groups.length ? [[t('settings.users.scope'), [...me.scope_tags, ...me.scope_groups].join(', ')] as [string, string]] : []),
             ]}
           />
-          {q.data && !q.data.local && <p className="text-[12.5px] text-muted">{t('settings.profile.oidc')}</p>}
+          {q.data && !q.data.local && <p className="text-meta text-muted">{t('settings.profile.oidc')}</p>}
         </FormSection>
         <FormSection title={t('settings.profile.appearance')} description={t('settings.profile.appearanceHelp')}>
           <Segmented<'de' | 'en'> label={t('settings.profile.language')} value={currentLocale()} onChange={(v) => setPrefs({ locale: v })} options={[{ value: 'de', label: 'Deutsch' }, { value: 'en', label: 'English' }]} />
@@ -129,7 +129,7 @@ function Authenticator({ pending }: { pending: boolean }) {
       ) : (
         <>
           <img src={`/api/v1/profile/totp/qr.svg?v=${qrV}`} alt={t('settings.profile.qr')} className="size-48 rounded-md border border-line bg-white p-2" />
-          {secret && <Facts rows={[[t('settings.profile.secret'), <code className="font-mono text-[12.5px] break-all">{secret.secret}</code>]]} />}
+          {secret && <Facts rows={[[t('settings.profile.secret'), <code className="font-mono text-meta break-all">{secret.secret}</code>]]} />}
           <SettingsForm
             schema={z.object({ code: z.string().trim().regex(/^\d{6}$/, t('settings.profile.codeBad')) })}
             values={{ code: '' }}
@@ -219,7 +219,7 @@ export function HelpPage() {
             {terms.map((x) => (
               <div key={x.id} id={x.id} className="scroll-mt-20">
                 <dt className="font-semibold">{x.term}</dt>
-                <dd className="text-[13px] text-fg-2">
+                <dd className="text-body text-fg-2">
                   {x.text}{' '}
                   {x.doc && (
                     <a className="text-accent underline-offset-2 hover:underline" href={x.doc} target="_blank" rel="noopener noreferrer">
@@ -239,7 +239,7 @@ export function HelpPage() {
                   <dt>
                     <StatusPill status={s} />
                   </dt>
-                  <dd className="mt-1 text-[13px] text-fg-2">{q.data?.states[s]}</dd>
+                  <dd className="mt-1 text-body text-fg-2">{q.data?.states[s]}</dd>
                 </div>
               ))}
             </dl>
@@ -249,13 +249,13 @@ export function HelpPage() {
               {(['admin', 'helpdesk', 'auditor'] as const).map((r) => (
                 <div key={r}>
                   <dt className="font-semibold">{t(`role.${r}` as MessageKey)}</dt>
-                  <dd className="text-[13px] text-fg-2">{t(`settings.users.roleHelp.${r}` as MessageKey)}</dd>
+                  <dd className="text-body text-fg-2">{t(`settings.users.roleHelp.${r}` as MessageKey)}</dd>
                 </div>
               ))}
             </dl>
           </Card>
           <Card title={t('settings.help.impact')}>
-            <ol className="flex list-decimal flex-col gap-2 pl-5 text-[13px]">
+            <ol className="flex list-decimal flex-col gap-2 pl-5 text-body">
               {(['lock', 'lost', 'retire', 'wipe'] as const).map((k) => (
                 <li key={k}>
                   <strong>{t(`settings.help.impact.${k}` as MessageKey)}</strong> <span className="text-fg-2">{t(`settings.help.impactText.${k}` as MessageKey)}</span>

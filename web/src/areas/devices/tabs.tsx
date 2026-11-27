@@ -1,11 +1,13 @@
 // Software, inventory and activity tabs of the device page.
 import { Link } from '@tanstack/react-router'
-import { Download, FileCode2, KeyRound, MoreHorizontal, Package, Plus, Terminal, Activity as ActivityIcon, Search } from 'lucide-react'
+import { Download, FileCode2, KeyRound, MoreHorizontal, Network as NetworkIcon, Package, Plus, ScrollText, ShieldCheck, Terminal, Activity as ActivityIcon, Search } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { api, unwrap } from '../../api/client'
 import { useCan } from '../../api/me'
 import { DataGrid, type GridColumn } from '../../components/datagrid'
+import { ScrollHint } from '../../components/layout'
 import { Field } from '../../components/form'
+import { Confirm } from '../../components/settingsform'
 import { EmptyState, ErrorState, LoadingState, errorText } from '../../components/states'
 import { Timeline, type TimelineItem } from '../../components/timeline'
 import { toast } from '../../components/toast'
@@ -14,8 +16,8 @@ import { useT, type MessageKey } from '../../i18n'
 import { ago, dateTime, fmt } from '../../i18n/format'
 import { useQueryClient } from '@tanstack/react-query'
 import { useRun, type Dialog } from './actions'
-import { usePackages, useTimeline, type DeviceDetail, type TimelineEntry } from './api'
-import { accountActionable, filterByName, statusTone, usedPct } from './logic'
+import { usePackages, useTimeline, type DeviceDetail, type Params, type TimelineEntry } from './api'
+import { accountActionable, checkTone, filterByName, statusTone, usedPct } from './logic'
 
 type Col = { label: ReactNode; className?: string }
 
@@ -23,9 +25,9 @@ type Col = { label: ReactNode; className?: string }
 function Table({ caption, cols, rows, empty }: { caption: string; cols: Col[]; rows: { key: string; cells: ReactNode[] }[]; empty: string }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-left text-[13px]">
+      <table className="w-full text-left text-body">
         <caption className="sr-only">{caption}</caption>
-        <thead className="text-[12px] text-muted">
+        <thead className="text-meta text-muted">
           <tr>
             {cols.map((c, i) => (
               <th key={i} scope="col" className={'py-1.5 pr-3 font-medium ' + (c.className ?? '')}>
@@ -47,8 +49,8 @@ function Table({ caption, cols, rows, empty }: { caption: string; cols: Col[]; r
             ))
           ) : (
             <tr>
-              <td colSpan={cols.length} className="py-4 text-center text-muted">
-                {empty}
+              <td colSpan={cols.length}>
+                <EmptyState compact title={empty} />
               </td>
             </tr>
           )}
@@ -60,13 +62,13 @@ function Table({ caption, cols, rows, empty }: { caption: string; cols: Col[]; r
 
 function SubTabs({ subs, value, onChange, label }: { subs: { value: string; label: string; count?: number }[]; value: string; onChange: (v: string) => void; label: string }) {
   return (
-    <div className="overflow-x-auto">
+    <ScrollHint>
       <Segmented label={label} value={value} onChange={onChange} options={subs.map((s) => ({ value: s.value, label: s.count != null ? `${s.label} ${fmt(s.count)}` : s.label }))} />
-    </div>
+    </ScrollHint>
   )
 }
 
-const mono = (v?: string | number) => <span className="font-mono text-[12.5px]">{v ?? ''}</span>
+const mono = (v?: string | number) => <span className="font-mono text-meta">{v ?? ''}</span>
 
 // ---- software ----
 
@@ -98,11 +100,28 @@ export function SoftwareTab({ d, sub, setSub, open }: { d: DeviceDetail; sub?: s
   )
 }
 
+/** A removal command asked for in the app's dialog first; render dialog once. */
 function useRemove(d: DeviceDetail) {
   const { run } = useRun({ id: d.id, hostname: d.hostname, detail: d })
   const t = useT()
-  return (kind: string, name: string, installation?: string) => {
-    if (confirm(t('devices.sw.removeConfirm', { name }))) run('software_remove', { kind, name, ...(installation ? { installation } : {}) })
+  const [ask, setAsk] = useState<{ text: string; type: string; params: Params }>()
+  return {
+    ask: (text: string, type: string, params: Params) => setAsk({ text, type, params }),
+    remove: (kind: string, name: string, installation?: string) => setAsk({ text: t('devices.sw.removeConfirm', { name }), type: 'software_remove', params: { kind, name, ...(installation ? { installation } : {}) } }),
+    dialog: (
+      <Confirm
+        open={!!ask}
+        onClose={() => setAsk(undefined)}
+        title={ask?.text ?? ''}
+        body={d.hostname}
+        confirm={t('devices.sw.remove')}
+        danger
+        onConfirm={() => {
+          if (ask) run(ask.type, ask.params)
+          setAsk(undefined)
+        }}
+      />
+    ),
   }
 }
 
@@ -111,7 +130,7 @@ function Packages({ d }: { d: DeviceDetail }) {
   const admin = useCan('admin')
   const pk = usePackages(d.id)
   const [q, setQ] = useState('')
-  const remove = useRemove(d)
+  const { remove, dialog } = useRemove(d)
   const rows = useMemo(() => filterByName(pk.data ?? [], q), [pk.data, q])
   const columns = useMemo<GridColumn<{ name: string; version: string; arch: string }>[]>(
     () => [
@@ -125,7 +144,7 @@ function Packages({ d }: { d: DeviceDetail }) {
               header: '',
               meta: { className: 'text-right' },
               cell: ({ row }: { row: { original: { name: string } } }) => (
-                <button type="button" className="btn btn-ghost !h-7 text-[12.5px]" onClick={() => remove('package', row.original.name)}>
+                <button type="button" className="btn btn-ghost !h-7 text-meta" onClick={() => remove('package', row.original.name)}>
                   {t('devices.sw.remove')}
                 </button>
               ),
@@ -142,12 +161,13 @@ function Packages({ d }: { d: DeviceDetail }) {
         <Field label={t('devices.sw.filter')}>
           {({ id }) => <input id={id} type="search" className="field !h-9 w-72" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('devices.sw.filterPlaceholder')} />}
         </Field>
-        <span className="pb-2 text-[13px] text-muted">{t('devices.sw.shown', { shown: fmt(rows.length), total: fmt(pk.data?.length ?? 0) })}</span>
+        <span className="pb-2 text-body text-muted">{t('devices.sw.shown', { shown: fmt(rows.length), total: fmt(pk.data?.length ?? 0) })}</span>
         <Link to="/devices" search={{ q: q ? `pkg:${q}` : '' }} className="btn ml-auto">
           <Search size={14} aria-hidden /> {t('devices.sw.fleet')}
         </Link>
       </div>
-      {pk.isPending ? <LoadingState /> : <DataGrid label={t('devices.sw.packages')} data={rows} columns={columns} getRowId={(r) => `${r.name}:${r.arch}`} maxHeight="60dvh" empty={<p className="p-6 text-center text-muted">{t('devices.sw.noPackages')}</p>} />}
+      {pk.isPending ? <LoadingState /> : <DataGrid label={t('devices.sw.packages')} data={rows} columns={columns} getRowId={(r) => `${r.name}:${r.arch}`} maxHeight="60dvh" empty={t('devices.sw.noPackages')} />}
+      {dialog}
     </div>
   )
 }
@@ -167,7 +187,7 @@ function Sources({ d }: { d: DeviceDetail }) {
           cells: [
             <>
               {r.name}
-              <span className="block font-mono text-[11.5px] text-muted">{r.file}</span>
+              <span className="block font-mono text-micro text-muted">{r.file}</span>
             </>,
             mono(r.url),
             <>
@@ -203,9 +223,9 @@ function Apps({ d }: { d: DeviceDetail }) {
   const admin = useCan('admin') && !d.retired
   const qc = useQueryClient()
   const inv = d.inventory
-  const remove = useRemove(d)
+  const { remove, dialog } = useRemove(d)
   const rm = (kind: string, name: string, inst?: string) => (
-    <button type="button" className="btn btn-ghost !h-7 text-[12.5px]" onClick={() => remove(kind, name, inst)}>
+    <button type="button" className="btn btn-ghost !h-7 text-meta" onClick={() => remove(kind, name, inst)}>
       {t('devices.sw.remove')}
     </button>
   )
@@ -216,6 +236,7 @@ function Apps({ d }: { d: DeviceDetail }) {
       .catch((e: unknown) => toast(errorText(e), 'error'))
   return (
     <div className="flex flex-col gap-[var(--gap)]">
+      {dialog}
       <Card title={t('devices.sw.remotes')} id="dv-rem" action={admin ? <Link className="btn" to="/config/library/$id" params={{ id: 'new' }} search={{ type: 'com.limdm.flatpak' }}>
               {t('devices.sw.addRemote')}
             </Link> : undefined}>
@@ -228,7 +249,7 @@ function Apps({ d }: { d: DeviceDetail }) {
             cells: [
               <>
                 {r.name}
-                {r.title && <span className="block text-[12px] text-muted">{r.title}</span>}
+                {r.title && <span className="block text-meta text-muted">{r.title}</span>}
               </>,
               mono(r.url),
               inst(r.installation),
@@ -259,7 +280,7 @@ function Apps({ d }: { d: DeviceDetail }) {
             cells: [
               <>
                 {f.name || f.id}
-                <span className="block font-mono text-[11.5px] text-muted">{f.id}</span>
+                <span className="block font-mono text-micro text-muted">{f.id}</span>
               </>,
               f.version,
               mono(f.branch),
@@ -270,7 +291,7 @@ function Apps({ d }: { d: DeviceDetail }) {
                   {t('devices.sw.inCatalog')}
                 </Link>
               ) : admin ? (
-                <button type="button" className="btn btn-ghost !h-7 text-[12.5px]" onClick={() => void addToCatalog(f.id)}>
+                <button type="button" className="btn btn-ghost !h-7 text-meta" onClick={() => void addToCatalog(f.id)}>
                   <Plus size={13} aria-hidden /> {t('devices.sw.addToCatalog')}
                 </button>
               ) : (
@@ -308,11 +329,13 @@ function Catalog({ d }: { d: DeviceDetail }) {
   const t = useT()
   const admin = useCan('admin') && !d.retired
   const { run, pending } = useRun({ id: d.id, hostname: d.hostname, detail: d })
+  const { ask, dialog } = useRemove(d)
   const apps = d.inventory.apps ?? []
   return (
     <div className="flex flex-col gap-3">
+      {dialog}
       {d.app_notes.map((n) => (
-        <div key={n.app + n.at} role="status" className={'rounded-lg border px-4 py-2 text-[13px] ' + (n.ok ? 'border-ok/30 bg-ok-soft' : 'border-bad/30 bg-bad-soft')}>
+        <div key={n.app + n.at} role="status" className={'rounded-lg border px-4 py-2 text-body ' + (n.ok ? 'border-ok/30 bg-ok-soft' : 'border-bad/30 bg-bad-soft')}>
           <strong>{n.app}</strong>{' '}
           {n.ok ? t(n.type === 'install' ? 'devices.sw.noteInstalled' : 'devices.sw.noteRemoved') : t(n.type === 'install' ? 'devices.sw.noteInstallFailed' : 'devices.sw.noteRemoveFailed', { error: n.error ?? '' })} <span className="text-muted">{dateTime(n.at)}</span>
         </div>
@@ -340,11 +363,11 @@ function Catalog({ d }: { d: DeviceDetail }) {
                           {t(busy === 'install' ? 'devices.sw.installing' : 'devices.sw.removing')}
                         </span>
                       ) : a.installed ? (
-                        <button type="button" className="btn !h-7 text-[12.5px]" disabled={pending} onClick={() => confirm(t('devices.sw.removeAppConfirm')) && run('app_remove', { app: a.id })}>
+                        <button type="button" className="btn !h-7 text-meta" disabled={pending} onClick={() => ask(t('devices.sw.removeAppConfirm'), 'app_remove', { app: a.id })}>
                           {t('devices.sw.remove')}
                         </button>
                       ) : (
-                        <button type="button" className="btn btn-primary !h-7 text-[12.5px]" disabled={pending} onClick={() => run('app_install', { app: a.id })}>
+                        <button type="button" className="btn btn-primary !h-7 text-meta" disabled={pending} onClick={() => run('app_install', { app: a.id })}>
                           {t('devices.sw.install')}
                         </button>
                       ),
@@ -385,15 +408,15 @@ function Requests({ d }: { d: DeviceDetail }) {
               ? [
                   r.status === 'pending' ? (
                     <span className="flex gap-2">
-                      <button type="button" className="btn btn-primary !h-7 text-[12.5px]" onClick={() => void decide(r.id, 'approve')}>
+                      <button type="button" className="btn btn-primary !h-7 text-meta" onClick={() => void decide(r.id, 'approve')}>
                         {t('devices.sw.approve')}
                       </button>
-                      <button type="button" className="btn !h-7 text-[12.5px]" onClick={() => void decide(r.id, 'deny')}>
+                      <button type="button" className="btn !h-7 text-meta" onClick={() => void decide(r.id, 'deny')}>
                         {t('devices.sw.deny')}
                       </button>
                     </span>
                   ) : (
-                    <span className="text-[12px] text-muted">{r.decided_by}</span>
+                    <span className="text-meta text-muted">{r.decided_by}</span>
                   ),
                 ]
               : []),
@@ -432,7 +455,7 @@ export function InventoryTab({ d, sub, setSub, open }: { d: DeviceDetail; sub?: 
 
 function KV({ rows }: { rows: [string, ReactNode][] }) {
   return (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-[13px]">
+    <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-body">
       {rows.map(([k, v]) => (
         <div key={k} className="contents">
           <dt className="text-muted">{k}</dt>
@@ -463,7 +486,7 @@ function Hardware({ d }: { d: DeviceDetail }) {
                   <>
                     {tpm.version}
                     {(tpm.luks_bound ?? []).map((l) => (
-                      <span key={l} className="block font-mono text-[12px]">
+                      <span key={l} className="block font-mono text-meta">
                         {t('devices.inv.tpmBound', { dev: l })}
                       </span>
                     ))}
@@ -520,7 +543,7 @@ function Disks({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
               v.encrypted ? <Badge tone="ok">{v.encryption || t('devices.inv.encrypted')}</Badge> : d.encryption_exempt.includes(v.mount) ? <Badge>{t('devices.inv.excluded')}</Badge> : <Badge tone="bad">{t('devices.sys.none')}</Badge>,
               <span className="flex items-center gap-2 whitespace-nowrap">
                 <meter min={0} max={100} low={80} high={90} optimum={0} value={usedPct(v.size_gb, v.free_gb)} aria-label={t('devices.inv.usage')} />
-                <span className="text-[12px] text-muted">{t('devices.inv.usageVal', { used: fmt(v.size_gb - v.free_gb), size: fmt(v.size_gb) })}</span>
+                <span className="text-meta text-muted">{t('devices.inv.usageVal', { used: fmt(v.size_gb - v.free_gb), size: fmt(v.size_gb) })}</span>
               </span>,
             ],
           }))}
@@ -547,7 +570,7 @@ function Disks({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
               ),
               ...(helpdesk
                 ? [
-                    <button type="button" className="btn !h-7 text-[12.5px]" onClick={() => open({ kind: 'recovery', uuid: k.uuid, path: k.device })}>
+                    <button type="button" className="btn !h-7 text-meta" onClick={() => open({ kind: 'recovery', uuid: k.uuid, path: k.device })}>
                       <KeyRound size={13} aria-hidden /> {t('devices.rec.show')}
                     </button>,
                   ]
@@ -568,7 +591,7 @@ function Network({ d }: { d: DeviceDetail }) {
   const routes = inv.routes ?? []
   return (
     <div className="flex flex-col gap-[var(--gap)]">
-      {!(inv.interfaces ?? []).some((i) => i.ips?.length) && !(inv.dns ?? []).length && <p className="text-[13px] text-muted">{t('devices.net.noInfo')}</p>}
+      {!(inv.interfaces ?? []).some((i) => i.ips?.length) && !(inv.dns ?? []).length && <EmptyState compact icon={NetworkIcon} title={t('devices.net.noInfo')} />}
       {d.external_ip && (
         <Card title={t('devices.net.public')} sub={t('devices.net.publicSub')} id="dv-pub">
           <KV
@@ -635,7 +658,7 @@ function Network({ d }: { d: DeviceDetail }) {
                 dateTime(c.not_after),
                 <>
                   <Badge tone={c.state === 'valid' ? 'ok' : c.state === 'revoked' ? 'bad' : 'off'}>{t(`devices.nc.${c.state}` as MessageKey)}</Badge>
-                  {c.reason && <span className="block text-[12px] text-muted">{c.reason}</span>}
+                  {c.reason && <span className="block text-meta text-muted">{c.reason}</span>}
                 </>,
               ],
             }))}
@@ -698,7 +721,7 @@ function Accounts({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
             { value: 'groups', label: t('devices.acc.groups') },
           ]}
         />
-        <label className="flex items-center gap-2 text-[13px]" htmlFor="acc-sys">
+        <label className="flex items-center gap-2 text-body" htmlFor="acc-sys">
           <Switch id="acc-sys" checked={system} onChange={setSystem} label={t('devices.acc.showSystem')} /> {t('devices.acc.showSystem')}
         </label>
         <span className="flex-1" />
@@ -708,7 +731,7 @@ function Accounts({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
           </button>
         )}
       </div>
-      <p className="text-[12.5px] text-muted">{t('devices.acc.nss')}</p>
+      <p className="text-meta text-muted">{t('devices.acc.nss')}</p>
       <div className="card p-[var(--pad-card)]">
         {groups ? (
           <Table
@@ -746,8 +769,8 @@ function Accounts({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
                   mono(a.name),
                   a.uid,
                   a.gecos,
-                  <span className="font-mono text-[12px] text-muted">{a.home}</span>,
-                  <span className="font-mono text-[12px] text-muted">{a.shell}</span>,
+                  <span className="font-mono text-meta text-muted">{a.home}</span>,
+                  <span className="font-mono text-meta text-muted">{a.shell}</span>,
                   <>
                     {a.source === 'nss' ? <Badge tone="accent">{t('devices.acc.directory')}</Badge> : t('devices.acc.local')} {a.system && <Badge>{t('devices.sw.system')}</Badge>}
                   </>,
@@ -787,18 +810,21 @@ function Accounts({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
 
 // ---- activity ----
 
-const kinds = ['', 'event', 'command', 'script', 'shell', 'diagnostics'] as const
+const kinds = ['', 'event', 'command', 'script', 'shell', 'diagnostics', 'compliance', 'audit'] as const
 const kindIcon: Record<string, ReactNode> = {
   event: <ActivityIcon size={7} />,
   command: <Package size={7} />,
   script: <FileCode2 size={7} />,
   shell: <Terminal size={7} />,
   diagnostics: <Download size={7} />,
+  compliance: <ShieldCheck size={7} />,
+  audit: <ScrollText size={7} />,
 }
 
 export function ActivityTab({ d }: { d: DeviceDetail }) {
   const t = useT()
   const helpdesk = useCan('commands')
+  const audit = useCan('audit')
   const [kind, setKind] = useState<(typeof kinds)[number]>('')
   const tl = useTimeline(d.id, kind)
   const { run, pending } = useRun({ id: d.id, hostname: d.hostname, detail: d })
@@ -806,7 +832,9 @@ export function ActivityTab({ d }: { d: DeviceDetail }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
-        <Segmented label={t('devices.act.filter')} value={kind || 'all'} onChange={(v) => setKind(v === 'all' ? '' : (v as typeof kind))} options={kinds.map((k) => ({ value: k || 'all', label: t(`devices.act.kind.${k || 'all'}` as MessageKey) }))} />
+        <ScrollHint className="max-w-full">
+          <Segmented label={t('devices.act.filter')} value={kind || 'all'} onChange={(v) => setKind(v === 'all' ? '' : (v as typeof kind))} options={kinds.filter((k) => audit || k !== 'audit').map((k) => ({ value: k || 'all', label: t(`devices.act.kind.${k || 'all'}` as MessageKey) }))} />
+        </ScrollHint>
         <span className="flex-1" />
         {helpdesk && !d.retired && (
           <button type="button" className="btn" disabled={pending} onClick={() => run('diagnostics')}>
@@ -814,7 +842,7 @@ export function ActivityTab({ d }: { d: DeviceDetail }) {
           </button>
         )}
       </div>
-      {helpdesk && <p className="text-[12.5px] text-muted">{t('devices.act.diagHelp')}</p>}
+      {helpdesk && <p className="text-meta text-muted">{t('devices.act.diagHelp')}</p>}
       <div className="card p-[var(--pad-card)]">
         {tl.error ? (
           <ErrorState error={tl.error} onRetry={() => void tl.refetch()} />
@@ -841,8 +869,8 @@ function Out({ text, label }: { text: string; label: string }) {
   if (!text.trim()) return null
   return (
     <details className="mt-1">
-      <summary className="cursor-pointer text-[12px] text-muted">{label}</summary>
-      <pre className="mt-1 max-h-72 overflow-auto rounded-md bg-surface-2 p-2 font-mono text-[12px] whitespace-pre-wrap">{text}</pre>
+      <summary className="cursor-pointer text-meta text-muted">{label}</summary>
+      <pre className="mt-1 max-h-72 overflow-auto rounded-md bg-surface-2 p-2 font-mono text-meta whitespace-pre-wrap">{text}</pre>
     </details>
   )
 }
@@ -853,7 +881,7 @@ function Entry({ e, d }: { e: TimelineEntry; d: DeviceDetail }) {
     case 'command':
       return (
         <div>
-          <span className="font-medium">{t(`devices.type.${e.title}` as MessageKey)}</span> <Badge tone={statusTone(e.status)}>{t(`devices.cstatus.${e.status}` as MessageKey)}</Badge> <span className="text-[12px] text-muted">#{e.id}</span>
+          <span className="font-medium">{t(`devices.type.${e.title}` as MessageKey)}</span> <Badge tone={statusTone(e.status)}>{t(`devices.cstatus.${e.status}` as MessageKey)}</Badge> <span className="text-meta text-muted">#{e.id}</span>
           <Out text={e.detail} label={t('devices.act.output')} />
         </div>
       )
@@ -869,19 +897,35 @@ function Entry({ e, d }: { e: TimelineEntry; d: DeviceDetail }) {
       return (
         <div>
           <span className="font-medium">{t('devices.act.shell', { user: e.title })}</span> <Badge tone={statusTone(e.status)}>{t(`devices.shell.state.${e.status}` as MessageKey)}</Badge>{' '}
-          <Link to="/devices/$id/shell/$sid" params={{ id: d.id, sid: e.id }} className="text-[12.5px]">
+          <Link to="/devices/$id/shell/$sid" params={{ id: d.id, sid: e.id }} className="text-meta">
             {t('devices.act.openSession')}
           </Link>
-          {e.detail && <span className="block text-[12px] text-muted">{e.detail}</span>}
+          {e.detail && <span className="block text-meta text-muted">{e.detail}</span>}
         </div>
       )
     case 'diagnostics':
       return (
         <div>
           <span className="font-medium">{t('devices.act.diag', { size: fmt(Number(e.detail)) })}</span>{' '}
-          <a href={`/api/v1/devices/${encodeURIComponent(d.id)}/diagnostics/${e.id}`} className="text-[12.5px]" download>
+          <a href={`/api/v1/devices/${encodeURIComponent(d.id)}/diagnostics/${e.id}`} className="text-meta" download>
             {t('devices.act.download')}
           </a>
+        </div>
+      )
+    case 'compliance': {
+      const c = (d.check_results as { id: string; title?: string }[]).find((x) => x.id === e.title)
+      return (
+        <div>
+          <span className="font-medium">{t('devices.act.check', { name: c?.title || e.title })}</span> <Badge tone={checkTone(e.status)}>{t(`devices.check.${e.status}` as MessageKey)}</Badge>
+          {e.detail && <span className="block text-meta text-muted">{e.detail}</span>}
+        </div>
+      )
+    }
+    case 'audit':
+      return (
+        <div>
+          <span className="font-medium">{e.extra || e.title}</span> <span className="font-mono text-micro text-muted">{e.title}</span>
+          {e.detail && <span className="block text-meta text-muted">{e.detail}</span>}
         </div>
       )
     default:

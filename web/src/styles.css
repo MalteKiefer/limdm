@@ -27,7 +27,7 @@
   --c-bad-soft: #fdeceb;
   --c-info: #1c5bb0;
   --c-info-soft: #e7effa;
-  --c-off: #6b7280;
+  --c-off: #5f6670;
   --c-off-soft: #eceef0;
   /* chart series (categorical, fixed order), never used for status */
   --c-s1: #0f6e6e;
@@ -76,7 +76,7 @@
   --c-bad-soft: #33161a;
   --c-info: #7fb0f5;
   --c-info-soft: #14233a;
-  --c-off: #7d8794;
+  --c-off: #8a94a1;
   --c-off-soft: #1d2126;
   --c-s1: #3fbfb3;
   --c-s2: #8f9cf2;
@@ -118,6 +118,25 @@
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
   --shadow-pop: var(--shadow-pop);
+}
+
+/* Typography: six size roles (utilities text-micro ... text-display), each
+   with its line height; weights are font-medium (500) for labels and
+   controls and font-semibold (600) for headings. No ad hoc sizes. */
+@theme {
+  --text-micro: 11.5px; /* ids, counters, keyboard hints */
+  --text-micro--line-height: 1.4;
+  --text-meta: 12.5px; /* help text, table heads, pills, captions */
+  --text-meta--line-height: 1.45;
+  --text-body: 13px; /* tables, lists, dense content */
+  --text-body--line-height: 1.45;
+  --text-title: 15px; /* card, sheet and dialog titles */
+  --text-title--line-height: 1.35;
+  --text-heading: 22px; /* page and device headings */
+  --text-heading--line-height: 1.2;
+  --text-heading--letter-spacing: -0.01em;
+  --text-display: 28px; /* key figures */
+  --text-display--line-height: 1.1;
 }
 
 @layer base {
@@ -226,7 +245,7 @@
   }
   .kbd {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--text-micro);
     border: 1px solid var(--c-line-strong);
     border-bottom-width: 2px;
     border-radius: 4px;

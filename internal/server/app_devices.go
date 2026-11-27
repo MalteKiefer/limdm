@@ -36,6 +36,7 @@ func (s *Server) appDevicesRoutes(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/devices/{id}/shell", s.need("helpdesk", s.apiShellStart))
 	m.HandleFunc("GET /api/v1/devices/{id}/shell-sessions", s.need("read", s.apiShellSessions))
 	m.HandleFunc("GET /api/v1/shell-sessions/{sid}", s.need("read", s.apiShellSession))
+	m.HandleFunc("GET /api/v1/shell-sessions/{sid}/transcript", s.need("audit", s.apiShellTranscript))
 	m.HandleFunc("POST /api/v1/shell-sessions/{sid}/end", s.need("helpdesk", s.apiShellEnd))
 	m.HandleFunc("POST /api/v1/devices/bulk", s.need("helpdesk", s.apiDevicesBulk))
 	m.HandleFunc("GET /api/v1/devices/primary-users", s.need("admin", s.apiPrimaryUsers))
@@ -440,9 +441,10 @@ func (s *Server) apiDevicePackages(w http.ResponseWriter, r *http.Request, c api
 }
 
 // timelineEntry is one entry of a device's activity: a device event, a
-// command, a script result, a remote shell session or a diagnostics bundle.
+// command, a script result, a remote shell session, a diagnostics bundle, a
+// change of a compliance check result or an audit entry about the device.
 type timelineEntry struct {
-	Kind   string    `json:"kind"` // event | command | script | shell | diagnostics
+	Kind   string    `json:"kind"` // event | command | script | shell | diagnostics | compliance | audit
 	ID     string    `json:"id"`
 	At     time.Time `json:"at"`
 	Title  string    `json:"title"`
@@ -453,8 +455,9 @@ type timelineEntry struct {
 }
 
 // apiDeviceTimeline merges the device's events, commands, script results,
-// remote shell sessions (the helpdesk sees its own) and diagnostics
-// bundles (admins and helpdesk), newest first; kind narrows it to one source.
+// remote shell sessions (the helpdesk sees its own), diagnostics bundles
+// (admins and helpdesk), compliance check changes and audit entries with the
+// device as target (audit permission), newest first; kind narrows it to one source.
 func (s *Server) apiDeviceTimeline(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	ctx := r.Context()
 	id := r.PathValue("id")
@@ -493,16 +496,30 @@ func (s *Server) apiDeviceTimeline(w http.ResponseWriter, r *http.Request, c api
 	if c.can("helpdesk") {
 		parts = append(parts, `SELECT 'diagnostics', command_id::text, created_at, '', '', '', length(content)::text, '' FROM diagnostics WHERE device_id=$1`)
 	}
+	parts = append(parts, `SELECT 'compliance', id::text, at, check_id, status, '', detail, '' FROM compliance_changes WHERE device_id=$1`)
+	kind := r.URL.Query().Get("kind")
+	if kind != "" && !slices.Contains([]string{"event", "command", "script", "shell", "diagnostics", "compliance", "audit"}, kind) {
+		problem(w, http.StatusBadRequest, "kind: event, command, script, shell, diagnostics, compliance or audit")
+		return
+	}
+	withAudit := c.can("audit") && (kind == "" || kind == "audit")
+	if withAudit {
+		// deviceFound checked tenant and scope of the device, so entries targeting it are visible
+		parts = append(parts, `SELECT 'audit', id::text, at, action, '', actor, detail, '' FROM audit_log WHERE target=$1`)
+		// reading audit entries is audited as on /api/v1/audit (LIMDM_AUDIT_API_READS)
+		if s.auditRead(r, "audit") {
+			if err := s.auditAction(ctx, c.actor(), "api.read", "GET /api/v1/devices/{id}/timeline", id, nil); err != nil {
+				s.apiFail(w, err)
+				return
+			}
+		}
+	}
 	n := len(args)
 	q := `SELECT * FROM (` + strings.Join(parts, " UNION ALL ") + `) t(kind, id, at, title, status, by, detail, extra)
 		WHERE (at, kind || ':' || id) < ($` + strconv.Itoa(n+1) + `, $` + strconv.Itoa(n+2) + `)`
 	args = append(args, curAt, curKey)
-	if k := r.URL.Query().Get("kind"); k != "" {
-		if !slices.Contains([]string{"event", "command", "script", "shell", "diagnostics"}, k) {
-			problem(w, http.StatusBadRequest, "kind: event, command, script, shell or diagnostics")
-			return
-		}
-		args = append(args, k)
+	if kind != "" {
+		args = append(args, kind)
 		q += ` AND kind = $` + strconv.Itoa(len(args))
 	}
 	args = append(args, limit+1)
@@ -518,7 +535,11 @@ func (s *Server) apiDeviceTimeline(w http.ResponseWriter, r *http.Request, c api
 		l := list[limit-1]
 		page.NextCursor = cursor(l.At.Format(time.RFC3339Nano) + " " + l.Kind + ":" + l.ID)
 	}
+	lang := requestLang(r)
 	for i := range list {
+		if list[i].Kind == "audit" {
+			list[i].Extra = auditLabel(lang, list[i].Title, func(string) string { return "" })
+		}
 		list[i].Detail = truncate(list[i].Detail, 64<<10)
 		list[i].Extra = truncate(list[i].Extra, 64<<10)
 	}
@@ -739,6 +760,31 @@ func (s *Server) apiShellSession(w http.ResponseWriter, r *http.Request, c apiCa
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, out)
+}
+
+// apiShellTranscript hands out the recorded bytes of an ended session for
+// replay in a terminal or as a .log download. The route needs the audit
+// level (admins, auditors), so the read is audited like /api/v1/audit.
+func (s *Server) apiShellTranscript(w http.ResponseWriter, r *http.Request, c apiCaller) {
+	ctx, sid := r.Context(), r.PathValue("sid")
+	sr, err := s.scanShell(s.db.QueryRow(ctx, `SELECT `+shellCols+` FROM shell_sessions s JOIN devices d ON d.id=s.device_id WHERE s.id=$1`, sid))
+	if err != nil || !s.inScope(ctx, c.sess(), sr.Device) {
+		problem(w, http.StatusNotFound, "session not found")
+		return
+	}
+	if sr.Ended == nil {
+		problem(w, http.StatusConflict, "the session has not ended yet")
+		return
+	}
+	var raw []byte
+	if err := s.db.QueryRow(ctx, `SELECT transcript FROM shell_sessions WHERE id=$1`, sid).Scan(&raw); err != nil {
+		s.apiFail(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", `attachment; filename="shell-`+sr.ID+`.log"`)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(raw)
 }
 
 // apiShellEnd ends a session, here or on another instance (shellEnd).

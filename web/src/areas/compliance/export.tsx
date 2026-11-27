@@ -1,10 +1,10 @@
 // Evidence export: pick a file, download it through the API, show its
 // SHA-256 next to the matching export.done audit entry.
 import { useQueryClient } from '@tanstack/react-query'
-import { FileCheck2 } from 'lucide-react'
+import { FileCheck2, FileDown } from 'lucide-react'
 import { useState } from 'react'
 import { Field } from '../../components/form'
-import { errorText } from '../../components/states'
+import { EmptyState, errorText } from '../../components/states'
 import { toast } from '../../components/toast'
 import { Modal } from '../../components/ui'
 import { useT, type MessageKey } from '../../i18n'
@@ -65,12 +65,12 @@ export function ExportDialog({ open, onClose, initial = 'evidence.pdf', at: init
     >
       <div className="flex flex-col gap-4">
         <fieldset className="flex flex-col gap-1.5">
-          <legend className="mb-1 text-[13px] font-medium">{t('compliance.exp.kind')}</legend>
+          <legend className="mb-1 text-body font-medium">{t('compliance.exp.kind')}</legend>
           {kinds.map((k) => (
-            <label key={k} className="flex items-start gap-2 text-[13px]">
+            <label key={k} className="flex items-start gap-2 text-body">
               <input type="radio" name="export-kind" value={k} checked={kind === k} onChange={() => setKind(k)} className="mt-0.5" />
               <span>
-                <span className="font-mono text-[12px]">{k}</span>
+                <span className="font-mono text-meta">{k}</span>
                 <span className="block text-muted">{t(`compliance.exp.kind.${k}` as MessageKey)}</span>
               </span>
             </label>
@@ -95,25 +95,25 @@ export function ExportDialog({ open, onClose, initial = 'evidence.pdf', at: init
           </Field>
         )}
         {sha && (
-          <div className="rounded-lg bg-surface-2 p-3 text-[13px]" aria-live="polite">
+          <div className="rounded-lg bg-surface-2 p-3 text-body" aria-live="polite">
             <div className="font-medium">{t('compliance.exp.sha')}</div>
-            <code className="block font-mono text-[11.5px] break-all">{sha}</code>
+            <code className="block font-mono text-micro break-all">{sha}</code>
             <div className="mt-1 text-muted">{match ? t('compliance.exp.match', { id: match.id ?? 0 }) : t('compliance.exp.noMatch')}</div>
           </div>
         )}
         <section>
-          <h3 className="mb-1 text-[12.5px] font-semibold text-muted">{t('compliance.exp.recent')}</h3>
+          <h3 className="mb-1 text-meta font-semibold text-muted">{t('compliance.exp.recent')}</h3>
           {!audit.data?.items?.length ? (
-            <p className="text-[13px] text-muted">{t('compliance.exp.none')}</p>
+            <EmptyState compact icon={FileDown} title={t('compliance.exp.none')} />
           ) : (
-            <ul className="divide-y divide-line rounded-lg border border-line text-[12.5px]">
+            <ul className="divide-y divide-line rounded-lg border border-line text-meta">
               {audit.data.items.map((e) => (
                 <li key={e.id} className="flex flex-col px-3 py-1.5">
                   <span className="flex justify-between gap-2">
                     <span className="font-mono">{e.target}</span>
                     <span className="text-muted">{e.at && dateTime(e.at)}</span>
                   </span>
-                  <span className="truncate font-mono text-[11px] text-muted">
+                  <span className="truncate font-mono text-micro text-muted">
                     #{e.id} {e.actor} {e.detail}
                   </span>
                 </li>

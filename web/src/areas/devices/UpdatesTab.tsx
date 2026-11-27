@@ -43,18 +43,18 @@ export function UpdatesTab({ d }: { d: DeviceDetail }) {
               <div className="font-medium">
                 {ring.name} {ring.paused ? <Badge tone="warn">{t('updates.ring.paused')}</Badge> : <Badge tone="ok">{t('updates.ring.active')}</Badge>}
               </div>
-              <div className="text-[12.5px] text-muted">{ring.wave ? t('updates.ring.waveN', { wave: ring.wave }) + (ring.wave_at ? ` · ${dateTime(ring.wave_at)}` : '') : t('updates.ring.noWave')}</div>
+              <div className="text-meta text-muted">{ring.wave ? t('updates.ring.waveN', { wave: ring.wave }) + (ring.wave_at ? ` · ${dateTime(ring.wave_at)}` : '') : t('updates.ring.noWave')}</div>
             </div>
           ) : (
             <p className="text-muted">{t('updates.dev.noRing')}</p>
           )}
-          <Link to="/updates" className="mt-2 inline-flex text-[13px] text-accent hover:underline">
+          <Link to="/updates" className="mt-2 inline-flex text-body text-accent hover:underline">
             {t('updates.dev.toRings')}
           </Link>
         </Card>
         <Card title={t('updates.dev.summary')}>
           {reports ? (
-            <ul className="flex flex-col gap-1 text-[13px]">
+            <ul className="flex flex-col gap-1 text-body">
               <li>{t('updates.dev.pendingN', { count: os.length })}</li>
               <li>
                 {t('updates.dev.securityN', {
@@ -87,7 +87,7 @@ export function UpdatesTab({ d }: { d: DeviceDetail }) {
               <span>
                 <RunBadge result={r.result} /> {r.count ? t('updates.dev.count', { count: r.count }) : ''}
               </span>,
-              <span className="font-mono text-[12px] break-all whitespace-pre-wrap text-muted">{r.detail}</span>,
+              <span className="font-mono text-meta break-all whitespace-pre-wrap text-muted">{r.detail}</span>,
             ],
           }))}
           empty={t('updates.dev.noRuns')}
@@ -115,10 +115,10 @@ export function UpdatesTab({ d }: { d: DeviceDetail }) {
                 mono(p.current),
                 mono(p.candidate),
                 <span>
-                  <SourceLabel source={p.source} /> {p.origin && <span className="text-[12px] text-muted">({p.origin})</span>}
+                  <SourceLabel source={p.source} /> {p.origin && <span className="text-meta text-muted">({p.origin})</span>}
                 </span>,
                 <SecurityTag security={p.security} severity={p.severity} />,
-                <span className="font-mono text-[12px]">{(p.cves ?? []).join(', ')}</span>,
+                <span className="font-mono text-meta">{(p.cves ?? []).join(', ')}</span>,
                 ...(admin
                   ? [
                       p.source === 'flatpak' || p.patch ? (
@@ -148,7 +148,7 @@ export function UpdatesTab({ d }: { d: DeviceDetail }) {
             rows={vulnerabilities.map((v) => ({
               key: `${v.cve}-${v.package}`,
               cells: [
-                <Link to="/updates" search={{ tab: 'security', cve: v.cve } as never} className="font-mono text-[12.5px] text-accent hover:underline">
+                <Link to="/updates" search={{ tab: 'security', cve: v.cve } as never} className="font-mono text-meta text-accent hover:underline">
                   {v.cve}
                 </Link>,
                 v.severity ? <Badge tone={severityTone(v.severity)}>{v.severity}</Badge> : <span className="text-muted">{t('updates.unknown')}</span>,

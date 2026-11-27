@@ -3773,7 +3773,7 @@
       "get": {
         "operationId": "deviceTimeline",
         "summary": "Activity of a device, newest first",
-        "description": "Merges device events, commands, script results, remote shell sessions (the helpdesk sees its own) and diagnostics bundles (admin and helpdesk).",
+        "description": "Merges device events, commands, script results, remote shell sessions (the helpdesk sees its own), diagnostics bundles (admin and helpdesk), compliance check changes (title is the check id, status the new result) and audit entries with the device as target (audit permission; title is the action, by the actor, extra the translated action label).",
         "parameters": [
           {
             "name": "id",
@@ -3800,7 +3800,9 @@
                 "command",
                 "script",
                 "shell",
-                "diagnostics"
+                "diagnostics",
+                "compliance",
+                "audit"
               ]
             }
           }
@@ -4259,6 +4261,54 @@
             "$ref": "#/components/responses/Problem"
           },
           "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shell-sessions/{sid}/transcript": {
+      "get": {
+        "operationId": "shellTranscript",
+        "summary": "Raw recorded bytes of an ended remote shell session",
+        "description": "The terminal output as recorded (escape sequences included) for replay in a terminal or download as .log. Admins and auditors; the read is audited like /api/v1/audit. 409 while the session runs.",
+        "parameters": [
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -12316,7 +12366,9 @@
               "command",
               "script",
               "shell",
-              "diagnostics"
+              "diagnostics",
+              "compliance",
+              "audit"
             ]
           },
           "id": {

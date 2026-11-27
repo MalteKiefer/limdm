@@ -85,7 +85,7 @@ export function CVEFeeds() {
           </>
         )}
       </SettingsForm>
-      <Link to="/updates" search={{ tab: 'security' } as never} className="mt-3 inline-flex text-[13px] text-accent hover:underline">
+      <Link to="/updates" search={{ tab: 'security' } as never} className="mt-3 inline-flex text-body text-accent hover:underline">
         {t('updates.feeds.toState')}
       </Link>
     </>

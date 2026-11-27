@@ -17,16 +17,16 @@ import { useRollback, useTypes, useVersions, type Kind, type Preview, type TypeI
 /** The effect of a change: devices online and offline, expected compliance effect, sample devices. */
 export function Impact({ preview, busy, error }: { preview?: Preview; busy?: boolean; error?: unknown }) {
   const t = useT()
-  if (error) return <p className="rounded-lg bg-bad-soft p-3 text-[13px] text-bad">{errorText(error)}</p>
-  if (!preview) return <p className="rounded-lg bg-surface-2 p-3 text-[13px] text-muted">{t(busy ? 'config.reviewing' : 'config.noChange')}</p>
+  if (error) return <p className="rounded-lg bg-bad-soft p-3 text-body text-bad">{errorText(error)}</p>
+  if (!preview) return <p className="rounded-lg bg-surface-2 p-3 text-body text-muted">{t(busy ? 'config.reviewing' : 'config.noChange')}</p>
   const bad = preview.impact.filter((i) => ['level', 'excluded_added', 'advisory_added', 'items_removed'].includes(i.code))
   return (
     <div className="flex flex-col gap-4" aria-live="polite" aria-busy={busy || undefined}>
       <div>
-        <div className="num text-[26px] leading-tight font-semibold">{t('config.devicesN', { count: preview.devices })}</div>
-        <p className="text-[12.5px] text-muted">{preview.devices ? t('config.onlineOffline', { online: fmt(preview.online), offline: fmt(preview.offline) }) : t('config.noDevices')}</p>
+        <div className="num text-display leading-tight font-semibold">{t('config.devicesN', { count: preview.devices })}</div>
+        <p className="text-meta text-muted">{preview.devices ? t('config.onlineOffline', { online: fmt(preview.online), offline: fmt(preview.offline) }) : t('config.noDevices')}</p>
         {preview.blueprints.length > 0 && (
-          <p className="mt-1 text-[12.5px] text-muted">
+          <p className="mt-1 text-meta text-muted">
             {t('config.viaBlueprints')}{' '}
             {preview.blueprints.map((b, i) => (
               <span key={b}>
@@ -40,11 +40,11 @@ export function Impact({ preview, busy, error }: { preview?: Preview; busy?: boo
         )}
       </div>
       {preview.impact.length === 0 ? (
-        <div className="flex items-center gap-2 rounded-lg bg-ok-soft p-3 text-[13px] text-ok">
+        <div className="flex items-center gap-2 rounded-lg bg-ok-soft p-3 text-body text-ok">
           <CheckCircle2 size={15} aria-hidden /> {t('config.noImpact')}
         </div>
       ) : (
-        <div className={cx('rounded-lg border p-3 text-[13px]', bad.length ? 'border-warn/40 bg-warn-soft' : 'border-line bg-surface-2')}>
+        <div className={cx('rounded-lg border p-3 text-body', bad.length ? 'border-warn/40 bg-warn-soft' : 'border-line bg-surface-2')}>
           <div className="mb-1 flex items-center gap-1.5 font-semibold">
             <ShieldAlert size={15} aria-hidden /> {t('config.expected')}
           </div>
@@ -52,20 +52,20 @@ export function Impact({ preview, busy, error }: { preview?: Preview; busy?: boo
             {preview.impact.map((i) => (
               <li key={i.code}>
                 {t(`config.impact.${i.code}` as MessageKey, { from: i.values[0] ?? '', to: i.values[1] ?? '' })}
-                {i.code !== 'level' && <span className="font-mono text-[12px]"> {i.values.join(', ')}</span>}
+                {i.code !== 'level' && <span className="font-mono text-meta"> {i.values.join(', ')}</span>}
               </li>
             ))}
           </ul>
         </div>
       )}
-      {preview.needs_approval && <p className="flex items-center gap-1.5 text-[12.5px] text-muted"><Users size={14} aria-hidden /> {t('config.fourEyesNote')}</p>}
+      {preview.needs_approval && <p className="flex items-center gap-1.5 text-meta text-muted"><Users size={14} aria-hidden /> {t('config.fourEyesNote')}</p>}
       {preview.sample.length > 0 && (
         <div>
-          <h3 className="mb-1.5 text-[12.5px] font-semibold text-muted">{t('config.sample')}</h3>
+          <h3 className="mb-1.5 text-meta font-semibold text-muted">{t('config.sample')}</h3>
           <ul className="divide-y divide-line rounded-lg border border-line">
             {preview.sample.slice(0, 8).map((d) => (
               <li key={d.id} className="flex items-center gap-2 px-2.5 py-1.5">
-                <Link to="/devices/$id" params={{ id: d.id }} className="flex-1 truncate font-mono text-[12px] hover:text-accent">
+                <Link to="/devices/$id" params={{ id: d.id }} className="flex-1 truncate font-mono text-meta hover:text-accent">
                   {d.hostname}
                 </Link>
                 <StatusPill status={d.status as DeviceStatus} compact />
@@ -90,7 +90,7 @@ export function PreviewDiff({ preview }: { preview?: Preview }) {
     }
     return [a.join('\n'), b.join('\n')]
   }, [preview])
-  if (!preview) return <p className="text-[13px] text-muted">{t('config.noChange')}</p>
+  if (!preview) return <p className="text-body text-muted">{t('config.noChange')}</p>
   return <DiffViewer before={before} after={after} label={t('config.diffLabel')} />
 }
 
@@ -112,16 +112,16 @@ export function Versions({ kind, id }: { kind: Kind; id: number }) {
     <div className="grid gap-[var(--gap)] xl:grid-cols-[minmax(0,1fr)_380px]">
       <div className="min-w-0">
         {!q.data.exists && (
-          <p className="mb-3 rounded-lg bg-warn-soft p-3 text-[13px]">
+          <p className="mb-3 rounded-lg bg-warn-soft p-3 text-body">
             <Trash2 size={14} className="mr-1 inline" aria-hidden /> {t('config.deletedNote')}
           </p>
         )}
         <DiffViewer before={a?.doc ?? ''} after={b.doc} label={a ? t('config.versionAB', { a: a.version, b: b.version }) : t('config.versionN', { n: b.version })} />
       </div>
       <Card title={t('config.history')} bodyClass="!px-0 !pb-1">
-        <table className="w-full text-left text-[13px]">
+        <table className="w-full text-left text-body">
           <caption className="sr-only">{t('config.history')}</caption>
-          <thead className="text-[12px] text-muted">
+          <thead className="text-meta text-muted">
             <tr className="border-b border-line">
               <th className="px-3 py-1.5 font-medium">#</th>
               <th className="font-medium">{t('config.compare')}</th>
@@ -143,13 +143,13 @@ export function Versions({ kind, id }: { kind: Kind; id: number }) {
                 </td>
                 <td className="py-1.5 align-top">
                   <div>{v.deleted ? <Badge tone="bad">{t('config.deleted')}</Badge> : v.note}</div>
-                  <div className="text-[12px] text-muted">
+                  <div className="text-meta text-muted">
                     {v.by} · <time dateTime={v.at} title={dateTime(v.at)}>{ago(v.at)}</time>
                   </div>
                 </td>
                 <td className="py-1.5 pr-3 text-right align-top">
                   {admin && !v.deleted && (v.version !== latest || !q.data.exists) && (
-                    <button type="button" className="btn !h-7 px-2 text-[12.5px]" onClick={() => setConfirm(v.version)}>
+                    <button type="button" className="btn !h-7 px-2 text-meta" onClick={() => setConfirm(v.version)}>
                       <RotateCcw size={13} aria-hidden /> {t(q.data.exists ? 'config.rollback' : 'config.restore')}
                     </button>
                   )}
@@ -209,7 +209,7 @@ export function DeletedList({ kind, items }: { kind: Kind; items: { id: number; 
             <Link to={kind === 'blueprints' ? '/config/blueprints/$id' : '/config/library/$id'} params={{ id: String(d.id) }} search={{ view: 'versions' }} className="font-medium hover:text-accent">
               {d.name}
             </Link>
-            <span className="text-[12.5px] text-muted">
+            <span className="text-meta text-muted">
               {t('config.deletedBy', { by: d.by })} · <time dateTime={d.at}>{ago(d.at)}</time>
             </span>
           </li>
@@ -244,8 +244,8 @@ export function TypePicker({ open, onClose, onPick }: { open: boolean; onClose: 
                   {x.title}
                   {x.four_eyes && <Badge tone="info">{t('config.fourEyes')}</Badge>}
                 </span>
-                <span className="block text-[12.5px] text-muted">{x.description}</span>
-                <span className="block font-mono text-[11.5px] text-muted">{x.type}</span>
+                <span className="block text-meta text-muted">{x.description}</span>
+                <span className="block font-mono text-micro text-muted">{x.type}</span>
               </span>
             </button>
           </li>

@@ -5,13 +5,15 @@ import { CircleAlert, Inbox, RotateCcw, type LucideIcon } from 'lucide-react'
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { ApiError } from '../api/client'
 import { t, useT } from '../i18n'
+import { cx } from '../lib/cx'
 import { Skeleton } from './ui'
 
-export function EmptyState({ icon: I = Inbox, title, children, action }: { icon?: LucideIcon; title: ReactNode; children?: ReactNode; action?: ReactNode }) {
+/** compact: inside a card or a table, with less space around it. */
+export function EmptyState({ icon: I = Inbox, title, children, action, compact }: { icon?: LucideIcon; title: ReactNode; children?: ReactNode; action?: ReactNode; compact?: boolean }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
-      <div className="mb-1 grid size-10 place-items-center rounded-full bg-accent-soft text-on-accent-soft">
-        <I size={20} aria-hidden />
+    <div className={cx('flex flex-col items-center justify-center gap-2 text-center', compact ? 'px-4 py-5 text-body' : 'px-6 py-12')}>
+      <div className={cx('mb-1 grid place-items-center rounded-full bg-accent-soft text-on-accent-soft', compact ? 'size-8' : 'size-10')}>
+        <I size={compact ? 16 : 20} aria-hidden />
       </div>
       <h3 className="font-semibold">{title}</h3>
       {children && <div className="max-w-sm text-muted">{children}</div>}
@@ -41,7 +43,7 @@ export function ErrorState({ error, onRetry, title }: { error: unknown; onRetry?
       </div>
       <h3 className="font-semibold">{title ?? tr('state.errorTitle')}</h3>
       <p className="max-w-md text-muted">{errorText(error)}</p>
-      {rid && <p className="font-mono text-[11.5px] text-muted">{tr('state.requestId', { id: rid })}</p>}
+      {rid && <p className="font-mono text-micro text-muted">{tr('state.requestId', { id: rid })}</p>}
       {onRetry && (
         <button type="button" className="btn mt-2" onClick={onRetry}>
           <RotateCcw size={14} aria-hidden /> {tr('state.retry')}

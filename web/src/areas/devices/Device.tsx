@@ -2,7 +2,7 @@
 // six tabs (overview, compliance, configuration, software, inventory,
 // activity), each with a URL (?tab=, ?sub=).
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
-import { ArrowLeft, Bot, CircleAlert, Cpu, Download, HardDrive, Monitor, MoreHorizontal, RefreshCw, Server, ShieldCheck, ShieldAlert, Terminal, Trash2 } from 'lucide-react'
+import { Activity, ArrowLeft, Bot, BrickWall, CheckCircle2, ChevronDown, ChevronUp, CircleAlert, Cpu, Download, HardDrive, Layers, Monitor, MoreHorizontal, RefreshCw, Server, ShieldCheck, ShieldAlert, Terminal, Trash2, Wifi } from 'lucide-react'
 import { useCallback, useState, type ReactNode } from 'react'
 import { useCan } from '../../api/me'
 import { axisX, axisY, baseOption, ChartFrame, EChart, type Colors } from '../../components/charts'
@@ -14,7 +14,7 @@ import { ago, dateShort, dateTime, fmt1 } from '../../i18n/format'
 import { cx } from '../../lib/cx'
 import { DeviceDialog, useDeviceMenu, useRun, type Dialog, type Target } from './actions'
 import { useDetail, type DeviceDetail } from './api'
-import { protectiveAlarm, usedPct } from './logic'
+import { checkTone, connectionState, firewallHealth, orderNotices, protectiveAlarm, updatesHealth, usedPct } from './logic'
 import { ActivityTab, InventoryTab, SoftwareTab } from './tabs'
 import { UpdatesTab } from './UpdatesTab'
 
@@ -38,7 +38,7 @@ export function DevicePage() {
   const failing = d.check_results.filter((c) => (c as { status: string }).status === 'fail').length
   return (
     <div className="flex flex-col gap-[var(--gap)]">
-      <Link to="/devices" className="inline-flex w-fit items-center gap-1 text-[13px] text-muted hover:text-fg">
+      <Link to="/devices" className="inline-flex w-fit items-center gap-1 text-body text-muted hover:text-fg">
         <ArrowLeft size={14} aria-hidden /> {t('devices.title')}
       </Link>
       <Header d={d} target={target} menu={menu} open={setDialog} />
@@ -67,8 +67,8 @@ export function DevicePage() {
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[12px] text-muted">{label}</dt>
-      <dd className="truncate text-[13px]">{children || '–'}</dd>
+      <dt className="text-meta text-muted">{label}</dt>
+      <dd className="truncate text-body">{children || '–'}</dd>
     </div>
   )
 }
@@ -87,8 +87,8 @@ function Header({ d, target, menu, open }: { d: DeviceDetail; target: Target; me
           {inv.desktop ? <Monitor size={22} /> : <Server size={22} />}
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate font-mono text-[20px] font-semibold">{d.hostname}</h1>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted">
+          <h1 className="truncate font-mono text-heading font-semibold">{d.hostname}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-body text-muted">
             <StatusPill status={d.status as DeviceStatus} />
             <span>{inv.os_name || d.os}</span>
             <span>{t('devices.seen', { ago: d.last_seen ? ago(d.last_seen) : t('devices.never') })}</span>
@@ -134,7 +134,7 @@ function Header({ d, target, menu, open }: { d: DeviceDetail; target: Target; me
         </Fact>
         <Fact label={t('devices.fact.blueprint')}>
           {d.blueprints.find((b) => b.applies)?.name ?? d.blueprint}
-          <span className="block text-[12px] text-muted">
+          <span className="block text-meta text-muted">
             {d.blueprint_source.Kind === 'device'
               ? t('devices.bp.device')
               : d.blueprint_source.Kind === 'group'
@@ -147,16 +147,12 @@ function Header({ d, target, menu, open }: { d: DeviceDetail; target: Target; me
             {d.agent_version}
           </Link>
           {d.update_requested ? (
-            <span className="block text-[12px] text-muted">{t('devices.agent.requested')}</span>
+            <span className="block text-meta text-muted">{t('devices.agent.requested')}</span>
           ) : d.update_state ? (
-            <span className="block text-[12px] text-muted">
+            <span className="block text-meta text-muted">
               {d.update_version} {d.update_state}
             </span>
           ) : null}
-        </Fact>
-        <Fact label={t('devices.fact.network')}>
-          <span className="font-mono">{d.external_ip}</span>
-          {d.place && <span className="block text-[12px] text-muted">{d.place}</span>}
         </Fact>
         <Fact label={t('devices.fact.tags')}>
           {d.tags.length
@@ -168,7 +164,6 @@ function Header({ d, target, menu, open }: { d: DeviceDetail; target: Target; me
             : null}
         </Fact>
         <Fact label={t('devices.fact.signedIn')}>{(inv.logged_in_users ?? []).join(', ')}</Fact>
-        <Fact label={t('devices.fact.inventory')}>{inv.source}</Fact>
       </dl>
     </header>
   )
@@ -183,68 +178,88 @@ const protectiveKey: Record<string, MessageKey> = {
   allow_uninstall: 'devices.prot.uninstall',
 }
 
+type Notice = { level: 'security' | 'compliance' | 'info'; key: string; node: ReactNode }
+
+/**
+ * Protective notices in one place, security first, then compliance, then
+ * information. The most important one shows; the rest fold behind a button.
+ */
 function Notices({ d }: { d: DeviceDetail }) {
   const t = useT()
   const audit = useCan('audit')
-  const box = (tone: 'bad' | 'warn' | 'ok', key: string, children: ReactNode) => (
-    <div key={key} role="status" className={cx('flex flex-wrap items-center gap-2 rounded-lg border px-4 py-2.5 text-[13px]', tone === 'bad' ? 'border-bad/30 bg-bad-soft' : tone === 'warn' ? 'border-warn/30 bg-warn-soft' : 'border-ok/30 bg-ok-soft')}>
-      {children}
-    </div>
-  )
-  const out: ReactNode[] = []
-  for (const p of d.protective) {
-    out.push(
-      box(
-        protectiveAlarm(p.type) ? 'bad' : 'ok',
-        `p-${p.type}`,
-        <>
-          <strong>{t(protectiveKey[p.type] ?? 'devices.prot.uninstall')}</strong>
-          <span>{t('devices.prot.by', { by: p.by, at: dateTime(p.at) })}</span>
-          <Badge tone={p.status === 'ok' ? 'ok' : p.status === 'failed' ? 'bad' : 'warn'}>{t(p.status === 'ok' ? 'devices.prot.done' : p.status === 'failed' ? 'devices.prot.failed' : 'devices.prot.waiting')}</Badge>
-        </>,
+  const [all, setAll] = useState(false)
+  const out: Notice[] = []
+  const box = (tone: 'bad' | 'warn' | 'ok', key: string, children: ReactNode) =>
+    out.push({
+      level: tone === 'bad' ? 'security' : tone === 'warn' ? 'compliance' : 'info',
+      key,
+      node: (
+        <div key={key} className={cx('flex flex-wrap items-center gap-2 rounded-lg border px-4 py-2.5 text-body', tone === 'bad' ? 'border-bad/30 bg-bad-soft' : tone === 'warn' ? 'border-warn/30 bg-warn-soft' : 'border-ok/30 bg-ok-soft')}>
+          {children}
+        </div>
       ),
+    })
+  for (const p of d.protective)
+    box(
+      protectiveAlarm(p.type) ? 'bad' : 'ok',
+      `p-${p.type}`,
+      <>
+        <strong>{t(protectiveKey[p.type] ?? 'devices.prot.uninstall')}</strong>
+        <span>{t('devices.prot.by', { by: p.by, at: dateTime(p.at) })}</span>
+        <Badge tone={p.status === 'ok' ? 'ok' : p.status === 'failed' ? 'bad' : 'warn'}>{t(p.status === 'ok' ? 'devices.prot.done' : p.status === 'failed' ? 'devices.prot.failed' : 'devices.prot.waiting')}</Badge>
+      </>,
     )
-  }
   if (d.tampered_at)
-    out.push(
-      box(
-        'bad',
-        'tamper',
-        <>
-          <ShieldAlert size={15} aria-hidden />
-          <strong>{t('devices.notice.tamper')}</strong> {dateTime(d.tampered_at)}.{' '}
-          {audit ? <Link to="/activity" search={{ action: 'agent.tamper', target: d.id } as never}>
-              {t('devices.notice.tamperAudit')}
-            </Link> : t('devices.notice.tamperAudit')}
-        </>,
-      ),
+    box(
+      'bad',
+      'tamper',
+      <>
+        <ShieldAlert size={15} aria-hidden />
+        <strong>{t('devices.notice.tamper')}</strong> {dateTime(d.tampered_at)}.{' '}
+        {audit ? (
+          <Link to="/activity" search={{ action: 'agent.tamper', target: d.id } as never}>
+            {t('devices.notice.tamperAudit')}
+          </Link>
+        ) : (
+          t('devices.notice.tamperAudit')
+        )}
+      </>,
     )
   if (d.auto_locked)
-    out.push(
-      box(
-        'bad',
-        'locked',
-        <>
-          <strong>{t('devices.notice.autoLocked')}</strong> {t('devices.notice.autoLockedBody')}
-        </>,
-      ),
+    box(
+      'bad',
+      'locked',
+      <>
+        <strong>{t('devices.notice.autoLocked')}</strong> {t('devices.notice.autoLockedBody')}
+      </>,
     )
   if (d.failing_since)
-    out.push(
-      box(
-        'warn',
-        'grace',
-        <>
-          <CircleAlert size={15} aria-hidden />
-          <span>
-            {t('devices.notice.failingSince', { at: dateTime(d.failing_since) })}
-            {d.grace_until && ' ' + t(d.status === 'in grace' ? 'devices.notice.graceEnds' : 'devices.notice.graceEnded', { at: dateTime(d.grace_until) })}{' '}
-            {d.lock_at ? (!d.auto_locked && t('devices.notice.lockAt', { at: dateTime(d.lock_at) })) : t('devices.notice.noLock')} {d.notify_on_grace && t('devices.notice.notify')}
-          </span>
-        </>,
-      ),
+    box(
+      'warn',
+      'grace',
+      <>
+        <CircleAlert size={15} aria-hidden />
+        <span>
+          {t('devices.notice.failingSince', { at: dateTime(d.failing_since) })}
+          {d.grace_until && ' ' + t(d.status === 'in grace' ? 'devices.notice.graceEnds' : 'devices.notice.graceEnded', { at: dateTime(d.grace_until) })}{' '}
+          {d.lock_at ? !d.auto_locked && t('devices.notice.lockAt', { at: dateTime(d.lock_at) }) : t('devices.notice.noLock')} {d.notify_on_grace && t('devices.notice.notify')}
+        </span>
+      </>,
     )
-  return out.length ? <div className="flex flex-col gap-2">{out}</div> : null
+  if (!out.length) return null
+  const list = orderNotices(out)
+  const shown = all ? list : list.slice(0, 1)
+  return (
+    <section aria-label={t('devices.notices')} role="status" className="flex flex-col gap-2">
+      {shown.map((n) => n.node)}
+      {list.length > 1 && (
+        <button type="button" className="btn btn-ghost self-start text-meta" aria-expanded={all} onClick={() => setAll(!all)}>
+          {all ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
+          {all ? t('devices.notice.less') : t('devices.notice.more', { count: list.length - 1 })}
+        </button>
+      )}
+    </section>
+  )
 }
 
 function Health({ icon: I, label, value, tone, note }: { icon: typeof Cpu; label: string; value: ReactNode; tone: 'ok' | 'warn' | 'bad' | 'off'; note: ReactNode }) {
@@ -254,9 +269,9 @@ function Health({ icon: I, label, value, tone, note }: { icon: typeof Cpu; label
         <I size={18} />
       </span>
       <div className="min-w-0">
-        <div className="text-[12.5px] text-muted">{label}</div>
+        <div className="text-meta text-muted">{label}</div>
         <div className="font-semibold">{value}</div>
-        <div className="truncate text-[12px] text-muted">{note}</div>
+        <div className="truncate text-meta text-muted">{note}</div>
       </div>
     </div>
   )
@@ -276,6 +291,9 @@ function Overview({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
   const certDays = Math.round((new Date(d.cert_expires).getTime() - now) / 86_400_000)
   const newest = d.agent_versions[0]
   const canRec = useCan('commands')
+  const upd = updatesHealth(checks)
+  const fw = firewallHealth(checks, d.declarations)
+  const conn = connectionState(d.last_seen, d.status)
   return (
     <div className="flex flex-col gap-[var(--gap)]">
       <div className="grid gap-[var(--gap)] sm:grid-cols-2 xl:grid-cols-4">
@@ -295,15 +313,24 @@ function Overview({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
           note={newest && newest !== d.agent_version ? t('devices.health.newer', { version: newest }) : t('devices.health.current')}
         />
         <Health icon={ShieldCheck} label={t('devices.health.cert')} value={dateShort(d.cert_expires)} tone={certDays < 14 ? 'warn' : 'ok'} note={t('devices.health.certDays', { count: certDays })} />
+        <Health icon={Download} label={t('devices.health.updates')} value={t(`devices.health.upd.${upd.state}`)} tone={upd.tone} note={upd.detail ?? ''} />
+        <Health icon={BrickWall} label={t('devices.health.firewall')} value={t(`devices.health.fw.${fw.state}`)} tone={fw.tone} note={t(fw.managed ? 'devices.health.fw.managed' : 'devices.health.fw.unmanaged')} />
+        <Health
+          icon={Wifi}
+          label={t('devices.health.connection')}
+          value={t(`devices.health.conn.${conn.state}`)}
+          tone={conn.tone}
+          note={[d.last_seen && t('devices.seen', { ago: ago(d.last_seen) }), d.external_ip, d.place].filter(Boolean).join(' · ')}
+        />
       </div>
       <div className="grid gap-[var(--gap)] xl:grid-cols-3">
         <Card className="xl:col-span-2" title={t('devices.load.title')} sub={t('devices.load.sub')} id="dv-load">
-          {d.metrics.length < 2 ? <p className="text-[13px] text-muted">{t('devices.load.none')}</p> : <LoadChart d={d} />}
+          {d.metrics.length < 2 ? <EmptyState compact icon={Activity} title={t('devices.load.none')}>{t('devices.load.noneBody')}</EmptyState> : <LoadChart d={d} />}
         </Card>
         <Card title={t('devices.open.title')} id="dv-open">
           {root && (
             <div className="mb-4">
-              <div className="mb-1.5 flex justify-between text-[12.5px]">
+              <div className="mb-1.5 flex justify-between text-meta">
                 <span className="text-muted">{t('devices.open.root')}</span>
                 <span className="num">{t('devices.open.rootUse', { pct: usedPct(root.size_gb, root.free_gb), size: root.size_gb })}</span>
               </div>
@@ -313,28 +340,28 @@ function Overview({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
             </div>
           )}
           {failing.length ? (
-            <ul className="flex flex-col gap-1.5 text-[13px]">
+            <ul className="flex flex-col gap-1.5 text-body">
               {failing.slice(0, 6).map((c) => (
                 <li key={c.id} className="flex items-start gap-2">
                   <CircleAlert size={14} className="mt-0.5 shrink-0 text-bad" aria-hidden />
                   <span className="min-w-0">
                     <span className="block truncate">{c.title || c.id}</span>
-                    {c.detail && <span className="block truncate text-[12px] text-muted">{c.detail}</span>}
+                    {c.detail && <span className="block truncate text-meta text-muted">{c.detail}</span>}
                   </span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-[13px] text-muted">{t('devices.open.none')}</p>
+            <EmptyState compact icon={CheckCircle2} title={t('devices.open.none')} />
           )}
         </Card>
       </div>
       <Card title={t('devices.sys.title')} id="dv-sys">
         <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Fact label={t('devices.sys.os')}>
-            {inv.os_name} {inv.os_codename && <span className="text-muted">({inv.os_codename})</span>}
+          {/* the operating system name is in the page header */}
+          <Fact label={t('devices.sys.version')}>
+            {inv.os_version} {inv.os_codename && <span className="text-muted">({inv.os_codename})</span>}
           </Fact>
-          <Fact label={t('devices.sys.version')}>{inv.os_version}</Fact>
           <Fact label={t('devices.sys.kernel')}>
             <span className="font-mono">{inv.kernel}</span>
           </Fact>
@@ -360,6 +387,7 @@ function Overview({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
           <Fact label={t('devices.sys.key')}>
             {d.tpm_bound ? <span title={`EK SHA-256 ${d.tpm_ek_sha256}`}>{t('devices.sys.keyTpm')}</span> : t('devices.sys.keyFile')}
           </Fact>
+          <Fact label={t('devices.fact.inventory')}>{inv.source}</Fact>
         </dl>
       </Card>
     </div>
@@ -408,7 +436,6 @@ function Refs({ list }: { list?: string[] }) {
   )
 }
 
-const checkTone = (s: string) => (s === 'pass' ? 'ok' : s === 'fail' ? 'bad' : s === 'excepted' ? 'warn' : 'off')
 
 function Compliance({ d }: { d: DeviceDetail }) {
   const t = useT()
@@ -431,9 +458,9 @@ function Compliance({ d }: { d: DeviceDetail }) {
         </div>
       ) : (
         <div className="card overflow-x-auto">
-          <table className="w-full text-left text-[13px]">
+          <table className="w-full text-left text-body">
             <caption className="sr-only">{t('devices.tab.compliance')}</caption>
-            <thead className="text-[12px] text-muted">
+            <thead className="text-meta text-muted">
               <tr>
                 <th scope="col" className="px-3 py-2 font-medium">{t('devices.comp.status')}</th>
                 <th scope="col" className="px-3 py-2 font-medium">{t('devices.comp.check')}</th>
@@ -449,11 +476,11 @@ function Compliance({ d }: { d: DeviceDetail }) {
                 <tr key={c.id} className="border-t border-line align-top">
                   <td className="px-3 py-2">
                     <Badge tone={checkTone(c.status)}>{t(`devices.check.${c.status}` as MessageKey)}</Badge>
-                    {c.remediated && <span className="mt-1 block text-[12px] text-ok">{t('devices.comp.remediated')}</span>}
+                    {c.remediated && <span className="mt-1 block text-meta text-ok">{t('devices.comp.remediated')}</span>}
                   </td>
                   <td className="px-3 py-2">
                     {c.title || c.id}
-                    <span className="block font-mono text-[11.5px] text-muted">{c.id}</span>
+                    <span className="block font-mono text-micro text-muted">{c.id}</span>
                   </td>
                   <td className="px-3 py-2">{c.severity ? t(`devices.sev.${c.severity}` as MessageKey) : c.level ? `L${c.level}` : '–'}</td>
                   <td className="max-w-md px-3 py-2 text-muted">{c.detail || '–'}</td>
@@ -463,7 +490,7 @@ function Compliance({ d }: { d: DeviceDetail }) {
                   <td className="px-3 py-2">
                     <Refs list={c.refs?.iso} />
                   </td>
-                  <td className="px-3 py-2 text-[12px] text-muted">{c.refs?.cis?.join('; ') || '–'}</td>
+                  <td className="px-3 py-2 text-meta text-muted">{c.refs?.cis?.join('; ') || '–'}</td>
                 </tr>
               ))}
             </tbody>
@@ -479,6 +506,12 @@ const declTone = (s: string) => (s === 'active' ? 'ok' : s === 'pending' ? 'warn
 function Config({ d }: { d: DeviceDetail }) {
   const t = useT()
   const certs = d.inventory.certificates ?? []
+  const applied = d.blueprints.find((b) => b.applies)
+  const bpLink = applied && (
+    <Link className="btn" to="/config/blueprints/$id" params={{ id: String(applied.id) }}>
+      {t('devices.cfg.openBlueprint', { name: applied.name })}
+    </Link>
+  )
   return (
     <div className="flex flex-col gap-[var(--gap)]">
       <Card
@@ -498,26 +531,26 @@ function Config({ d }: { d: DeviceDetail }) {
         }
       >
         {d.items.length ? (
-          <ol className="flex flex-col divide-y divide-line text-[13px]">
+          <ol className="flex flex-col divide-y divide-line text-body">
             {d.items.map((it, i) => (
               <li key={it.id} className="flex items-center gap-3 py-1.5">
                 <span className="num w-6 text-muted">{i + 1}</span>
                 <Link to="/config/library/$id" params={{ id: String(it.id) }} className="flex-1 hover:underline">
                   {it.name}
                 </Link>
-                <span className="font-mono text-[12px] text-muted">{it.type}</span>
+                <span className="font-mono text-meta text-muted">{it.type}</span>
               </li>
             ))}
           </ol>
         ) : (
-          <p className="text-[13px] text-muted">{t('devices.cfg.noItems')}</p>
+          <EmptyState compact icon={Layers} title={t('devices.cfg.noItems')} action={bpLink} />
         )}
       </Card>
       <Card title={t('devices.cfg.decls')} id="dv-decl">
         {d.declarations.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-[13px]">
-              <thead className="text-[12px] text-muted">
+            <table className="w-full text-left text-body">
+              <thead className="text-meta text-muted">
                 <tr>
                   <th scope="col" className="py-1.5 pr-3 font-medium">{t('devices.comp.status')}</th>
                   <th scope="col" className="py-1.5 pr-3 font-medium">{t('devices.cfg.identifier')}</th>
@@ -531,8 +564,8 @@ function Config({ d }: { d: DeviceDetail }) {
                     <td className="py-1.5 pr-3">
                       <Badge tone={declTone(x.state)}>{t(`devices.decl.${x.state.replace(' ', '_')}` as MessageKey)}</Badge>
                     </td>
-                    <td className="py-1.5 pr-3 font-mono text-[12.5px]">{x.identifier}</td>
-                    <td className="py-1.5 pr-3 font-mono text-[12.5px] text-muted">{x.type}</td>
+                    <td className="py-1.5 pr-3 font-mono text-meta">{x.identifier}</td>
+                    <td className="py-1.5 pr-3 font-mono text-meta text-muted">{x.type}</td>
                     <td className="py-1.5 text-muted">{x.reasons.join('; ') || '–'}</td>
                   </tr>
                 ))}
@@ -540,14 +573,14 @@ function Config({ d }: { d: DeviceDetail }) {
             </table>
           </div>
         ) : (
-          <p className="text-[13px] text-muted">{t('devices.cfg.noDecls')}</p>
+          <EmptyState compact icon={Layers} title={t('devices.cfg.noDecls')} action={bpLink} />
         )}
       </Card>
       {certs.length > 0 && (
         <Card title={t('devices.cfg.certs')} sub={t('devices.cfg.certsSub')} id="dv-certs">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-[13px]">
-              <thead className="text-[12px] text-muted">
+            <table className="w-full text-left text-body">
+              <thead className="text-meta text-muted">
                 <tr>
                   <th scope="col" className="py-1.5 pr-3 font-medium">{t('devices.cfg.name')}</th>
                   <th scope="col" className="py-1.5 pr-3 font-medium">{t('devices.cfg.subject')}</th>
@@ -559,9 +592,9 @@ function Config({ d }: { d: DeviceDetail }) {
                 {certs.map((c) => (
                   <tr key={c.sha256} className="border-t border-line">
                     <td className="py-1.5 pr-3">{c.name}</td>
-                    <td className="py-1.5 pr-3 font-mono text-[12px]">{c.subject}</td>
+                    <td className="py-1.5 pr-3 font-mono text-meta">{c.subject}</td>
                     <td className="py-1.5 pr-3 whitespace-nowrap">{dateTime(c.not_after)}</td>
-                    <td className="py-1.5 font-mono text-[12px]" title={c.sha256}>
+                    <td className="py-1.5 font-mono text-meta" title={c.sha256}>
                       {c.sha256.slice(0, 16)}…
                     </td>
                   </tr>

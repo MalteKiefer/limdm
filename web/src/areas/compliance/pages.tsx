@@ -79,12 +79,12 @@ function ScoreRow({ stats, fw, onFw }: { stats?: ReturnType<typeof useCompliance
   return (
     <div className="grid grid-cols-1 gap-[var(--gap)] sm:grid-cols-2 xl:grid-cols-4">
       <div className="card flex flex-col p-[var(--pad-card)]">
-        <span className="text-[12.5px] font-medium text-muted" title={t('compliance.scoreHint')}>
+        <span className="text-meta font-medium text-muted" title={t('compliance.scoreHint')}>
           {t('compliance.score')}
         </span>
-        <span className="num text-[30px] leading-tight font-semibold tracking-tight">{pct(stats.score)}</span>
+        <span className="num text-display leading-tight font-semibold tracking-tight">{pct(stats.score)}</span>
         {prev !== undefined && <Delta value={stats.score - prev} label={t('compliance.in30')} />}
-        <p className="mt-1 text-[12px] text-muted">{t('compliance.scoreHint')}</p>
+        <p className="mt-1 text-meta text-muted">{t('compliance.scoreHint')}</p>
         {hist.length > 1 && (
           <div className="mt-2">
             <Sparkline data={hist.map((h) => h.score)} height={30} width={220} label={t('compliance.scoreSpark')} />
@@ -100,12 +100,12 @@ function ScoreRow({ stats, fw, onFw }: { stats?: ReturnType<typeof useCompliance
           aria-label={t('compliance.fwPick', { name: t(`compliance.fw.${f.id}` as MessageKey) })}
           className={cx('card flex flex-col p-[var(--pad-card)] text-left transition-colors', fw === f.id ? 'border-accent ring-1 ring-accent' : 'hover:border-line-strong')}
         >
-          <span className="flex items-center justify-between text-[12.5px] font-medium text-muted">
+          <span className="flex items-center justify-between text-meta font-medium text-muted">
             {t(`compliance.fw.${f.id}` as MessageKey)}
             {fw === f.id && <ShieldCheck size={14} className="text-accent" aria-hidden />}
           </span>
-          <span className="num text-[24px] leading-tight font-semibold">{pct(f.rate)}</span>
-          <span className="text-[12px] text-muted">
+          <span className="num text-heading leading-tight font-semibold">{pct(f.rate)}</span>
+          <span className="text-meta text-muted">
             {t('compliance.fwRate')}: {fmt(f.pass)} / {fmt(f.pass + f.fail)}
           </span>
           <div className="mt-3">
@@ -129,12 +129,12 @@ function StateRow({ d }: { d: NonNullable<ReturnType<typeof useCompliance>['data
     <div className="grid grid-cols-2 gap-[var(--gap)] md:grid-cols-4">
       {items.map((i) => (
         <Link key={i.q} to="/devices" search={{ q: i.q } as never} className="card flex flex-col gap-0.5 p-3 hover:border-line-strong">
-          <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-muted">
+          <span className="flex items-center gap-1.5 text-meta font-medium text-muted">
             <span className={cx('size-2 rounded-full', i.dot)} aria-hidden />
             {i.label}
           </span>
-          <span className="num text-[20px] font-semibold">{fmt(i.n)}</span>
-          {i.hint && <span className="text-[12px] text-muted">{i.hint}</span>}
+          <span className="num text-heading font-semibold">{fmt(i.n)}</span>
+          {i.hint && <span className="text-meta text-muted">{i.hint}</span>}
         </Link>
       ))}
     </div>
@@ -146,7 +146,7 @@ function RateCell({ c }: { c: { pass: number; fail: number } }) {
   if (r === null) return <span className="text-muted">·</span>
   return (
     <div className="flex items-center gap-2 pr-2">
-      <span className="num w-12 text-right text-[12.5px]">{Math.round(r)} %</span>
+      <span className="num w-12 text-right text-meta">{Math.round(r)} %</span>
       <div className="min-w-16 flex-1">
         <Bullet value={r} target={TARGET} label={`${Math.round(r)} %`} />
       </div>
@@ -169,7 +169,7 @@ function Body({ d, s, go }: { d: NonNullable<ReturnType<typeof useCompliance>['d
         cell: ({ row: { original: c } }) => (
           <span className="flex min-w-0 flex-col">
             <span className="truncate font-medium">{c.title}</span>
-            <span className="truncate font-mono text-[11.5px] text-muted">{c.id}</span>
+            <span className="truncate font-mono text-micro text-muted">{c.id}</span>
           </span>
         ),
       },
@@ -177,7 +177,7 @@ function Body({ d, s, go }: { d: NonNullable<ReturnType<typeof useCompliance>['d
       {
         id: 'refs',
         header: t('compliance.col.refs'),
-        cell: ({ row: { original: c } }) => <span className="font-mono text-[11.5px] text-muted">{(fw ? refsOf(c, fw) : [...refsOf(c, 'bsi'), ...refsOf(c, 'iso')]).slice(0, 3).join(', ')}</span>,
+        cell: ({ row: { original: c } }) => <span className="font-mono text-micro text-muted">{(fw ? refsOf(c, fw) : [...refsOf(c, 'bsi'), ...refsOf(c, 'iso')]).slice(0, 3).join(', ')}</span>,
       },
       { id: 'rate', header: t('compliance.col.rate'), meta: { sortKey: 'rate', className: 'w-[170px]' }, cell: ({ row: { original: c } }) => <RateCell c={c} /> },
       {
@@ -195,7 +195,7 @@ function Body({ d, s, go }: { d: NonNullable<ReturnType<typeof useCompliance>['d
     () => [
       { id: 'framework', header: t('compliance.col.framework'), cell: ({ row: { original: c } }) => t(`compliance.fw.${c.framework}` as MessageKey) },
       { id: 'control', header: t('compliance.col.control'), cell: ({ row: { original: c } }) => <span className="font-mono">{c.control}</span> },
-      { id: 'checks', header: t('compliance.col.checks'), cell: ({ row: { original: c } }) => <span className="truncate font-mono text-[11.5px] text-muted">{c.checks.join(', ')}</span> },
+      { id: 'checks', header: t('compliance.col.checks'), cell: ({ row: { original: c } }) => <span className="truncate font-mono text-micro text-muted">{c.checks.join(', ')}</span> },
       { id: 'rate', header: t('compliance.col.rate'), meta: { className: 'w-[170px]' }, cell: ({ row: { original: c } }) => <RateCell c={c} /> },
       { id: 'fail', header: t('compliance.col.fail'), meta: { className: 'text-right' }, cell: ({ row: { original: c } }) => <span className={cx('num font-semibold', c.fail ? 'text-bad' : 'text-muted')}>{c.fail ? fmt(c.fail) : '·'}</span> },
     ],
@@ -229,7 +229,7 @@ function Body({ d, s, go }: { d: NonNullable<ReturnType<typeof useCompliance>['d
             <input type="search" className="field pl-8" placeholder={t('compliance.search')} value={s.q ?? ''} onChange={(e) => go({ q: e.target.value || undefined })} />
           </label>
         )}
-        <label className="flex flex-col gap-0.5 text-[12px] text-muted">
+        <label className="flex flex-col gap-0.5 text-meta text-muted">
           {t('compliance.filter.state')}
           <select className="field" value={s.state ?? ''} onChange={(e) => go({ state: e.target.value || undefined })}>
             <option value="">{t('compliance.filter.all')}</option>
@@ -238,7 +238,7 @@ function Body({ d, s, go }: { d: NonNullable<ReturnType<typeof useCompliance>['d
           </select>
         </label>
         {view === 'checks' && (
-          <label className="flex flex-col gap-0.5 text-[12px] text-muted">
+          <label className="flex flex-col gap-0.5 text-meta text-muted">
             {t('compliance.filter.level')}
             <select className="field" value={s.level ?? ''} onChange={(e) => go({ level: e.target.value || undefined })}>
               <option value="">{t('compliance.filter.allLevels')}</option>
@@ -252,7 +252,7 @@ function Body({ d, s, go }: { d: NonNullable<ReturnType<typeof useCompliance>['d
             {t('compliance.reset')}
           </button>
         )}
-        <span className="ml-auto self-center text-[12.5px] text-muted" aria-live="polite">
+        <span className="ml-auto self-center text-meta text-muted" aria-live="polite">
           {view === 'checks' ? t('compliance.shown', { shown: checks.length, all: d.checks.length }) : t('compliance.shown', { shown: controls.length, all: d.controls.length })}
         </span>
       </div>
@@ -269,12 +269,12 @@ function Body({ d, s, go }: { d: NonNullable<ReturnType<typeof useCompliance>['d
               activeId={s.sel}
               onRowClick={(c) => go({ sel: c.id, control: undefined })}
               maxHeight="560px"
-              empty={<p className="p-6 text-center text-muted">{t('compliance.noMatch')}</p>}
+              empty={t('compliance.noMatch')}
               card={(c) => (
                 <span className="flex items-center justify-between gap-2">
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate font-medium">{c.title}</span>
-                    <span className="truncate font-mono text-[11.5px] text-muted">{c.id}</span>
+                    <span className="truncate font-mono text-micro text-muted">{c.id}</span>
                   </span>
                   <span className={cx('num font-semibold', c.fail ? 'text-bad' : 'text-muted')}>{c.fail || '·'}</span>
                 </span>
@@ -350,36 +350,36 @@ function CheckSheet({ id, total, onClose, onPrev, onNext }: { id: string; total:
             <SeverityBadge severity={c.severity} />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className={cx('num text-[26px] font-semibold', c.fail ? 'text-bad' : 'text-ok')}>{fmt(c.fail)}</span>
+            <span className={cx('num text-display font-semibold', c.fail ? 'text-bad' : 'text-ok')}>{fmt(c.fail)}</span>
             <span className="text-muted">{t('compliance.check.ofDevices', { total })}</span>
           </div>
           <RateCell c={c} />
-          <div className="rounded-lg bg-surface-2 p-3 text-[13px]">
+          <div className="rounded-lg bg-surface-2 p-3 text-body">
             <span className="font-semibold">{t('compliance.check.fix')}: </span>
             {fix !== fixKey ? fix : id.startsWith('custom.') ? t('compliance.check.fixCustom') : t('compliance.check.fixUnknown')}
           </div>
           <section>
-            <h3 className="mb-1.5 text-[12.5px] font-semibold text-muted">{t('compliance.check.refs')}</h3>
+            <h3 className="mb-1.5 text-meta font-semibold text-muted">{t('compliance.check.refs')}</h3>
             {frameworks.every((f) => !refsOf(c, f).length) ? (
               <p className="text-muted">{t('compliance.check.noRefs')}</p>
             ) : (
-              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[13px]">
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-body">
                 {frameworks
                   .filter((f) => refsOf(c, f).length)
                   .map((f) => (
                     <div key={f} className="contents">
                       <dt className="text-muted">{t(`compliance.fw.${f}` as MessageKey)}</dt>
-                      <dd className="font-mono text-[12px]">{refsOf(c, f).join(', ')}</dd>
+                      <dd className="font-mono text-meta">{refsOf(c, f).join(', ')}</dd>
                     </div>
                   ))}
               </dl>
             )}
-            {c.refs.cis_benchmark && <p className="mt-1 text-[12px] text-muted">{t('compliance.check.benchmark', { name: c.refs.cis_benchmark })}</p>}
+            {c.refs.cis_benchmark && <p className="mt-1 text-meta text-muted">{t('compliance.check.benchmark', { name: c.refs.cis_benchmark })}</p>}
           </section>
           {active.length > 0 && (
             <section>
-              <h3 className="mb-1.5 text-[12.5px] font-semibold text-muted">{t('compliance.check.exceptions')}</h3>
-              <ul className="flex flex-col gap-1 text-[13px]">
+              <h3 className="mb-1.5 text-meta font-semibold text-muted">{t('compliance.check.exceptions')}</h3>
+              <ul className="flex flex-col gap-1 text-body">
                 {active.map((e) => (
                   <li key={e.id}>
                     <Link to="/compliance/exceptions" className="hover:text-accent">
@@ -392,10 +392,10 @@ function CheckSheet({ id, total, onClose, onPrev, onNext }: { id: string; total:
           )}
           {byBp.length > 0 && (
             <section>
-              <h3 className="mb-1.5 text-[12.5px] font-semibold text-muted">{t('compliance.check.byBlueprint')}</h3>
+              <h3 className="mb-1.5 text-meta font-semibold text-muted">{t('compliance.check.byBlueprint')}</h3>
               <ul className="flex flex-col gap-1.5">
                 {byBp.map(([name, n]) => (
-                  <li key={name} className="flex items-center gap-2 text-[13px]">
+                  <li key={name} className="flex items-center gap-2 text-body">
                     <span className="w-36 truncate">{name}</span>
                     <span className="h-2 flex-1 rounded-full bg-surface-2" aria-hidden>
                       <span className="block h-2 rounded-full bg-bad" style={{ width: `${(n / c.fail) * 100}%` }} />
@@ -407,22 +407,22 @@ function CheckSheet({ id, total, onClose, onPrev, onNext }: { id: string; total:
             </section>
           )}
           <section>
-            <h3 className="mb-1.5 text-[12.5px] font-semibold text-muted">{t('compliance.check.devices')}</h3>
-            {c.truncated && <p className="mb-1 text-[12px] text-muted">{t('compliance.check.truncated', { count: c.devices.length })}</p>}
+            <h3 className="mb-1.5 text-meta font-semibold text-muted">{t('compliance.check.devices')}</h3>
+            {c.truncated && <p className="mb-1 text-meta text-muted">{t('compliance.check.truncated', { count: c.devices.length })}</p>}
             <ul className="max-h-[320px] divide-y divide-line overflow-y-auto rounded-lg border border-line">
               {c.devices.map((dv) => (
                 <li key={dv.id}>
                   <Link to="/devices/$id" params={{ id: dv.id } as never} className="flex flex-col gap-0.5 px-3 py-1.5 hover:bg-surface-2">
                     <span className="flex items-center gap-2">
-                      <span className="flex-1 truncate font-mono text-[12.5px]">{dv.hostname || dv.id}</span>
+                      <span className="flex-1 truncate font-mono text-meta">{dv.hostname || dv.id}</span>
                       <ResultBadge status={dv.status} />
                     </span>
-                    <span className="flex gap-2 text-[12px] text-muted">
+                    <span className="flex gap-2 text-meta text-muted">
                       <span className="truncate">{dv.blueprint}</span>
                       {dv.last_seen && <span>{ago(dv.last_seen)}</span>}
                       {dv.remediated && <span>{t('compliance.check.remediated')}</span>}
                     </span>
-                    {dv.detail && dv.status !== 'pass' && <span className="truncate text-[12px] text-muted">{dv.detail}</span>}
+                    {dv.detail && dv.status !== 'pass' && <span className="truncate text-meta text-muted">{dv.detail}</span>}
                   </Link>
                 </li>
               ))}
@@ -442,14 +442,14 @@ function ControlSheet({ c, checks, onClose, onPick }: { c: Control; checks: Chec
       <div className="flex flex-col gap-4">
         <RateCell c={c} />
         <section>
-          <h3 className="mb-1.5 text-[12.5px] font-semibold text-muted">{t('compliance.control.checks')}</h3>
+          <h3 className="mb-1.5 text-meta font-semibold text-muted">{t('compliance.control.checks')}</h3>
           <ul className="divide-y divide-line rounded-lg border border-line">
             {list.map((x) => (
               <li key={x.id}>
                 <button type="button" onClick={() => onPick(x.id)} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-surface-2">
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate font-medium">{x.title}</span>
-                    <span className="truncate font-mono text-[11.5px] text-muted">{x.id}</span>
+                    <span className="truncate font-mono text-micro text-muted">{x.id}</span>
                   </span>
                   <span className={cx('num font-semibold', x.fail ? 'text-bad' : 'text-muted')}>{x.fail ? t('compliance.failDevices', { count: x.fail }) : t('compliance.rateOf', { rate: pct(passRate(x) ?? 100) })}</span>
                 </button>
@@ -517,7 +517,7 @@ function Heatmap({ group, onGroup }: { group: 'blueprint' | 'tenant'; onGroup: (
       ) : !q.data ? (
         <Skeleton className="h-[240px]" />
       ) : !m.areas.length ? (
-        <p className="text-muted">{t('compliance.heat.none')}</p>
+        <EmptyState compact title={t('compliance.heat.none')} />
       ) : (
         <ChartFrame
           caption={t('compliance.heat.label', { group: groupLabel })}

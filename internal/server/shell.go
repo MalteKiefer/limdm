@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -558,22 +557,6 @@ func (s *Server) shellAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-}
-
-// ansiRe matches terminal control sequences: CSI, OSC and two byte escapes.
-var ansiRe = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[@-Z\\-_]`)
-
-// terminalText makes a transcript readable: control sequences removed,
-// carriage returns resolved, other control characters dropped.
-func terminalText(raw []byte) string {
-	s := strings.ToValidUTF8(ansiRe.ReplaceAllString(string(raw), ""), "�")
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	return strings.Map(func(r rune) rune {
-		if r < 0x20 && r != '\n' && r != '\t' {
-			return -1
-		}
-		return r
-	}, s)
 }
 
 // shellPolicyOff is the answer when the device's policy does not allow

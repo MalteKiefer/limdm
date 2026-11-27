@@ -140,7 +140,7 @@ People and groups come from SCIM 2.0 or Google Workspace ([configuration.md](con
 
 * A device's **primary user** links it to a person; their groups and department become
   rule facts, and group assignments select the blueprint.
-* **Desktop users** are listed per device (`username email [admin]`). The agent creates
+* **Desktop users** are listed per device (user name, mail address, admin flag). The agent creates
   these accounts and manages admin group membership ([desktop-login.md](desktop-login.md)).
 * A person deactivated in the directory is removed from the account list of every device
   at its next check in; the agent then locks the account (home directory kept). Accounts
