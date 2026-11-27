@@ -154,7 +154,11 @@ with the recovery key at boot and set a new passphrase, for example with
 `cryptsetup luksAddKey` using the recovery key, then rotate the viewed recovery key.
 
 **Wipe** erases the LUKS headers of all volumes (`cryptsetup luksErase`), which makes the data
-unrecoverable, and powers the device off two minutes later, after reporting the result. Devices
+unrecoverable, and restarts the device two minutes later, after reporting the result. The
+restart is forced: sleep is blocked until then, a device that slept through the two minutes
+restarts as soon as it wakes up, inhibitors are ignored and, if systemd refuses, the agent
+reboots through the kernel (`/proc/sysrq-trigger`). After the restart the disk cannot be
+unlocked any more. Devices
 without LUKS are refused, because there is no fast way to guarantee deletion; use lost mode.
 
 ## Limits
