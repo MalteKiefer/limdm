@@ -79,6 +79,7 @@ func (a *Agent) applyExtra() {
 	run(api.TypeNetwork, a.applyNetwork(x.Network))
 	run(api.TypePrinters, a.applyPrinters(x.Printers))
 	run(api.TypeArtifacts, a.applyArtifacts(x.Artifacts))
+	run(api.TypeHostname, a.applyHostname(x.Hostname))
 	a.ensureDependencies()
 	a.notifyEscrow()
 }

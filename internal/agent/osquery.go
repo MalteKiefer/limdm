@@ -158,14 +158,10 @@ func enrichFromOsquery(inv *api.Inventory) {
 
 // cleanDMI drops the placeholders vendors leave in firmware fields.
 func cleanDMI(v string) string {
-	v = strings.TrimSpace(v)
-	switch strings.ToLower(strings.Trim(v, ". ")) {
-	case "", "to be filled by o.e.m", "to be filled by oem", "default string", "system serial number", "system product name",
-		"system manufacturer", "system version", "not specified", "not applicable", "none", "n/a", "na", "oem", "o.e.m",
-		"0", "00000000", "0123456789", "123456789", "chassis serial number", "invalid", "unknown", "xxxxxxxxxxxx":
+	if api.PlaceholderDMI(v) {
 		return ""
 	}
-	return v
+	return strings.TrimSpace(v)
 }
 
 func firstNonEmpty(v ...string) string {

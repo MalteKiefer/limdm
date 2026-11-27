@@ -3,6 +3,7 @@
 export type Inventory = Partial<{
   source: string
   hostname: string
+  hostname_info: HostnameInfo
   os_name: string
   os_version: string
   os_codename: string
@@ -40,4 +41,19 @@ export type Inventory = Partial<{
   groups: { name: string; gid: number; members?: string[]; source?: string; system?: boolean }[]
   logged_in_users: string[]
   tpm: { present: boolean; version?: string; luks_bound?: string[] }
+}>
+
+/** Facts and result of com.limdm.hostname (internal/api HostnameInfo). */
+export type HostnameInfo = Partial<{
+  address: string
+  mac: string
+  ptr: string
+  fqdn: string
+  target: string
+  source: string
+  result: 'unchanged' | 'changed' | 'waiting' | 'failed'
+  detail: string
+  previous: string
+  changed_at: string
+  warning: string
 }>

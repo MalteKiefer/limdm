@@ -116,6 +116,7 @@ type State struct {
 	FirewallRules       []fwRule                  `json:"firewall_rules,omitempty"`    // rules LiMDM added
 	FirewallEgress      string                    `json:"firewall_egress,omitempty"`   // ufw outgoing default LiMDM set: deny or allow
 	LocalUsers          map[string]localUserState `json:"local_users,omitempty"`       // accounts com.limdm.localusers manages
+	Hostname            *hostState                `json:"hostname,omitempty"`          // com.limdm.hostname (hostname.go)
 	UpdateRuns          map[string]api.UpdateRun  `json:"update_runs,omitempty"`       // last run per update source
 	UpdateGate          *api.UpdateGate           `json:"update_gate,omitempty"`       // the device's update ring as the server last sent it
 	SecuritySince       time.Time                 `json:"security_since,omitzero"`     // security updates pending since
@@ -646,6 +647,9 @@ func (a *Agent) declarationStatus() []api.DeclarationStatus {
 		if r := a.reasons[out[i].Type]; out[i].Valid && len(r) > 0 {
 			out[i].Active, out[i].Reasons = false, r
 		}
+		if out[i].Type == api.TypeHostname {
+			out[i].Info = a.hostnameNotes()
+		}
 	}
 	return out
 }
@@ -666,6 +670,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	inv := a.host.inventory(a.pol.Privacy)
 	inv.Certificates = certInfo(a.pol.Extra.Certificates)
 	inv.WireGuardKeys = wireguardKeys(a.pol.Extra.Network)
+	inv.HostnameInfo = a.hostnameInfo(a.pol.Privacy)
 	a.applyCatalog(inv.Flatpaks)
 	inv.Apps = a.catalogStates(inv.Flatpaks)
 	a.lastFlatpaks = inv.Flatpaks

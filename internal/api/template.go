@@ -22,6 +22,10 @@ type TemplateVars struct {
 	Tenant      string            `json:"tenant"`
 	PrimaryUser string            `json:"primary_user"` // mail address, empty without one
 	Attributes  map[string]string `json:"attributes"`   // custom device attributes
+	Serial      string            `json:"serial"`       // DMI system serial the device reported, empty for a placeholder
+	MAC         string            `json:"mac"`          // MAC address of the primary interface
+	Vendor      string            `json:"vendor"`
+	Model       string            `json:"model"`
 }
 
 // MaxTemplateOutput bounds the text one template renders.
@@ -153,8 +157,8 @@ func ValidateAttributes(m map[string]string) error {
 	return nil
 }
 
-// RenderPayload renders the templates of a files or firewall payload for
-// one device; other types and payloads without template come back as they
+// RenderPayload renders the templates of a files, firewall or hostname
+// payload for one device; other types and payloads without template come back as they
 // are. Files render one by one: a file that fails keeps template set (the
 // agent then leaves it alone) and its error is returned with the rest.
 // A firewall payload renders as a whole and must be valid afterwards;
@@ -211,6 +215,8 @@ func RenderPayload(typ string, payload json.RawMessage, v TemplateVars) (json.Ra
 			return payload, fmt.Errorf("firewall after rendering: %w", err)
 		}
 		return b, nil
+	case TypeHostname:
+		return renderHostname(payload, v) // hostname.go
 	}
 	return payload, nil
 }

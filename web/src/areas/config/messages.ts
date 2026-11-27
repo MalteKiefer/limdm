@@ -397,6 +397,16 @@ export const de = {
   'config.runsEmptyHelp': 'Geräte melden Ergebnisse beim nächsten Check in nach einem Lauf. Skripte laufen nur auf Geräten, die mit allow_scripts registriert sind.',
   'config.runsExit': 'Exit {code}',
   'config.runsOutput': 'Ausgabe',
+  // R3-H
+  'config.hnWarnTitle': 'Ein neuer Hostname kann Dienste stören',
+  'config.hnWarn': 'Mailserver, Kerberos und AD Beitritte, TLS Zertifikate und Überwachung hängen am Namen. Erst in einem Pilot Blueprint testen. Geändert wird nur auf Geräten, denen das Element zugewiesen ist; Geräte ID und Zertifikate bleiben gleich.',
+  'config.hnPreview': 'Vorschau des Hostnamens',
+  'config.hnPreviewHelp': 'Berechnet den Namen für ein Gerät aus seinem letzten Bericht. Nichts wird gespeichert.',
+  'config.hnKeeps': 'Das Gerät behält seinen Namen: {error}',
+  'config.hnSame': 'unverändert',
+  'config.hnSource': 'Quelle',
+  'config.hnSerial': 'Seriennummer',
+  'config.hnFactsHelp': 'PTR und DNS meldet der Agent nur mit privacy.network_info oder während das Element zugewiesen ist. Namen aus DNS setzt er erst, wenn zwei Check ins dasselbe Ergebnis liefern.',
 } satisfies Catalog
 
 export const en: Record<keyof typeof de, Msg> = {
@@ -795,4 +805,14 @@ export const en: Record<keyof typeof de, Msg> = {
   'config.runsEmptyHelp': 'Devices report results at the next check in after a run. Scripts run only on devices enrolled with allow_scripts.',
   'config.runsExit': 'Exit {code}',
   'config.runsOutput': 'Output',
+  // R3-H
+  'config.hnWarnTitle': 'A new host name can disrupt services',
+  'config.hnWarn': 'Mail servers, Kerberos and AD joins, TLS certificates and monitoring depend on the name. Test on a pilot blueprint first. Only devices the item is assigned to change; device ID and certificates stay the same.',
+  'config.hnPreview': 'Host name preview',
+  'config.hnPreviewHelp': 'Computes the name for one device from its last report. Nothing is saved.',
+  'config.hnKeeps': 'The device keeps its name: {error}',
+  'config.hnSame': 'unchanged',
+  'config.hnSource': 'Source',
+  'config.hnSerial': 'Serial number',
+  'config.hnFactsHelp': 'The agent reports PTR and DNS only with privacy.network_info or while the item is assigned. It sets names from DNS only when two check ins give the same result.',
 }

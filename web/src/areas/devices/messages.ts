@@ -605,6 +605,20 @@ export const de = {
   'devices.enroll.range': '1 bis {max} (Einstellungen, Registrierung)',
   'devices.enroll.days': 'Gültig in Tagen',
   'devices.enroll.create': 'Token erstellen',
+  // R3-H
+  'devices.hn.title': 'Hostname',
+  'devices.hn.sub': 'aus com.limdm.hostname, wie der Agent es gemeldet hat',
+  'devices.hn.current': 'Aktueller Name',
+  'devices.hn.target': 'Berechnetes Ziel',
+  'devices.hn.source': 'Quelle',
+  'devices.hn.result': 'Ergebnis',
+  'devices.hn.previous': 'Vorher',
+  'devices.hn.changed': 'Geändert',
+  'devices.hn.address': 'Primäre Adresse',
+  'devices.hn.r.unchanged': 'unverändert',
+  'devices.hn.r.changed': 'geändert',
+  'devices.hn.r.waiting': 'wartet',
+  'devices.hn.r.failed': 'fehlgeschlagen',
 } satisfies Catalog
 
 export const en: Record<keyof typeof de, Msg> = {
@@ -1211,4 +1225,18 @@ export const en: Record<keyof typeof de, Msg> = {
   'devices.enroll.range': '1 to {max} (Settings, Enrollment)',
   'devices.enroll.days': 'Valid for days',
   'devices.enroll.create': 'Create token',
+  // R3-H
+  'devices.hn.title': 'Host name',
+  'devices.hn.sub': 'from com.limdm.hostname, as the agent reported it',
+  'devices.hn.current': 'Current name',
+  'devices.hn.target': 'Computed target',
+  'devices.hn.source': 'Source',
+  'devices.hn.result': 'Result',
+  'devices.hn.previous': 'Before',
+  'devices.hn.changed': 'Changed',
+  'devices.hn.address': 'Primary address',
+  'devices.hn.r.unchanged': 'unchanged',
+  'devices.hn.r.changed': 'changed',
+  'devices.hn.r.waiting': 'waiting',
+  'devices.hn.r.failed': 'failed',
 }

@@ -1471,8 +1471,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Render a files or firewall template for one device
-         * @description Admins. Validates the payload like a save, then renders its templates with the values of the device (an ID or hostname in the caller's scope). Nothing is saved. A render error comes back in error with the payload as the agent would get it.
+         * Render a files, firewall or hostname template for one device
+         * @description Admins. Validates the payload like a save, then renders its templates with the values of the device (an ID or hostname in the caller's scope). Nothing is saved. A render error comes back in error with the payload as the agent would get it. For com.limdm.hostname the response adds hostname: the name the declaration computes for the device from its last report (current name, target FQDN, source used or the reason it keeps its name).
          */
         post: operations["configItemRender"];
         delete?: never;
@@ -3805,6 +3805,8 @@ export interface components {
                 type: string;
                 state: string;
                 reasons: string[];
+                /** @description notes of the reported state (com.limdm.hostname: target, source, result, warnings) */
+                info?: string[];
             }[];
             chain: {
                 id: number;
@@ -7722,6 +7724,28 @@ export interface operations {
                             primary_user: string;
                             attributes: {
                                 [key: string]: string;
+                            };
+                            /** @description DMI serial number, empty for a placeholder */
+                            serial?: string;
+                            /** @description MAC address of the primary interface */
+                            mac?: string;
+                            vendor?: string;
+                            model?: string;
+                        };
+                        /** @description com.limdm.hostname only */
+                        hostname?: {
+                            /** @description host name the device reported */
+                            current: string;
+                            /** @description FQDN (or short name) the declaration computes */
+                            target?: string;
+                            /** @description source used, "template (fallback)" for the fallback */
+                            source?: string;
+                            /** @description why the device keeps its name */
+                            error?: string;
+                            serial?: string;
+                            /** @description hostname_info of the inventory: address, mac, ptr, fqdn, target, source, result, detail, previous, changed_at, warning */
+                            facts?: {
+                                [key: string]: unknown;
                             };
                         };
                     };

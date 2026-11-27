@@ -390,6 +390,9 @@ gets the result and the declarations token changes when a value changes. The val
 | `{{.Tenant}}` | tenant name |
 | `{{.PrimaryUser}}` | mail address of the primary user, empty without one |
 | `{{.Attributes.name}}` | custom device attribute, set in the console under **Edit** on the device page or with `PATCH /api/v1/devices/{id}` (`attributes`) |
+| `{{.Serial}}` | DMI system serial number the device reported, empty for a vendor placeholder |
+| `{{.MAC}}` | MAC address of the primary interface (the interface of the default route) |
+| `{{.Vendor}}`, `{{.Model}}` | hardware vendor and model the device reported |
 
 Functions: `lower`, `upper`, `trim`, `replace s old new`, `join list sep`,
 `hasTag .Tags "x"`, `default "fallback" value`, plus the built in `if`, `with`, `range`,
@@ -589,6 +592,93 @@ up with `lpadmin` (separate arguments, no shell).
   its capabilities and fails while it is off, then the agent retries on the next cycle.
 * Devices without CUPS are skipped, unless `install_cups` is true: then the agent installs
   the `cups` package and starts the service.
+
+### `com.limdm.hostname`
+
+Console: **Host name**.
+
+```json
+{"source": "template", "template": "pc-{{lower .Serial}}", "domain": "corp.example", "lowercase": true,
+ "max_length": 63, "fallback": "keep", "hosts": true, "mailname": true}
+```
+
+| Field | Type | Rules |
+|---|---|---|
+| `source` | text | `rdns`, `dns`, `serial`, `template` or `fixed` |
+| `name` | text | source `fixed` only: short name or FQDN |
+| `template` | text | source `template`, and the fallback of the other sources; one line up to 1024 characters, the values of [Templates](#templates) |
+| `domain` | text | DNS domain; the FQDN is short name + domain. Empty keeps the domain the source gives |
+| `lowercase` | true or false | default true |
+| `max_length` | number | length of the short name, 1 to 63; 0 is 63 |
+| `fallback` | text | `keep` (default) or `template`: what happens when the source gives no usable name |
+| `hosts` | true or false | manage the `127.0.1.1` line of `/etc/hosts` |
+| `mailname` | true or false | write the FQDN to `/etc/mailname` where the file or an MTA (Postfix, Exim) exists |
+| `pretty` | text | pretty host name, one line up to 64 characters (systemd only) |
+
+Not a list type: the item evaluated last wins. Sources:
+
+* `rdns`: the PTR record of the primary address, which is the source address of the default
+  route (IPv4 first, then IPv6). The first name counts, and only when it is forward confirmed:
+  its A or AAAA records contain that address. A PTR record that does not resolve back is
+  ignored, so whoever controls a reverse zone cannot name the device alone.
+* `dns`: the DNS name of the host. Candidates are the current host name when it is an FQDN,
+  then the current short name in each search domain of `/etc/resolv.conf` (the last `search`
+  or `domain` line, in order). The canonical name (CNAME target) of the first candidate whose
+  A or AAAA records contain the primary address wins. `hostname -f` is not used: it reads
+  `/etc/hosts`, which this declaration writes, so it would confirm its own entry.
+* `serial`: the DMI system serial number (`/sys/class/dmi/id/product_serial`, on ARM boards
+  the device tree serial). Vendor placeholders such as `To be filled by O.E.M.`,
+  `Default string`, `System Serial Number`, `0` or an empty value count as no serial.
+  The whole serial is one label (dots become `-`).
+* `template`: the template, rendered by the server for the device like file templates, with
+  `{{.Serial}}`, `{{.MAC}}`, `{{.Vendor}}` and `{{.Model}}` in addition. A template that uses
+  `.Serial` or `.MAC` while the device has not reported that value does not render.
+* `fixed`: `name`.
+
+The name is made a valid RFC 1123 host name: letters and digits stay (lower case unless
+`lowercase` is false), every other run of characters becomes one `-`, no `-` at either end,
+the short name at most `max_length` characters, the FQDN at most 253. A name of digits only
+and `localhost` are refused. When the source gives no usable name the template is used with
+`fallback` `template`; otherwise the device keeps its name and the declaration reports the
+reason as not achieved. An invalid name is never set.
+
+The agent:
+
+* sets the name only when it differs from the current one: with systemd
+  `hostnamectl set-hostname --static --transient <short name>` (and `--pretty` for `pretty`),
+  without systemd (Alpine) it writes `/etc/hostname` and runs `hostname -F /etc/hostname`.
+  The static host name is the short name; the FQDN goes to `/etc/hosts`.
+* with `hosts`, sets `127.0.1.1 <FQDN> <short name>`: inside a block between
+  `# BEGIN LiMDM hostname` and `# END LiMDM hostname` when there is one, else on the first
+  `127.0.1.1` line (Debian and Ubuntu have one), else it appends that block (Fedora, RHEL,
+  SUSE, Arch and Alpine have none). No other line is changed or removed. The SELinux label
+  is restored after writing.
+* with `mailname`, writes the FQDN to `/etc/mailname` when that file exists or Postfix or
+  Exim is installed.
+* never edits MTA configuration. When Postfix sets `myhostname` explicitly, or Exim's
+  `primary_hostname`, to another name, the declaration status shows a warning.
+* applies names from `rdns` and `dns` only when two check ins in a row give the same result,
+  and changes such a name at most once an hour, so a PTR record that changes with DHCP never
+  makes the device rename itself in a loop. Until then the status says `waiting`.
+* reports in the inventory (`hostname_info`) the primary address, its MAC, the confirmed PTR
+  name, the DNS name, the computed target, the source used, the result (`unchanged`,
+  `changed`, `waiting`, `failed`) and the name before the last change. The declaration status
+  carries the same as notes. Address, PTR and DNS name are only reported with
+  `privacy.network_info` (they are still used on the device while the item is assigned).
+
+The device page shows this under **Configuration**, **Host name**; the item editor shows the
+name the declaration computes for one device from its last report
+(`POST /api/v1/config/library/render`, field `hostname`). The device list takes the new
+name from the next check in.
+
+**Caution.** A new host name affects mail servers (HELO name, `myhostname`), Kerberos and
+Active Directory or FreeIPA joins (the machine account and keytab keep the old name), TLS
+certificates issued for the old name, monitoring and anything that matches on the name.
+Test the item on a pilot blueprint first. Nothing changes on a device until the item is
+assigned through a blueprint; removing the item leaves the current name in place. The device
+identity does not depend on the host name: the device ID, the mTLS client certificate
+(common name is the device ID) and the network certificate (DNS name derived from the device
+ID by the server) stay the same, so a device keeps checking in under its new name.
 
 ## Security
 

@@ -657,6 +657,7 @@ type DeclarationStatus struct {
 	Valid       bool     `json:"valid"`
 	Active      bool     `json:"active"`
 	Reasons     []string `json:"reasons,omitempty"`
+	Info        []string `json:"info,omitempty"` // state notes that are no failure (com.limdm.hostname: target, source, result, warnings)
 }
 
 func (f File) FileMode() (uint32, error) {
@@ -741,27 +742,29 @@ type RenewRequest struct {
 // ---- status channel ----
 
 type Inventory struct {
-	Source      string `json:"source"` // "osquery 5.x" or "native"
-	Hostname    string `json:"hostname"`
-	MachineID   string `json:"machine_id"`
-	OSID        string `json:"os_id"`
-	OSVersion   string `json:"os_version"`
-	OSName      string `json:"os_name"`
-	OSCodename  string `json:"os_codename,omitempty"`
-	Kernel      string `json:"kernel"`
-	Arch        string `json:"arch"`
-	CPU         string `json:"cpu"`
-	CPUCores    int    `json:"cpu_cores,omitempty"`
-	CPUThreads  int    `json:"cpu_threads,omitempty"`
-	MemoryMB    uint64 `json:"memory_mb"`
-	SwapMB      uint64 `json:"swap_mb,omitempty"`
-	DiskGB      uint64 `json:"disk_gb"` // root filesystem
-	Vendor      string `json:"vendor"`
-	Model       string `json:"model"`
-	Serial      string `json:"serial"`
-	BIOSVendor  string `json:"bios_vendor,omitempty"`
-	BIOSVersion string `json:"bios_version,omitempty"`
-	BootTime    int64  `json:"boot_time"`
+	Source   string `json:"source"` // "osquery 5.x" or "native"
+	Hostname string `json:"hostname"`
+	// HostnameInfo: facts and result of com.limdm.hostname (hostname.go).
+	HostnameInfo *HostnameInfo `json:"hostname_info,omitempty"`
+	MachineID    string        `json:"machine_id"`
+	OSID         string        `json:"os_id"`
+	OSVersion    string        `json:"os_version"`
+	OSName       string        `json:"os_name"`
+	OSCodename   string        `json:"os_codename,omitempty"`
+	Kernel       string        `json:"kernel"`
+	Arch         string        `json:"arch"`
+	CPU          string        `json:"cpu"`
+	CPUCores     int           `json:"cpu_cores,omitempty"`
+	CPUThreads   int           `json:"cpu_threads,omitempty"`
+	MemoryMB     uint64        `json:"memory_mb"`
+	SwapMB       uint64        `json:"swap_mb,omitempty"`
+	DiskGB       uint64        `json:"disk_gb"` // root filesystem
+	Vendor       string        `json:"vendor"`
+	Model        string        `json:"model"`
+	Serial       string        `json:"serial"`
+	BIOSVendor   string        `json:"bios_vendor,omitempty"`
+	BIOSVersion  string        `json:"bios_version,omitempty"`
+	BootTime     int64         `json:"boot_time"`
 	// Desktop environment and display manager, empty on servers.
 	Desktop        string              `json:"desktop,omitempty"`
 	DisplayManager string              `json:"display_manager,omitempty"`
