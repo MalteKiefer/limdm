@@ -19,7 +19,7 @@ German, British, US) follows the account across devices.
 |---|---|---|
 | Home | `/app/` | fleet state, what needs attention, first steps |
 | Inbox | `/app/inbox` | approvals, warnings, open commands |
-| Devices | `/app/devices` | device list with filters, saved views, exports and bulk actions; device page with every command, the remote shell, recovery keys and diagnostics; **Add device** (`/app/devices/enroll`) with the enrollment tokens |
+| Devices | `/app/devices` | device list with filters, saved views, exports and bulk actions; device page with every command, the remote shell, recovery keys, diagnostics and the **Firewall** tab (rules of the host firewall to adopt, keep or discard, see [Firewall inventory](declarations.md#firewall-inventory)); **Add device** (`/app/devices/enroll`) with the enrollment tokens |
 | Compliance | `/app/compliance` | checks, heatmap, history, policies, risk exceptions |
 | Configuration | `/app/config` | blueprints, library items, software catalog, uploaded packages, with version history, preview and rollback |
 | Updates | `/app/updates` | update rings and waves, open security updates and CVEs, installed package versions; the device page has an **Updates** tab ([Patch management](patching.md)) |
