@@ -1,6 +1,6 @@
 // Settings section "CVE data": the daily import of the Debian, Ubuntu,
-// Arch and Alpine security data, each off by default (it downloads from
-// third parties). The state of the imports and "refresh now" are in
+// Arch and Alpine security data and the CISA KEV list, each off by default
+// (it downloads from third parties). The state of the imports and "refresh now" are in
 // Updates, Security.
 import { Link } from '@tanstack/react-router'
 import { FormSection } from '../../components/form'
@@ -18,6 +18,7 @@ const feeds = [
   { id: 'ubuntu', placeholder: 'https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip' },
   { id: 'arch', placeholder: 'https://security.archlinux.org/issues/all.json' },
   { id: 'alpine', placeholder: 'https://secdb.alpinelinux.org' },
+  { id: 'kev', placeholder: 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json' },
 ] as const
 
 export function CVEFeeds() {
@@ -34,10 +35,12 @@ export function CVEFeeds() {
     ubuntu: z.boolean(),
     arch: z.boolean(),
     alpine: z.boolean(),
+    kev: z.boolean(),
     debian_url: url,
     ubuntu_url: url,
     arch_url: url,
     alpine_url: url,
+    kev_url: url,
     max_mb: z.string().refine((v) => /^\d*$/.test(v.trim()) && Number(v || 0) <= 4096, t('updates.feeds.maxRange')),
   })
   const values = {
@@ -45,10 +48,12 @@ export function CVEFeeds() {
     ubuntu: !!c.ubuntu,
     arch: !!c.arch,
     alpine: !!c.alpine,
+    kev: !!c.kev,
     debian_url: c.debian_url ?? '',
     ubuntu_url: c.ubuntu_url ?? '',
     arch_url: c.arch_url ?? '',
     alpine_url: c.alpine_url ?? '',
+    kev_url: c.kev_url ?? '',
     max_mb: c.max_mb ? String(c.max_mb) : '',
   }
   return (
@@ -66,6 +71,7 @@ export function CVEFeeds() {
               ubuntu_url: v.ubuntu_url.trim(),
               arch_url: v.arch_url.trim(),
               alpine_url: v.alpine_url.trim(),
+              kev_url: v.kev_url.trim(),
               max_mb: Number(v.max_mb || 0),
             },
           })

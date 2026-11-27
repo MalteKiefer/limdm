@@ -515,7 +515,13 @@ function Feeds() {
           key: f.distro!,
           cells: [
             <span>
-              {t(`updates.feeds.distro.${f.distro ?? 'debian'}`)} {!f.enabled && <Badge tone="off">{t('updates.feeds.disabled')}</Badge>} <span className="block font-mono text-micro break-all text-muted">{f.url}</span>
+              {t(`updates.feeds.distro.${f.distro ?? 'debian'}`)} {!f.enabled && <Badge tone="off">{t('updates.feeds.disabled')}</Badge>}{' '}
+              {f.skipped && (
+                <span title={t('updates.feeds.skippedHelp')}>
+                  <Badge tone="info">{t('updates.feeds.skipped')}</Badge>
+                </span>
+              )}{' '}
+              <span className="block font-mono text-micro break-all text-muted">{f.url}</span>
             </span>,
             f.fetched_at ? (
               <span title={dateTime(f.fetched_at)}>

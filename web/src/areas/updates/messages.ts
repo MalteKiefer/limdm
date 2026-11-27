@@ -162,7 +162,7 @@ export const de = {
   'updates.feeds.settingsSub':
     'Debian, Ubuntu, Arch und Alpine melden keine CVE Nummern zu ihren Updates. Der Server lädt dafür einmal täglich die Sicherheitsdaten der Distributionen und gleicht sie mit den installierten Paketversionen ab. Die Geräte laden nichts.',
   'updates.feeds.title': 'Sicherheitsdaten',
-  'updates.feeds.help': 'Ab Werk aus: der Server ruft dafür Dienste Dritter ab. Bei einem Fehler bleiben die letzten Daten erhalten.',
+  'updates.feeds.help': 'Ab Werk aus: der Server ruft dafür Dienste Dritter ab. Eine Distribution wird nur geladen, solange mindestens ein Gerät mit ihr läuft. Bei einem Fehler bleiben die letzten Daten erhalten.',
   'updates.feeds.enabled': 'Täglich laden',
   'updates.feeds.urlHelp': 'Leer nutzt die öffentliche Adresse; ein eigener Spiegel geht auch.',
   'updates.feeds.maxMB': 'Höchstgröße je Download (MB)',
@@ -196,6 +196,11 @@ export const de = {
   'updates.feeds.about.arch': 'Liste der AVGs: Pakete, behobene Version, Schweregrad und CVEs. Arch hat keine Releases.',
   'updates.feeds.about.alpine': 'secfixes aus main und community, je Branch, den Alpine Geräte melden (v3.20, edge). Ohne Schweregrad.',
   'updates.feeds.disabled': 'aus',
+  'updates.feeds.distro.kev': 'CISA KEV (bekannt ausgenutzt)',
+  'updates.feeds.url.kev': 'Adresse der KEV Liste (JSON)',
+  'updates.feeds.about.kev': 'Liste der CVEs, die nachweislich ausgenutzt werden (CISA). Markiert sie unter Schwachstellen. Eine kleine Datei, unabhängig von den Distributionen.',
+  'updates.feeds.skipped': 'keine Geräte, übersprungen',
+  'updates.feeds.skippedHelp': 'Kein Gerät läuft mit dieser Distribution: der Server lädt die Daten erst, wenn eines dazukommt.',
 } satisfies Catalog
 
 export const en: Record<keyof typeof de, Msg> = {
@@ -359,7 +364,7 @@ export const en: Record<keyof typeof de, Msg> = {
   'updates.feeds.settingsSub':
     "Debian, Ubuntu, Arch and Alpine report no CVE IDs for their updates. For them the server downloads the distributions' security data once a day and matches it against the installed package versions. The devices download nothing.",
   'updates.feeds.title': 'Security data',
-  'updates.feeds.help': 'Off by default: the server fetches it from third parties. After a failure the last data stays.',
+  'updates.feeds.help': 'Off by default: the server fetches it from third parties. A distribution is downloaded only while at least one device runs it. After a failure the last data stays.',
   'updates.feeds.enabled': 'Download daily',
   'updates.feeds.urlHelp': 'Empty uses the public address; a mirror of your own works too.',
   'updates.feeds.maxMB': 'Largest download (MB)',
@@ -393,4 +398,9 @@ export const en: Record<keyof typeof de, Msg> = {
   'updates.feeds.about.arch': 'The list of AVGs: packages, fixed version, severity and CVEs. Arch has no releases.',
   'updates.feeds.about.alpine': 'secfixes of main and community, per branch the Alpine devices report (v3.20, edge). No severity.',
   'updates.feeds.disabled': 'off',
+  'updates.feeds.distro.kev': 'CISA KEV (known exploited)',
+  'updates.feeds.url.kev': 'KEV list URL (JSON)',
+  'updates.feeds.about.kev': 'The CVEs known to be exploited (CISA). Marks them under Vulnerabilities. A small file, independent of the distributions.',
+  'updates.feeds.skipped': 'no devices, skipped',
+  'updates.feeds.skippedHelp': 'No device runs this distribution: the server downloads the data once one does.',
 }
