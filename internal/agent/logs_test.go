@@ -72,7 +72,7 @@ func TestContainerLogs(t *testing.T) {
 // allowRoot lets the tests read below dir, as /var/log/ is in production.
 func allowRoot(t *testing.T, dir string) {
 	old := logPathAllowed
-	logPathAllowed = func(p string) bool { return strings.HasPrefix(p, dir+"/") }
+	logPathAllowed = func(p string, _ []string) bool { return strings.HasPrefix(p, dir+"/") }
 	t.Cleanup(func() { logPathAllowed = old })
 }
 
@@ -205,7 +205,7 @@ func TestLogFileOpenRefusals(t *testing.T) {
 	os.WriteFile(secret, []byte("root:$6$hash:::\n"), 0o600)
 	os.WriteFile(filepath.Join(root, "ok.log"), []byte("fine\n"), 0o644)
 	allowRoot(t, root)
-	if f, _, err := openLogFile(filepath.Join(root, "ok.log")); err != nil {
+	if f, _, err := openLogFile(filepath.Join(root, "ok.log"), nil); err != nil {
 		t.Fatalf("plain file: %v", err)
 	} else {
 		f.Close()
@@ -214,14 +214,14 @@ func TestLogFileOpenRefusals(t *testing.T) {
 	os.Symlink(secret, filepath.Join(root, "app.log"))
 	os.Symlink(base, filepath.Join(root, "sub"))
 	for _, p := range []string{filepath.Join(root, "app.log"), filepath.Join(root, "sub", "shadow"), secret} {
-		if f, _, err := openLogFile(p); err == nil {
+		if f, _, err := openLogFile(p, nil); err == nil {
 			f.Close()
 			t.Errorf("%s opened", p)
 		}
 	}
 	// a link inside the root is refused too (no link as last component)
 	os.Symlink(filepath.Join(root, "ok.log"), filepath.Join(root, "alias.log"))
-	if _, _, err := openLogFile(filepath.Join(root, "alias.log")); err == nil {
+	if _, _, err := openLogFile(filepath.Join(root, "alias.log"), nil); err == nil {
 		t.Error("link followed")
 	}
 	// a directory others can write to (not owned by root)
@@ -229,18 +229,58 @@ func TestLogFileOpenRefusals(t *testing.T) {
 	os.Mkdir(open, 0o755)
 	os.Chmod(open, 0o777)
 	os.WriteFile(filepath.Join(open, "x.log"), []byte("x\n"), 0o644)
-	if _, _, err := openLogFile(filepath.Join(open, "x.log")); err == nil || !strings.Contains(err.Error(), "writable") {
+	if _, _, err := openLogFile(filepath.Join(open, "x.log"), nil); err == nil || !strings.Contains(err.Error(), "writable") {
 		t.Errorf("world writable directory: %v", err)
 	}
 	// a file others can write to
 	os.WriteFile(filepath.Join(root, "w.log"), []byte("x\n"), 0o644)
 	os.Chmod(filepath.Join(root, "w.log"), 0o666)
-	if _, _, err := openLogFile(filepath.Join(root, "w.log")); err == nil {
+	if _, _, err := openLogFile(filepath.Join(root, "w.log"), nil); err == nil {
 		t.Error("world writable file opened")
 	}
 	// the real check: outside /var/log/ and /srv/<name>/log/
 	logPathAllowed = api.LogFileAllowed
-	if _, _, err := openLogFile(filepath.Join(root, "ok.log")); err == nil {
+	if _, _, err := openLogFile(filepath.Join(root, "ok.log"), nil); err == nil {
 		t.Error("path outside the allowlist opened")
+	}
+}
+
+func TestLogFileCustomRoot(t *testing.T) {
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	root := filepath.Join(base, "app", "logs")
+	os.MkdirAll(root, 0o755)
+	os.WriteFile(filepath.Join(root, "app.log"), []byte("hello\n"), 0o644)
+	os.WriteFile(filepath.Join(base, "secret"), []byte("x\n"), 0o600)
+	os.Symlink(base, filepath.Join(root, "up"))
+	// the real rules, with the custom root; the temporary directory is deep enough
+	if f, _, err := openLogFile(filepath.Join(root, "app.log"), []string{root}); err != nil {
+		t.Fatalf("custom root: %v", err)
+	} else {
+		f.Close()
+	}
+	if _, _, err := openLogFile(filepath.Join(root, "app.log"), nil); err == nil {
+		t.Error("read without the root")
+	}
+	if _, _, err := openLogFile(filepath.Join(root, "up", "secret"), []string{root}); err == nil {
+		t.Error("link out of the custom root followed")
+	}
+	// collection reads it
+	c := newLogCollector(filepath.Join(base, "spool"))
+	os.MkdirAll(c.dir, 0o700)
+	if err := c.configure(api.Logging{Enabled: true, Roots: []string{root}, Files: []string{filepath.Join(root, "app.log")}, MinPriority: "debug"}); err != nil {
+		t.Fatal(err)
+	}
+	c.collectFiles()
+	f, _ := os.OpenFile(filepath.Join(root, "app.log"), os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString("from the custom root\n")
+	f.Close()
+	c.collectFiles()
+	c.closeSegment()
+	segs, _ := c.segments()
+	if len(segs) != 1 {
+		t.Fatalf("segments %v", segs)
+	}
+	if lines, _ := readSegment(segs[0]); len(lines) != 1 || lines[0].Message != "from the custom root" {
+		t.Errorf("lines %+v", lines)
 	}
 }

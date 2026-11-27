@@ -57,10 +57,18 @@ files ────┘                                                      │
 The agent reads files as root, so a file source is held to these rules (on the server when
 the item is saved, and on the device before every read):
 
-* Only below `/var/log/` or `/srv/<name>/log/`, clean absolute paths without wildcards.
-  Secret locations are refused anywhere (`/etc/shadow`, `/etc/gshadow`, `/etc/ssh/`,
-  `/root/`, `/home/*/.ssh`, `/etc/ssl/private/`, `/var/lib/limdm/`, `/etc/limdm/`, `/proc`,
-  `/sys`, `/dev`, `/run`).
+* Only below `/var/log/`, `/srv/<name>/log/` or a custom root of the item (`roots`), clean
+  absolute paths without wildcards. Secret locations are refused anywhere (`/etc/shadow`,
+  `/etc/gshadow`, `/etc/ssh/`, `/root/`, `/home/*/.ssh`, `/etc/ssl/private/`,
+  `/var/lib/limdm/`, `/etc/limdm/`, `/proc`, `/sys`, `/dev`, `/run`, `/boot`).
+* Custom roots (`roots`) are for applications that log elsewhere, for example
+  `/opt/app/logs`. A root must be a clean absolute directory at least two levels deep: `/`
+  and bare top level directories (`/etc`, `/home`, `/usr`, `/var`, `/opt` ...) are refused,
+  so are roots in a secret location. Name only directories that hold nothing but logs: the
+  agent reads every declared file below them as root and ships it. Because a root widens
+  what the agent reads, saving an item with `roots` needs four eyes approval when it is on,
+  and the audit entry lists the roots. The server checks the rules when the item is saved,
+  the agent again before every read.
 * Symbolic links of the directories are resolved and the real path must still be in an
   allowed root; the file itself is opened with `O_NOFOLLOW` (a link as the file is refused,
   also one pointing inside the root), and the opened file must be the file the real path

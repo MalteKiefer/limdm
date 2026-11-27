@@ -626,6 +626,10 @@ func itemDetail(it api.LibraryItem, note string) string {
 	if it.Type == api.TypeNetwork {
 		detail = it.Type + " " + string(api.MaskNetworkSecrets(it.Payload)) // no secrets in the audit log
 	}
+	var l api.Logging
+	if it.Type == api.TypeLogging && json.Unmarshal(it.Payload, &l) == nil && len(l.Roots) > 0 {
+		detail = "custom log roots " + strings.Join(l.Roots, ", ") + "; " + detail
+	}
 	if note != "save" {
 		detail = note + ": " + detail
 	}

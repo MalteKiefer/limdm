@@ -42,8 +42,13 @@ type Logging struct {
 	ContainerLabels   []string `json:"container_labels,omitempty"`
 	ComposeProjects   []string `json:"compose_projects,omitempty"`
 	ExcludeContainers []string `json:"exclude_containers,omitempty"`
-	// absolute paths of plain text log files, followed across rotation
+	// absolute paths of plain text log files, followed across rotation,
+	// below /var/log/, /srv/<name>/log/ or one of Roots
 	Files []string `json:"files,omitempty"`
+	// Roots are further directories file sources may live in. The agent
+	// reads them as root and ships them: saving an item with roots needs
+	// four eyes approval when it is on (LogRootValid has the hard rules).
+	Roots []string `json:"roots,omitempty"`
 	// regular expressions on the message: with include only matching
 	// lines are shipped, exclude drops matching lines
 	Include []string `json:"include,omitempty"`
@@ -99,30 +104,45 @@ var (
 // must never reach other files. logSecretPrefixes are refused anywhere, as
 // a second line.
 var logSecretPrefixes = []string{"/etc/shadow", "/etc/gshadow", "/etc/ssh/", "/root/", "/etc/ssl/private/", "/var/lib/limdm/",
-	"/etc/limdm/", "/proc/", "/sys/", "/dev/", "/run/"}
+	"/etc/limdm/", "/proc/", "/sys/", "/dev/", "/run/", "/boot/"}
 
-// LogFileAllowed reports whether a clean absolute path is a permitted log
-// file location.
-func LogFileAllowed(p string) bool {
-	if p != path.Clean(p) || !strings.HasPrefix(p, "/") {
-		return false
-	}
+// logSecret reports a path in a secret location (or the location itself).
+func logSecret(p string) bool {
 	for _, s := range logSecretPrefixes {
 		if p == strings.TrimSuffix(s, "/") || strings.HasPrefix(p, s) {
-			return false
+			return true
 		}
 	}
 	parts := strings.Split(p, "/") // "", first, ...
-	if len(parts) >= 3 && parts[1] == "home" && slices.Contains(parts[3:], ".ssh") {
+	return len(parts) >= 3 && parts[1] == "home" && slices.Contains(parts[3:], ".ssh")
+}
+
+func cleanAbs(p string) bool {
+	return strings.HasPrefix(p, "/") && p == path.Clean(p) && len(p) <= 512 && noControl(p, 512) && !strings.ContainsAny(p, "*?[")
+}
+
+// LogRootValid checks a custom root of file sources: a clean absolute
+// directory at least two levels deep (never "/" or a bare top level
+// directory such as /etc, /home or /opt), not in a secret location.
+func LogRootValid(r string) bool {
+	return cleanAbs(r) && strings.Count(r, "/") >= 2 && !logSecret(r)
+}
+
+// LogFileAllowed reports whether a clean absolute path is a permitted log
+// file location: below /var/log/, /srv/<name>/log/ or one of roots (valid
+// ones only), never in a secret location.
+func LogFileAllowed(p string, roots []string) bool {
+	if !cleanAbs(p) || logSecret(p) {
 		return false
 	}
+	parts := strings.Split(p, "/")
 	switch {
 	case strings.HasPrefix(p, "/var/log/") && len(p) > len("/var/log/"):
 		return true
 	case len(parts) >= 5 && parts[1] == "srv" && parts[2] != "" && parts[3] == "log" && parts[4] != "":
 		return true
 	}
-	return false
+	return slices.ContainsFunc(roots, func(r string) bool { return LogRootValid(r) && strings.HasPrefix(p, r+"/") })
 }
 
 // LogGlob matches name against a pattern with * as the only wildcard.
@@ -161,13 +181,21 @@ func (l Logging) validate() error {
 	if len(l.Files) > 50 {
 		bad("files: at most 50 paths")
 	}
+	if len(l.Roots) > 20 {
+		bad("roots: at most 20 directories")
+	}
+	for _, r := range l.Roots {
+		if !LogRootValid(r) {
+			bad("roots: %q must be a clean absolute directory at least two levels deep, outside secret locations", r)
+		}
+	}
 	for _, f := range l.Files {
-		if !strings.HasPrefix(f, "/") || path.Clean(f) != f || len(f) > 512 || !noControl(f, 512) || strings.ContainsAny(f, "*?[") {
+		if !cleanAbs(f) {
 			bad("files: %q must be a clean absolute path without wildcards", f)
 			continue
 		}
-		if !LogFileAllowed(f) {
-			bad("files: %q must be below /var/log/ or /srv/<name>/log/", f)
+		if !LogFileAllowed(f, l.Roots) {
+			bad("files: %q must be below /var/log/, /srv/<name>/log/ or one of roots", f)
 		}
 	}
 	for _, f := range []struct {

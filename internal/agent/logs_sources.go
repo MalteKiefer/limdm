@@ -336,8 +336,8 @@ func safeOwner(fi os.FileInfo) bool {
 }
 
 // openLogFile opens a declared log file read only after the checks above.
-func openLogFile(p string) (*os.File, os.FileInfo, error) {
-	if !logPathAllowed(p) {
+func openLogFile(p string, roots []string) (*os.File, os.FileInfo, error) {
+	if !logPathAllowed(p, roots) {
 		return nil, nil, fmt.Errorf("%s: not an allowed log file location", p)
 	}
 	dir, err := filepath.EvalSymlinks(filepath.Dir(p))
@@ -345,7 +345,7 @@ func openLogFile(p string) (*os.File, os.FileInfo, error) {
 		return nil, nil, err
 	}
 	real := filepath.Join(dir, filepath.Base(p))
-	if !logPathAllowed(real) {
+	if !logPathAllowed(real, roots) {
 		return nil, nil, fmt.Errorf("%s: resolves to %s, outside the allowed log locations", p, real)
 	}
 	dfi, err := os.Stat(dir)
@@ -391,7 +391,7 @@ func (c *logCollector) collectFiles() {
 }
 
 func (c *logCollector) collectFile(p string) {
-	f, fi, err := openLogFile(p)
+	f, fi, err := openLogFile(p, c.cfg.Roots)
 	if err != nil {
 		return
 	}
@@ -404,7 +404,7 @@ func (c *logCollector) collectFile(p string) {
 	}
 	if cur.Inode != ino {
 		// rotated: read the rest of the old file when it was renamed to .1
-		if old, ofi, err := openLogFile(p + ".1"); err == nil {
+		if old, ofi, err := openLogFile(p+".1", c.cfg.Roots); err == nil {
 			if inode(ofi) == cur.Inode {
 				if lines, _, err := readFileFrom(old, p, cur, true); err == nil {
 					_ = c.add(lines)

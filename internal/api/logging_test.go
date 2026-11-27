@@ -21,6 +21,14 @@ func TestLoggingValidate(t *testing.T) {
 		`{"files": ["/etc/shadow"]}`,
 		`{"files": ["/home/a/app.log"]}`,
 		`{"files": ["/srv/log/x"]}`,
+		`{"files": ["/opt/app/logs/a.log"]}`, // outside every root
+		`{"roots": ["/etc"], "files": ["/etc/app.log"]}`,
+		`{"roots": ["/"]}`,
+		`{"roots": ["/opt"]}`,
+		`{"roots": ["/etc/ssh/keys"]}`,
+		`{"roots": ["/home/u/.ssh"]}`,
+		`{"roots": ["/opt/app/../../etc"]}`,
+		`{"roots": ["/boot/grub"]}`,
 		`{"files": ["/var/log/*.log"]}`,
 		`{"include": ["("]}`,
 		`{"units": ["a b"]}`,
@@ -39,13 +47,25 @@ func TestLoggingValidate(t *testing.T) {
 	}
 }
 
+func TestLogRoots(t *testing.T) {
+	ok := Declaration{Identifier: "logs", Type: TypeLogging, Payload: json.RawMessage(`{"enabled": true, "roots": ["/opt/app/logs"], "files": ["/opt/app/logs/app.log"]}`)}
+	var p Policy
+	if err := ok.apply(&p); err != nil {
+		t.Fatal(err)
+	}
+	roots := []string{"/opt/app/logs", "/etc"}
+	if !LogFileAllowed("/opt/app/logs/x/y.log", roots) || LogFileAllowed("/opt/app/logsx/y.log", roots) || LogFileAllowed("/etc/app.log", roots) || LogFileAllowed("/etc/shadow", []string{"/etc/x"}) {
+		t.Error("roots")
+	}
+}
+
 func TestLogFileAllowed(t *testing.T) {
 	for p, ok := range map[string]bool{
 		"/var/log/syslog": true, "/var/log/nginx/error.log": true, "/srv/paperless/log/app.log": true,
 		"/var/log": false, "/var/log/": false, "/var/logs/x": false, "/srv/app/data/x.log": false, "/srv/log/x": false,
 		"/etc/shadow": false, "/root/x.log": false, "/home/u/.ssh/id_ed25519": false, "/var/log/../../etc/shadow": false, "var/log/x": false,
 	} {
-		if LogFileAllowed(p) != ok {
+		if LogFileAllowed(p, nil) != ok {
 			t.Errorf("%s: want %v", p, ok)
 		}
 	}

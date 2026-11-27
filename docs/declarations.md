@@ -701,7 +701,8 @@ the whole data flow, storage, archive and privacy.
 | `containers` | true or false | Docker and Podman containers |
 | `container_names`, `container_labels`, `compose_projects` | list of text | only containers whose name (`*` as wildcard), label (`key=value`) or compose project matches; none of them: all containers |
 | `exclude_containers` | list of text | container names to leave out |
-| `files` | list of text | absolute paths of plain text log files, at most 50, without wildcards, only below `/var/log/` or `/srv/<name>/log/` ([logs.md](logs.md#file-sources)) |
+| `files` | list of text | absolute paths of plain text log files, at most 50, without wildcards, only below `/var/log/`, `/srv/<name>/log/` or one of `roots` ([logs.md](logs.md#file-sources)) |
+| `roots` | list of text | further directories for `files`, at most 20: clean absolute paths at least two levels deep (`/opt/app/logs`, not `/opt`), never in a secret location. The agent reads them as root and ships them; saving needs four eyes approval when it is on |
 | `include`, `exclude` | list of text | regular expressions (RE2) on the message: with `include` only matching lines are shipped, `exclude` drops matching lines |
 | `mask_builtin` | true or false | default true: passwords, tokens, `Authorization` headers, private keys, JWTs, AWS access key IDs and credentials in URLs become `***` |
 | `mask` | list of text | further regular expressions; the matched text becomes `***` |

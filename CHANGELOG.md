@@ -16,12 +16,14 @@ change behavior they rely on.
 - Logs area and device Logs tab: search across devices with a query language, histogram, context, live tail, saved views, audited export, alert rules on notification channels (evaluated in the scope of the account that saved them; notifications carry no log text).
 - Encrypted log archive to S3 compatible storage or Backblaze B2 (AES-256-GCM, per tenant data keys wrapped by the `logs` key, rotation through Settings, Keys, verified uploads), restore from the console or `limdm-server logs restore`.
 - Settings, Logs section and notification events `logs.alert` and `logs.guard`.
+- Custom log directories: `roots` in `com.limdm.logging` lets file sources live in further directories (at least two levels deep, for example `/opt/app/logs`), editable in the item form.
 
 ### Changed
 - The console loads area translations with their routes (first load 212 KB instead of 286 KB).
 
 ### Security
 - Log file sources are limited to `/var/log/` and `/srv/<name>/log/`; the agent opens them without following links and refuses files or directories writable by others.
+- Custom log roots keep the same rules (no `/`, no bare top level directory, never in secret locations such as `/etc/shadow`, `/etc/ssh/`, `/root/`, `/home/*/.ssh`, `/boot`), are checked on save and on the agent, and saving an item with roots needs four eyes approval when it is on; the audit entry lists the roots.
 
 ## 0.20.2 (2026-11-27)
 

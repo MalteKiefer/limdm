@@ -35,6 +35,10 @@ func (s *Server) itemNeedsApproval(it api.LibraryItem) bool {
 	if rootTypes[it.Type] {
 		return true
 	}
+	if it.Type == api.TypeLogging { // custom roots widen what the agent reads as root and ships
+		var l api.Logging
+		return json.Unmarshal(it.Payload, &l) != nil || len(l.Roots) > 0
+	}
 	if it.Type == api.TypeFirewall { // a remove list deletes rules on every device that gets the item
 		var f api.Firewall
 		return json.Unmarshal(it.Payload, &f) != nil || len(f.Remove) > 0
