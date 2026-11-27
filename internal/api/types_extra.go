@@ -236,6 +236,7 @@ type ExtraPolicy struct {
 
 	Artifacts []Artifact `json:"artifacts,omitempty"` // artifacts.go
 	Hostname  *Hostname  `json:"hostname,omitempty"`  // hostname.go
+	Logging   *Logging   `json:"logging,omitempty"`   // logging.go
 }
 
 var extraExamples = map[string]string{

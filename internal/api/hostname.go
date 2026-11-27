@@ -167,7 +167,7 @@ func (h Hostname) validate() error {
 // applyHostname decodes and validates the hostname type.
 func (d Declaration) applyHostname(p *Policy) (bool, error) {
 	if d.Type != TypeHostname {
-		return false, nil
+		return d.applyLogging(p) // logging.go
 	}
 	var v Hostname
 	if err := strict(d.Payload, &v); err != nil {

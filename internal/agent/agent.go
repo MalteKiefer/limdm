@@ -598,6 +598,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.store.jobs = map[string]*appJob{}
 	go a.serveDesktop(ctx)
 	go a.pollLoop(ctx)
+	go a.logLoop(ctx)       // logs.go, idle without com.limdm.logging
 	a.enforceOffline(false) // before anything else: the device may have been off for a long time
 	for {
 		a.cycle(ctx)
