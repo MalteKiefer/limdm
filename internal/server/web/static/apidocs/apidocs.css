@@ -1,0 +1,38 @@
+/* LiMDM look for Swagger UI at /api/v1/docs. Colors follow app.css; dark mode is
+   Swagger UI's own html.dark-mode, switched by apidocs.js from prefers-color-scheme. */
+:root {
+  --accent: #0f6e6e; --accent-ink: #fff; --accent-soft: #e2f0ef;
+  --bg: #f5f6f7; --surface: #fff; --line: #e2e5e9; --text: #16191d; --text-2: #4b535c;
+  --warn: #8a5a00; --warn-soft: #fbf1da;
+  color-scheme: light;
+}
+html.dark-mode {
+  --accent: #3fb5ad; --accent-ink: #08201e; --accent-soft: #12302e;
+  --bg: #0e1113; --surface: #15191c; --line: #262c31; --text: #e6e9ec; --text-2: #aab2ba;
+  --warn: #e3b341; --warn-soft: #2f2610;
+  color-scheme: dark;
+}
+html, body { margin: 0; }
+body, html.dark-mode, html.dark-mode .swagger-ui { background: var(--bg); color: var(--text); }
+body { font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; }
+
+.apidocs-bar {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 10px 20px; background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.apidocs-brand { display: inline-flex; align-items: center; gap: 10px; color: var(--text); font-weight: 600; font-size: 16px; text-decoration: none; }
+.apidocs-session { color: var(--text-2); font-size: 13px; }
+.apidocs-back { margin-left: auto; color: var(--accent); text-decoration: none; }
+.apidocs-back:hover { text-decoration: underline; }
+.apidocs-bar a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.swagger-ui { font-family: inherit; }
+.swagger-ui .wrapper { max-width: 1320px; padding: 0 20px; }
+.swagger-ui .info { margin: 24px 0; }
+.swagger-ui .info .title { color: var(--text); }
+.swagger-ui .info a, .swagger-ui .markdown a, .swagger-ui .renderedMarkdown a { color: var(--accent); }
+.swagger-ui .scheme-container { background: var(--surface); box-shadow: none; border-bottom: 1px solid var(--line); }
+.swagger-ui .btn.authorize { color: var(--accent); border-color: var(--accent); }
+.swagger-ui .btn.authorize svg { fill: var(--accent); }
+.swagger-ui .btn.execute { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.swagger-ui .opblock-tag { border-bottom-color: var(--line); }

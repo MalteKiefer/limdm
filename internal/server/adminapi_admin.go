@@ -4,14 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"html/template"
 	"io"
 	"net/http"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -551,89 +550,23 @@ var errPrecondition = &userError{http.StatusPreconditionFailed, "changed since i
 
 // ---- API reference ----
 
-// apiReference renders openapi.json as a page on the console origin, with
-// the console's stylesheet and no scripts, so the CSP needs no exception.
-func (s *Server) apiReference(w http.ResponseWriter, r *http.Request) {
-	var doc struct {
-		Info struct {
-			Title, Version, Description string
-		}
-		Paths map[string]map[string]json.RawMessage
-	}
-	type operation struct {
-		Summary, Description string
-		Parameters           []struct {
-			Ref         string `json:"$ref"`
-			Name, In    string
-			Required    bool
-			Description string
-		}
-		Responses map[string]json.RawMessage
-	}
-	if err := json.Unmarshal(openAPIDoc, &doc); err != nil {
-		http.Error(w, "invalid openapi.json", http.StatusInternalServerError)
-		return
-	}
-	type param struct{ Name, In, Description string }
-	type op struct {
-		ID, Method, Path, Summary, Description string
-		Params                                 []param
-		Codes                                  []string
-	}
-	var ops []op
-	for path, methods := range doc.Paths {
-		for method, raw := range methods {
-			var o operation
-			if method == "parameters" || json.Unmarshal(raw, &o) != nil {
-				continue // path level parameters are repeated by the operations
-			}
-			x := op{Method: strings.ToUpper(method), Path: path, Summary: o.Summary, Description: o.Description}
-			x.ID = strings.NewReplacer("/", "-", "{", "", "}", "").Replace(strings.ToLower(x.Method) + path)
-			for _, p := range o.Parameters {
-				if p.Ref != "" {
-					p.Name, p.In = strings.TrimPrefix(p.Ref, "#/components/parameters/"), "query"
-				}
-				if p.Required {
-					p.Description = strings.TrimSpace("required. " + p.Description)
-				}
-				x.Params = append(x.Params, param{p.Name, p.In, p.Description})
-			}
-			for code := range o.Responses {
-				x.Codes = append(x.Codes, code)
-			}
-			sort.Strings(x.Codes)
-			ops = append(ops, x)
-		}
-	}
-	order := map[string]int{"GET": 0, "POST": 1, "PUT": 2, "PATCH": 3, "DELETE": 4}
-	sort.Slice(ops, func(i, j int) bool {
-		if ops[i].Path != ops[j].Path {
-			return ops[i].Path < ops[j].Path
-		}
-		return order[ops[i].Method] < order[ops[j].Method]
-	})
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := apiReferenceTpl.Execute(w, map[string]any{"Info": doc.Info, "Ops": ops}); err != nil {
-		s.log.Error("api reference", "err", err)
-	}
-}
+//go:embed apidocs.html
+var apiDocsPage []byte
 
-var apiReferenceTpl = template.Must(template.New("ref").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.Info.Title}} reference</title><link rel="stylesheet" href="/static/app.css"></head>
-<body><main class="content">
-<h1>{{.Info.Title}} <span class="muted">version {{.Info.Version}}</span></h1>
-<p>Machine readable: <a href="/api/v1/openapi.json">/api/v1/openapi.json</a> (OpenAPI 3.1). Every endpoint takes <code>Authorization: Bearer &lt;token&gt;</code>.</p>
-<nav class="card"><ul>{{range .Ops}}<li><a href="#{{.ID}}"><code>{{.Method}} {{.Path}}</code></a> {{.Summary}}</li>{{end}}</ul></nav>
-{{range .Ops}}<section class="card" id="{{.ID}}">
-<h2><code>{{.Method}} {{.Path}}</code></h2>
-<p><strong>{{.Summary}}</strong></p>{{if .Description}}<p>{{.Description}}</p>{{end}}
-{{if .Params}}<table><thead><tr><th>Parameter</th><th>In</th><th>Description</th></tr></thead><tbody>
-{{range .Params}}<tr><td><code>{{.Name}}</code></td><td>{{.In}}</td><td>{{.Description}}</td></tr>{{end}}</tbody></table>{{end}}
-<p class="muted">Answers: {{range $i, $c := .Codes}}{{if $i}}, {{end}}{{$c}}{{end}}</p>
-</section>{{end}}
-</main></body></html>
-`))
+// apiDocsCSP is the console policy plus data: and blob: images: Swagger UI
+// draws its icons as data: SVG in swagger-ui.css and shows image answers
+// (the TOTP QR code) from blob: URLs. Scripts, styles and connections stay
+// 'self'; the page runs no inline script or style.
+const apiDocsCSP = "default-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; form-action 'self'; base-uri 'none'"
+
+// apiReference serves Swagger UI (static/vendor/swagger-ui) for openapi.json.
+// Public like the document itself: the page holds no data, and "Try it out"
+// calls carry the caller's token or console session through the usual checks.
+func (s *Server) apiReference(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Security-Policy", apiDocsCSP)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(apiDocsPage)
+}
 
 // preconditionFail answers err; a failed If-Match carries the current ETag.
 func (s *Server) preconditionFail(w http.ResponseWriter, r *http.Request, table string, id int64, err error) {
