@@ -4,6 +4,24 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.20.0 (2026-11-27)
+
+### Upgrade notes
+- Agents report the source version of Debian packages, so every agent sends its package list once more after the update; CVE matches are recomputed at server start.
+
+### Added
+- Vulnerabilities page (main navigation, palette) with severity, remediation and top software cards, filters, sorting, paging, CSV export, column chooser, full screen and a detail sheet with packages, devices, CISA KEV and references.
+- `GET /api/v1/vulnerabilities`, `/summary`, `/{cve}`, `POST /{cve}/accept` and `/{cve}/reopen`; risk acceptance per CVE (optionally one device or package) with reason and expiry, audited.
+- CVE findings keep first detected, last seen and remediated; CVSS v3 scores from the Ubuntu OSV vectors; optional CISA KEV feed (off by default).
+
+### Changed
+- A distribution CVE feed is downloaded only while at least one device runs that distribution; the feed state shows "no devices, skipped".
+- CVEs of pending dnf and zypper updates are recorded as findings.
+
+### Fixed
+- Debian packages whose binary version differs from the source version (postgresql 17+278+deb13u1 from postgresql-common 278+deb13u1) were matched as vulnerable; the agent now reports the source version and the matching compares it.
+- Form fields line up with subgrid rows only in containers that hold nothing but fields; filter bars with other controls are no longer shifted.
+
 ## 0.19.1 (2026-11-27)
 
 ### Fixed
