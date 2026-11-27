@@ -113,9 +113,9 @@ network namespace) and `LIMDM_AGENT_LISTEN` itself. Other variables of the table
 ## Console settings
 
 **Settings** is open to admins (edit) and auditors (read). It has the tabs General,
-Security, SSO, Notifications, Branding, Data retention, Operations and Backup (saving and
-Backup: global admins only); each form saves only its own fields, changes take
-effect at once on every instance and are written to the audit log (`settings.save`).
+Security, SSO, Notifications, Branding, Data retention, Operations, Enrollment, CVE data and
+Backup (saving and Backup: global admins only); each form saves only its own fields, changes
+take effect at once on every instance and are written to the audit log (`settings.save`).
 Accounts of a tenant see only the Notifications tab with their own channels
 ([tenants.md](tenants.md)).
 
@@ -217,6 +217,16 @@ that missed the change notification loads it on reconnect):
   continues where it stopped.
 
 The environment variables of the same name are only the values until the first save here.
+
+### Enrollment
+
+Limits and defaults of new enrollment tokens: maximum uses (1 to 500) and days (1 to 30),
+default uses and days (1 and 1, within the limits), and **Require TPM bound key** for every
+tenant (a tenant can also require it on its own). Section `enrollment` of
+`PATCH /api/v1/settings/{section}` with `max_uses`, `max_days`, `default_uses`,
+`default_days`, `require_tpm`. Every token use is audited
+([agent.md](agent.md#tpm-bound-device-key)). The domain of EAP-TLS device certificates is
+under **Network** (`network_cert_domain`, [network.md](network.md)).
 
 ### CVE data
 

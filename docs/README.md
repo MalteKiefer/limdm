@@ -1,6 +1,6 @@
 # LiMDM documentation
 
-The documents for LiMDM 0.16. Start with [Installation](installation.md), then
+The documents for LiMDM 0.18 and the unreleased changes in the changelog. Start with [Installation](installation.md), then
 [Concepts](concepts.md) and [Console](console.md). Changes per version are in the
 [changelog](../CHANGELOG.md); the upgrade from 0.15 is in
 [Operations](operations.md#upgrading-from-015-to-016).
