@@ -389,6 +389,8 @@ export default {
   'settings.notify.none': 'Каналов пока нет',
   'settings.notify.noneBody': 'Подключите Slack, Discord, эл. почту или вебхук, чтобы узнавать о несоответствующих устройствах, попытках вмешательства и неудачных командах.',
   'settings.notify.namePh': 'Дежурный ИТ',
+  'settings.notify.lang': 'Язык',
+  'settings.notify.langHelp': 'Язык писем и сообщений Slack и Discord. Вебхуки остаются на английском.',
   'settings.notify.url': 'URL вебхука',
   'settings.notify.urlHelp': 'Хранится в зашифрованном виде. Только https; адреса loopback, link local, метаданных и частных сетей отклоняются.',
   'settings.notify.urlBad': 'Введите URL https.',

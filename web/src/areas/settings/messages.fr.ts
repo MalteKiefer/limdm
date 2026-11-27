@@ -389,6 +389,8 @@ export default {
   'settings.notify.none': 'Aucun canal',
   'settings.notify.noneBody': 'Connectez Slack, Discord, e-mail ou un webhook pour être informé des appareils non conformes, des tentatives de manipulation et des commandes en échec.',
   'settings.notify.namePh': 'Astreinte IT',
+  'settings.notify.lang': 'Langue',
+  'settings.notify.langHelp': 'Langue des e-mails et des messages Slack et Discord. Les webhooks restent en anglais.',
   'settings.notify.url': 'URL du webhook',
   'settings.notify.urlHelp': 'Stockée chiffrée. https uniquement ; loopback, link local, métadonnées et réseaux privés sont refusés.',
   'settings.notify.urlBad': 'Saisissez une URL https.',

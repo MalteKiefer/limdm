@@ -13454,6 +13454,21 @@
           },
           "detail": {
             "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "description": "Device events: the event in the request language"
+          },
+          "key": {
+            "type": "string",
+            "description": "Device events: key of the event format (EventFormats in internal/api/events.go)"
+          },
+          "params": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Device events: parameters of the event format"
           }
         }
       },
@@ -13948,7 +13963,19 @@
             "type": "string"
           },
           "extra": {
-            "type": "string"
+            "type": "string",
+            "description": "Audit: label of the action; event: the event in the request language"
+          },
+          "key": {
+            "type": "string",
+            "description": "Device events: key of the event format (EventFormats in internal/api/events.go)"
+          },
+          "params": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Device events: parameters of the event format"
           }
         },
         "required": [
@@ -17045,6 +17072,18 @@
             "items": {
               "type": "string"
             }
+          },
+          "lang": {
+            "type": "string",
+            "enum": [
+              "en",
+              "de",
+              "fr",
+              "es",
+              "it",
+              "ru"
+            ],
+            "description": "Language of email, Slack and Discord notifications (webhooks stay English); English when empty"
           }
         },
         "required": []

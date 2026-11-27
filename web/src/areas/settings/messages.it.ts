@@ -389,6 +389,8 @@ export default {
   'settings.notify.none': 'Ancora nessun canale',
   'settings.notify.noneBody': 'Collega Slack, Discord, email o un webhook per essere avvisato di dispositivi non conformi, tentativi di manomissione e comandi non riusciti.',
   'settings.notify.namePh': 'Reperibilità IT',
+  'settings.notify.lang': 'Lingua',
+  'settings.notify.langHelp': 'Lingua di e-mail, Slack e Discord. I webhook restano in inglese.',
   'settings.notify.url': 'URL del webhook',
   'settings.notify.urlHelp': 'Salvato cifrato. Solo https; indirizzi loopback, link local, di metadati e di reti private vengono rifiutati.',
   'settings.notify.urlBad': 'Inserisci un URL https.',

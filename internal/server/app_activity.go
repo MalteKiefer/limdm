@@ -36,6 +36,11 @@ type activityItem struct {
 	Target   string    `json:"target"`
 	Hostname string    `json:"hostname,omitempty"`
 	Detail   string    `json:"detail"`
+	// device events: the text in the reader's language and its key and
+	// parameters (api.ParseEvent); empty when the text matches no format
+	Text   string   `json:"text,omitempty"`
+	Key    string   `json:"key,omitempty"`
+	Params []string `json:"params,omitempty"`
 }
 
 // activityCategory groups an audit action for filters and the histogram.
@@ -165,7 +170,7 @@ func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request, c apiCaller
 				continue
 			}
 			items = append(items, activityItem{ID: "a" + strconv.FormatInt(a.ID, 10), Kind: "audit", Category: cat, At: a.At, Actor: a.Actor,
-				Action: a.Action, Label: auditLabel(lang, a.Action, func(string) string { return "" }), Target: a.Target, Detail: a.Detail})
+				Action: a.Action, Label: auditLabel(lang, a.Action), Target: a.Target, Detail: a.Detail})
 			if len(items) > limit {
 				break
 			}
@@ -192,6 +197,7 @@ func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request, c apiCaller
 				return
 			}
 			it.ID, it.Actor, it.Label = "e"+strconv.FormatInt(id, 10), it.Hostname, translate(lang, "Device event")
+			it.Key, it.Params, it.Text = eventText(lang, it.Detail)
 			items = append(items, it)
 		}
 		rows.Close()

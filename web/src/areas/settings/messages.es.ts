@@ -389,6 +389,8 @@ export default {
   'settings.notify.none': 'Aún no hay canales',
   'settings.notify.noneBody': 'Conecte Slack, Discord, correo o un webhook para enterarse de dispositivos no conformes, intentos de manipulación y comandos fallidos.',
   'settings.notify.namePh': 'Guardia de TI',
+  'settings.notify.lang': 'Idioma',
+  'settings.notify.langHelp': 'Idioma del correo, Slack y Discord. Los webhooks siguen en inglés.',
   'settings.notify.url': 'URL del webhook',
   'settings.notify.urlHelp': 'Guardada cifrada. Solo https; se rechazan direcciones loopback, link local, de metadatos y de redes privadas.',
   'settings.notify.urlBad': 'Introduzca una URL https.',

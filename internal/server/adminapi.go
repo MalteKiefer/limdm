@@ -282,6 +282,8 @@ func (c apiCaller) can(level string) bool {
 // token's scopes.
 func (s *Server) need(level string, h apiHandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// problem details in the caller's language (problemField reads it back)
+		w.Header().Set("Content-Language", requestLang(r))
 		c, _ := r.Context().Value(apiCallerKey).(apiCaller)
 		if !c.allows(level) {
 			s.deny(w, r, c, "the token's role cannot do this")

@@ -3980,6 +3980,12 @@ export interface components {
             target: string;
             hostname?: string;
             detail: string;
+            /** @description Device events: the event in the request language */
+            text?: string;
+            /** @description Device events: key of the event format (EventFormats in internal/api/events.go) */
+            key?: string;
+            /** @description Device events: parameters of the event format */
+            params?: string[];
         };
         ActivityPage: {
             items: components["schemas"]["ActivityItem"][];
@@ -4115,7 +4121,12 @@ export interface components {
             status: string;
             by: string;
             detail: string;
+            /** @description Audit: label of the action; event: the event in the request language */
             extra: string;
+            /** @description Device events: key of the event format (EventFormats in internal/api/events.go) */
+            key?: string;
+            /** @description Device events: parameters of the event format */
+            params?: string[];
         };
         TimelinePage: {
             items: components["schemas"]["TimelineEntry"][];
@@ -4925,6 +4936,11 @@ export interface components {
             user?: string;
             from?: string;
             to?: string[];
+            /**
+             * @description Language of email, Slack and Discord notifications (webhooks stay English); English when empty
+             * @enum {string}
+             */
+            lang?: "en" | "de" | "fr" | "es" | "it" | "ru";
         };
         Channel: {
             id: number;

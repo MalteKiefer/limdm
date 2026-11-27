@@ -12,7 +12,8 @@ import { FormSection } from '../../components/form'
 import { EmptyState, ErrorState, errorText, LoadingState } from '../../components/states'
 import { ActionMenu, Badge, Modal } from '../../components/ui'
 import { ago, bytes, dateTime, fmt } from '../../i18n/format'
-import { useT, type MessageKey } from '../../i18n'
+import { currentLocale, locales, useT, type MessageKey } from '../../i18n'
+import type { Locale } from '../../lib/prefs'
 import { useAction, useBackup, useChannels, useKeys, useSettings } from './api'
 import { Confirm, Facts, ListField, SectionHead, SelectField, SettingsForm, TextField, Toggle } from '../../components/settingsform'
 import { badTime, cleanSchedule, keepEmpty, lines, parseTimes, unlines, weekOrder, type Keep, type Schedule } from './logic'
@@ -278,6 +279,7 @@ function AddChannel({ events, onClose }: { events: { type: string; label: string
       from: z.string(),
       to: z.string(),
       events: z.array(z.string()),
+      lang: z.string(),
     })
     .superRefine((v, ctx) => {
       if (v.kind !== 'email' && !/^https:\/\/\S+$/.test(v.url.trim())) ctx.addIssue({ code: 'custom', path: ['url'], message: t('settings.notify.urlBad') })
@@ -291,14 +293,15 @@ function AddChannel({ events, onClose }: { events: { type: string; label: string
     <Modal open wide onClose={onClose} title={t('settings.notify.add')} description={t('settings.notify.addHelp')}>
       <SettingsForm
         schema={schema}
-        values={{ kind: 'slack', name: '', url: '', host: '', port: 587, tls: 'starttls', user: '', password: '', from: '', to: '', events: [] }}
+        values={{ kind: 'slack', name: '', url: '', host: '', port: 587, tls: 'starttls', user: '', password: '', from: '', to: '', events: [], lang: currentLocale() }}
         okText={t('settings.notify.added')}
         onSave={async (v) => {
           const kind = v.kind as Schemas['ChannelInput']['kind']
+          const lang = v.lang as Locale
           await add.mutateAsync(
             kind === 'email'
-              ? { kind, name: v.name.trim(), events: v.events, password: v.password, config: { host: v.host.trim(), port: v.port, tls: v.tls as 'tls', user: v.user.trim(), from: v.from.trim(), to: lines(v.to) } }
-              : { kind, name: v.name.trim(), events: v.events, url: v.url.trim() },
+              ? { kind, name: v.name.trim(), events: v.events, password: v.password, config: { host: v.host.trim(), port: v.port, tls: v.tls as 'tls', user: v.user.trim(), from: v.from.trim(), to: lines(v.to), lang } }
+              : { kind, name: v.name.trim(), events: v.events, url: v.url.trim(), config: kind === 'webhook' ? undefined : { lang } },
           )
           onClose()
         }}
@@ -321,6 +324,7 @@ function AddChannel({ events, onClose }: { events: { type: string; label: string
                 </div>
               </fieldset>
               <TextField form={f} name="name" label={t('settings.tokens.name')} placeholder={t('settings.notify.namePh')} required />
+              {kind !== 'webhook' && <SelectField form={f} name="lang" label={t('settings.notify.lang')} help={t('settings.notify.langHelp')} options={locales.map((l) => ({ value: l.id, label: l.name }))} />}
               {kind !== 'email' ? (
                 <TextField form={f} name="url" type="url" label={t('settings.notify.url')} help={t('settings.notify.urlHelp')} placeholder="https://…" mono required />
               ) : (

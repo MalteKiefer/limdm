@@ -79,7 +79,7 @@ func TestNotificationFormats(t *testing.T) {
 	}
 	inj2 := n
 	inj2.Text = "<!channel> <https://evil.example|click> *bold*"
-	b, _ = slackBody(inj2)
+	b, _ = slackBody("en", inj2)
 	if !strings.Contains(string(b), "https://mdm.example.com/devices/d1|Open in LiMDM") {
 		t.Fatalf("slack: console link missing: %s", b)
 	}

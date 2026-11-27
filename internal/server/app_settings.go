@@ -1088,10 +1088,10 @@ func (s *Server) apiAgentRelease(w http.ResponseWriter, r *http.Request, c apiCa
 // ---- help ----
 
 // apiGlossary serves the console glossary and the device states in the
-// language of lang (de or en; else the request's language), sorted by term.
+// language of lang (one of langs; else the request's language), sorted by term.
 func (s *Server) apiGlossary(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	lang := r.URL.Query().Get("lang")
-	if lang != "de" && lang != "en" {
+	if !knownLang(lang) {
 		lang = requestLang(r)
 	}
 	type term struct {

@@ -227,6 +227,9 @@ func (s *Server) apiDeviceDetail(w http.ResponseWriter, r *http.Request, c apiCa
 	if d.Geo != nil {
 		d.Place = d.Geo.Place()
 	}
+	for i := range d.CheckResults {
+		checkText(requestLang(r), &d.CheckResults[i])
+	}
 	slices.SortStableFunc(d.CheckResults, func(a, b api.CheckResult) int { // failing first, as on the console page
 		return boolInt(b.Status == "fail") - boolInt(a.Status == "fail")
 	})
@@ -451,7 +454,10 @@ type timelineEntry struct {
 	Status string    `json:"status"`
 	By     string    `json:"by"`
 	Detail string    `json:"detail"`
-	Extra  string    `json:"extra"`
+	Extra  string    `json:"extra"` // audit: the action's label; event: the text in the reader's language
+	// Key and Params of a device event (api.ParseEvent); empty when the text matches no format
+	Key    string   `json:"key,omitempty" db:"-"`
+	Params []string `json:"params,omitempty" db:"-"`
 }
 
 // apiDeviceTimeline merges the device's events, commands, script results,
@@ -537,8 +543,13 @@ func (s *Server) apiDeviceTimeline(w http.ResponseWriter, r *http.Request, c api
 	}
 	lang := requestLang(r)
 	for i := range list {
-		if list[i].Kind == "audit" {
-			list[i].Extra = auditLabel(lang, list[i].Title, func(string) string { return "" })
+		switch list[i].Kind {
+		case "audit":
+			list[i].Extra = auditLabel(lang, list[i].Title)
+		case "event":
+			list[i].Key, list[i].Params, list[i].Extra = eventText(lang, list[i].Detail)
+		case "compliance":
+			list[i].Detail = checkDetailText(lang, list[i].Detail)
 		}
 		list[i].Detail = truncate(list[i].Detail, 64<<10)
 		list[i].Extra = truncate(list[i].Extra, 64<<10)
