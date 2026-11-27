@@ -170,7 +170,8 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `POST /api/v1/devices/{id}/agent-update` | admin | `{"version"}` (empty: newest approved) | `202`; audited as `agent_update.request` |
 | `POST /api/v1/devices/{id}/recovery-keys/{uuid}/view` | helpdesk | `{"reason"}` | `200` `{"key", "rotate", ...}`; with four eyes for recovery keys `state` `reason`, `requested` or `pending` instead of the key; audited as `recovery.view` |
 | `POST /api/v1/devices/{id}/shell` | helpdesk, console session | `{"user"}` | `201` `{"id"}`, the terminal connects to `/shell/{id}/ws?csrf=`; `202` waits for approval; audited as `shell.start` |
-| `GET /api/v1/devices/{id}/shell-sessions`, `GET /api/v1/shell-sessions/{sid}` | read | | sessions; the transcript for admins and auditors after the end |
+| `GET /api/v1/devices/{id}/shell-sessions`, `GET /api/v1/shell-sessions/{sid}` | read | | sessions; the transcript (plain text) for admins and auditors after the end |
+| `GET /api/v1/shell-sessions/{sid}/transcript` | audit | | `200` raw recorded bytes of an ended session (`application/octet-stream`, `.log`), audited read; `409` while it runs |
 | `POST /api/v1/shell-sessions/{sid}/end` | helpdesk | | `204`; the user who started it or an admin |
 | `POST /api/v1/devices/bulk` | helpdesk | `{"ids": [...], "action": "command:sync", "params": {...}}`; actions `command:<type>` (not `lost`, `wipe`), `agent-update`, `tag-add`, `tag-remove` (admin) | `202` `{"status": "queued"}` or `{"status": "approval", "approvals": n}` |
 | `GET /api/v1/devices/catalog-apps` | read | | `200` enabled catalog apps (`id`, `name`) for bulk install and removal |

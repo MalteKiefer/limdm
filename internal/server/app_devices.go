@@ -36,6 +36,7 @@ func (s *Server) appDevicesRoutes(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/devices/{id}/shell", s.need("helpdesk", s.apiShellStart))
 	m.HandleFunc("GET /api/v1/devices/{id}/shell-sessions", s.need("read", s.apiShellSessions))
 	m.HandleFunc("GET /api/v1/shell-sessions/{sid}", s.need("read", s.apiShellSession))
+	m.HandleFunc("GET /api/v1/shell-sessions/{sid}/transcript", s.need("audit", s.apiShellTranscript))
 	m.HandleFunc("POST /api/v1/shell-sessions/{sid}/end", s.need("helpdesk", s.apiShellEnd))
 	m.HandleFunc("POST /api/v1/devices/bulk", s.need("helpdesk", s.apiDevicesBulk))
 	m.HandleFunc("GET /api/v1/devices/primary-users", s.need("admin", s.apiPrimaryUsers))
@@ -753,6 +754,31 @@ func (s *Server) apiShellSession(w http.ResponseWriter, r *http.Request, c apiCa
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, out)
+}
+
+// apiShellTranscript hands out the recorded bytes of an ended session for
+// replay in a terminal or as a .log download. The route needs the audit
+// level (admins, auditors), so the read is audited like /api/v1/audit.
+func (s *Server) apiShellTranscript(w http.ResponseWriter, r *http.Request, c apiCaller) {
+	ctx, sid := r.Context(), r.PathValue("sid")
+	sr, err := s.scanShell(s.db.QueryRow(ctx, `SELECT `+shellCols+` FROM shell_sessions s JOIN devices d ON d.id=s.device_id WHERE s.id=$1`, sid))
+	if err != nil || !s.inScope(ctx, c.sess(), sr.Device) {
+		problem(w, http.StatusNotFound, "session not found")
+		return
+	}
+	if sr.Ended == nil {
+		problem(w, http.StatusConflict, "the session has not ended yet")
+		return
+	}
+	var raw []byte
+	if err := s.db.QueryRow(ctx, `SELECT transcript FROM shell_sessions WHERE id=$1`, sid).Scan(&raw); err != nil {
+		s.apiFail(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", `attachment; filename="shell-`+sr.ID+`.log"`)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(raw)
 }
 
 // apiShellEnd ends a session, here or on another instance (shellEnd).

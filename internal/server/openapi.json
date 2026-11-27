@@ -4272,6 +4272,54 @@
         }
       }
     },
+    "/api/v1/shell-sessions/{sid}/transcript": {
+      "get": {
+        "operationId": "shellTranscript",
+        "summary": "Raw recorded bytes of an ended remote shell session",
+        "description": "The terminal output as recorded (escape sequences included) for replay in a terminal or download as .log. Admins and auditors; the read is audited like /api/v1/audit. 409 while the session runs.",
+        "parameters": [
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
     "/api/v1/shell-sessions/{sid}/end": {
       "post": {
         "operationId": "endShell",
