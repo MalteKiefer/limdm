@@ -45,7 +45,7 @@ func TestFirewallLegacyDeclarationUnchanged(t *testing.T) {
 		log := filepath.Join(dir, "calls")
 		script := "#!/bin/sh\necho \"${0##*/} $*\" >> " + log + "\n[ \"$1\" = is-active ] && exit 1\nexit 0\n"
 		for _, name := range []string{"ufw", "firewall-cmd", "systemctl"} {
-			if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil { //nolint:gosec // test stub must be executable
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
 				t.Fatal(err)
 			}
 		}
