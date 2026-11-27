@@ -94,4 +94,14 @@ func TestUpdateOutcome(t *testing.T) {
 			t.Errorf("%s %q: %q", c[0], c[1], got)
 		}
 	}
+	if b := pacmanBase("%NAME%\nlib32-openssl\n\n%VERSION%\n1:3.4.0-1\n\n%BASE%\nlib32-openssl\n\n%DESC%\nx\n"); b != "lib32-openssl" {
+		t.Fatal(b)
+	}
+	if pacmanBase("%NAME%\nx\n") != "" {
+		t.Fatal("base without %BASE%")
+	}
+	l, _ := parseApkList("libcrypto3-3.3.2-r4 x86_64 {openssl} (Apache-2.0) [installed]\nmusl-1.2.5-r8 x86_64 {musl} (MIT) [installed]\nWARNING: something\n", nil)
+	if len(l) != 2 || l[0].Name != "libcrypto3" || l[0].Version != "3.3.2-r4" || l[0].Source != "openssl" || l[0].Arch != "x86_64" || l[1].Source != "" {
+		t.Fatalf("%+v", l)
+	}
 }

@@ -232,8 +232,16 @@ func (h *host) nativePackages() ([]api.Package, error) {
 	var err error
 	switch h.family {
 	case "arch":
-		return parsePacmanQ(run(time.Minute, "pacman", "-Q"))
+		pkgs, err := parsePacmanQ(run(time.Minute, "pacman", "-Q"))
+		for i := range pkgs { // the security tracker lists pkgbase for split packages
+			pkgs[i].Source = sourceName(pkgs[i].Name, pacmanBase(readFile(filepath.Join(pacmanLocal, pkgs[i].Name+"-"+pkgs[i].Version, "desc"))))
+		}
+		return pkgs, err
 	case "alpine":
+		// apk list -I carries the origin (the secdb's package); apk info -v is the fallback
+		if pkgs, err := parseApkList(run(time.Minute, "apk", "list", "-I")); err == nil && len(pkgs) > 0 {
+			return pkgs, nil
+		}
 		return parseApkInfo(run(time.Minute, "apk", "info", "-v"))
 	}
 	if h.family == "debian" {
@@ -589,6 +597,40 @@ func parseApkInfo(out string, err error) ([]api.Package, error) {
 			continue
 		}
 		pkgs = append(pkgs, api.Package{Name: l[:j], Version: l[j+1:]})
+	}
+	return pkgs, nil
+}
+
+// pacmanLocal is pacman's local database, one directory per package.
+const pacmanLocal = "/var/lib/pacman/local"
+
+// pacmanBase reads %BASE% of a local database desc file.
+func pacmanBase(desc string) string {
+	_, rest, ok := strings.Cut(desc, "%BASE%\n")
+	if !ok {
+		return ""
+	}
+	base, _, _ := strings.Cut(rest, "\n")
+	return strings.TrimSpace(base)
+}
+
+// parseApkList reads apk list -I: "name-version-rN arch {origin} (license) [installed]".
+func parseApkList(out string, err error) ([]api.Package, error) {
+	if err != nil {
+		return nil, err
+	}
+	var pkgs []api.Package
+	for _, l := range strings.Split(out, "\n") {
+		f := strings.Fields(l)
+		if len(f) < 3 || !strings.HasPrefix(f[2], "{") || !strings.HasSuffix(f[2], "}") {
+			continue
+		}
+		p, _ := parseApkInfo(f[0], nil)
+		if len(p) != 1 {
+			continue
+		}
+		p[0].Arch, p[0].Source = f[1], sourceName(p[0].Name, strings.Trim(f[2], "{}"))
+		pkgs = append(pkgs, p[0])
 	}
 	return pkgs, nil
 }
