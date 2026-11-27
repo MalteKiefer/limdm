@@ -3,7 +3,7 @@
   "info": {
     "title": "LiMDM admin API",
     "version": "1",
-    "description": "REST API of the LiMDM console. Every action runs through the same functions as the console, with the same role rules, validation and audit entries. Authenticate with an API token from the console (Administration, API tokens) as a bearer token. The console app (/app/) uses the session cookie instead: every request must come from the console origin (Origin, Sec-Fetch-Site) and every state change must carry the CSRF token of GET /api/v1/me in the X-CSRF-Token header. Errors are RFC 9457 problem details. Lists are paged with limit and an opaque cursor. Each token may send 600 requests per minute; failed authentications are limited to 20 per client address in five minutes. Tenants: a token created in a tenant (multi tenancy, see docs/tenants.md) sees and changes only that tenant's devices, commands, library items, blueprints, tags and audit entries; shared library items and blueprints of the Default tenant are readable but not writable, and objects of other tenants answer 404. Global tokens see every tenant. Metrics need a global token. List conventions (devices is the reference): filter takes the query language (free words, key:value, key:\"quoted value\", every term must match), sort takes a field with - for descending, cursor continues a page from next_cursor, and <list>/facets answers counts per value for the same filter."
+    "description": "REST API of the LiMDM console. Every action runs through the same functions as the console, with the same role rules, validation and audit entries. Authenticate with an API token from the console (Administration, API tokens) as a bearer token. The console app (/app/) uses the session cookie instead: every request must come from the console origin (Origin, Sec-Fetch-Site) and every state change must carry the CSRF token of GET /api/v1/me in the X-CSRF-Token header. Errors are RFC 9457 problem details. Lists are paged with limit and an opaque cursor. Each token may send 600 requests per minute; failed authentications are limited to 20 per client address in five minutes. Tenants: a token created in a tenant (multi tenancy, see docs/tenants.md) sees and changes only that tenant's devices, commands, library items, blueprints, tags and audit entries; shared library items and blueprints of the Default tenant are readable but not writable, and objects of other tenants answer 404. Global tokens see every tenant. Metrics need a global token. List conventions (devices is the reference): filter takes the query language (free words, key:value, key:\"quoted value\", every term must match), sort takes a field with - for descending, cursor continues a page from next_cursor, and <list>/facets answers counts per value for the same filter. Trying it out: the reference at /api/v1/docs sends real requests to this server under your role, tenant and scope, with the same audit rules as the console. Start with GET calls; calls marked Warning change devices or delete data."
   },
   "servers": [
     {
@@ -17,6 +17,80 @@
     },
     {
       "session": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Devices",
+      "description": "Fleet inventory, device details, tags, saved filters and the commands queued for devices."
+    },
+    {
+      "name": "Remote shell",
+      "description": "Recorded remote shell sessions on devices."
+    },
+    {
+      "name": "Enrollment",
+      "description": "Enrollment tokens and the install data for new devices."
+    },
+    {
+      "name": "Compliance",
+      "description": "Compliance results, checks, history and risk exceptions."
+    },
+    {
+      "name": "Configuration",
+      "description": "Library items, blueprints, declaration schemas, versions, previews and pilot rollouts."
+    },
+    {
+      "name": "Software",
+      "description": "Software catalog, Flathub, app requests, Flatpak remotes and the package repository."
+    },
+    {
+      "name": "Updates",
+      "description": "Security updates, update rings and waves, CVE feeds and agent releases."
+    },
+    {
+      "name": "Vulnerabilities",
+      "description": "CVEs of the devices in scope and their risk acceptances."
+    },
+    {
+      "name": "Logs",
+      "description": "Central log search, archive and log alert rules."
+    },
+    {
+      "name": "Audit and activity",
+      "description": "Audit log with its hash chain, the activity stream and evidence exports."
+    },
+    {
+      "name": "Reports",
+      "description": "Scheduled reports and their runs."
+    },
+    {
+      "name": "Statistics",
+      "description": "Dashboard figures of the fleet, compliance, updates and tenants."
+    },
+    {
+      "name": "Approvals",
+      "description": "Four eyes approval requests."
+    },
+    {
+      "name": "Access",
+      "description": "API tokens, console users and the directory (SCIM, Google Workspace)."
+    },
+    {
+      "name": "Tenants",
+      "description": "Tenants, the tenant view and shared objects."
+    },
+    {
+      "name": "Settings",
+      "description": "Server settings, keys, backup, notification channels and the network CA."
+    },
+    {
+      "name": "Session",
+      "description": "The caller, own profile, live events and the glossary."
+    },
+    {
+      "name": "Meta",
+      "description": "This document, the reference page and Prometheus metrics."
     }
   ],
   "paths": {
@@ -185,7 +259,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/{id}": {
@@ -230,7 +315,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "patch": {
         "operationId": "updateDevice",
@@ -242,6 +338,13 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/DevicePatch"
+              },
+              "example": {
+                "tags": [
+                  "prod",
+                  "berlin"
+                ],
+                "primary_user": "jane@example.com"
               }
             }
           }
@@ -281,12 +384,23 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "delete": {
         "operationId": "deleteDevice",
         "summary": "Delete a retired device for good",
-        "description": "Deletes the device with its events, metrics, commands, recovery keys and app requests. Audited as device.delete. Role admin.",
+        "description": "Warning: deletes or revokes data; the API cannot undo it. Deletes the device with its events, metrics, commands, recovery keys and app requests. Audited as device.delete. Role admin.",
         "parameters": [
           {
             "name": "id",
@@ -311,6 +425,9 @@
           "204": {
             "description": "Deleted"
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
@@ -323,7 +440,18 @@
           "422": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/{id}/commands": {
@@ -370,27 +498,41 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
-          "429": {
+          "404": {
             "$ref": "#/components/responses/Problem"
           },
-          "404": {
+          "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "operationId": "enqueueCommand",
         "summary": "Queue a command",
-        "description": "Same commands and rules as the console: scripts, lost mode, wipe, allow_uninstall, user, software and app commands need the admin role; lost and wipe need confirm set to the host name. Audited as command.<type>. Roles admin and helpdesk, not read only. With four eyes approval on (wipe, lost mode, scripts) nothing is queued: the answer is 202 with the approval_id of a pending request that another admin decides in the console or through /api/v1/approvals/{id}. sync is accepted once per device and 30 seconds (429 with Retry-After otherwise); workload_action is refused with 409 while another action for the same workload or 5 actions in all wait for the device.",
+        "description": "Warning: queues a command on a real device; wipe, lost mode, reboot, shutdown and scripts act on the machine and wipe cannot be undone. Same commands and rules as the console: scripts, lost mode, wipe, allow_uninstall, user, software and app commands need the admin role; lost and wipe need confirm set to the host name. Audited as command.<type>. Roles admin and helpdesk, not read only. With four eyes approval on (wipe, lost mode, scripts) nothing is queued: the answer is 202 with the approval_id of a pending request that another admin decides in the console or through /api/v1/approvals/{id}. sync is accepted once per device and 30 seconds (429 with Retry-After otherwise); workload_action is refused with 409 while another action for the same workload or 5 actions in all wait for the device.",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CommandRequest"
+              },
+              "example": {
+                "type": "sync"
               }
             }
           }
@@ -459,6 +601,17 @@
             },
             "description": "Repeating the request with the same key within 24 hours returns the first answer (header Idempotent-Replayed: true) instead of queuing again; the same key with another request is 422, one still running 409."
           }
+        ],
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -505,7 +658,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/library-items": {
@@ -547,7 +711,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "operationId": "createLibraryItem",
@@ -559,6 +734,19 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/LibraryItem"
+              },
+              "example": {
+                "name": "base packages",
+                "type": "com.limdm.packages",
+                "description": "Tools on every device",
+                "payload": {
+                  "install": [
+                    "htop"
+                  ],
+                  "remove": [
+                    "telnet"
+                  ]
+                }
               }
             }
           }
@@ -606,7 +794,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/library-items/{id}": {
@@ -660,7 +859,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "put": {
         "operationId": "replaceLibraryItem",
@@ -709,6 +919,9 @@
           "409": {
             "$ref": "#/components/responses/Problem"
           },
+          "412": {
+            "$ref": "#/components/responses/Problem"
+          },
           "415": {
             "$ref": "#/components/responses/Problem"
           },
@@ -716,9 +929,6 @@
             "$ref": "#/components/responses/Problem"
           },
           "429": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "412": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
@@ -734,12 +944,23 @@
             },
             "description": "ETag of the version the change is based on; another version answers 412"
           }
+        ],
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       },
       "delete": {
         "operationId": "deleteLibraryItem",
         "summary": "Delete a library item no blueprint uses",
-        "description": "Audited as library.delete. Role admin, not read only.",
+        "description": "Warning: deletes or revokes data; the API cannot undo it. Audited as library.delete. Role admin, not read only.",
         "responses": {
           "204": {
             "description": "Deleted"
@@ -762,7 +983,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/blueprints": {
@@ -804,7 +1036,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "operationId": "createBlueprint",
@@ -816,6 +1059,12 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BlueprintInput"
+              },
+              "example": {
+                "name": "workstations",
+                "description": "Office desktops",
+                "parent_id": null,
+                "tree": []
               }
             }
           }
@@ -863,7 +1112,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/blueprints/{id}": {
@@ -917,7 +1177,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "put": {
         "operationId": "replaceBlueprint",
@@ -966,6 +1237,9 @@
           "409": {
             "$ref": "#/components/responses/Problem"
           },
+          "412": {
+            "$ref": "#/components/responses/Problem"
+          },
           "415": {
             "$ref": "#/components/responses/Problem"
           },
@@ -973,9 +1247,6 @@
             "$ref": "#/components/responses/Problem"
           },
           "429": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "412": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
@@ -991,12 +1262,23 @@
             },
             "description": "ETag of the version the change is based on; another version answers 412"
           }
+        ],
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       },
       "delete": {
         "operationId": "deleteBlueprint",
         "summary": "Delete a blueprint",
-        "description": "Its devices fall back to default; default itself cannot be deleted. Audited as blueprint.delete. Role admin, not read only.",
+        "description": "Warning: deletes or revokes data; the API cannot undo it. Its devices fall back to default; default itself cannot be deleted. Audited as blueprint.delete. Role admin, not read only.",
         "responses": {
           "204": {
             "description": "Deleted"
@@ -1019,7 +1301,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/tags": {
@@ -1050,7 +1343,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/audit": {
@@ -1146,7 +1450,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Audit and activity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/openapi.json": {
@@ -1161,7 +1476,10 @@
               "application/json": {}
             }
           }
-        }
+        },
+        "tags": [
+          "Meta"
+        ]
       }
     },
     "/metrics": {
@@ -1192,7 +1510,15 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Meta"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
       }
     },
     "/api/v1/approvals": {
@@ -1248,7 +1574,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Approvals"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/approvals/{id}": {
@@ -1293,7 +1630,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Approvals"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/approvals/{id}/approve": {
@@ -1336,13 +1684,13 @@
           "409": {
             "$ref": "#/components/responses/Problem"
           },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "422": {
             "$ref": "#/components/responses/Problem"
           }
         },
@@ -1355,7 +1703,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Approvals"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/approvals/{id}/reject": {
@@ -1398,13 +1757,13 @@
           "409": {
             "$ref": "#/components/responses/Problem"
           },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "422": {
             "$ref": "#/components/responses/Problem"
           }
         },
@@ -1417,7 +1776,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Approvals"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/exceptions": {
@@ -1455,7 +1825,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Compliance"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "operationId": "addException",
@@ -1467,6 +1848,15 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ExceptionInput"
+              },
+              "example": {
+                "check_id": "ssh.baseline",
+                "mode": "advisory",
+                "tag": "lab",
+                "reason": "Lab machines need password login until the migration",
+                "owner": "jane@example.com",
+                "approver": "ciso@example.com",
+                "expires": "2027-03-31"
               }
             }
           }
@@ -1489,24 +1879,6 @@
                 "description": "API path of the new or pending resource"
               }
             }
-          },
-          "400": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "403": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "415": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "503": {
-            "$ref": "#/components/responses/Problem"
           },
           "202": {
             "description": "Four eyes: stored as a request",
@@ -1533,8 +1905,37 @@
                 "description": "API path of the approval"
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "415": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Compliance"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/exceptions/{id}": {
@@ -1572,7 +1973,19 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Compliance"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "description": "Warning: deletes or revokes data; the API cannot undo it."
       }
     },
     "/api/v1/tokens": {
@@ -1611,7 +2024,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Access"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "operationId": "createToken",
@@ -1623,6 +2047,15 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/TokenInput"
+              },
+              "example": {
+                "name": "reporting",
+                "role": "auditor",
+                "days": 30,
+                "read_only": true,
+                "scopes": [
+                  "read"
+                ]
               }
             }
           }
@@ -1664,7 +2097,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Access"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/tokens/{id}": {
@@ -1702,7 +2146,19 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Access"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "description": "Warning: deletes or revokes data; the API cannot undo it."
       }
     },
     "/api/v1/tenants": {
@@ -1744,7 +2200,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Tenants"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "operationId": "createTenant",
@@ -1812,13 +2279,24 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Tenants"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/docs": {
       "get": {
         "operationId": "apiReference",
-        "summary": "This reference as a page",
+        "summary": "This reference as an interactive page (Swagger UI)",
         "security": [],
         "responses": {
           "200": {
@@ -1831,7 +2309,10 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Meta"
+        ]
       }
     },
     "/api/v1/devices/facets": {
@@ -1958,6 +2439,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
           "401": {
             "$ref": "#/components/responses/Problem"
           },
@@ -1969,11 +2453,19 @@
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "400": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/me": {
@@ -2004,7 +2496,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Session"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/events/stream": {
@@ -2035,7 +2538,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Session"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/views": {
@@ -2063,6 +2577,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
           "401": {
             "$ref": "#/components/responses/Problem"
           },
@@ -2074,11 +2591,19 @@
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "400": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "operationId": "createView",
@@ -2129,7 +2654,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/views/{id}": {
@@ -2167,19 +2703,13 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
           "401": {
             "$ref": "#/components/responses/Problem"
           },
           "403": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "503": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "400": {
             "$ref": "#/components/responses/Problem"
           },
           "404": {
@@ -2190,8 +2720,25 @@
           },
           "422": {
             "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "delete": {
         "operationId": "deleteView",
@@ -2215,7 +2762,19 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "description": "Warning: deletes or revokes data; the API cannot undo it."
       }
     },
     "/api/v1/schemas": {
@@ -2259,6 +2818,17 @@
               ]
             },
             "description": "language of titles and help texts; default from the request"
+          }
+        ],
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -2309,16 +2879,27 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "404": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/stats/fleet": {
@@ -2348,7 +2929,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Statistics"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/stats/compliance": {
@@ -2378,6 +2970,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
           "401": {
             "$ref": "#/components/responses/Problem"
           },
@@ -2389,11 +2984,19 @@
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "400": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Statistics"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/stats/attention": {
@@ -2423,7 +3026,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Statistics"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/compliance": {
@@ -2454,7 +3068,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Compliance"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/compliance/checks/{id}": {
@@ -2501,7 +3126,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Compliance"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/compliance/heatmap": {
@@ -2552,7 +3188,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Compliance"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/compliance/history": {
@@ -2607,7 +3254,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Compliance"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/compliance/policies": {
@@ -2637,7 +3295,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Compliance"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/exports/{kind}": {
@@ -2789,7 +3458,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Audit and activity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/exception-requests": {
@@ -2855,7 +3535,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Compliance"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/stats/tenants": {
@@ -2880,16 +3571,27 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "404": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Statistics"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/stats/commands": {
@@ -2919,6 +3621,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
           "401": {
             "$ref": "#/components/responses/Problem"
           },
@@ -2930,11 +3635,19 @@
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "400": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Statistics"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/onboarding": {
@@ -2964,7 +3677,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Statistics"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/commands": {
@@ -3015,6 +3739,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
           "401": {
             "$ref": "#/components/responses/Problem"
           },
@@ -3026,11 +3753,19 @@
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "400": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/activity": {
@@ -3136,6 +3871,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
           "401": {
             "$ref": "#/components/responses/Problem"
           },
@@ -3147,11 +3885,19 @@
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "400": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Audit and activity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/activity/histogram": {
@@ -3250,6 +3996,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
           "401": {
             "$ref": "#/components/responses/Problem"
           },
@@ -3261,11 +4010,19 @@
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "400": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Audit and activity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/audit/status": {
@@ -3295,7 +4052,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Audit and activity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/audit/verify": {
@@ -3325,7 +4093,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Audit and activity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/stats/updates": {
@@ -3355,6 +4134,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
           "401": {
             "$ref": "#/components/responses/Problem"
           },
@@ -3366,11 +4148,19 @@
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "400": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Statistics"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/stats/annotations": {
@@ -3400,6 +4190,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
           "401": {
             "$ref": "#/components/responses/Problem"
           },
@@ -3411,11 +4204,19 @@
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "400": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Statistics"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/report-schedules": {
@@ -3445,7 +4246,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Reports"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "operationId": "saveReportSchedule",
@@ -3478,16 +4290,27 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Reports"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/report-schedules/{id}": {
@@ -3516,16 +4339,28 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "404": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Reports"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "description": "Warning: deletes or revokes data; the API cannot undo it."
       }
     },
     "/api/v1/report-schedules/{id}/run": {
@@ -3561,16 +4396,27 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "404": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Reports"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/report-schedules/{id}/runs": {
@@ -3606,16 +4452,27 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "404": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Reports"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/report-runs/{id}": {
@@ -3651,16 +4508,27 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "404": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Reports"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/{id}/detail": {
@@ -3708,7 +4576,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/{id}/packages": {
@@ -3766,7 +4645,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/{id}/timeline": {
@@ -3836,7 +4726,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/{id}/diagnostics/{cid}": {
@@ -3874,20 +4775,34 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "404": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/{id}/retire": {
       "post": {
         "operationId": "retireDevice",
         "summary": "Retire a device and revoke its certificates",
-        "description": "Audited as device.retire. Role admin.",
+        "description": "Warning: revokes the device certificates; the device stops being managed. Audited as device.retire. Role admin.",
         "parameters": [
           {
             "name": "id",
@@ -3922,16 +4837,27 @@
           "404": {
             "$ref": "#/components/responses/Problem"
           },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "409": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/{id}/agent-update": {
@@ -3997,26 +4923,37 @@
           "404": {
             "$ref": "#/components/responses/Problem"
           },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "503": {
-            "$ref": "#/components/responses/Problem"
-          },
           "409": {
             "$ref": "#/components/responses/Problem"
           },
           "422": {
             "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/{id}/recovery-keys/{uuid}/view": {
       "post": {
         "operationId": "viewRecoveryKey",
         "summary": "Show a disk recovery key",
-        "description": "Audited as recovery.view and announced on the device. With four eyes for recovery keys the answer has no key but a state: reason (send a reason to request approval), requested, pending. Roles admin and helpdesk.",
+        "description": "Warning: reveals a disk recovery key; audited. Audited as recovery.view and announced on the device. With four eyes for recovery keys the answer has no key but a state: reason (send a reason to request approval), requested, pending. Roles admin and helpdesk.",
         "parameters": [
           {
             "name": "id",
@@ -4076,23 +5013,34 @@
           "404": {
             "$ref": "#/components/responses/Problem"
           },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/{id}/shell": {
       "post": {
         "operationId": "startShell",
         "summary": "Start a remote shell session",
-        "description": "Console sessions only; the terminal connects to /shell/{session}/ws with the CSRF token. 202 when the session waits for four eyes approval. Audited as shell.start.",
+        "description": "Warning: opens a root shell on a real device; the session is recorded. Console sessions only; the terminal connects to /shell/{session}/ws with the CSRF token. 202 when the session waits for four eyes approval. Audited as shell.start.",
         "parameters": [
           {
             "name": "id",
@@ -4155,16 +5103,27 @@
           "404": {
             "$ref": "#/components/responses/Problem"
           },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Remote shell"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/{id}/shell-sessions": {
@@ -4222,7 +5181,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Remote shell"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/shell-sessions/{sid}": {
@@ -4269,7 +5239,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Remote shell"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/shell-sessions/{sid}/transcript": {
@@ -4317,7 +5298,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Remote shell"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/shell-sessions/{sid}/end": {
@@ -4339,20 +5331,34 @@
           "204": {
             "description": "Ended"
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "404": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Remote shell"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/bulk": {
       "post": {
         "operationId": "bulkDevices",
         "summary": "Run one action on many devices",
-        "description": "action: command:<type> (not lost or wipe), agent-update, tag-add, tag-remove. params are the fields of the command (as createCommand) or tag. Commands under four eyes become one approval per device. Roles admin and helpdesk (helpdesk: its commands only).",
+        "description": "Warning: acts on many devices at once. action: command:<type> (not lost or wipe), agent-update, tag-add, tag-remove. params are the fields of the command (as createCommand) or tag. Commands under four eyes become one approval per device. Roles admin and helpdesk (helpdesk: its commands only).",
         "requestBody": {
           "required": true,
           "content": {
@@ -4404,16 +5410,27 @@
           "404": {
             "$ref": "#/components/responses/Problem"
           },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/primary-users": {
@@ -4470,7 +5487,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/enrollment-tokens": {
@@ -4506,7 +5534,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Enrollment"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "operationId": "createEnrollmentToken",
@@ -4579,16 +5618,27 @@
           "404": {
             "$ref": "#/components/responses/Problem"
           },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Enrollment"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/enrollment-tokens/{id}": {
@@ -4605,10 +5655,13 @@
             }
           }
         ],
-        "description": "Devices enrolled with it stay. Audited as token.revoke. Role admin.",
+        "description": "Warning: deletes or revokes data; the API cannot undo it. Devices enrolled with it stay. Audited as token.revoke. Role admin.",
         "responses": {
           "204": {
             "description": "Revoked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
           },
           "403": {
             "$ref": "#/components/responses/Problem"
@@ -4616,7 +5669,18 @@
           "404": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Enrollment"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/catalog-apps": {
@@ -4663,7 +5727,18 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/config/blueprints": {
@@ -4694,7 +5769,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/config/blueprints/preview": {
@@ -4719,16 +5805,16 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "503": {
-            "$ref": "#/components/responses/Problem"
-          },
           "404": {
             "$ref": "#/components/responses/Problem"
           },
           "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
             "$ref": "#/components/responses/Problem"
           }
         },
@@ -4768,7 +5854,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/config/library": {
@@ -4799,7 +5896,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/config/library/render": {
@@ -4941,10 +6049,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "422": {
             "description": "Invalid payload or unknown device"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/config/scripts/results": {
@@ -5014,8 +6139,25 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/config/library/preview": {
@@ -5040,16 +6182,16 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "503": {
-            "$ref": "#/components/responses/Problem"
-          },
           "404": {
             "$ref": "#/components/responses/Problem"
           },
           "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
             "$ref": "#/components/responses/Problem"
           }
         },
@@ -5062,7 +6204,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/config/library/template": {
@@ -5175,7 +6328,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/config/{kind}/{id}/versions": {
@@ -5200,13 +6364,13 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "404": {
             "$ref": "#/components/responses/Problem"
           }
         },
@@ -5229,6 +6393,17 @@
             },
             "description": "ID"
           }
+        ],
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -5236,7 +6411,7 @@
       "post": {
         "operationId": "configRollback",
         "summary": "Roll back or restore",
-        "description": "Saves an old version again as the newest one, or restores a deleted object, audited like a save. Root effective library items wait for four eyes approval (202).",
+        "description": "Warning: changes what devices apply at their next check in. Saves an old version again as the newest one, or restores a deleted object, audited like a save. Root effective library items wait for four eyes approval (202).",
         "responses": {
           "200": {
             "description": "OK",
@@ -5248,16 +6423,20 @@
               }
             }
           },
+          "202": {
+            "description": "Four eyes: waits for another administrator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalPending"
+                }
+              }
+            }
+          },
           "401": {
             "$ref": "#/components/responses/Problem"
           },
           "403": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "503": {
             "$ref": "#/components/responses/Problem"
           },
           "404": {
@@ -5269,15 +6448,11 @@
           "422": {
             "$ref": "#/components/responses/Problem"
           },
-          "202": {
-            "description": "Four eyes: waits for another administrator",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApprovalPending"
-                }
-              }
-            }
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
         },
         "parameters": [
@@ -5317,7 +6492,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/software/catalog": {
@@ -5348,7 +6534,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/software/apps": {
@@ -5367,24 +6564,6 @@
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "403": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "503": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "409": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
-          },
           "202": {
             "description": "Four eyes: waits for another administrator",
             "content": {
@@ -5394,6 +6573,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
         },
         "requestBody": {
@@ -5405,7 +6602,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/software/apps/{id}": {
@@ -5424,24 +6632,6 @@
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "403": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "503": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "404": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
-          },
           "202": {
             "description": "Four eyes: waits for another administrator",
             "content": {
@@ -5451,6 +6641,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
         },
         "parameters": [
@@ -5473,12 +6681,23 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "delete": {
         "operationId": "softwareAppDelete",
         "summary": "Remove a catalog app",
-        "description": "Installed copies stay on the devices.",
+        "description": "Warning: deletes or revokes data; the API cannot undo it. Installed copies stay on the devices.",
         "responses": {
           "204": {
             "description": "Removed"
@@ -5499,6 +6718,17 @@
               "type": "string"
             },
             "description": "app ID"
+          }
+        ],
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -5563,7 +6793,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/software/flathub/search": {
@@ -5607,6 +6848,17 @@
               "type": "string"
             }
           }
+        ],
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -5626,27 +6878,6 @@
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "403": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "503": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "409": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "502": {
-            "$ref": "#/components/responses/Problem"
-          },
           "202": {
             "description": "Four eyes: waits for another administrator",
             "content": {
@@ -5656,6 +6887,27 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "502": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
         },
         "requestBody": {
@@ -5683,7 +6935,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/software/requests": {
@@ -5725,7 +6988,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/software/requests/{id}/{op}": {
@@ -5750,13 +7024,13 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "404": {
             "$ref": "#/components/responses/Problem"
           }
         },
@@ -5782,6 +7056,17 @@
                 "deny"
               ]
             }
+          }
+        ],
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -5825,7 +7110,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/software/remotes/{name}": {
@@ -5850,13 +7146,13 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "422": {
             "$ref": "#/components/responses/Problem"
           }
         },
@@ -5880,7 +7176,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/software/remotes/{name}/{op}": {
@@ -5905,16 +7212,16 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "503": {
-            "$ref": "#/components/responses/Problem"
-          },
           "404": {
             "$ref": "#/components/responses/Problem"
           },
           "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
             "$ref": "#/components/responses/Problem"
           }
         },
@@ -5941,6 +7248,17 @@
                 "unmanage"
               ]
             }
+          }
+        ],
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -5973,7 +7291,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "put": {
         "operationId": "softwareSettingsSave",
@@ -6012,7 +7341,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/packages": {
@@ -6043,7 +7383,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "operationId": "packageUpload",
@@ -6066,12 +7417,6 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "503": {
-            "$ref": "#/components/responses/Problem"
-          },
           "409": {
             "$ref": "#/components/responses/Problem"
           },
@@ -6079,6 +7424,12 @@
             "$ref": "#/components/responses/Problem"
           },
           "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
             "$ref": "#/components/responses/Problem"
           }
         },
@@ -6114,14 +7465,25 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/packages/{id}": {
       "delete": {
         "operationId": "packageDelete",
         "summary": "Delete an upload",
-        "description": "Refused while a library item references it.",
+        "description": "Warning: deletes or revokes data; the API cannot undo it. Refused while a library item references it.",
         "responses": {
           "204": {
             "description": "Deleted"
@@ -6148,6 +7510,17 @@
               "type": "integer"
             },
             "description": "ID"
+          }
+        ],
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -6179,16 +7552,16 @@
           "403": {
             "$ref": "#/components/responses/Problem"
           },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "503": {
-            "$ref": "#/components/responses/Problem"
-          },
           "409": {
             "$ref": "#/components/responses/Problem"
           },
           "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
             "$ref": "#/components/responses/Problem"
           }
         },
@@ -6201,7 +7574,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Software"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/config/blueprints/{id}/pilot": {
@@ -6267,26 +7651,37 @@
           "404": {
             "$ref": "#/components/responses/Problem"
           },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "503": {
-            "$ref": "#/components/responses/Problem"
-          },
           "409": {
             "$ref": "#/components/responses/Problem"
           },
           "422": {
             "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/config/blueprints/{id}/pilot/{op}": {
       "post": {
         "operationId": "configPilotEnd",
         "summary": "Promote or abort a pilot rollout",
-        "description": "promote saves the pilot map into the blueprint (a new version), abort drops it; both put the devices back on what they had set and delete the copy.",
+        "description": "Warning: promoting rolls the change out to every device of the blueprint. promote saves the pilot map into the blueprint (a new version), abort drops it; both put the devices back on what they had set and delete the copy.",
         "parameters": [
           {
             "name": "id",
@@ -6329,16 +7724,27 @@
           "404": {
             "$ref": "#/components/responses/Problem"
           },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Configuration"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/settings": {
@@ -6381,7 +7787,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/settings/{section}": {
@@ -6459,6 +7876,17 @@
             },
             "description": ""
           }
+        ],
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -6502,7 +7930,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Access"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "operationId": "addUser",
@@ -6571,7 +8010,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Access"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/users/{login}": {
@@ -6580,9 +8030,6 @@
         "summary": "Change role, state or scope",
         "description": "Own account cannot be demoted or disabled; the last admin stays. Role changes and admin edits wait for approval while four eyes approval is on. Audited as user.update.",
         "responses": {
-          "204": {
-            "description": "Done"
-          },
           "202": {
             "description": "Waits for four eyes approval",
             "content": {
@@ -6600,6 +8047,9 @@
                 "description": "The approval"
               }
             }
+          },
+          "204": {
+            "description": "Done"
           },
           "400": {
             "$ref": "#/components/responses/Problem"
@@ -6646,6 +8096,17 @@
             },
             "description": "Email or local:name"
           }
+        ],
+        "tags": [
+          "Access"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -6653,7 +8114,7 @@
       "post": {
         "operationId": "resetUser",
         "summary": "Reset password and TOTP of a local account",
-        "description": "Not the own account. For admins with four eyes approval the approver gets the credentials. Audited as user.reset.",
+        "description": "Warning: the user's password and authenticator stop working at once. Not the own account. For admins with four eyes approval the approver gets the credentials. Audited as user.reset.",
         "responses": {
           "200": {
             "description": "OK",
@@ -6734,6 +8195,17 @@
             },
             "description": "Email or local:name"
           }
+        ],
+        "tags": [
+          "Access"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -6788,7 +8260,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Tenants"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/tenants/shared": {
@@ -6831,7 +8314,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Tenants"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "put": {
         "operationId": "setSharedObjects",
@@ -6893,7 +8387,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Tenants"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/tenants/{id}": {
@@ -6946,6 +8451,17 @@
               "type": "integer"
             },
             "description": ""
+          }
+        ],
+        "tags": [
+          "Tenants"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -7009,6 +8525,17 @@
             },
             "description": ""
           }
+        ],
+        "tags": [
+          "Tenants"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -7063,14 +8590,25 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/keys/{kind}/{op}": {
       "post": {
         "operationId": "keyRotation",
         "summary": "Rotate or finish a key rotation",
-        "description": "rotate starts a rotation (name: HSM key label), finish ends it (force: before every device moved). Audited.",
+        "description": "Warning: rotates a server key; read docs/keys.md first. rotate starts a rotation (name: HSM key label), finish ends it (force: before every device moved). Audited.",
         "responses": {
           "200": {
             "description": "OK",
@@ -7165,6 +8703,17 @@
             },
             "description": ""
           }
+        ],
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -7208,7 +8757,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "put": {
         "operationId": "saveBackup",
@@ -7252,7 +8812,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/backup/run": {
@@ -7288,7 +8859,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/backup/{id}/verify": {
@@ -7334,6 +8916,17 @@
               "type": "integer"
             },
             "description": ""
+          }
+        ],
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -7392,12 +8985,23 @@
             },
             "description": "Lower case letters, digits, underscore"
           }
+        ],
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       },
       "delete": {
         "operationId": "deleteBackupTarget",
         "summary": "Remove a target",
-        "description": "Refused while a schedule uses it; archives on it stay.",
+        "description": "Warning: deletes or revokes data; the API cannot undo it. Refused while a schedule uses it; archives on it stay.",
         "responses": {
           "204": {
             "description": "Done"
@@ -7436,6 +9040,17 @@
               "type": "string"
             },
             "description": "Lower case letters, digits, underscore"
+          }
+        ],
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -7499,6 +9114,17 @@
             },
             "description": "Lower case letters, digits, underscore"
           }
+        ],
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -7552,7 +9178,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/backup/schedules/{name}": {
@@ -7609,12 +9246,23 @@
             },
             "description": "Lower case letters, digits, underscore"
           }
+        ],
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       },
       "delete": {
         "operationId": "deleteBackupSchedule",
         "summary": "Delete a schedule",
-        "description": "Its archives follow the retention for archives outside a schedule.",
+        "description": "Warning: deletes or revokes data; the API cannot undo it. Its archives follow the retention for archives outside a schedule.",
         "responses": {
           "204": {
             "description": "Done"
@@ -7654,6 +9302,17 @@
             },
             "description": "Lower case letters, digits, underscore"
           }
+        ],
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -7663,11 +9322,11 @@
         "summary": "Run, pause or resume a schedule",
         "description": "run answers 202 and backs up in the background.",
         "responses": {
-          "204": {
-            "description": "Done"
-          },
           "202": {
             "description": "Started"
+          },
+          "204": {
+            "description": "Done"
           },
           "400": {
             "$ref": "#/components/responses/Problem"
@@ -7718,6 +9377,17 @@
             },
             "description": ""
           }
+        ],
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -7761,7 +9431,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "operationId": "addChannel",
@@ -7812,7 +9493,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/notification-channels/{id}": {
@@ -7877,12 +9569,23 @@
             },
             "description": ""
           }
+        ],
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       },
       "delete": {
         "operationId": "deleteChannel",
         "summary": "Delete a channel",
-        "description": "Audited as notification.channel_delete.",
+        "description": "Warning: deletes or revokes data; the API cannot undo it. Audited as notification.channel_delete.",
         "responses": {
           "204": {
             "description": "Done"
@@ -7921,6 +9624,17 @@
               "type": "integer"
             },
             "description": ""
+          }
+        ],
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -7969,6 +9683,17 @@
             },
             "description": ""
           }
+        ],
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -8012,7 +9737,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Access"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/directory/users": {
@@ -8074,6 +9810,17 @@
             "schema": {
               "type": "string"
             }
+          }
+        ],
+        "tags": [
+          "Access"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -8143,6 +9890,17 @@
             },
             "description": ""
           }
+        ],
+        "tags": [
+          "Access"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -8150,7 +9908,7 @@
       "post": {
         "operationId": "rotateSCIMToken",
         "summary": "New SCIM token",
-        "description": "The previous token stops working; the answer holds the token once.",
+        "description": "Warning: the old SCIM token stops working at once. The previous token stops working; the answer holds the token once.",
         "responses": {
           "201": {
             "description": "Created",
@@ -8198,7 +9956,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Access"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/directory/google": {
@@ -8270,7 +10039,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Access"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/directory/google/sync": {
@@ -8321,7 +10101,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Access"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/network": {
@@ -8364,14 +10155,25 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/network/crl-token": {
       "post": {
         "operationId": "rotateCRLToken",
         "summary": "New CRL download token",
-        "description": "For RADIUS servers fetching /network/crl.pem; shown once. Audited as network.crl_token.",
+        "description": "Warning: the old CRL download token stops working at once. For RADIUS servers fetching /network/crl.pem; shown once. Audited as network.crl_token.",
         "responses": {
           "201": {
             "description": "Created",
@@ -8407,7 +10209,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/agents": {
@@ -8450,7 +10263,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Updates"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/agents/policy": {
@@ -8496,7 +10320,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Updates"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/agents/fetch": {
@@ -8547,7 +10382,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Updates"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/agents/releases/{version}/{op}": {
@@ -8607,6 +10453,17 @@
             },
             "description": ""
           }
+        ],
+        "tags": [
+          "Updates"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -8650,7 +10507,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Session"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/profile/password": {
@@ -8712,7 +10580,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Session"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/profile/totp/qr.svg": {
@@ -8751,7 +10630,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Session"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/profile/totp/{step}": {
@@ -8844,6 +10734,17 @@
             },
             "description": ""
           }
+        ],
+        "tags": [
+          "Session"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -8916,7 +10817,18 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Session"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/glossary": {
@@ -8972,6 +10884,17 @@
               ]
             }
           }
+        ],
+        "tags": [
+          "Session"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -8990,10 +10913,10 @@
               }
             }
           },
-          "403": {
+          "401": {
             "$ref": "#/components/responses/Problem"
           },
-          "401": {
+          "403": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -9002,7 +10925,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Updates"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "operationId": "createUpdateRing",
@@ -9031,13 +10965,13 @@
           "400": {
             "$ref": "#/components/responses/Problem"
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "422": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -9046,7 +10980,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Updates"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/update-rings/{id}": {
@@ -9089,6 +11034,9 @@
           "400": {
             "$ref": "#/components/responses/Problem"
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
@@ -9098,16 +11046,24 @@
           "422": {
             "$ref": "#/components/responses/Problem"
           },
-          "401": {
-            "$ref": "#/components/responses/Problem"
-          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Updates"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "delete": {
         "operationId": "deleteUpdateRing",
@@ -9128,13 +11084,13 @@
           "204": {
             "description": "No content"
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "404": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -9143,7 +11099,19 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Updates"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "description": "Warning: deletes or revokes data; the API cannot undo it."
       }
     },
     "/api/v1/update-rings/{id}/{action}": {
@@ -9187,13 +11155,13 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "404": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -9202,7 +11170,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Updates"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/update-waves": {
@@ -9220,13 +11199,13 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "409": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -9235,7 +11214,19 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Updates"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "description": "Warning: starts installing updates on devices."
       }
     },
     "/api/v1/devices/{id}/updates": {
@@ -9263,13 +11254,13 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "404": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -9278,7 +11269,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Updates"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/{id}/workloads": {
@@ -9321,7 +11323,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/workloads": {
@@ -9389,7 +11402,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/updates/fleet": {
@@ -9450,10 +11474,10 @@
           "400": {
             "$ref": "#/components/responses/Problem"
           },
-          "403": {
+          "401": {
             "$ref": "#/components/responses/Problem"
           },
-          "401": {
+          "403": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -9462,7 +11486,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Updates"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/updates/package-versions": {
@@ -9512,10 +11547,10 @@
           "400": {
             "$ref": "#/components/responses/Problem"
           },
-          "403": {
+          "401": {
             "$ref": "#/components/responses/Problem"
           },
-          "401": {
+          "403": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -9524,7 +11559,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Updates"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/updates/cve-feeds": {
@@ -9557,10 +11603,10 @@
               }
             }
           },
-          "403": {
+          "401": {
             "$ref": "#/components/responses/Problem"
           },
-          "401": {
+          "403": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -9569,7 +11615,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Updates"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/updates/cve-feeds/refresh": {
@@ -9593,13 +11650,13 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "409": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -9608,7 +11665,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Updates"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/vulnerabilities": {
@@ -9751,10 +11819,10 @@
           "400": {
             "$ref": "#/components/responses/Problem"
           },
-          "403": {
+          "401": {
             "$ref": "#/components/responses/Problem"
           },
-          "401": {
+          "403": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -9763,7 +11831,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Vulnerabilities"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/vulnerabilities/summary": {
@@ -9781,10 +11860,10 @@
               }
             }
           },
-          "403": {
+          "401": {
             "$ref": "#/components/responses/Problem"
           },
-          "401": {
+          "403": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -9793,7 +11872,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Vulnerabilities"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/vulnerabilities/{cve}": {
@@ -9822,13 +11912,13 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "404": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -9837,7 +11927,18 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Vulnerabilities"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/vulnerabilities/{cve}/accept": {
@@ -9862,6 +11963,10 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CVEAcceptanceInput"
+              },
+              "example": {
+                "reason": "Service not exposed, fix scheduled",
+                "expires": "2027-01-31"
               }
             }
           }
@@ -9877,6 +11982,9 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
@@ -9889,16 +11997,24 @@
           "422": {
             "$ref": "#/components/responses/Problem"
           },
-          "401": {
-            "$ref": "#/components/responses/Problem"
-          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Vulnerabilities"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/vulnerabilities/{cve}/reopen": {
@@ -9936,6 +12052,9 @@
           "204": {
             "description": "Revoked"
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
@@ -9945,16 +12064,24 @@
           "415": {
             "$ref": "#/components/responses/Problem"
           },
-          "401": {
-            "$ref": "#/components/responses/Problem"
-          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Vulnerabilities"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/{id}/firewall": {
@@ -9982,20 +12109,34 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "404": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/{id}/firewall/rules/{rid}/{action}": {
       "post": {
         "operationId": "firewallRuleAction",
         "summary": "Adopt a foreign firewall rule into a firewall library item, keep it as an exception there, or list it to be removed",
-        "description": "adopt adds the rule in the declaration format, keep adds its match to keep, remove adds its match to remove: every agent that gets the item deletes the rule whenever it finds it, also after a reboot (a rule with a risk needs confirm_risk; an item with a remove list needs four eyes approval when it is on, and a new item is then refused with 409). item_id names an existing com.limdm.firewall item, saved through the library save (validation, signature, audit, four eyes). Without it a new item with name is created (enforce off) and assigned in blueprint_id, one of GET /api/v1/devices/{id}/firewall/targets, in one transaction with both audit entries: nothing is created when the assignment fails. A blueprint that is the global default or reaches more than one device needs confirm (422 on field confirm otherwise). Tenant accounts pick only blueprints of their tenant. System and managed rules are refused. Admins only.",
+        "description": "Warning: a removed rule is deleted on the device at its next check in. adopt adds the rule in the declaration format, keep adds its match to keep, remove adds its match to remove: every agent that gets the item deletes the rule whenever it finds it, also after a reboot (a rule with a risk needs confirm_risk; an item with a remove list needs four eyes approval when it is on, and a new item is then refused with 409). item_id names an existing com.limdm.firewall item, saved through the library save (validation, signature, audit, four eyes). Without it a new item with name is created (enforce off) and assigned in blueprint_id, one of GET /api/v1/devices/{id}/firewall/targets, in one transaction with both audit entries: nothing is created when the assignment fails. A blueprint that is the global default or reaches more than one device needs confirm (422 on field confirm otherwise). Tenant accounts pick only blueprints of their tenant. System and managed rules are refused. Admins only.",
         "parameters": [
           {
             "name": "id",
@@ -10109,6 +12250,9 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
@@ -10121,7 +12265,18 @@
           "422": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/devices/{id}/firewall/targets": {
@@ -10161,13 +12316,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "404": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/logs": {
@@ -10239,13 +12408,13 @@
           "400": {
             "$ref": "#/components/responses/Problem"
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "422": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -10254,7 +12423,15 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/logs/histogram": {
@@ -10315,13 +12492,13 @@
           "400": {
             "$ref": "#/components/responses/Problem"
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "422": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -10330,7 +12507,15 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/logs/facets": {
@@ -10390,13 +12575,13 @@
           "400": {
             "$ref": "#/components/responses/Problem"
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "422": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -10405,7 +12590,15 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/logs/context": {
@@ -10447,10 +12640,10 @@
           "400": {
             "$ref": "#/components/responses/Problem"
           },
-          "403": {
+          "401": {
             "$ref": "#/components/responses/Problem"
           },
-          "401": {
+          "403": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -10459,7 +12652,15 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/logs/export": {
@@ -10538,13 +12739,13 @@
           "400": {
             "$ref": "#/components/responses/Problem"
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "422": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -10553,7 +12754,15 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/logs/status": {
@@ -10575,10 +12784,10 @@
               }
             }
           },
-          "403": {
+          "401": {
             "$ref": "#/components/responses/Problem"
           },
-          "401": {
+          "403": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -10587,7 +12796,15 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/logs/keys/rotate": {
@@ -10617,10 +12834,10 @@
               }
             }
           },
-          "403": {
+          "401": {
             "$ref": "#/components/responses/Problem"
           },
-          "401": {
+          "403": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -10629,7 +12846,15 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/logs/archive/run": {
@@ -10656,13 +12881,13 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "409": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -10671,7 +12896,15 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/logs/archive/restore": {
@@ -10728,6 +12961,9 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
@@ -10737,16 +12973,21 @@
           "422": {
             "$ref": "#/components/responses/Problem"
           },
-          "401": {
-            "$ref": "#/components/responses/Problem"
-          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/logs/alerts": {
@@ -10778,10 +13019,10 @@
               }
             }
           },
-          "403": {
+          "401": {
             "$ref": "#/components/responses/Problem"
           },
-          "401": {
+          "403": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -10790,7 +13031,15 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "operationId": "createLogAlert",
@@ -10820,13 +13069,13 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "422": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -10835,7 +13084,15 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/logs/alerts/{id}": {
@@ -10876,6 +13133,9 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
@@ -10885,16 +13145,21 @@
           "422": {
             "$ref": "#/components/responses/Problem"
           },
-          "401": {
-            "$ref": "#/components/responses/Problem"
-          },
           "429": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       },
       "delete": {
         "operationId": "deleteLogAlert",
@@ -10916,13 +13181,13 @@
           "204": {
             "description": "Deleted"
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "404": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -10931,7 +13196,16 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "description": "Warning: deletes or revokes data; the API cannot undo it."
       }
     },
     "/api/v1/logs/alerts/{id}/test": {
@@ -10974,13 +13248,13 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
           "403": {
             "$ref": "#/components/responses/Problem"
           },
           "404": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "401": {
             "$ref": "#/components/responses/Problem"
           },
           "429": {
@@ -10989,7 +13263,15 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
       }
     }
   },
