@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"net/http/httptest"
@@ -53,7 +56,7 @@ func TestLogArchiveCrypto(t *testing.T) {
 	key := bytes.Repeat([]byte{9}, 32)
 	plain := bytes.Repeat([]byte("line of log\n"), 20000) // several chunks
 	var buf bytes.Buffer
-	w, err := newLogSealer(&buf, "lk-1-x", key)
+	w, err := newLogSealer(&buf, "lk-1-x", key, "logs/t1/d1/2026-11-27.ndjson.gz.enc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +69,7 @@ func TestLogArchiveCrypto(t *testing.T) {
 		t.Fatal("plain text in the archive")
 	}
 	read := func(b []byte) ([]byte, error) {
-		r, id, err := openLogArchive(bytes.NewReader(b), func(string) ([]byte, error) { return key, nil })
+		r, id, err := openLogArchive(bytes.NewReader(b), func(string) ([]byte, error) { return key, nil }, "logs/t1/d1/2026-11-27.ndjson.gz.enc")
 		if err != nil {
 			return nil, err
 		}
@@ -90,10 +93,58 @@ func TestLogArchiveCrypto(t *testing.T) {
 		}
 	}
 	// a wrong key fails
-	if r, _, err := openLogArchive(bytes.NewReader(enc), func(string) ([]byte, error) { return bytes.Repeat([]byte{1}, 32), nil }); err == nil {
+	if r, _, err := openLogArchive(bytes.NewReader(enc), func(string) ([]byte, error) { return bytes.Repeat([]byte{1}, 32), nil }, ""); err == nil {
 		if _, err := io.ReadAll(r); err == nil {
 			t.Error("wrong key read")
 		}
+	}
+}
+
+func TestLogArchiveObjectKeys(t *testing.T) {
+	key := bytes.Repeat([]byte{9}, 32)
+	seal := func(name string) []byte {
+		var buf bytes.Buffer
+		w, err := newLogSealer(&buf, "lk-1-x", key, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Write([]byte("same plain text"))
+		w.Close()
+		return buf.Bytes()
+	}
+	a, b := seal("logs/t1/d1/2026-11-27.ndjson.gz.enc"), seal("logs/t1/d1/2026-11-27.ndjson.gz.enc")
+	// a fresh salt per object: the same plain text under the same data key
+	// never gives the same cipher text (no shared nonce space)
+	if bytes.Equal(a[len(a)-40:], b[len(b)-40:]) {
+		t.Fatal("two objects share their key stream")
+	}
+	// an object moved to another tenant, device or day is refused
+	if _, _, err := openLogArchive(bytes.NewReader(a), func(string) ([]byte, error) { return key, nil }, "logs/t2/d1/2026-11-27.ndjson.gz.enc"); err == nil {
+		t.Fatal("object opened under another name")
+	}
+	// a changed name in the header breaks the authentication
+	i := bytes.Index(a, []byte("logs/t1"))
+	c := append([]byte{}, a...)
+	c[i+6] = '2'
+	if r, _, err := openLogArchive(bytes.NewReader(c), func(string) ([]byte, error) { return key, nil }, ""); err == nil {
+		if _, err := io.ReadAll(r); err == nil {
+			t.Fatal("changed header accepted")
+		}
+	}
+	// format version 1 objects stay readable
+	block, _ := aes.NewCipher(key)
+	g, _ := cipher.NewGCM(block)
+	h := append([]byte(logArchiveMagicV1), 6)
+	h = append(append(h, "lk-1-x"...), 1, 2, 3, 4)
+	nonce := binary.BigEndian.AppendUint64([]byte{1, 2, 3, 4}, 0)
+	sealed := g.Seal(nil, nonce, []byte("old"), append(append([]byte{}, h...), 1))
+	v1 := append(append(h, binary.BigEndian.AppendUint32(nil, uint32(len(sealed)))...), sealed...)
+	r, _, err := openLogArchive(bytes.NewReader(v1), func(string) ([]byte, error) { return key, nil }, "logs/t1/d1/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := io.ReadAll(r); err != nil || string(got) != "old" {
+		t.Fatalf("v1 object: %q %v", got, err)
 	}
 }
 

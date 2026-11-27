@@ -4,6 +4,11 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.21.1 (2026-11-27)
+
+### Security
+- Log archive format `LIMDMLG2`: every object is encrypted with its own key (HKDF-SHA256 of the tenant's data key and a random 32 byte salt), so AES-GCM nonces never repeat across objects; the header binds tenant, device and day and a restore refuses an object moved to another name. `LIMDMLG1` objects of 0.21.0 stay readable.
+
 ## 0.21.0 (2026-11-27)
 
 ### Upgrade notes

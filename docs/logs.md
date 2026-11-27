@@ -234,10 +234,14 @@ logs/t<tenant>/manifests/<YYYY-MM-DD>.json
 
 ### Encryption
 
-* Format `LIMDMLG1`: a header with the key ID and a random nonce prefix, then chunks of
-  64 KiB sealed with AES-256-GCM. The nonce is the prefix and the chunk number; the
-  additional data binds the header and marks the last chunk, so changed, reordered,
-  removed or appended chunks fail to open.
+* Format `LIMDMLG2`: a header with the key ID, a random 32 byte salt and the object name
+  (`logs/t<tenant>/<device>/<day>...`), then chunks of 64 KiB sealed with AES-256-GCM.
+  Every object has its own key, HKDF-SHA256 of the tenant's data key and the salt, so the
+  chunk number is a unique nonce under that key and no nonce repeats across objects. The
+  additional data binds the header (tenant, device and day) and marks the last chunk, so
+  changed, reordered, removed or appended chunks and objects moved to another name fail to
+  open. Objects of the first format `LIMDMLG1` (0.21.0: one random 4 byte nonce prefix per
+  object under the data key) stay readable; new archives are always written as version 2.
 * Each tenant has its own random 256 bit data key, stored in the database with its ID
   (`lk-<tenant>-<random>`), wrapped (AES-256-GCM) with a key encryption key of the server
   key management: the key kind `logs` ([keys.md](keys.md#log-archive-key)), an Ed25519 key
