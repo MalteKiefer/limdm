@@ -3655,7 +3655,7 @@ export interface components {
             permissions: ("read" | "audit" | "commands" | "admin" | "tenants")[];
             four_eyes: boolean;
             /** @enum {string} */
-            locale: "de" | "en";
+            locale: "de" | "en" | "fr" | "es" | "it" | "ru";
             date_format: string;
             stale_hours: number;
             version: string;
@@ -7000,7 +7000,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description language of titles and help texts; default from the request */
-                lang?: "de" | "en";
+                lang?: "de" | "en" | "fr" | "es" | "it" | "ru";
             };
             header?: never;
             path?: never;
@@ -7027,7 +7027,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description language of titles and help texts; default from the request */
-                lang?: "de" | "en";
+                lang?: "de" | "en" | "fr" | "es" | "it" | "ru";
             };
             header?: never;
             path: {
@@ -10798,7 +10798,7 @@ export interface operations {
     getGlossary: {
         parameters: {
             query?: {
-                lang?: "de" | "en";
+                lang?: "de" | "en" | "fr" | "es" | "it" | "ru";
             };
             header?: never;
             path?: never;

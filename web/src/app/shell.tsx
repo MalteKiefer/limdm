@@ -6,13 +6,13 @@ import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-route
 import { Bell, Bookmark, Building2, ChevronsUpDown, CircleHelp, Languages, LogOut, Menu as MenuIcon, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Rows3, Rows4, Search, Sun, UserRound, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useInboxCount, useLiveState, startLive } from '../api/live'
-import { useMe } from '../api/me'
+import { chooseLocale, useMe } from '../api/me'
 import { useSavedViews } from '../api/views'
 import { SvgDefs } from '../components/charts'
 import { ErrorBoundary } from '../components/states'
 import { Toaster } from '../components/toast'
 import { ActionMenu, Avatar, Tip } from '../components/ui'
-import { currentLocale, useT, type MessageKey } from '../i18n'
+import { currentLocale, locales, useT, type MessageKey } from '../i18n'
 import { accentTokens } from '../lib/contrast'
 import { cx } from '../lib/cx'
 import { resolvedTheme, setPrefs, usePrefs, type Theme } from '../lib/prefs'
@@ -174,8 +174,7 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         ...themes.map(([v, k]) => ({ label: t(k), icon: v === 'dark' ? Moon : v === 'light' ? Sun : Monitor, checked: p.theme === v, onClick: () => setPrefs({ theme: v }) })),
         { label: p.density === 'compact' ? t('user.comfortable') : t('user.compact'), icon: p.density === 'compact' ? Rows3 : Rows4, onClick: () => setPrefs({ density: p.density === 'compact' ? 'comfortable' : 'compact' }) },
         { group: t('user.language') },
-        { label: 'Deutsch', icon: Languages, checked: currentLocale() === 'de', onClick: () => setPrefs({ locale: 'de' }) },
-        { label: 'English', icon: Languages, checked: currentLocale() === 'en', onClick: () => setPrefs({ locale: 'en' }) },
+        ...locales.map((l) => ({ label: l.name, icon: Languages, checked: currentLocale() === l.id, onClick: () => chooseLocale(l.id) })),
         'sep',
         { label: t('user.profile'), icon: UserRound, onClick: () => void navigate({ to: '/profile' }) },
         { label: t('user.help'), icon: CircleHelp, onClick: () => void navigate({ to: '/help' }) },

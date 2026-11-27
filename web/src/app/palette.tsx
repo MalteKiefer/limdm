@@ -8,10 +8,10 @@ import { Command } from 'cmdk'
 import { Building2, Languages, Laptop, Moon, Rows4, Search, Sun, type LucideIcon } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { api, unwrap } from '../api/client'
-import { useMe } from '../api/me'
+import { chooseLocale, useMe } from '../api/me'
 import { useT } from '../i18n'
 import { loadAllCatalogs } from '../i18n/catalog'
-import { currentLocale } from '../i18n'
+import { currentLocale, locales } from '../i18n'
 import { resolvedTheme, setPrefs, usePrefs } from '../lib/prefs'
 import { SearchResults } from '../areas/home/search'
 import { areas } from './areas'
@@ -92,9 +92,13 @@ export function Palette({ open, setOpen }: { open: boolean; setOpen: (v: boolean
                 <Item icon={Rows4} onSelect={close(() => setPrefs({ density: p.density === 'compact' ? 'comfortable' : 'compact' }))}>
                   {t('top.density')}
                 </Item>
-                <Item icon={Languages} onSelect={close(() => setPrefs({ locale: currentLocale() === 'de' ? 'en' : 'de' }))} hint={currentLocale() === 'de' ? 'English' : 'Deutsch'}>
-                  {t('palette.language')}
-                </Item>
+                {locales
+                  .filter((l) => l.id !== currentLocale())
+                  .map((l) => (
+                    <Item key={l.id} icon={Languages} value={`${t('palette.language')} ${l.name}`} onSelect={close(() => chooseLocale(l.id))} hint={l.name}>
+                      {t('palette.language')}
+                    </Item>
+                  ))}
                 {tenants.data?.map((x) => (
                   <Item key={x.id} icon={Building2} onSelect={close(() => void switchTenant(x.id))}>
                     {t('palette.switchTenant', { name: x.name })}

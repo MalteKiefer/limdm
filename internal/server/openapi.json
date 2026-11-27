@@ -2255,7 +2255,11 @@
               "type": "string",
               "enum": [
                 "de",
-                "en"
+                "en",
+                "fr",
+                "es",
+                "it",
+                "ru"
               ]
             },
             "description": "language of titles and help texts; default from the request"
@@ -2286,7 +2290,11 @@
               "type": "string",
               "enum": [
                 "de",
-                "en"
+                "en",
+                "fr",
+                "es",
+                "it",
+                "ru"
               ]
             },
             "description": "language of titles and help texts; default from the request"
@@ -8968,7 +8976,11 @@
               "type": "string",
               "enum": [
                 "de",
-                "en"
+                "en",
+                "fr",
+                "es",
+                "it",
+                "ru"
               ]
             }
           }
@@ -12175,7 +12187,11 @@
             "type": "string",
             "enum": [
               "de",
-              "en"
+              "en",
+              "fr",
+              "es",
+              "it",
+              "ru"
             ]
           },
           "date_format": {
