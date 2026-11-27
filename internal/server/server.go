@@ -1422,6 +1422,9 @@ func problem(w http.ResponseWriter, status int, detail string) { problemField(w,
 // problemField is a problem; a 422 names the request field it is about in
 // errors (empty when it concerns the request as a whole).
 func problemField(w http.ResponseWriter, status int, field, detail string) {
+	if lang := w.Header().Get("Content-Language"); lang != "" && lang != "en" {
+		detail = friendlyError(lang, detail).Text // admin API: the caller's language (need)
+	}
 	code := problemCodes[status]
 	if code == "" {
 		code = strconv.Itoa(status)

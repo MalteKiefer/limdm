@@ -928,7 +928,7 @@ function Entry({ e, d }: { e: TimelineEntry; d: DeviceDetail }) {
           {e.detail && <span className="block text-meta text-muted">{e.detail}</span>}
         </div>
       )
-    default:
-      return <span>{e.detail}</span>
+    default: // device events: the server's text in the reader's language, else the line as sent
+      return <span>{e.extra || e.detail}</span>
   }
 }

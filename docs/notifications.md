@@ -43,6 +43,10 @@ the label, webhooks receive the code.
 | Email (SMTP) | SMTP server, port, encryption (`STARTTLS` or `TLS`), optional user and password, sender, 1 to 20 recipients | subject `[LiMDM] <title>`, plain text; plain SMTP is refused, TLS 1.2 at least, header values are encoded and control characters removed |
 | Webhook | an https URL | the JSON event, signed |
 
+Email, Slack and Discord channels have a language (`config.lang`: `en`, `de`, `fr`, `es`, `it`,
+`ru`; English when empty) for titles and fixed texts; device data such as host and user names
+stays as it is. Webhooks stay English, programs read them ([Languages](i18n.md)).
+
 Every channel has a name (1 to 80 characters, unique). Channels can be tested, switched off
 and on, and deleted; adding, switching and deleting are audited
 (`notification.channel_add`, `notification.channel_enable`, `notification.channel_disable`,

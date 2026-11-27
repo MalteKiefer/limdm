@@ -78,9 +78,11 @@ configuration in `.golangci.yml` (`nolintlint` is on: an exception is a
 ## Conventions
 
 * Validation lives in `internal/api` and runs on server and agent.
-* Console texts are English keys, wrapped as `{{t "..."}}` in templates. Every such text and
-  every declaration type label needs a German entry in `deCatalog` in
-  `internal/server/i18n.go`; `TestGermanCatalogComplete` fails otherwise.
+* Server texts are English keys, wrapped as `{{t "..."}}` in templates. Every such text, every
+  declaration type label, audit action, command label, agent event format and literal problem
+  detail needs a German entry in `deCatalog` in `internal/server/i18n.go`
+  (`TestGermanCatalogComplete`) and a French, Spanish, Italian and Russian one in
+  `i18n_<lang>.go` (`TestCatalogsComplete`); see [Languages](i18n.md).
 * `internal/server/schema.sql` runs at every start, so every statement must be idempotent
   (`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `CREATE OR REPLACE`, guarded
   constraints). The integration test applies the schema twice and fails when the second run
@@ -143,8 +145,10 @@ Rules the checks enforce:
   `new Function` unless it runs jitless, so every area imports `z` from `src/lib/zod.ts`,
   which sets that once; eslint refuses a direct `zod` import.
 * Translations: German and English for every text, one catalog per area
-  (`src/areas/<area>/messages.ts`) plus `src/i18n/core.ts`; the lint step fails on a key
-  missing in one language. The language follows the browser until the user picks one.
+  (`src/areas/<area>/messages.ts`) plus `src/i18n/core.ts`, French, Spanish, Italian and
+  Russian in `messages.<lang>.ts` and `core.<lang>.ts`; tsc and the i18n test fail on a key
+  missing in one language, the lint step on hardcoded visible text. The language follows the
+  browser until the user picks one ([Languages](i18n.md)).
 * Bundle budget (gzip): first load 290 KB (the shell and the core catalog; area catalogs load with their routes), a lazy
   chunk 120 KB, ECharts 220 KB, CSS 20 KB, a font 100 KB.
 * Shared building blocks live in `src/components` (settings forms, blueprint picker, badges,

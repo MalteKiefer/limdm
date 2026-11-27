@@ -150,19 +150,81 @@ var auditActions = map[string]string{ //nolint:gosec // action labels such as "E
 	"network.crl_token":           "Network CRL token rotated",
 	"shell.start":                 "Remote shell started",
 	"shell.end":                   "Remote shell ended",
+	// labels of the remaining actions (i18n audit)
+	"api.read":                    "API data read",
+	"catalog.remote":              "Flatpak remote changed",
+	"catalog.request":             "App requested by a user",
+	"directory.scim_group_delete": "SCIM group deleted",
+	"directory.scim_group_write":  "SCIM group written",
+	"directory.scim_user_delete":  "SCIM user deleted",
+	"evidence.sign":               "Compliance evidence signed",
+	"keys.finish":                 "Key rotation finished",
+	"keys.reseal":                 "Keys sealed again",
+	"keys.rotate":                 "Key rotation started",
+	"profile.totp_start":          "Authenticator setup started",
+	"tenant.add":                  "Tenant added",
+	"tenant.shared":               "Shared tenant settings changed",
+	"tenant.switch":               "Tenant view switched",
+	"tenant.update":               "Tenant changed",
+	"view.delete":                 "Saved view deleted",
+	"view.save":                   "Saved view saved",
 }
 
-// auditLabel is the readable name of an audit action, or the code itself.
-func auditLabel(lang, action string, cmdLabel func(string) string) string {
+// commandLabels name the command types (api.CommandTypes and the remote shell).
+var commandLabels = map[string]string{
+	"sync": "Sync", "update": "Install updates", "reboot": "Reboot", "shutdown": "Shut down", "lock": "Lock", "unlock": "Unlock",
+	"script": "Script", "lost": "Lost mode", "found": "Lost mode ended", "wipe": "Wipe", "allow_uninstall": "Uninstall allowed",
+	"message": "Message", "app_install": "Install app", "app_remove": "Remove app", "user_create": "Create user",
+	"user_admin": "Change admin rights", "user_lock": "Lock account", "user_unlock": "Unlock account", "user_password": "Reset password",
+	"user_delete": "Delete account", "software_remove": "Remove software", "diagnostics": "Collect diagnostics",
+	"package_hold": "Hold package", "package_downgrade": "Downgrade package", "shell": "Remote shell",
+	"workload_action": "Container or VM action", "firewall_remove_rule": "Discard firewall rule",
+}
+
+// auditLabel is the readable name of an audit action in lang; command.<type>
+// names the command, anything unknown stays the code itself.
+func auditLabel(lang, action string) string {
 	if l, ok := auditActions[action]; ok {
 		return translate(lang, l)
 	}
 	if typ, ok := strings.CutPrefix(action, "command."); ok {
-		if l := cmdLabel(typ); l != "" {
-			return translate(lang, "Command") + ": " + l
+		if l := commandLabels[typ]; l != "" {
+			return translate(lang, "Command") + ": " + translate(lang, l)
 		}
 	}
 	return action
+}
+
+// checkText is a check result of the agent in lang: title and the known
+// detail texts translated, device data as sent.
+func checkText(lang string, c *api.CheckResult) {
+	c.Title = translate(lang, c.Title)
+	c.Detail = checkDetailText(lang, c.Detail)
+}
+
+// checkDetailText translates a check detail that is a known text or starts
+// with one of checkDetailPrefixes.
+func checkDetailText(lang, d string) string {
+	if t := translate(lang, d); t != d {
+		return t
+	}
+	for _, p := range checkDetailPrefixes {
+		if rest, ok := strings.CutPrefix(d, p); ok {
+			return translate(lang, p) + rest
+		}
+	}
+	return d
+}
+
+// eventText is an agent event in lang: its key and parameters
+// (api.ParseEvent) and the translated format filled with them, or the
+// text as sent when no format matches.
+func eventText(lang, text string) (key string, params []string, out string) {
+	key, params = api.ParseEvent(text)
+	if key == "" {
+		return "", nil, text
+	}
+	return key, params, api.FormatEvent(translate(lang, api.EventFormats[key]), params)
 }
 
 // checkDetailPrefixes are agent detail texts followed by device data.

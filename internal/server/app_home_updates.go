@@ -172,7 +172,7 @@ func (s *Server) apiStatsAnnotations(w http.ResponseWriter, r *http.Request, c a
 	}
 	lang := requestLang(r)
 	for i := range list {
-		list[i].Label = auditLabel(lang, list[i].Action, func(string) string { return "" })
+		list[i].Label = auditLabel(lang, list[i].Action)
 	}
 	writeJSON(w, listPage{Items: nonNilSlice(list)})
 }

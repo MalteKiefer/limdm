@@ -6,14 +6,14 @@ import { ExternalLink } from 'lucide-react'
 import { useState } from 'react'
 import { z } from '../../lib/zod'
 import { api, unwrap } from '../../api/client'
-import { useMe } from '../../api/me'
+import { chooseLocale, useMe } from '../../api/me'
 import { Field, FormSection } from '../../components/form'
 import { ErrorState, LoadingState } from '../../components/states'
 import { toast } from '../../components/toast'
 import { Badge, Card, PageHeader, Segmented, StatusPill, type DeviceStatus } from '../../components/ui'
-import { currentLocale, useT, type MessageKey } from '../../i18n'
+import { currentLocale, locales, useT, type MessageKey } from '../../i18n'
 import { dateTime } from '../../i18n/format'
-import { setPrefs, usePrefs, type DateFormat, type Density, type Theme } from '../../lib/prefs'
+import { setPrefs, usePrefs, type DateFormat, type Density, type Locale, type Theme } from '../../lib/prefs'
 import { useAction, useProfile } from './api'
 import { Facts, OnceSecret, SettingsForm, TextField } from '../../components/settingsform'
 
@@ -47,7 +47,17 @@ export function ProfilePage() {
           {q.data && !q.data.local && <p className="text-meta text-muted">{t('settings.profile.oidc')}</p>}
         </FormSection>
         <FormSection title={t('settings.profile.appearance')} description={t('settings.profile.appearanceHelp')}>
-          <Segmented<'de' | 'en'> label={t('settings.profile.language')} value={currentLocale()} onChange={(v) => setPrefs({ locale: v })} options={[{ value: 'de', label: 'Deutsch' }, { value: 'en', label: 'English' }]} />
+          <Field label={t('settings.profile.language')}>
+            {({ id }) => (
+              <select id={id} className="field w-fit" value={currentLocale()} onChange={(e) => chooseLocale(e.target.value as Locale)}>
+                {locales.map((l) => (
+                  <option key={l.id} value={l.id} lang={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
           <Segmented<Theme> label={t('settings.profile.theme')} value={p.theme} onChange={(v) => setPrefs({ theme: v })} options={[{ value: 'system', label: t('settings.profile.system') }, { value: 'light', label: t('settings.profile.light') }, { value: 'dark', label: t('settings.profile.dark') }]} />
           <Field label={t('settings.profile.dateFormat')}>
             {({ id }) => (

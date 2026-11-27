@@ -17,7 +17,7 @@ import { Confirm, Facts } from '../../components/settingsform'
 import { EmptyState, ErrorState, errorText, LoadingState } from '../../components/states'
 import { toast } from '../../components/toast'
 import { ActionMenu, Badge, Card, Modal, PageHeader, Switch } from '../../components/ui'
-import { currentLocale, useT, type MessageKey } from '../../i18n'
+import { intlTag, useT, type MessageKey } from '../../i18n'
 import { dateTime, fmt } from '../../i18n/format'
 import { cx } from '../../lib/cx'
 import { exportLogs, useAlerts, useDeleteAlert, useFacets, useHistogram, useLogContext, useLogs, useSaveAlert, useTestAlert, type LogAlert, type LogLine } from './api'
@@ -43,7 +43,7 @@ export function LogsPage() {
 }
 
 const timeFmt = (at: string) =>
-  new Intl.DateTimeFormat(currentLocale() === 'de' ? 'de-DE' : 'en-GB', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(at))
+  new Intl.DateTimeFormat(intlTag(), { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(at))
 
 export function PrioBadge({ p }: { p: number }) {
   return <Badge tone={prioTone(p)}>{prioName(p)}</Badge>
