@@ -10,6 +10,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { api, unwrap } from '../api/client'
 import { useMe } from '../api/me'
 import { useT } from '../i18n'
+import { loadAllCatalogs } from '../i18n/catalog'
 import { currentLocale } from '../i18n'
 import { resolvedTheme, setPrefs, usePrefs } from '../lib/prefs'
 import { SearchResults } from '../areas/home/search'
@@ -37,6 +38,11 @@ export function Palette({ open, setOpen }: { open: boolean; setOpen: (v: boolean
   const tenants = useTenants()
   const [search, setSearch] = useState('')
   const [term, setTerm] = useState('')
+  // the area commands' labels: every catalog, once the palette opens
+  const [, setLoaded] = useState(false)
+  useEffect(() => {
+    if (open) void loadAllCatalogs().then(() => setLoaded(true))
+  }, [open])
   useEffect(() => {
     const id = setTimeout(() => setTerm(search.trim()), 200)
     return () => clearTimeout(id)

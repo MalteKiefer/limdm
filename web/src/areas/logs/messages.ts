@@ -2,7 +2,6 @@
 import type { Msg } from '../../i18n/types'
 
 export const de = {
-  'logs.nav': 'Logs',
   'logs.title': 'Logs',
   'logs.sub': 'Journal, Container und Logdateien der Geräte, durchsuchbar über alle Geräte im eigenen Bereich',
   'logs.tabs': 'Logs Ansichten',
@@ -178,7 +177,6 @@ export const de = {
 }
 
 export const en: Record<keyof typeof de, Msg> = {
-  'logs.nav': 'Logs',
   'logs.title': 'Logs',
   'logs.sub': 'Journal, container and file logs of the devices, searchable across every device in your scope',
   'logs.tabs': 'Logs views',

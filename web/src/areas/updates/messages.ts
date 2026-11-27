@@ -2,7 +2,6 @@
 import type { Catalog, Msg } from '../../i18n/types'
 
 export const de = {
-  'updates.nav': 'Updates',
   'updates.title': 'Updates',
   'updates.sub': 'Updateringe, offene Sicherheitsupdates und Paketversionen',
   'updates.palette.rings': 'Updateringe öffnen',
@@ -204,7 +203,6 @@ export const de = {
 } satisfies Catalog
 
 export const en: Record<keyof typeof de, Msg> = {
-  'updates.nav': 'Updates',
   'updates.title': 'Updates',
   'updates.sub': 'Update rings, open security updates and package versions',
   'updates.palette.rings': 'Open update rings',

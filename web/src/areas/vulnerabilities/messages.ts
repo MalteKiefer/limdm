@@ -2,7 +2,6 @@
 import type { Catalog, Msg } from '../../i18n/types'
 
 export const de = {
-  'vulns.nav': 'Schwachstellen',
   'vulns.title': 'Schwachstellen',
   'vulns.sub': 'Bekannte CVEs in den installierten Paketen der Geräte, mit Schweregrad, Behebung und Risikoakzeptanz',
   'vulns.palette.open': 'Schwachstellen öffnen',
@@ -121,7 +120,6 @@ export const de = {
 } satisfies Catalog
 
 export const en: Record<keyof typeof de, Msg> = {
-  'vulns.nav': 'Vulnerabilities',
   'vulns.title': 'Vulnerabilities',
   'vulns.sub': 'Known CVEs in the installed packages of the devices, with severity, remediation and risk acceptance',
   'vulns.palette.open': 'Open vulnerabilities',

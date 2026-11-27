@@ -177,8 +177,8 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         { label: 'Deutsch', icon: Languages, checked: currentLocale() === 'de', onClick: () => setPrefs({ locale: 'de' }) },
         { label: 'English', icon: Languages, checked: currentLocale() === 'en', onClick: () => setPrefs({ locale: 'en' }) },
         'sep',
-        { label: t('settings.profile.title'), icon: UserRound, onClick: () => void navigate({ to: '/profile' }) },
-        { label: t('settings.help.title'), icon: CircleHelp, onClick: () => void navigate({ to: '/help' }) },
+        { label: t('user.profile'), icon: UserRound, onClick: () => void navigate({ to: '/profile' }) },
+        { label: t('user.help'), icon: CircleHelp, onClick: () => void navigate({ to: '/help' }) },
         { label: t('user.signOut'), icon: LogOut, onClick: () => void signOut() },
       ]}
     />
