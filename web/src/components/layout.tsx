@@ -9,7 +9,7 @@ import { cx } from '../lib/cx'
  * A horizontal scroller that shows a fade and an arrow button on each side
  * that hides content, so tabs cut off on a phone are visible as such.
  */
-export function ScrollHint({ children, className }: { children: ReactNode; className?: string }) {
+export function ScrollHint({ children, className, surface }: { children: ReactNode; className?: string; surface?: boolean }) {
   const t = useT()
   const ref = useRef<HTMLDivElement>(null)
   const [edge, setEdge] = useState({ back: false, more: false })
@@ -35,7 +35,7 @@ export function ScrollHint({ children, className }: { children: ReactNode; class
       tabIndex={-1}
       aria-label={t(`scroll.${side}`)}
       onClick={() => step(side === 'back' ? -1 : 1)}
-      className={cx('absolute inset-y-0 flex w-10 items-center text-muted hover:text-fg', side === 'back' ? 'left-0 justify-start bg-linear-to-r' : 'right-0 justify-end bg-linear-to-l', 'from-bg from-40% to-transparent')}
+      className={cx('absolute inset-y-0 flex w-10 items-center text-muted hover:text-fg', side === 'back' ? 'left-0 justify-start bg-linear-to-r' : 'right-0 justify-end bg-linear-to-l', surface ? 'from-surface' : 'from-bg', 'from-40% to-transparent')}
     >
       {side === 'back' ? <ChevronLeft size={16} aria-hidden /> : <ChevronRight size={16} aria-hidden />}
     </button>

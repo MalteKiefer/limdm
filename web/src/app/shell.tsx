@@ -278,7 +278,7 @@ export function Shell() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
   return (
-    <div className={cx('min-h-dvh lg:grid', collapsed ? 'lg:grid-cols-[64px_1fr]' : 'lg:grid-cols-[244px_1fr]')}>
+    <div className={cx('min-h-dvh lg:grid', collapsed ? 'lg:grid-cols-[64px_1fr]' : 'lg:grid-cols-[244px_1fr]')} style={{ '--nav-w': collapsed ? '64px' : '244px' } as React.CSSProperties}>
       <SvgDefs />
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-surface focus:p-2">
         {t('app.skip')}
@@ -297,7 +297,7 @@ export function Shell() {
       </Dialog.Root>
       <div className="flex min-w-0 flex-col">
         <Topbar onMenu={() => setMobileNav(true)} onSearch={() => setPalette(true)} collapsed={collapsed} />
-        <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1600px] min-w-0 flex-1 px-4 py-5 outline-none lg:px-6">
+        <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1600px] min-w-0 flex-1 px-4 pt-5 pb-[calc(1.25rem+var(--bulk-h,0px))] outline-none lg:px-6">
           <ErrorBoundary key={path}>
             <Outlet />
           </ErrorBoundary>

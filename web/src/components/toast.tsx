@@ -36,7 +36,7 @@ export function Toaster() {
     () => list,
   )
   return (
-    <section aria-label={t('toast.region')} className="pointer-events-none fixed right-4 bottom-4 z-[60] flex flex-col gap-2">
+    <section aria-label={t('toast.region')} className="pointer-events-none fixed right-4 bottom-[calc(1rem+var(--bulk-h,0px))] z-[60] flex flex-col gap-2">
       <div role="status" aria-live="polite" className="flex flex-col gap-2">
         {items.filter((x) => x.tone === 'ok').map((x) => (
           <Item key={x.id} item={x} />

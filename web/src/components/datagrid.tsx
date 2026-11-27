@@ -17,6 +17,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactN
 import { useT } from '../i18n'
 import { cx } from '../lib/cx'
 import { EmptyState } from './states'
+import { ScrollHint } from './layout'
 import { ActionMenu } from './ui'
 
 declare module '@tanstack/react-table' {
@@ -222,16 +223,47 @@ export function ColumnChooser({ columns, value, onChange }: { columns: { id: str
 }
 
 /** Appears while rows are selected; holds the actions for all of them. */
+/**
+ * The actions for the selected rows, fixed to the bottom of the content
+ * column (right of the sidebar, above the phone's safe area). While shown it
+ * publishes its height as --bulk-h; the shell pads the page and lifts the
+ * toasts by it, so the bar never covers the last row.
+ */
 export function BulkActionBar({ count, onClear, children }: { count: number; onClear: () => void; children: ReactNode }) {
   const t = useT()
-  if (count === 0) return null
+  const ref = useRef<HTMLDivElement>(null)
+  const shown = count > 0
+  useEffect(() => {
+    const el = ref.current
+    if (!shown || !el) return
+    const root = document.documentElement.style
+    const update = () => root.setProperty('--bulk-h', `${el.offsetHeight}px`)
+    update()
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+    ro?.observe(el)
+    return () => {
+      ro?.disconnect()
+      root.removeProperty('--bulk-h')
+    }
+  }, [shown])
+  if (!shown) return null
   return (
-    <div role="region" aria-label={t('bulk.selected', { count })} className="fade-in sticky bottom-4 z-20 mx-auto mt-3 flex w-fit max-w-full flex-wrap items-center gap-2 rounded-xl bg-fg px-3 py-2 text-bg shadow-pop">
-      <span className="num px-1 text-body font-medium">{t('bulk.selected', { count })}</span>
-      <div className="flex flex-wrap gap-1.5 [&_.btn]:border-transparent [&_.btn]:bg-bg/10 [&_.btn]:text-bg [&_.btn:hover]:bg-bg/20">{children}</div>
-      <button type="button" className="rounded p-1 hover:bg-bg/20" aria-label={t('bulk.clear')} onClick={onClear}>
-        <X size={15} />
-      </button>
+    <div
+      ref={ref}
+      role="region"
+      aria-label={t('bulk.selected', { count })}
+      className="fade-in fixed right-0 bottom-0 left-0 z-30 border-t border-line bg-surface px-4 pt-2 pb-[max(8px,env(safe-area-inset-bottom))] shadow-pop lg:left-[var(--nav-w,0px)] lg:px-6"
+    >
+      {/* phones: count and clear on top, the actions in one row that scrolls sideways */}
+      <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="num px-1 text-body font-medium">{t('bulk.selected', { count })}</span>
+        <ScrollHint surface className="order-3 basis-full sm:order-2 sm:basis-0 sm:flex-1">
+          <div className="flex w-max gap-1.5 sm:w-auto sm:flex-wrap">{children}</div>
+        </ScrollHint>
+        <button type="button" className="btn btn-ghost order-2 ml-auto px-2 sm:order-3 sm:ml-0" aria-label={t('bulk.clear')} onClick={onClear}>
+          <X size={16} />
+        </button>
+      </div>
     </div>
   )
 }
