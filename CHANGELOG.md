@@ -4,6 +4,17 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.22.0 (2026-11-27)
+
+### Added
+- Interactive API reference at `/api/v1/docs` (Swagger UI 5.34.1, vendored, no third party requests): authorize with a bearer token (kept in memory only) or use the console session with its CSRF token. Roles, scopes, tenants, four eyes and audit apply unchanged.
+- "API reference" entry in the console user menu.
+- `scripts/vendor-swagger-ui.sh` to refresh the vendored Swagger UI.
+
+### Changed
+- OpenAPI document: tags with descriptions, per operation security, Problem Details responses for 401 and 403, request body examples, warnings on operations that act on devices or delete data; title "LiMDM Admin API". Paths, operationIds and schemas are unchanged.
+- `/api/v1/docs` allows `data:` and `blob:` images for that page only; the console CSP is unchanged.
+
 ## 0.21.2 (2026-11-27)
 
 ### Added
