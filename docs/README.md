@@ -29,6 +29,7 @@ The documents for LiMDM 0.18 and the unreleased changes in the changelog. Start 
 | [notifications.md](notifications.md) | Channels and every notification event |
 | [software.md](software.md) | Software catalog, requests, Flathub and vendor repositories |
 | [patching.md](patching.md) | Update rules per source, update rings and waves, pending updates, CVEs, rollback |
+| [logs.md](logs.md) | Log management: journal, container and file logs of the devices, search, alerts, encrypted archive in S3 or B2, restore |
 | [vulnerabilities.md](vulnerabilities.md) | Fleet view of CVE findings: severity, CVSS, CISA KEV, remediation history, risk acceptance |
 | [packages.md](packages.md) | Uploaded packages, scripts and files, delivery and verification |
 | [network.md](network.md) | WLAN, 802.1X, WireGuard and OpenVPN profiles, EAP-TLS certificates, CRL |

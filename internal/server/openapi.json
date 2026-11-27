@@ -6388,7 +6388,7 @@
       "patch": {
         "operationId": "saveSettings",
         "summary": "Save one settings section",
-        "description": "Sections: general (local_login, stale_hours), network (console_allow, console_block, scim_allow, network_cert_domain), security (password_policy, four_eyes*, geolocation, fallback_dns), remote_shell, sso (oidc_*, allowed_domain, require_mfa, mfa_acr, role_groups, oidc_client_secret, clear_secret), monitoring (webhook_url, notify_private_networks), branding (company_name, logo_png, remove_logo), operations (ops), retention, enrollment (enrollment). Fields left out keep their value. The same guards as the console: no self lockout, local login only off with an OIDC admin, four eyes needs two admins, OIDC changes are checked against the provider. Audited as settings.save.",
+        "description": "Sections: general (local_login, stale_hours), network (console_allow, console_block, scim_allow, network_cert_domain), security (password_policy, four_eyes*, geolocation, fallback_dns), remote_shell, sso (oidc_*, allowed_domain, require_mfa, mfa_acr, role_groups, oidc_client_secret, clear_secret), monitoring (webhook_url, notify_private_networks), branding (company_name, logo_png, remove_logo), operations (ops), retention, enrollment (enrollment), cve_feeds, logs (logs). Fields left out keep their value. The same guards as the console: no self lockout, local login only off with an OIDC admin, four eyes needs two admins, OIDC changes are checked against the provider. Audited as settings.save.",
         "responses": {
           "200": {
             "description": "OK",
@@ -6453,7 +6453,8 @@
                 "operations",
                 "retention",
                 "enrollment",
-                "cve_feeds"
+                "cve_feeds",
+                "logs"
               ]
             },
             "description": ""
@@ -7145,7 +7146,8 @@
                 "netca",
                 "command",
                 "session",
-                "webhook"
+                "webhook",
+                "logs"
               ]
             },
             "description": ""
@@ -10163,6 +10165,828 @@
             "$ref": "#/components/responses/Problem"
           },
           "404": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/logs": {
+      "get": {
+        "operationId": "searchLogs",
+        "tags": [
+          "Logs"
+        ],
+        "summary": "Search log lines",
+        "description": "Lines of the devices in the caller's tenant and scope, newest first. Admins and auditors; the helpdesk only with device and when Settings, Logs allows it. Runs under a statement timeout of 20 s (422 when exceeded).",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "query language: device:, tag:, blueprint:, os:, source:, unit:, container:, file:, host:, prio:, field.NAME:, \"phrase\", /regex/, -term"
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "RFC 3339; default one hour before to"
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "RFC 3339; default now"
+          },
+          {
+            "name": "device",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "only this device ID (the helpdesk needs it)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "1 to 1000, default 200"
+          },
+          {
+            "$ref": "#/components/parameters/cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/logs/histogram": {
+      "get": {
+        "operationId": "logHistogram",
+        "tags": [
+          "Logs"
+        ],
+        "summary": "Lines per time bucket and priority",
+        "description": "About 120 buckets over the range (1 minute to 7 days each). Same filter and access as searchLogs.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "query language: device:, tag:, blueprint:, os:, source:, unit:, container:, file:, host:, prio:, field.NAME:, \"phrase\", /regex/, -term"
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "RFC 3339; default one hour before to"
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "RFC 3339; default now"
+          },
+          {
+            "name": "device",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "only this device ID (the helpdesk needs it)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogHistogram"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/logs/facets": {
+      "get": {
+        "operationId": "logFacets",
+        "tags": [
+          "Logs"
+        ],
+        "summary": "Most frequent units, containers and files",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "query language: device:, tag:, blueprint:, os:, source:, unit:, container:, file:, host:, prio:, field.NAME:, \"phrase\", /regex/, -term"
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "RFC 3339; default one hour before to"
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "RFC 3339; default now"
+          },
+          {
+            "name": "device",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "only this device ID (the helpdesk needs it)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogFacets"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/logs/context": {
+      "get": {
+        "operationId": "logContext",
+        "tags": [
+          "Logs"
+        ],
+        "summary": "Lines before and after a line on the same device",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "id of a log line"
+          },
+          {
+            "name": "n",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "lines on each side, 1 to 200, default 25"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogContext"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/logs/export": {
+      "get": {
+        "operationId": "exportLogs",
+        "tags": [
+          "Logs"
+        ],
+        "summary": "Export the filtered lines",
+        "description": "NDJSON (LogLine per line) or CSV, newest first, at most 100000 lines. Audited as logs.export with the filter.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "query language: device:, tag:, blueprint:, os:, source:, unit:, container:, file:, host:, prio:, field.NAME:, \"phrase\", /regex/, -term"
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "RFC 3339; default one hour before to"
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "RFC 3339; default now"
+          },
+          {
+            "name": "device",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "only this device ID (the helpdesk needs it)"
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ndjson",
+                "csv"
+              ]
+            },
+            "description": "ndjson or csv",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/logs/status": {
+      "get": {
+        "operationId": "logStatus",
+        "tags": [
+          "Logs"
+        ],
+        "summary": "State of the log store, the archive and the keys",
+        "description": "Admins and auditors of the whole installation.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/logs/keys/rotate": {
+      "post": {
+        "operationId": "rotateLogKeys",
+        "tags": [
+          "Logs"
+        ],
+        "summary": "Start new archive data keys",
+        "description": "Global admins. Every tenant with a data key gets a new active one; older archives keep theirs. Audited as logs.key_rotate.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "rotated"
+                  ],
+                  "properties": {
+                    "rotated": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/logs/archive/run": {
+      "post": {
+        "operationId": "runLogArchive",
+        "tags": [
+          "Logs"
+        ],
+        "summary": "Archive finished days now",
+        "description": "Global admins; runs in the background. Audited as logs.archive_run.",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/logs/archive/restore": {
+      "post": {
+        "operationId": "restoreLogs",
+        "tags": [
+          "Logs"
+        ],
+        "summary": "Restore an archived day",
+        "description": "Global admins. Downloads, verifies (SHA-256 against the manifest), decrypts and loads the day into its partition, searchable for restore_hours. Audited as logs.restore.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "day"
+                ],
+                "properties": {
+                  "day": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "tenant_id": {
+                    "type": "integer",
+                    "description": "0 or absent: every tenant of the day"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "lines",
+                    "day"
+                  ],
+                  "properties": {
+                    "lines": {
+                      "type": "integer"
+                    },
+                    "day": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/logs/alerts": {
+      "get": {
+        "operationId": "listLogAlerts",
+        "tags": [
+          "Logs"
+        ],
+        "summary": "Log alert rules of the tenant",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LogAlert"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createLogAlert",
+        "tags": [
+          "Logs"
+        ],
+        "summary": "Create a log alert rule",
+        "description": "Admins. When at least threshold lines matched in the last window, a logs.alert notification goes out, at most once per window. Audited as logs.alert_save.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogAlertInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogAlert"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/logs/alerts/{id}": {
+      "put": {
+        "operationId": "saveLogAlert",
+        "tags": [
+          "Logs"
+        ],
+        "summary": "Change a log alert rule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogAlertInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogAlert"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteLogAlert",
+        "tags": [
+          "Logs"
+        ],
+        "summary": "Delete a log alert rule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/logs/alerts/{id}/test": {
+      "post": {
+        "operationId": "testLogAlert",
+        "tags": [
+          "Logs"
+        ],
+        "summary": "Count a rule now and send a test notification",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "count",
+                    "matches"
+                  ],
+                  "properties": {
+                    "count": {
+                      "type": "integer"
+                    },
+                    "matches": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -15165,6 +15989,9 @@
           },
           "cve_feeds": {
             "$ref": "#/components/schemas/CVEFeedSettings"
+          },
+          "logs": {
+            "$ref": "#/components/schemas/LogSettings"
           }
         },
         "required": []
@@ -15333,6 +16160,9 @@
           },
           "cve_feeds": {
             "$ref": "#/components/schemas/CVEFeedSettings"
+          },
+          "logs": {
+            "$ref": "#/components/schemas/LogSettings"
           }
         },
         "required": [
@@ -15635,7 +16465,8 @@
               "netca",
               "command",
               "session",
-              "webhook"
+              "webhook",
+              "logs"
             ]
           },
           "active": {
@@ -18210,6 +19041,525 @@
             "type": "string",
             "maxLength": 200,
             "description": "only this package"
+          }
+        }
+      },
+      "LogSettings": {
+        "type": "object",
+        "description": "Settings, Logs (docs/logs.md)",
+        "properties": {
+          "retention_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 90,
+            "description": "days of log lines on the server, default 7"
+          },
+          "max_store_gb": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "size of the log store (partitions with indexes) that stops new lines; 0: no limit"
+          },
+          "min_free_pct": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50,
+            "description": "free space of the database disk that stops new lines; 0: off"
+          },
+          "device_mb_per_day": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10240,
+            "description": "per device and day, default 200"
+          },
+          "tenant_mb_per_day": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "per tenant and day; 0: no limit"
+          },
+          "tenant_quotas": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "tenant ID: MB per day, overrides tenant_mb_per_day"
+          },
+          "helpdesk_device_logs": {
+            "type": "boolean",
+            "description": "the helpdesk reads the logs of single devices in its scope"
+          },
+          "archive": {
+            "type": "boolean",
+            "description": "export each finished day, encrypted, to archive_target"
+          },
+          "archive_target": {
+            "type": "string",
+            "description": "name of a storage target of Settings, Backup"
+          },
+          "archive_retention_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3650,
+            "description": "archived days are deleted from the target after this; 0 keeps them"
+          },
+          "restore_hours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 720,
+            "description": "a restored day stays searchable this long, default 24"
+          }
+        }
+      },
+      "LogLine": {
+        "type": "object",
+        "required": [
+          "id",
+          "at",
+          "device_id",
+          "hostname",
+          "source",
+          "unit",
+          "priority",
+          "host",
+          "message"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "device~unix nanoseconds~dedup key; for /logs/context"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "journald",
+              "container",
+              "file"
+            ]
+          },
+          "unit": {
+            "type": "string",
+            "description": "systemd unit, container name or file path"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 7,
+            "description": "0 emerg to 7 debug"
+          },
+          "host": {
+            "type": "string",
+            "description": "host name the journal recorded"
+          },
+          "message": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "extra fields: _PID, SYSLOG_IDENTIFIER, container_id, image, compose_project ..."
+          }
+        }
+      },
+      "LogList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LogLine"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "LogHistogram": {
+        "type": "object",
+        "required": [
+          "bucket_seconds",
+          "from",
+          "to",
+          "buckets"
+        ],
+        "properties": {
+          "bucket_seconds": {
+            "type": "integer"
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "buckets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "at",
+                "counts"
+              ],
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "counts": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  },
+                  "description": "lines per priority 0 to 7"
+                }
+              }
+            }
+          }
+        }
+      },
+      "LogFacets": {
+        "type": "object",
+        "required": [
+          "units"
+        ],
+        "properties": {
+          "units": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "source",
+                "unit",
+                "count"
+              ],
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "unit": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "LogContext": {
+        "type": "object",
+        "required": [
+          "items",
+          "id"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LogLine"
+            },
+            "description": "newest first, the line itself included"
+          },
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "LogStatus": {
+        "type": "object",
+        "required": [
+          "partitions",
+          "store_bytes",
+          "free_pct",
+          "guard",
+          "keys",
+          "archives",
+          "restores",
+          "today"
+        ],
+        "properties": {
+          "partitions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "day",
+                "rows",
+                "bytes"
+              ],
+              "properties": {
+                "day": {
+                  "type": "string"
+                },
+                "rows": {
+                  "type": "integer",
+                  "description": "estimate"
+                },
+                "bytes": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "store_bytes": {
+            "type": "integer"
+          },
+          "free_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "free space of the database disk where readable"
+          },
+          "guard": {
+            "type": "string",
+            "description": "why new lines are refused; empty when they are accepted"
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "tenant_id",
+                "created_at",
+                "active",
+                "kek_id"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "tenant_id": {
+                  "type": "integer"
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "active": {
+                  "type": "boolean"
+                },
+                "kek_id": {
+                  "type": "string",
+                  "description": "key encryption key (key kind logs) that wraps the data key"
+                }
+              }
+            }
+          },
+          "archives": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "tenant_id",
+                "day",
+                "target",
+                "objects",
+                "lines",
+                "bytes",
+                "key_id",
+                "verified_at"
+              ],
+              "properties": {
+                "tenant_id": {
+                  "type": "integer"
+                },
+                "day": {
+                  "type": "string"
+                },
+                "target": {
+                  "type": "string"
+                },
+                "objects": {
+                  "type": "integer"
+                },
+                "lines": {
+                  "type": "integer"
+                },
+                "bytes": {
+                  "type": "integer"
+                },
+                "key_id": {
+                  "type": "string"
+                },
+                "verified_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "restores": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "day",
+                "until",
+                "restored_by"
+              ],
+              "properties": {
+                "day": {
+                  "type": "string"
+                },
+                "until": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "restored_by": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "today": {
+            "type": "object",
+            "required": [
+              "devices",
+              "lines",
+              "bytes",
+              "dropped"
+            ],
+            "properties": {
+              "devices": {
+                "type": "integer"
+              },
+              "lines": {
+                "type": "integer"
+              },
+              "bytes": {
+                "type": "integer"
+              },
+              "dropped": {
+                "type": "integer",
+                "description": "lines the devices dropped (rate, volume, full buffer)"
+              }
+            }
+          }
+        }
+      },
+      "LogAlertInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "query",
+          "threshold",
+          "window_minutes"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string",
+            "description": "a query of the Logs page (docs/logs.md#search)"
+          },
+          "threshold": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "lines in the window that fire the rule"
+          },
+          "window_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1440
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "critical"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "LogAlert": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "query",
+          "threshold",
+          "window_minutes",
+          "severity",
+          "enabled",
+          "created_by",
+          "last_count",
+          "last_fired_at"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string",
+            "description": "a query of the Logs page (docs/logs.md#search)"
+          },
+          "threshold": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "lines in the window that fire the rule"
+          },
+          "window_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1440
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "critical"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "last_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "matches at the last evaluation, counted up to the threshold"
+          },
+          "last_fired_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           }
         }
       }

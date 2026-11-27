@@ -232,6 +232,16 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `GET /api/v1/vulnerabilities/{cve}` | read | | `200` severity, CVSS and vector, KEV entry, packages with installed and fixed versions, devices, sources, references, risk acceptances; `404` when no device in scope has it |
 | `POST /api/v1/vulnerabilities/{cve}/accept` | admin | | `201` risk acceptance with `reason`, `expires` (last day, within a year), optional `device_id` and `package` (a tag scoped admin needs `device_id`); audited as `vulnerability.accept` |
 | `POST /api/v1/vulnerabilities/{cve}/reopen` | admin | | `204` revokes the active acceptances of the CVE (or `acceptance_id`); `404` when none; audited as `vulnerability.reopen` |
+| `GET /api/v1/logs` | read | `q` (query language), `from`, `to` (RFC 3339, default the last hour), `device`, `limit` (1 to 1000), `cursor` | `200` log lines newest first, `next_cursor`; admins and auditors, the helpdesk only with `device` when Settings, Logs allows it; see [Logs](logs.md#search) |
+| `GET /api/v1/logs/histogram` | read | as `/logs` | `200` lines per time bucket and priority |
+| `GET /api/v1/logs/facets` | read | as `/logs` | `200` most frequent units, containers and files |
+| `GET /api/v1/logs/context` | read | `id`, `n` | `200` lines before and after a line on the same device |
+| `GET /api/v1/logs/export` | read | as `/logs`, `format` (`ndjson`, `csv`) | `200` at most 100000 lines; audited as `logs.export` |
+| `GET /api/v1/logs/status` | audit | | `200` partitions, store size, disk guard, archive keys, archived days, restores, usage today (global accounts) |
+| `POST /api/v1/logs/keys/rotate` | admin | | `200` new archive data key per tenant; audited as `logs.key_rotate` |
+| `POST /api/v1/logs/archive/run` | admin | | `202` archives finished days in the background; audited as `logs.archive_run` |
+| `POST /api/v1/logs/archive/restore` | admin | | `200` loads an archived `day` (optional `tenant_id`) back into the search; audited as `logs.restore` |
+| `GET`, `POST /api/v1/logs/alerts`, `PUT`, `DELETE /api/v1/logs/alerts/{id}`, `POST /api/v1/logs/alerts/{id}/test` | audit (read), admin | | alert rules (query, threshold, window, severity); audited as `logs.alert_save` and `logs.alert_delete` |
 | `GET /api/v1/stats/annotations` | audit | `days` | `200` key rotations, approved agent releases, blueprint changes and failed backups per day, for the history charts |
 | `GET /api/v1/report-schedules` | audit | | `200` own schedules (admins: all of the tenant view) and the channels a schedule may use |
 | `POST /api/v1/report-schedules` | admin or auditor person, not a token | `{"view_id", "cadence", "channels", "emails"}` | `200` schedule of a saved report (list `reports`); audited as `report.schedule`; see [Scheduled reports](#scheduled-reports) |

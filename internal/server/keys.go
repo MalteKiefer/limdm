@@ -46,11 +46,12 @@ const (
 	kindCommand = "command"
 	kindSession = "session"
 	kindWebhook = "webhook"
+	kindLogs    = "logs" // wraps the log archive data keys (logs_archive.go)
 	keysFile    = "keys.json"
 )
 
 // keyKinds is the order of the status table.
-var keyKinds = []string{kindCA, kindNetCA, kindCommand, kindSession, kindWebhook}
+var keyKinds = []string{kindCA, kindNetCA, kindCommand, kindSession, kindWebhook, kindLogs}
 
 // KeyProvider says where private keys live: "file" (or empty) or "pkcs11".
 type KeyProvider struct {
@@ -187,7 +188,7 @@ type keyState struct {
 var keyNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 
 func readKeyStates(dir string) (map[string]keyState, error) {
-	st := map[string]keyState{kindCA: {Active: kindCA}, kindNetCA: {Active: kindNetCA}, kindCommand: {Active: kindCommand}}
+	st := map[string]keyState{kindCA: {Active: kindCA}, kindNetCA: {Active: kindNetCA}, kindCommand: {Active: kindCommand}, kindLogs: {Active: kindLogs}}
 	b, err := os.ReadFile(filepath.Join(dir, keysFile))
 	if errors.Is(err, os.ErrNotExist) {
 		return st, nil
@@ -264,6 +265,10 @@ type keyring struct {
 	rollover *api.KeyRollover
 	bundle   string // PEM of the trusted device CAs, as agents store it
 	cli      bool   // limdm-server keys: notifications are sent before the process ends
+	// log archive key encryption keys: the active one, the one being
+	// retired, and why the active one is missing (an HSM without the object)
+	logKEK, logPrev *logKEK
+	logErr          error
 }
 
 // loadKeys loads the active keys and those of running rotations.
@@ -288,6 +293,13 @@ func (s *Server) loadKeyStates(st map[string]keyState) error {
 	}
 	if s.cmdKey, err = loadCommandKey(p, dir, st[kindCommand].Active, true); err != nil {
 		return err
+	}
+	// the archive key does not stop the server: archiving reports its error
+	kr.logKEK, kr.logErr = loadLogKEK(p, dir, st[kindLogs].Active, true)
+	if prev := st[kindLogs].Previous; prev != "" {
+		if kr.logPrev, err = loadLogKEK(p, dir, prev, false); err != nil {
+			return fmt.Errorf("previous log archive key: %w", err)
+		}
 	}
 	kr.bundle = string(s.ca.pem)
 	if prev := st[kindCA].Previous; prev != "" {
@@ -344,7 +356,7 @@ func (s *Server) devicePool() *x509.CertPool {
 
 func (s *Server) keyStates() map[string]keyState {
 	if s.kr.states == nil {
-		return map[string]keyState{kindCA: {Active: kindCA}, kindNetCA: {Active: kindNetCA}, kindCommand: {Active: kindCommand}}
+		return map[string]keyState{kindCA: {Active: kindCA}, kindNetCA: {Active: kindNetCA}, kindCommand: {Active: kindCommand}, kindLogs: {Active: kindLogs}}
 	}
 	return s.kr.states
 }
@@ -463,6 +475,13 @@ func (s *Server) keyProgress(ctx context.Context, kind, active string) (done, to
 		q = `SELECT count(*) FILTER (WHERE command_key = $1), count(*) FROM devices WHERE NOT retired`
 	case kindNetCA:
 		q = `SELECT count(*) FILTER (WHERE ca = $1), count(*) FROM network_certs WHERE revoked_at IS NULL AND not_after > now()`
+	case kindLogs:
+		k, err := loadLogKEK(s.cfg.Keys, s.cfg.CADir, active, false)
+		if err != nil {
+			return 0, 0, err
+		}
+		active = k.id // data keys wrapped with it (the server rewraps them after its restart)
+		q = `SELECT count(*) FILTER (WHERE kek_id = $1), count(*) FROM log_keys`
 	default:
 		return 0, 0, fmt.Errorf("unknown key kind %q", kind)
 	}
@@ -504,7 +523,7 @@ func (s *Server) RotateKey(ctx context.Context, actor, kind, name string) (strin
 	}
 	cur, ok := st[kind]
 	if !ok {
-		return "", fmt.Errorf("unknown key kind %q (ca, network-ca, command, session, webhook)", kind)
+		return "", fmt.Errorf("unknown key kind %q (ca, network-ca, command, session, webhook, logs)", kind)
 	}
 	if cur.Previous != "" {
 		return "", errors.New("a rotation of this key is running: finish it first")
@@ -533,6 +552,8 @@ func (s *Server) RotateKey(ctx context.Context, actor, kind, name string) (strin
 		_, err = loadRoot(p, dir, name, "LiMDM Network CA "+date)
 	case kindCommand:
 		_, err = loadCommandKey(p, dir, name, true)
+	case kindLogs:
+		_, err = loadLogKEK(p, dir, name, true)
 	}
 	if err != nil {
 		return "", err
@@ -573,7 +594,7 @@ func (s *Server) FinishKey(ctx context.Context, actor, kind string, force bool) 
 	}
 	cur, ok := st[kind]
 	if !ok {
-		return "", fmt.Errorf("unknown key kind %q (ca, network-ca, command, session, webhook)", kind)
+		return "", fmt.Errorf("unknown key kind %q (ca, network-ca, command, session, webhook, logs)", kind)
 	}
 	if cur.Previous == "" {
 		return "", errors.New("no rotation of this key is running")

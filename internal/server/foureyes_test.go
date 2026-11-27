@@ -147,6 +147,20 @@ func TestFourEyesArtifacts(t *testing.T) {
 	}
 }
 
+// TestFourEyesLogRoots: custom log roots widen what the agent reads as
+// root; without them a logging item saves directly.
+func TestFourEyesLogRoots(t *testing.T) {
+	s := &Server{}
+	s.rt.Store(&runtimeState{set: Settings{FourEyes: true}})
+	with := api.LibraryItem{Type: api.TypeLogging, Payload: []byte(`{"enabled": true, "roots": ["/opt/app/logs"], "files": ["/opt/app/logs/a.log"]}`)}
+	if !s.itemNeedsApproval(with) || s.itemNeedsApproval(api.LibraryItem{Type: api.TypeLogging, Payload: []byte(`{"enabled": true, "journald": true}`)}) {
+		t.Fatal("approval for log roots")
+	}
+	if d := itemDetail(with, "save"); !strings.HasPrefix(d, "custom log roots /opt/app/logs;") {
+		t.Fatalf("audit detail %q", d)
+	}
+}
+
 func TestGlobalRequest(t *testing.T) {
 	two := int64(2)
 	for _, c := range []struct {

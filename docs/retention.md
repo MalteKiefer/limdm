@@ -26,6 +26,7 @@ Not configurable:
 | Approval requests | expire after 24 hours; decided requests stay with the audit log |
 | Library item and blueprint versions | forever (append only); they hold configuration, no personal data |
 | Retired devices | until deleted on the device page; the deletion removes events, metrics, commands, recovery keys and app requests |
+| Device logs | **Settings, Logs**: 7 days on the server by default (1 to 90), archives in S3 or B2 as long as set there ([logs.md](logs.md#retention-quotas-and-disk-guard-settings-logs)) |
 | Backups | per target by the retention rule of each schedule under **Settings, Backup** ([backup.md](backup.md#retention-of-archives)) |
 
 ## Why the audit log is no longer kept forever

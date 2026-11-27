@@ -818,4 +818,15 @@ var deCatalog = map[string]string{
 	// R4-V
 	"Vulnerability risk accepted": "Risiko einer Schwachstelle akzeptiert",
 	"Vulnerability reopened":      "Schwachstelle wieder geöffnet",
+	// R5-L
+	"Log collection": "Logsammlung",
+	"Ships journal, container and file logs to the server, filtered and masked on the device.": "Sendet Journal, Container und Dateilogs an den Server, auf dem Gerät gefiltert und maskiert.",
+	"Logs exported":                    "Logs exportiert",
+	"Archived logs restored":           "Archivierte Logs wiederhergestellt",
+	"Log archive keys rotated":         "Schlüssel des Logarchivs rotiert",
+	"Log alert saved":                  "Logalarm gespeichert",
+	"Log alert deleted":                "Logalarm gelöscht",
+	"Log archive started":              "Logarchivierung gestartet",
+	"Log alert rule matched":           "Logalarm ausgelöst",
+	"Log store full or archive failed": "Logspeicher voll oder Archivierung fehlgeschlagen",
 }

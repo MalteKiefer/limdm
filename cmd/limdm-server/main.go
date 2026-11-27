@@ -54,13 +54,16 @@ func main() {
 		err = backupCmd(log, os.Args[2:])
 	case "evidence":
 		err = evidenceCmd(os.Args[2:])
+	case "logs":
+		err = logsCmd(log, os.Args[2:])
 	default:
 		err = errors.New(`usage: limdm-server [serve | keygen -out FILE | sign -key FILE|-key-env VAR|-pkcs11 LABEL SHA256SUMS
                      | local-admin [-env FILE] [-role admin|auditor] [-out FILE] add|reset|disable|enable|list [NAME]
                      | audit [-ca DIR] [-key HEX -keyed-from ID] verify FILE.jsonl | audit [-ca DIR] key
                      | keys [-env FILE] status | rotate KIND [-name NAME] | finish KIND [-force]
                      | backup [-env FILE] create | list | verify | restore | restore-test ...
-                     | evidence [-ca DIR | -key HEX] verify FILE]`)
+                     | evidence [-ca DIR | -key HEX] verify FILE
+                     | logs [-env FILE] status | archive | restore -day YYYY-MM-DD [-tenant ID]]`)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -415,4 +418,17 @@ func backupCmd(log *slog.Logger, args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	return server.BackupCommand(ctx, log, args, os.Stdout)
+}
+
+// logsCmd lists, runs and restores log archives (docs/logs.md#restore).
+func logsCmd(log *slog.Logger, args []string) error {
+	if len(args) >= 2 && args[0] == "-env" {
+		if err := loadEnvFile(args[1]); err != nil {
+			return err
+		}
+		args = args[2:]
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return server.LogsCommand(ctx, log, args, os.Stdout)
 }

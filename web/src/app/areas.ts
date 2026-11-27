@@ -6,6 +6,7 @@ import { configArea } from '../areas/config/routes'
 import { devicesArea } from '../areas/devices/routes'
 import { homeArea } from '../areas/home/routes'
 import { inboxArea } from '../areas/inbox/routes'
+import { logsArea } from '../areas/logs/routes'
 import { reportsArea } from '../areas/reports/routes'
 import { settingsArea } from '../areas/settings/routes'
 import { updatesArea } from '../areas/updates/routes'
@@ -19,4 +20,4 @@ const devArea: Area = {
   routes: (shell) => [createRoute({ getParentRoute: () => shell, path: '/dev/components', component: lazyRouteComponent(() => import('./gallery'), 'Gallery') })],
 }
 
-export const areas: Area[] = [homeArea, inboxArea, devicesArea, complianceArea, configArea, updatesArea, vulnerabilitiesArea, activityArea, reportsArea, settingsArea, devArea]
+export const areas: Area[] = [homeArea, inboxArea, devicesArea, complianceArea, configArea, updatesArea, vulnerabilitiesArea, logsArea, activityArea, reportsArea, settingsArea, devArea]

@@ -18,7 +18,10 @@ with one line per addition.
 | Administration (users, tenants, tokens, approvals settings, keys, backup, retention, operations, notifications, SSO, directory, network, agents, enrollment, audit) | `settings` | `app_settings.go` |
 
 A new area directory is fine; register it with one line each in
-`src/app/areas.ts` and `src/i18n/catalog.ts` (import, list entry, `typeof x.de`).
+`src/app/areas.ts` and `src/i18n/catalog.ts` (type import, `typeof x.de`, loader, and the
+catalogs of other areas it uses in `deps`). Area catalogs load with the area's routes, so
+`t()` in an area sees only the core, its own and its dependencies' keys; nav labels of
+areas live in `src/i18n/core.ts`, which loads up front.
 
 ## File layout of an area
 

@@ -138,6 +138,7 @@ func (s *Server) settingsView(r *http.Request, c apiCaller, set Settings) apiSet
 	v.Logo = nil
 	v.Ops = v.Ops.withDefaults()
 	v.Enroll = v.Enroll.withDefaults()
+	v.Logs = v.Logs.withDefaults()
 	for _, row := range retentionRows(set) {
 		v.RetentionKinds = append(v.RetentionKinds, apiRetentionKind{row.Key, row.Days, row.Default, row.Min, row.Max, row.Forever})
 	}

@@ -36,6 +36,7 @@ func (s *Server) appAPIRoutes(m *http.ServeMux) {
 	s.appSettingsRoutes(m) // app_settings.go
 	s.appPatchRoutes(m)    // app_patch.go
 	s.appVulnRoutes(m)     // app_vulns.go
+	s.appLogRoutes(m)      // app_logs.go
 
 	s.appWorkloadsRoutes(m)
 	s.appFirewallRoutes(m) // app_firewall.go

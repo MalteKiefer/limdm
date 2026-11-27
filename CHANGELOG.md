@@ -4,6 +4,28 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.21.0 (2026-11-27)
+
+### Upgrade notes
+- New key kind `logs` in the server key management (created in `LIMDM_CA_DIR` at first start, or as PKCS#11 object `limdm-logs`); it wraps the per tenant data keys of the encrypted log archive.
+- Log collection is off by default; it starts only when a `com.limdm.logging` item is assigned. Older agents refuse the new declaration type.
+
+### Added
+- Log collection declaration `com.limdm.logging`: journald, Docker and Podman containers and files, with filters, masking of secrets, rate and volume limits and an offline buffer. Off by default, refused on personal devices unless allowed.
+- Log store on the server: daily partitions, retention 1 to 90 days, per device and tenant quotas, disk guard, deduplication.
+- Logs area and device Logs tab: search across devices with a query language, histogram, context, live tail, saved views, audited export, alert rules on notification channels (evaluated in the scope of the account that saved them; notifications carry no log text).
+- Encrypted log archive to S3 compatible storage or Backblaze B2 (AES-256-GCM, per tenant data keys wrapped by the `logs` key, rotation through Settings, Keys, verified uploads), restore from the console or `limdm-server logs restore`.
+- Settings, Logs section and notification events `logs.alert` and `logs.guard`.
+- Custom log directories: `roots` in `com.limdm.logging` lets file sources live in further directories (at least two levels deep, for example `/opt/app/logs`), editable in the item form.
+
+### Changed
+- The console loads area translations with their routes (first load 212 KB instead of 286 KB).
+
+### Security
+- Log file sources are limited to `/var/log/` and `/srv/<name>/log/`; the agent opens them without following links and refuses files or directories writable by others.
+- Custom log roots must name a log directory (a path component `log` or `logs`) and never reach credential stores of other services (TLS and VPN keys, Docker, Kubernetes, database and identity data, sudoers) or dot directories in home directories.
+- Custom log roots keep the same rules (no `/`, no bare top level directory, never in secret locations such as `/etc/shadow`, `/etc/ssh/`, `/root/`, `/home/*/.ssh`, `/boot`), are checked on save and on the agent, and saving an item with roots needs four eyes approval when it is on; the audit entry lists the roots.
+
 ## 0.20.2 (2026-11-27)
 
 ### Fixed

@@ -20,8 +20,9 @@ import { UpdatesTab } from './UpdatesTab'
 import { WorkloadsTab } from '../workloads/WorkloadsTab'
 import { HostnameCard } from './HostnameCard'
 import { FirewallTab } from './FirewallTab'
+import { LogsTab } from '../logs/LogsTab'
 
-const tabs = ['overview', 'compliance', 'config', 'software', 'updates', 'firewall', 'workloads', 'inventory', 'activity'] as const
+const tabs = ['overview', 'compliance', 'config', 'software', 'updates', 'firewall', 'workloads', 'logs', 'inventory', 'activity'] as const
 type Tab = (typeof tabs)[number]
 
 export function DevicePage() {
@@ -61,6 +62,7 @@ export function DevicePage() {
         {tab === 'updates' && <UpdatesTab d={d} />}
         {tab === 'firewall' && <FirewallTab d={d} />}
         {tab === 'workloads' && <WorkloadsTab d={d} />}
+        {tab === 'logs' && <LogsTab d={d} />}
         {tab === 'inventory' && <InventoryTab d={d} sub={search.sub} setSub={setSub} open={setDialog} />}
         {tab === 'activity' && <ActivityTab d={d} />}
       </TabPanel>

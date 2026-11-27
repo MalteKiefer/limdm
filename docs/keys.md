@@ -13,6 +13,7 @@ each one without enrolling the fleet again.
 | Audit chain keys | HMAC-SHA256 of the audit log ([security.md](security.md#audit-log)) | derived with HKDF from the command key | derived; earlier segments in `LIMDM_CA_DIR/audit-keys` (0600) | yes, `audit-keys` and `audit-keyed-from` |
 | Session key | signs console sessions and CSRF tokens, derives the AES-256-GCM keys for sealed values (OIDC client secret, Google service account key, notification channel secrets, LUKS recovery keys, desktop login client secret, webhook signing secret) | 32+ random bytes | `LIMDM_SESSION_KEY` in `server.env` or `.env` | yes, apart from the database |
 | Webhook signing secret (`webhook`) | signs the compliance webhook and global signed webhook channels (`X-LiMDM-Signature`); each tenant's channel secret is derived from it ([notifications.md](notifications.md#webhook-channel-payload-and-signature)) | HMAC-SHA256, 32 random bytes | settings row `webhook` in the database, sealed with the session key; shown in Settings, Notifications | yes, with the database |
+| Log archive key (`logs`) | wraps the per tenant data keys of the log archive ([logs.md](logs.md#encryption)); independent of the session key | Ed25519; the key encryption key is HKDF over its deterministic signature of a fixed label, AES-256-GCM | `LIMDM_CA_DIR/<name>.key` (0600, created at the first start), or the HSM object `limdm-<name>` | yes, with the CA directory: without it archived logs cannot be decrypted |
 | Release key | signs `SHA256SUMS` of agent releases; its public half is compiled into the agent and the server (`/install.sh` embeds it, `LIMDM_RELEASE_PUBLIC_KEY` overrides it) | Ed25519 | CI secret `RELEASE_SIGNING_KEY`, an offline file, or the HSM ([operations.md](operations.md#release-key)) | offline |
 | Console TLS key | HTTPS of the console | any | `LIMDM_TLS_KEY` or the reverse proxy | as usual |
 
@@ -112,6 +113,7 @@ limdm-server keys -env /etc/limdm-server/server.env rotate ca            # or ne
 limdm-server keys -env /etc/limdm-server/server.env finish ca            # when status shows every device moved
 limdm-server keys -env /etc/limdm-server/server.env rotate session       # prints the new LIMDM_SESSION_KEY
 limdm-server keys -env /etc/limdm-server/server.env rotate webhook       # prints the new webhook signing secret
+limdm-server keys -env /etc/limdm-server/server.env rotate logs          # log archive key; finish when status shows every data key moved
 ```
 
 Every step is written to the audit log (`keys.rotate`, `keys.finish`, `keys.reseal`,
@@ -187,6 +189,15 @@ still holds the old keys refuses to start. A step waits while an instance starts
    key in `LIMDM_SESSION_KEY` and restart.
 
 A session key rotation does not change the webhook signing secret.
+
+### Log archive key
+
+`rotate logs` creates a new key (with an HSM: names the object `limdm-NAME`). After the
+restart the new key is active and the old one retiring: the logs job wraps every data key
+of the log archive again with the new key (the data keys themselves stay, so every archived
+day stays readable). Status shows the data keys moved; `finish` refuses until all moved
+and then deletes the old key file. Data keys of builds before 0.21, wrapped with the session
+key, are wrapped with this key at the first start.
 
 ### Webhook signing secret
 

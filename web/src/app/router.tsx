@@ -5,6 +5,7 @@ import { Compass } from 'lucide-react'
 import { Suspense } from 'react'
 import { EmptyState, ErrorState } from '../components/states'
 import { t, useT } from '../i18n'
+import { loadCatalogs } from '../i18n/catalog'
 import { areas } from './areas'
 import { Shell } from './shell'
 
@@ -45,7 +46,8 @@ const root = createRootRoute({
   errorComponent: ({ error, reset }) => <ErrorState error={error} onRetry={reset} />,
 })
 
-export const routeTree = root.addChildren(areas.flatMap((a) => a.routes(root)))
+// each area's catalog (and those it depends on) loads before its routes render
+export const routeTree = root.addChildren(areas.flatMap((a) => a.routes(root).map((r) => r.update({ loader: () => loadCatalogs(a.id) } as never))))
 
 export const router = createRouter({ routeTree, basepath: '/app', defaultPreload: 'intent', scrollRestoration: true })
 

@@ -450,7 +450,7 @@ func (s *Server) Close() {
 func (s *Server) Background(ctx context.Context) {
 	for name, loop := range map[string]func(context.Context){"google sync": s.googleSyncLoop, "history": s.historyLoop,
 		"catalog icons": s.iconLoop, "syslog": s.syslogLoop, "reseal": s.resealLoop, "backup": s.backupLoop,
-		"reports": s.reportLoop, "update rings": s.ringLoop, "cve feeds": s.cveLoop} {
+		"reports": s.reportLoop, "update rings": s.ringLoop, "cve feeds": s.cveLoop, "logs": s.logsLoop} {
 		go s.background(ctx, name, loop, true)
 	}
 	// every instance serves agent packages from its own release directory
@@ -570,6 +570,7 @@ func (s *Server) AgentHandler() http.Handler {
 	mux.HandleFunc("POST /api/v1/renew", s.deviceAuth(s.renew, true))
 	mux.HandleFunc("POST /api/v1/checkin", s.deviceAuth(s.checkin, false))
 	mux.HandleFunc("POST /api/v1/poll", s.deviceAuth(s.poll, false))
+	mux.HandleFunc("POST /api/v1/logs", s.deviceAuth(s.agentLogs, false)) // logs.go
 	mux.HandleFunc("POST /api/v1/network-cert", s.deviceAuth(s.deviceLimit(5, s.networkCert), false))
 	mux.HandleFunc("GET /api/v1/agent-packages/{version}/{file}", s.deviceAuth(s.agentPackage, false))
 	mux.HandleFunc("GET /api/v1/catalog/icons/{id}", s.deviceAuth(s.catalogIcon, false))

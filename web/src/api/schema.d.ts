@@ -1962,7 +1962,7 @@ export interface paths {
         head?: never;
         /**
          * Save one settings section
-         * @description Sections: general (local_login, stale_hours), network (console_allow, console_block, scim_allow, network_cert_domain), security (password_policy, four_eyes*, geolocation, fallback_dns), remote_shell, sso (oidc_*, allowed_domain, require_mfa, mfa_acr, role_groups, oidc_client_secret, clear_secret), monitoring (webhook_url, notify_private_networks), branding (company_name, logo_png, remove_logo), operations (ops), retention, enrollment (enrollment). Fields left out keep their value. The same guards as the console: no self lockout, local login only off with an OIDC admin, four eyes needs two admins, OIDC changes are checked against the provider. Audited as settings.save.
+         * @description Sections: general (local_login, stale_hours), network (console_allow, console_block, scim_allow, network_cert_domain), security (password_policy, four_eyes*, geolocation, fallback_dns), remote_shell, sso (oidc_*, allowed_domain, require_mfa, mfa_acr, role_groups, oidc_client_secret, clear_secret), monitoring (webhook_url, notify_private_networks), branding (company_name, logo_png, remove_logo), operations (ops), retention, enrollment (enrollment), cve_feeds, logs (logs). Fields left out keep their value. The same guards as the console: no self lockout, local login only off with an OIDC admin, four eyes needs two admins, OIDC changes are checked against the provider. Audited as settings.save.
          */
         patch: operations["saveSettings"];
         trace?: never;
@@ -3079,6 +3079,236 @@ export interface paths {
         get: operations["getFirewallTargets"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search log lines
+         * @description Lines of the devices in the caller's tenant and scope, newest first. Admins and auditors; the helpdesk only with device and when Settings, Logs allows it. Runs under a statement timeout of 20 s (422 when exceeded).
+         */
+        get: operations["searchLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/logs/histogram": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lines per time bucket and priority
+         * @description About 120 buckets over the range (1 minute to 7 days each). Same filter and access as searchLogs.
+         */
+        get: operations["logHistogram"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/logs/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Most frequent units, containers and files */
+        get: operations["logFacets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/logs/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lines before and after a line on the same device */
+        get: operations["logContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/logs/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export the filtered lines
+         * @description NDJSON (LogLine per line) or CSV, newest first, at most 100000 lines. Audited as logs.export with the filter.
+         */
+        get: operations["exportLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/logs/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * State of the log store, the archive and the keys
+         * @description Admins and auditors of the whole installation.
+         */
+        get: operations["logStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/logs/keys/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start new archive data keys
+         * @description Global admins. Every tenant with a data key gets a new active one; older archives keep theirs. Audited as logs.key_rotate.
+         */
+        post: operations["rotateLogKeys"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/logs/archive/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive finished days now
+         * @description Global admins; runs in the background. Audited as logs.archive_run.
+         */
+        post: operations["runLogArchive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/logs/archive/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore an archived day
+         * @description Global admins. Downloads, verifies (SHA-256 against the manifest), decrypts and loads the day into its partition, searchable for restore_hours. Audited as logs.restore.
+         */
+        post: operations["restoreLogs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/logs/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Log alert rules of the tenant */
+        get: operations["listLogAlerts"];
+        put?: never;
+        /**
+         * Create a log alert rule
+         * @description Admins. When at least threshold lines matched in the last window, a logs.alert notification goes out, at most once per window. Audited as logs.alert_save.
+         */
+        post: operations["createLogAlert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/logs/alerts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Change a log alert rule */
+        put: operations["saveLogAlert"];
+        post?: never;
+        /** Delete a log alert rule */
+        delete: operations["deleteLogAlert"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/logs/alerts/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Count a rule now and send a test notification */
+        post: operations["testLogAlert"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4418,6 +4648,7 @@ export interface components {
             network_cert_domain?: string;
             enrollment?: components["schemas"]["EnrollSettings"];
             cve_feeds?: components["schemas"]["CVEFeedSettings"];
+            logs?: components["schemas"]["LogSettings"];
         };
         RetentionKind: {
             key: string;
@@ -4470,6 +4701,7 @@ export interface components {
             network_cert_domain?: string;
             enrollment: components["schemas"]["EnrollSettings"];
             cve_feeds?: components["schemas"]["CVEFeedSettings"];
+            logs?: components["schemas"]["LogSettings"];
         };
         ConsoleUser: {
             /** @description Email (OIDC) or local:name */
@@ -4546,7 +4778,7 @@ export interface components {
         };
         KeyStatus: {
             /** @enum {string} */
-            kind: "ca" | "netca" | "command" | "session" | "webhook";
+            kind: "ca" | "netca" | "command" | "session" | "webhook" | "logs";
             active: string;
             previous: string;
             /** Format: date-time */
@@ -5318,6 +5550,157 @@ export interface components {
             device_id?: string;
             /** @description only this package */
             package?: string;
+        };
+        /** @description Settings, Logs (docs/logs.md) */
+        LogSettings: {
+            /** @description days of log lines on the server, default 7 */
+            retention_days?: number;
+            /** @description size of the log store (partitions with indexes) that stops new lines; 0: no limit */
+            max_store_gb?: number;
+            /** @description free space of the database disk that stops new lines; 0: off */
+            min_free_pct?: number;
+            /** @description per device and day, default 200 */
+            device_mb_per_day?: number;
+            /** @description per tenant and day; 0: no limit */
+            tenant_mb_per_day?: number;
+            /** @description tenant ID: MB per day, overrides tenant_mb_per_day */
+            tenant_quotas?: {
+                [key: string]: number;
+            };
+            /** @description the helpdesk reads the logs of single devices in its scope */
+            helpdesk_device_logs?: boolean;
+            /** @description export each finished day, encrypted, to archive_target */
+            archive?: boolean;
+            /** @description name of a storage target of Settings, Backup */
+            archive_target?: string;
+            /** @description archived days are deleted from the target after this; 0 keeps them */
+            archive_retention_days?: number;
+            /** @description a restored day stays searchable this long, default 24 */
+            restore_hours?: number;
+        };
+        LogLine: {
+            /** @description device~unix nanoseconds~dedup key; for /logs/context */
+            id: string;
+            /** Format: date-time */
+            at: string;
+            device_id: string;
+            hostname: string;
+            /** @enum {string} */
+            source: "journald" | "container" | "file";
+            /** @description systemd unit, container name or file path */
+            unit: string;
+            /** @description 0 emerg to 7 debug */
+            priority: number;
+            /** @description host name the journal recorded */
+            host: string;
+            message: string;
+            /** @description extra fields: _PID, SYSLOG_IDENTIFIER, container_id, image, compose_project ... */
+            fields?: {
+                [key: string]: string;
+            };
+        };
+        LogList: {
+            items: components["schemas"]["LogLine"][];
+            next_cursor?: string;
+        };
+        LogHistogram: {
+            bucket_seconds: number;
+            /** Format: date-time */
+            from: string;
+            /** Format: date-time */
+            to: string;
+            buckets: {
+                /** Format: date-time */
+                at: string;
+                /** @description lines per priority 0 to 7 */
+                counts: number[];
+            }[];
+        };
+        LogFacets: {
+            units: {
+                source: string;
+                unit: string;
+                count: number;
+            }[];
+        };
+        LogContext: {
+            /** @description newest first, the line itself included */
+            items: components["schemas"]["LogLine"][];
+            id: string;
+        };
+        LogStatus: {
+            partitions: {
+                day: string;
+                /** @description estimate */
+                rows: number;
+                bytes: number;
+            }[];
+            store_bytes: number;
+            /** @description free space of the database disk where readable */
+            free_pct: number | null;
+            /** @description why new lines are refused; empty when they are accepted */
+            guard: string;
+            keys: {
+                id: string;
+                tenant_id: number;
+                /** Format: date-time */
+                created_at: string;
+                active: boolean;
+                /** @description key encryption key (key kind logs) that wraps the data key */
+                kek_id: string;
+            }[];
+            archives: {
+                tenant_id: number;
+                day: string;
+                target: string;
+                objects: number;
+                lines: number;
+                bytes: number;
+                key_id: string;
+                /** Format: date-time */
+                verified_at: string | null;
+            }[];
+            restores: {
+                day: string;
+                /** Format: date-time */
+                until: string;
+                restored_by: string;
+            }[];
+            today: {
+                devices: number;
+                lines: number;
+                bytes: number;
+                /** @description lines the devices dropped (rate, volume, full buffer) */
+                dropped: number;
+            };
+        };
+        LogAlertInput: {
+            name: string;
+            /** @description a query of the Logs page (docs/logs.md#search) */
+            query: string;
+            /** @description lines in the window that fire the rule */
+            threshold: number;
+            window_minutes: number;
+            /** @enum {string} */
+            severity?: "info" | "warning" | "critical";
+            enabled?: boolean;
+        };
+        LogAlert: {
+            name: string;
+            /** @description a query of the Logs page (docs/logs.md#search) */
+            query: string;
+            /** @description lines in the window that fire the rule */
+            threshold: number;
+            window_minutes: number;
+            /** @enum {string} */
+            severity: "info" | "warning" | "critical";
+            enabled: boolean;
+            id: number;
+            created_by: string;
+            /** @description matches at the last evaluation, counted up to the threshold */
+            last_count: number | null;
+            /** Format: date-time */
+            last_fired_at: string | null;
         };
     };
     responses: {
@@ -8966,7 +9349,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                section: "general" | "network" | "security" | "remote_shell" | "sso" | "monitoring" | "branding" | "operations" | "retention" | "enrollment" | "cve_feeds";
+                section: "general" | "network" | "security" | "remote_shell" | "sso" | "monitoring" | "branding" | "operations" | "retention" | "enrollment" | "cve_feeds" | "logs";
             };
             cookie?: never;
         };
@@ -9350,7 +9733,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                kind: "ca" | "netca" | "command" | "session" | "webhook";
+                kind: "ca" | "netca" | "command" | "session" | "webhook" | "logs";
                 op: "rotate" | "finish";
             };
             cookie?: never;
@@ -11097,6 +11480,440 @@ export interface operations {
             };
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+        };
+    };
+    searchLogs: {
+        parameters: {
+            query?: {
+                /** @description query language: device:, tag:, blueprint:, os:, source:, unit:, container:, file:, host:, prio:, field.NAME:, "phrase", /regex/, -term */
+                q?: string;
+                /** @description RFC 3339; default one hour before to */
+                from?: string;
+                /** @description RFC 3339; default now */
+                to?: string;
+                /** @description only this device ID (the helpdesk needs it) */
+                device?: string;
+                /** @description 1 to 1000, default 200 */
+                limit?: number;
+                /** @description next_cursor of the previous page */
+                cursor?: components["parameters"]["cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogList"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    logHistogram: {
+        parameters: {
+            query?: {
+                /** @description query language: device:, tag:, blueprint:, os:, source:, unit:, container:, file:, host:, prio:, field.NAME:, "phrase", /regex/, -term */
+                q?: string;
+                /** @description RFC 3339; default one hour before to */
+                from?: string;
+                /** @description RFC 3339; default now */
+                to?: string;
+                /** @description only this device ID (the helpdesk needs it) */
+                device?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogHistogram"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    logFacets: {
+        parameters: {
+            query?: {
+                /** @description query language: device:, tag:, blueprint:, os:, source:, unit:, container:, file:, host:, prio:, field.NAME:, "phrase", /regex/, -term */
+                q?: string;
+                /** @description RFC 3339; default one hour before to */
+                from?: string;
+                /** @description RFC 3339; default now */
+                to?: string;
+                /** @description only this device ID (the helpdesk needs it) */
+                device?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogFacets"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    logContext: {
+        parameters: {
+            query?: {
+                /** @description id of a log line */
+                id?: string;
+                /** @description lines on each side, 1 to 200, default 25 */
+                n?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogContext"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    exportLogs: {
+        parameters: {
+            query: {
+                /** @description query language: device:, tag:, blueprint:, os:, source:, unit:, container:, file:, host:, prio:, field.NAME:, "phrase", /regex/, -term */
+                q?: string;
+                /** @description RFC 3339; default one hour before to */
+                from?: string;
+                /** @description RFC 3339; default now */
+                to?: string;
+                /** @description only this device ID (the helpdesk needs it) */
+                device?: string;
+                /** @description ndjson or csv */
+                format: "ndjson" | "csv";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-ndjson": string;
+                    "text/csv": string;
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    logStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogStatus"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    rotateLogKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        rotated: number;
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    runLogArchive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status?: string;
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    restoreLogs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: date */
+                    day: string;
+                    /** @description 0 or absent: every tenant of the day */
+                    tenant_id?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        lines: number;
+                        day: string;
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listLogAlerts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["LogAlert"][];
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    createLogAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogAlertInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogAlert"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    saveLogAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogAlertInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogAlert"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deleteLogAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    testLogAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        count: number;
+                        matches: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
         };
     };
 }
