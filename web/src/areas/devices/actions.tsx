@@ -43,7 +43,7 @@ import {
   type DeviceDetail,
   type Params,
 } from './api'
-import { badParamLine, formatUsers, mayCommand, parseTags, parseUsers } from './logic'
+import { badParamLine, formatAttrs, formatUsers, mayCommand, parseAttrs, parseTags, parseUsers } from './logic'
 
 export type Dialog =
   | { kind: 'confirm'; type: string; params?: Params; title: MessageKey; body: MessageKey; danger?: boolean }
@@ -384,6 +384,8 @@ function EditDialog({ target, onClose }: { target: Target; onClose: () => void }
   const [primary, setPrimary] = useState(d?.primary_user ?? '')
   const [tags, setTags] = useState((d?.tags ?? []).join(', '))
   const [users, setUsers] = useState(formatUsers(d?.desktop_users ?? []))
+  const [attrs, setAttrs] = useState(formatAttrs(d?.attributes))
+  const pa = parseAttrs(attrs)
   const people = usePeople(primary, primary.length >= 2)
   const pu = parseUsers(users)
   const pt = parseTags(tags)
@@ -391,11 +393,11 @@ function EditDialog({ target, onClose }: { target: Target; onClose: () => void }
   const list = d?.blueprints.length ? d.blueprints : (bps.data ?? []).map((b) => ({ id: b.id, name: b.name }))
   const submit = () =>
     patch.mutate(
-      { id: target.id, body: { blueprint_id: Number(bp) > 0 ? Number(bp) : null, primary_user: primary.trim(), tags: pt.tags, users: pu.users } },
+      { id: target.id, body: { blueprint_id: Number(bp) > 0 ? Number(bp) : null, primary_user: primary.trim(), tags: pt.tags, users: pu.users, attributes: pa.attrs } },
       { onSuccess: () => (toast(t('devices.edit.saved')), onClose()), onError: (e) => setErr(fieldError(e)) },
     )
   return (
-    <Modal open wide onClose={onClose} title={t('devices.cmd.edit')} description={target.hostname} footer={<Foot form="dlg-edit" onClose={onClose} label={t('common.save')} busy={patch.isPending} disabled={!!pu.error || !!pt.error} />}>
+    <Modal open wide onClose={onClose} title={t('devices.cmd.edit')} description={target.hostname} footer={<Foot form="dlg-edit" onClose={onClose} label={t('common.save')} busy={patch.isPending} disabled={!!pu.error || !!pt.error || !!pa.error} />}>
       <form id="dlg-edit" className="flex flex-col gap-4" onSubmit={(e) => (e.preventDefault(), submit())}>
         {err && (
           <p role="alert" className="text-[13px] font-medium text-bad">
@@ -427,6 +429,7 @@ function EditDialog({ target, onClose }: { target: Target; onClose: () => void }
         </Field>
         <Text label={t('devices.edit.tags')} help={t('devices.edit.tagsHelp')} value={tags} onChange={setTags} error={pt.error ? t('devices.edit.tagBad', { tag: pt.error }) : undefined} />
         <Text label={t('devices.edit.users')} help={t('devices.edit.usersHelp')} value={users} onChange={setUsers} area={4} mono error={pu.error ? t('devices.edit.userBad', { line: pu.error }) : undefined} />
+        <Text label={t('devices.edit.attrs')} help={t('devices.edit.attrsHelp')} value={attrs} onChange={setAttrs} area={3} mono error={pa.error ? t('devices.edit.attrBad', { line: pa.error }) : undefined} />
       </form>
     </Modal>
   )

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { enrollConf, installCommand } from './enrolltext'
-import { accountActionable, badParamLine, filterByName, formatUsers, mayCommand, parseTags, parseUsers, pkgValue, statusTone, usedPct } from './logic'
+import { accountActionable, badParamLine, filterByName, formatAttrs, formatUsers, mayCommand, parseAttrs, parseTags, parseUsers, pkgValue, statusTone, usedPct } from './logic'
 
 describe('enrollment texts', () => {
   it('prints the install command and enroll.conf', () => {
@@ -29,6 +29,13 @@ describe('devices logic', () => {
     expect(parseUsers('root r@x.de').error).toBe('root r@x.de')
     expect(parseUsers('a a@x.de\na b@x.de').error).toBe('a b@x.de')
     expect(parseUsers('a a@x.de sudo').error).toBeDefined()
+  })
+
+  it('parses template attributes', () => {
+    expect(parseAttrs('site = ber\n\nnet=10.0.0.0/8')).toEqual({ attrs: { site: 'ber', net: '10.0.0.0/8' } })
+    expect(parseAttrs('1x=y').error).toBe('1x=y')
+    expect(parseAttrs('a=1\na=2').error).toBe('a=2')
+    expect(formatAttrs({ a: '1', b: 'x=y' })).toBe('a=1\nb=x=y')
   })
 
   it('parses tags', () => {
