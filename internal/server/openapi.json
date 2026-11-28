@@ -20575,6 +20575,10 @@
                 },
                 "severity": {
                   "type": "string"
+                },
+                "via": {
+                  "type": "string",
+                  "description": "base distribution whose feed matched a derivative (ubuntu, debian, arch); absent for a direct match"
                 }
               }
             },
@@ -21320,6 +21324,10 @@
                     "accepted",
                     "remediated"
                   ]
+                },
+                "via": {
+                  "type": "string",
+                  "description": "base distribution whose feed matched a derivative (ubuntu, debian, arch); absent for a direct match"
                 }
               }
             }

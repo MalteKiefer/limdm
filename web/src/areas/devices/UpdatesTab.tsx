@@ -13,7 +13,7 @@ import { useT } from '../../i18n'
 import { dateTime } from '../../i18n/format'
 import { useDeviceUpdates } from '../updates/api'
 import { severityTone, sortPending } from '../updates/logic'
-import { mono, RunBadge, SecurityTag, SourceLabel, Table } from '../updates/parts'
+import { feedName, mono, RunBadge, SecurityTag, SourceLabel, Table } from '../updates/parts'
 import { useRun } from './actions'
 import type { DeviceDetail } from './api'
 
@@ -152,7 +152,10 @@ export function UpdatesTab({ d }: { d: DeviceDetail }) {
                   {v.cve}
                 </Link>,
                 v.severity ? <Badge tone={severityTone(v.severity)}>{v.severity}</Badge> : <span className="text-muted">{t('updates.unknown')}</span>,
-                mono(v.package),
+                <span className="flex flex-wrap items-baseline gap-x-2">
+                  {mono(v.package)}
+                  {v.via && <span className="text-micro text-muted">{t('updates.dev.via', { feed: feedName(v.via) })}</span>}
+                </span>,
                 mono(v.installed),
                 mono(v.fixed),
               ],

@@ -185,6 +185,7 @@ export default {
   'updates.dev.vulns': 'Vulnerabilidades conocidas',
   'updates.dev.vulnsSub': 'De los datos de seguridad de Debian y Ubuntu: la versión instalada es anterior a la corregida.',
   'updates.dev.fixed': 'Corregido en',
+  'updates.dev.via': 'mediante el feed de {feed}',
   'updates.feeds.distro.arch': 'Arch Security Tracker',
   'updates.feeds.distro.alpine': 'Alpine secdb',
   'updates.feeds.url.debian': 'Dirección de Debian Security Tracker (JSON)',

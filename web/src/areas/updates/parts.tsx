@@ -45,6 +45,9 @@ export function Table({ caption, cols, rows, empty }: { caption: string; cols: C
   )
 }
 
+// feedName is the display name of the base feed a derivative was matched through (ubuntu: Ubuntu).
+export const feedName = (via: string) => via.charAt(0).toUpperCase() + via.slice(1)
+
 export const mono = (v?: string | number) => <span className="font-mono text-meta break-all">{v ?? ''}</span>
 
 /** A security flag with the advisory's severity (text, never color alone). */

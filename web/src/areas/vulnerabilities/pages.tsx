@@ -37,6 +37,7 @@ import {
   type Severity,
   type Status,
 } from './logic'
+import { feedName } from '../updates/parts'
 
 const sevKey = (s: string | undefined) => `vulns.sev.${s ?? 'unknown'}` as MessageKey
 const statusKey = (s: string | undefined) => `vulns.status.${s ?? 'active'}` as MessageKey
@@ -774,6 +775,7 @@ function Detail({ cve, onClose, onPrev, onNext, onAccept, onReopen }: { cve: str
                     <span className="truncate font-mono text-micro text-muted">
                       {d.package} {d.installed} → {d.fixed}
                     </span>
+                    {d.via && <span className="text-micro text-muted">{t('vulns.detail.via', { feed: feedName(d.via) })}</span>}
                   </span>
                   <span className="flex flex-col items-end gap-0.5">
                     <StatusBadge status={d.status} />
