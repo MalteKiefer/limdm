@@ -5,7 +5,7 @@ import type { Area } from '../../app/area'
 import { str } from '../../app/Stub'
 import { t } from '../../i18n'
 
-const groups = ['approvals', 'warnings', 'commands'] as const
+const groups = ['approvals', 'requests', 'warnings', 'commands'] as const
 type Group = (typeof groups)[number]
 
 export const inboxArea: Area = {

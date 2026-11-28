@@ -124,6 +124,9 @@ type eventState struct {
 	since   time.Time // devices seen after this were not sent yet
 	auditID int64     // last audit entry sent
 	pending int       // pending approvals last sent, -1 before the first
+	// requests is the number of open software requests last sent; only
+	// for callers who may read them (global, unscoped, audit)
+	requests int
 }
 
 func (s *Server) pollEvents(ctx context.Context, w http.ResponseWriter, c apiCaller, sess session, st *eventState) error {
@@ -180,9 +183,21 @@ func (s *Server) pollEvents(ctx context.Context, w http.ResponseWriter, c apiCal
 	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM approvals WHERE status='pending' AND expires_at > now() AND `+cond, args...).Scan(&n); err != nil {
 		return err
 	}
-	if n != st.pending {
-		st.pending = n
-		return send("inbox", map[string]int{"pending": n})
+	var reqs int
+	if canReadRequests(c) {
+		if err := s.db.QueryRow(ctx, `SELECT count(*) FROM catalog_requests WHERE status='pending'`).Scan(&reqs); err != nil {
+			return err
+		}
+	}
+	if n != st.pending || reqs != st.requests {
+		st.pending, st.requests = n, reqs
+		return send("inbox", map[string]int{"pending": n, "requests": reqs})
 	}
 	return nil
+}
+
+// canReadRequests: software requests are fleet wide, readable by global,
+// unscoped callers with audit rights (GET /api/v1/software/requests).
+func canReadRequests(c apiCaller) bool {
+	return c.can("audit") && !deviceScoped(c.sess()) && !c.sess().TenantOnly()
 }

@@ -342,7 +342,7 @@ data.
 and device scope: `device` (a check in: `id`, `hostname`, `status`, `last_seen`),
 `activity` (new audit entries: `id`, `at`, `actor`, `action`, `target`; admin and auditor
 with the `audit` scope; opening such a stream is an audited read of the audit log) and
-`inbox` (`pending` approvals, when the number changes). A stream ends after four minutes and
+`inbox` (`pending` approvals and open software `requests`, the latter only for global readers with audit rights, when a number changes). A stream ends after four minutes and
 the browser reconnects; each caller may hold five streams.
 
 ### Settings and administration
