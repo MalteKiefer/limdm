@@ -30,6 +30,7 @@ import { errorText } from '../../components/states'
 import { toast } from '../../components/toast'
 import { Modal, type MenuEntry } from '../../components/ui'
 import { useT, type MessageKey } from '../../i18n'
+import { cx } from '../../lib/cx'
 import { ApiError } from '../../api/client'
 import {
   useAgentUpdate,
@@ -140,16 +141,31 @@ function Foot({ onClose, label, busy, danger, disabled, form }: { onClose: () =>
 }
 
 function Text({ label, value, onChange, help, required, error, type = 'text', mono, area, max, autoFocus, name }: { label: ReactNode; value: string; onChange: (v: string) => void; help?: ReactNode; required?: boolean; error?: string; type?: string; mono?: boolean; area?: number; max?: number; autoFocus?: boolean; name?: string }) {
+  // a multi line field with a limit counts its characters
+  const counter = area && max ? `${value.length} / ${max}` : undefined
   return (
-    <Field label={label} help={help} required={required} error={error}>
+    <Field label={label} help={counter ? (help ? <>{help} · {counter}</> : counter) : help} required={required} error={error}>
       {({ id, describedBy, invalid }) =>
         area ? (
-          <textarea id={id} name={name} rows={area} className={mono ? 'field font-mono text-meta' : 'field'} aria-describedby={describedBy} aria-invalid={invalid || undefined} value={value} maxLength={max} required={required} spellCheck={!mono} onChange={(e) => onChange(e.target.value)} autoFocus={autoFocus} />
+          <textarea id={id} name={name} rows={area} className={cx('field resize-y', mono && 'font-mono text-meta')} aria-describedby={describedBy} aria-invalid={invalid || undefined} value={value} maxLength={max} required={required} spellCheck={!mono} onChange={(e) => onChange(e.target.value)} autoFocus={autoFocus} />
         ) : (
           <input id={id} name={name} type={type} className={mono ? 'field font-mono' : 'field'} aria-describedby={describedBy} aria-invalid={invalid || undefined} value={value} maxLength={max} required={required} autoComplete="off" spellCheck={false} onChange={(e) => onChange(e.target.value)} autoFocus={autoFocus} />
         )
       }
     </Field>
+  )
+}
+
+/** "Type the host name {host} to confirm", the host name set as code, so it reads as what to type. */
+function ConfirmHostLabel({ host }: { host: string }) {
+  const t = useT()
+  const [before, after = ''] = t('devices.f.confirmHost', { host: '\u0000' }).split('\u0000')
+  return (
+    <>
+      {before}
+      <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-meta">{host}</code>
+      {after}
+    </>
   )
 }
 
@@ -254,7 +270,7 @@ function MessageDialog({ target, onClose }: { target: Target; onClose: () => voi
     <Modal open onClose={onClose} title={t('devices.cmd.message')} description={t('devices.f.messageHelp')} footer={<Foot form="dlg-msg" onClose={onClose} label={t('devices.f.send')} busy={pending} disabled={!text.trim()} />}>
       <form id="dlg-msg" className="flex flex-col gap-4" onSubmit={(e) => (e.preventDefault(), run('message', { title, text }, onClose))}>
         <Text label={t('devices.f.title')} help={t('devices.f.optional')} value={title} onChange={setTitle} max={100} />
-        <Text label={t('devices.f.message')} value={text} onChange={setText} area={4} max={1000} required autoFocus />
+        <Text label={t('devices.f.message')} value={text} onChange={setText} area={6} max={1000} required autoFocus />
       </form>
     </Modal>
   )
@@ -280,7 +296,7 @@ function ProtectDialog({ type, target, onClose }: { type: 'lost' | 'wipe'; targe
       <form id="dlg-protect" className="flex flex-col gap-4" onSubmit={(e) => (e.preventDefault(), run(type, params, onClose))}>
         <p className="rounded-lg bg-bad-soft p-3 text-body text-bad">{t(type === 'lost' ? 'devices.f.lostHelp' : 'devices.f.wipeHelp')}</p>
         {type === 'lost' && <Text label={t('devices.f.lostMessage')} help={t('devices.f.lostMessageHelp')} value={message} onChange={setMessage} area={3} max={500} />}
-        <Text label={t('devices.f.confirmHost', { host: target.hostname })} value={confirm} onChange={setConfirm} required mono autoFocus />
+        <Text label={<ConfirmHostLabel host={target.hostname} />} value={confirm} onChange={setConfirm} required mono autoFocus />
         <Reason show={fourEyes(target.detail, type)} value={reason} onChange={setReason} />
       </form>
     </Modal>
@@ -569,7 +585,7 @@ function DeleteDialog({ target, onClose }: { target: Target; onClose: () => void
         }}
       >
         <p className="text-body">{t('devices.delete.help')}</p>
-        <Text label={t('devices.f.confirmHost', { host: target.hostname })} value={confirm} onChange={setConfirm} required mono autoFocus />
+        <Text label={<ConfirmHostLabel host={target.hostname} />} value={confirm} onChange={setConfirm} required mono autoFocus />
       </form>
     </Modal>
   )

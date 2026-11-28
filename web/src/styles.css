@@ -189,7 +189,11 @@
   :root[data-density='compact'] .field {
     height: 30px;
   }
-  textarea.field {
+  /* align-self: in a field grid (Field next to fields only) a stretched
+     textarea shrank to one line; it keeps the height of its rows */
+  textarea.field,
+  :root[data-density='compact'] textarea.field {
+    align-self: start;
     height: auto;
     padding: 8px 10px;
   }
