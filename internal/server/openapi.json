@@ -7014,7 +7014,7 @@
       "post": {
         "operationId": "appRequestDecide",
         "summary": "Decide an app request",
-        "description": "approve, approve-all (an app from outside the catalog becomes available for everyone) or deny.",
+        "description": "approve, approve-all (an app from outside the catalog becomes available for everyone) or deny. An optional body {\"install\": true} on approve and approve-all has the agent install the app at once; without it the user may install it. The device learns the decision within its next poll (about ten seconds while a request is open).",
         "responses": {
           "200": {
             "description": "OK",
@@ -7076,7 +7076,24 @@
           {
             "session": []
           }
-        ]
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "install": {
+                    "type": "boolean",
+                    "description": "Approve and install on the requesting device."
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/software/remotes": {
@@ -16923,6 +16940,23 @@
                     "created_at": {
                       "type": "string",
                       "format": "date-time"
+                    },
+                    "install": {
+                      "type": "boolean",
+                      "description": "Approved with install: the agent installs the app at once."
+                    },
+                    "install_state": {
+                      "type": "string",
+                      "enum": [
+                        "",
+                        "installed",
+                        "install_failed"
+                      ],
+                      "description": "Result of an approval with install, empty until the device reports it."
+                    },
+                    "install_error": {
+                      "type": "string",
+                      "description": "Why the install failed (install_failed)."
                     }
                   },
                   "required": [
@@ -16934,7 +16968,10 @@
                     "status",
                     "decided_by",
                     "decided_at",
-                    "created_at"
+                    "created_at",
+                    "install",
+                    "install_state",
+                    "install_error"
                   ]
                 }
               },
@@ -17792,6 +17829,23 @@
           },
           "remote": {
             "type": "string"
+          },
+          "install": {
+            "type": "boolean",
+            "description": "Approved with install: the agent installs the app at once."
+          },
+          "install_state": {
+            "type": "string",
+            "enum": [
+              "",
+              "installed",
+              "install_failed"
+            ],
+            "description": "Result of an approval with install, empty until the device reports it."
+          },
+          "install_error": {
+            "type": "string",
+            "description": "Why the install failed (install_failed)."
           }
         },
         "required": [
@@ -17805,7 +17859,10 @@
           "status",
           "created_at",
           "flatpak",
-          "remote"
+          "remote",
+          "install",
+          "install_state",
+          "install_error"
         ]
       },
       "Remote": {
