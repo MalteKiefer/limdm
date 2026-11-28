@@ -87,6 +87,7 @@ export default {
   'vulns.detail.packages': 'Paquets',
   'vulns.detail.installed': 'Installé',
   'vulns.detail.fixed': 'Corrigé dans',
+  'vulns.detail.via': 'via le flux {feed}',
   'vulns.detail.devices': 'Appareils',
   'vulns.detail.lastSeen': 'Dernière confirmation',
   'vulns.detail.remediatedAt': 'Corrigée le',

@@ -8,6 +8,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -68,11 +70,36 @@ func TestParseCVEFeeds(t *testing.T) {
 		t.Fatalf("%+v", fx)
 	}
 	for _, c := range []struct {
-		os, ver, distro, rel string
-		ok                   bool
-	}{{"debian", "12", "debian", "bookworm", true}, {"ubuntu", "24.04", "ubuntu", "24.04", true}, {"debian", "", "debian", "", false}, {"fedora", "41", "", "", false}} {
-		if d, r, ok := cveRelease(c.os, c.ver); d != c.distro || r != c.rel || ok != c.ok {
-			t.Errorf("%s %s: %s %s %v", c.os, c.ver, d, r, ok)
+		os, ver, like, base, distro, rel, via string
+		ok                                    bool
+	}{
+		{"debian", "12", "", "", "debian", "bookworm", "", true},
+		{"ubuntu", "24.04", "debian", "noble", "ubuntu", "24.04", "", true},
+		{"debian", "", "", "", "debian", "", "", false},
+		{"fedora", "41", "", "", "", "", "", false},
+		{"arch", "", "", "", "arch", "rolling", "", true},
+		{"linuxmint", "22.1", "ubuntu debian", "noble", "ubuntu", "24.04", "ubuntu", true},
+		{"pop", "22.04", "ubuntu debian", "jammy", "ubuntu", "22.04", "ubuntu", true},
+		{"elementary", "8", "ubuntu", "noble", "ubuntu", "24.04", "ubuntu", true},
+		{"zorin", "18", "ubuntu", "resolute", "ubuntu", "26.04", "ubuntu", true},
+		{"linuxmint", "6", "debian", "bookworm", "debian", "bookworm", "debian", true}, // LMDE
+		{"linuxmint", "22.1", "ubuntu debian", "warty", "ubuntu", "", "ubuntu", false}, // unknown codename
+		{"linuxmint", "22.1", "ubuntu debian", "", "ubuntu", "", "ubuntu", false},      // no codename
+		{"linuxmint", "22.1", "", "", "", "", "", false},                               // old agent without os_like
+		{"kali", "2025.4", "debian", "", "", "", "", false},
+		{"raspbian", "12", "debian", "", "", "", "", false},
+		{"manjaro", "25.0", "arch", "", "arch", "rolling", "arch", true},
+		{"cachyos", "", "arch", "", "arch", "rolling", "arch", true},
+		{"biglinux", "", "manjaro", "", "arch", "rolling", "arch", true},
+		{"nobara", "42", "rhel centos fedora", "", "", "", "", false},
+	} {
+		if d, r, v, ok := cveRelease(c.os, c.ver, c.like, c.base); d != c.distro || r != c.rel || v != c.via || ok != c.ok {
+			t.Errorf("%s %s: %s %s %s %v", c.os, c.ver, d, r, v, ok)
+		}
+	}
+	for code, ver := range ubuntuReleases { // VERSION_ID form of the Ubuntu feed
+		if !regexp.MustCompile(`^\d{2}\.(04|10)$`).MatchString(ver) || code == "" {
+			t.Errorf("ubuntuReleases %s: %s", code, ver)
 		}
 	}
 	if (CVEFeedSettings{DebianURL: "http://x"}).validate() == "" || (CVEFeedSettings{MaxMB: 5000}).validate() == "" || (CVEFeedSettings{UbuntuURL: "https://mirror.example/all.zip"}).validate() != "" {
@@ -193,5 +220,44 @@ func TestCVEImportAndMatch(t *testing.T) {
 	}
 	if code, _ := call(dashAuditor, "POST", "/api/v1/updates/cve-feeds/refresh", ``); code != 403 {
 		t.Fatalf("auditor refresh: %d", code)
+	}
+}
+
+// TestCVEDerivativeMatch: a Linux Mint device is matched against the
+// Ubuntu feed of its base, and the Ubuntu feed counts as active with only
+// that device in service.
+func TestCVEDerivativeMatch(t *testing.T) {
+	s, db, call := dashServer(t)
+	ctx := context.Background()
+	zipped := osvZip(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(zipped) }))
+	defer srv.Close()
+	if err := s.importFeed(ctx, "ubuntu", srv.URL, 1<<20); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE devices SET inventory='{}';
+		UPDATE devices SET inventory='{"os_id":"linuxmint","os_version":"22.1","os_like":"ubuntu debian","os_base_codename":"noble"}' WHERE id='d2';
+		INSERT INTO device_packages(device_id, name, version, arch, source) VALUES ('d2', 'openssh-server', '1:9.6p1-3ubuntu13', 'amd64', 'openssh')`); err != nil {
+		t.Fatal(err)
+	}
+	fleet, err := s.fleetDistros(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := activeFeeds([]string{"debian", "ubuntu", "arch"}, fleet); !slices.Equal(got, []string{"ubuntu"}) {
+		t.Fatalf("active feeds %v (fleet %v)", got, fleet)
+	}
+	if err := s.matchAllCVEs(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var via string
+	if err := db.QueryRow(ctx, `SELECT via FROM device_cves WHERE device_id='d2' AND cve='CVE-2024-6387'`).Scan(&via); err != nil || via != "ubuntu" {
+		t.Fatalf("mint finding: %q %v", via, err)
+	}
+	if code, body := call(dashHelpdesk, "GET", "/api/v1/devices/d2/updates", ``); code != 200 || !strings.Contains(body, `"via":"ubuntu"`) {
+		t.Fatalf("device: %d %s", code, body)
+	}
+	if code, body := call(dashAuditor, "GET", "/api/v1/vulnerabilities/CVE-2024-6387", ``); code != 200 || !strings.Contains(body, `"via":"ubuntu"`) {
+		t.Fatalf("vulnerability: %d %s", code, body)
 	}
 }

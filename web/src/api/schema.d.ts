@@ -5308,6 +5308,8 @@ export interface components {
                 installed?: string;
                 fixed?: string;
                 severity?: string;
+                /** @description base distribution whose feed matched a derivative (ubuntu, debian, arch); absent for a direct match */
+                via?: string;
             }[];
         };
         UpdatesFleet: {
@@ -5567,6 +5569,8 @@ export interface components {
                 remediated_at?: string | null;
                 /** @enum {string} */
                 status?: "active" | "accepted" | "remediated";
+                /** @description base distribution whose feed matched a derivative (ubuntu, debian, arch); absent for a direct match */
+                via?: string;
             }[];
             /** @description debian, ubuntu, arch, alpine, or package manager (advisories of pending dnf and zypper updates) */
             sources?: string[];

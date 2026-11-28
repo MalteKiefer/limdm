@@ -4,8 +4,9 @@ The console page **Vulnerabilities** (main navigation, between Compliance
 and Configuration; command palette "Open vulnerabilities") shows the known
 CVEs of the devices in scope, one row per CVE. The data comes from the
 matching described in [Patch management](patching.md#cve-data-for-debian-ubuntu-arch-and-alpine):
-the distributions' security data for Debian, Ubuntu, Arch and Alpine, and
-the advisories of pending dnf and zypper updates on Fedora, RHEL and SUSE.
+the distributions' security data for Debian, Ubuntu, Arch and Alpine (and
+their derivatives such as Linux Mint, LMDE or Manjaro, through the feed of
+the base), and the advisories of pending dnf and zypper updates on Fedora, RHEL and SUSE.
 Without any CVE data switched on, Debian, Ubuntu, Arch and Alpine show
 nothing; the page then links to **Settings, CVE data**.
 
@@ -41,8 +42,9 @@ else remediated. The list shows active CVEs by default.
 A CVE takes the highest level its findings state. CVSS v3 base scores are
 computed from the vectors in the Ubuntu OSV data (no NVD download); where
 no source states a level, the score decides (9.0 critical, 7.0 high, 4.0
-medium, above 0 low). Without an Ubuntu device the Ubuntu feed is skipped
-and no CVSS scores exist. **Known exploited** comes from the optional CISA
+medium, above 0 low). Without an Ubuntu device (or a derivative matched
+against Ubuntu, such as Linux Mint) the Ubuntu feed is skipped and no CVSS
+scores exist. **Known exploited** comes from the optional CISA
 KEV feed (Settings, CVE data), off by default.
 
 ## The page

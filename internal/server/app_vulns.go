@@ -550,6 +550,7 @@ type vulnDevice struct {
 	LastSeen     time.Time  `json:"last_seen"`
 	RemediatedAt *time.Time `json:"remediated_at"`
 	Status       string     `json:"status"`
+	Via          string     `json:"via,omitempty"` // base feed a derivative was matched through
 }
 
 type vulnPackage struct {
@@ -611,7 +612,7 @@ func (s *Server) apiVuln(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	scope, args := scopeCond(c.sess(), 1)
 	devices, err := collect(ctx, s.db, pgx.RowToStructByPos[vulnDevice], `SELECT d.id, d.hostname, coalesce(d.inventory->>'os_name', d.inventory->>'os_id', ''),
 			c.package, c.installed, c.fixed, c.severity, c.first_seen, c.last_seen, c.remediated_at,
-			CASE WHEN c.remediated_at IS NOT NULL THEN 'remediated' WHEN `+acceptedSQL+` THEN 'accepted' ELSE 'active' END
+			CASE WHEN c.remediated_at IS NOT NULL THEN 'remediated' WHEN `+acceptedSQL+` THEN 'accepted' ELSE 'active' END, c.via
 		FROM device_cves c JOIN devices d ON d.id = c.device_id WHERE c.cve = $1 AND NOT d.retired AND `+scope+`
 		ORDER BY (c.remediated_at IS NOT NULL), d.hostname, c.package LIMIT 1000`, append([]any{cve}, args...)...)
 	if err != nil {

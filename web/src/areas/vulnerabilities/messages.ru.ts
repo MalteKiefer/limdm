@@ -89,6 +89,7 @@ export default {
   'vulns.detail.packages': 'Пакеты',
   'vulns.detail.installed': 'Установлено',
   'vulns.detail.fixed': 'Исправлено в',
+  'vulns.detail.via': 'через фид {feed}',
   'vulns.detail.devices': 'Устройства',
   'vulns.detail.lastSeen': 'Последнее подтверждение',
   'vulns.detail.remediatedAt': 'Устранена',

@@ -4,6 +4,20 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.24.0 (2026-11-28)
+
+### Added
+- CachyOS is supported like Manjaro and EndeavourOS (pacman family, `ID_LIKE=arch`).
+- Derivatives checked and documented: Kubuntu and the other Ubuntu flavours, LMDE, Zorin, elementary OS, TUXEDO OS, KDE neon, AnduinOS, Kali, Nobara, BigLinux, Garuda and Omarchy. Distributions that name only Manjaro in `ID_LIKE` (BigLinux) map to the pacman family.
+- CVE matching for derivatives: Ubuntu derivatives (Linux Mint, Pop!_OS, Zorin, elementary OS, TUXEDO OS, KDE neon, AnduinOS) use the Ubuntu feed by their `UBUNTU_CODENAME`, LMDE the Debian feed by `DEBIAN_CODENAME`, and the Arch family (Manjaro, EndeavourOS, Garuda, CachyOS, BigLinux) the Arch feed. A feed downloads when only derivatives of its base are in service. Kali and Raspberry Pi OS stay unmatched. The agent reports `os_like` and `os_base_codename` for this; older agents keep working without derivative matching.
+- Findings matched through a base feed show "via Ubuntu feed" (or Debian, Arch) on the device's known vulnerabilities and in the device list of a vulnerability; the API returns `via` on these findings.
+
+### Fixed
+- Pending updates from elementary OS' own Launchpad PPAs count as distribution updates, not third party.
+
+### Changed
+- Software removal refuses `pacman`, `openssh` and the kernel packages of Arch and its derivatives (`linux`, `linux-lts`, `linux-zen`, `linux-hardened`, `linux-rt`, Manjaro's `linuxNNN`, `linux-cachyos` and its variants); headers and module packages stay removable.
+
 ## 0.23.1 (2026-11-27)
 
 ### Fixed
