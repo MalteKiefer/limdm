@@ -1173,7 +1173,7 @@ func pollWait(failures int) time.Duration {
 // pollEvery is the normal poll interval; fastPollFor how long the agent
 // polls every requestPoll after the server reported waiting commands.
 var (
-	pollEvery   = time.Minute
+	pollEvery   = 30 * time.Second
 	fastPollFor = 5 * time.Minute
 )
 

@@ -13,7 +13,7 @@ change behavior they rely on.
 - The device message field has six lines, can be resized and counts its characters (1000 at most).
 
 ### Changed
-- Device commands (lock, unlock, wipe, lost mode, message, restart, shell and every other) reach the agent within one poll: a pending poll starts a quick check in that skips converging and the inventory, and a second one reports the results at once. For five minutes after a poll found something the agent polls every 10 seconds.
+- Device commands (lock, unlock, wipe, lost mode, message, restart, shell and every other) reach the agent within one poll: a pending poll starts a quick check in that skips converging and the inventory, and a second one reports the results at once. For five minutes after a poll found something the agent polls every 10 seconds. The normal poll interval is 30 seconds instead of one minute, so the first command arrives within about 40 seconds.
 - The tray and the LiMDM app ask the agent every 15 seconds; the agent refreshes their data after every command and check in and reports the lock, lost mode and wipe state live.
 - Host name confirmations (wipe, lost mode, delete) show the host name to type as code.
 - Wipe restart: after `systemctl reboot --force` and `--force --force` the agent tries `reboot -f`, then sysrq sync, remount read only and reboot; masking sleep is bounded to 20 seconds.
