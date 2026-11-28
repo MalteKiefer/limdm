@@ -4,6 +4,25 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.25.0 (2026-11-28)
+
+### Added
+- Proxmox VE 8 and 9 nodes are recognised (`/etc/pve`, `pveversion`). The inventory reports `os_product` ("Proxmox VE 8.4") and `proxmox` (version, node, corosync cluster); the console shows them in the device header. See [docs/proxmox.md](docs/proxmox.md).
+- Blueprint rule field `os.product` ("Product"), for example `contains proxmox`.
+- Reboot and shutdown dialogs on a Proxmox VE node show how many VMs and containers are running.
+- The update status carries `pending_warning`: on Proxmox VE a 401 of the enterprise repository (no subscription) no longer hides the pending updates of the other repositories, the updates tab shows a warning instead.
+
+### Changed
+- Proxmox VE: full upgrades and the pending list use `apt-get dist-upgrade`; every apt transaction of the agent is simulated first and refused when it would remove `proxmox-ve` or `pve-manager`.
+- Proxmox VE: `com.limdm.hostname` refuses a rename and leaves `/etc/hosts` alone; firewall declarations are not enforced (pve-firewall owns the host firewall) and `firewall.active` checks `pve-firewall status`; no automatic reboot after updates.
+- Proxmox VE: `net.forwarding` is not applicable, `ssh.baseline` accepts `PermitRootLogin prohibit-password`, `ssh.strict` does not require `AllowTcpForwarding no`. Catalog version 2026.11.3.
+- Software removal refuses `proxmox-ve`, `pve-manager`, `pve-cluster`, `pve-qemu-kvm`, `lxc-pve`, `zfsutils-linux`, `corosync` and the Proxmox kernels (headers stay removable).
+- Pending updates from the Proxmox repositories count as distribution updates on a Proxmox VE node.
+
+### Fixed
+- Packages named `pve-*` or `proxmox-*` are no longer matched against the Debian Security Tracker (no Debian `linux` findings on the Proxmox kernel).
+- The firewall inventory classifies the pve-firewall chains (`PVEFW-*`), the `proxmox-firewall` tables and the guest interfaces as system rules.
+
 ## 0.24.0 (2026-11-28)
 
 ### Added

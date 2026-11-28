@@ -55,7 +55,7 @@ upgraded every repository, then Flatpak).
 | Source | Debian, Ubuntu | Fedora, RHEL | openSUSE, SLES | Arch, Alpine, Tumbleweed |
 |---|---|---|---|---|
 | `os_security` | `unattended-upgrade` | `dnf upgrade --security` | `zypper patch --category security` | full upgrade (no security channel) |
-| `os_all` | `apt-get upgrade`, or `apt-get install --only-upgrade name=version` for the distribution's packages when third party updates are pending | `dnf upgrade`, or `dnf upgrade --repo=<distribution repos>` | `zypper update`, or `zypper update --repo <aliases>` | full upgrade |
+| `os_all` | `apt-get upgrade --with-new-pkgs` (`apt-get dist-upgrade` on Proxmox VE, [proxmox.md](proxmox.md)), or `apt-get install --only-upgrade name=version` for the distribution's packages when third party updates are pending | `dnf upgrade`, or `dnf upgrade --repo=<distribution repos>` | `zypper update`, or `zypper update --repo <aliases>` | full upgrade |
 | `third_party` | `apt-get install --only-upgrade name=version` of the matching packages | `dnf upgrade --repo=<matching repos>` | `zypper update --repo <matching aliases>` | unsupported |
 | `flatpak` | `flatpak update --system` | same | same | same |
 
