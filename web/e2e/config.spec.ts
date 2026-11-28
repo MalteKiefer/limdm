@@ -147,6 +147,21 @@ test('software: store settings, a remote and a package upload', async ({ page })
   await expect(page.getByRole('button', { name: `hello-${stamp} löschen` })).toBeDisabled()
 })
 
+test('software: approve and install a user request', async ({ page }) => {
+  const repo = join(import.meta.dirname, '..', '..')
+  execFileSync('go', ['run', './scripts/e2eseed', join(import.meta.dirname, 'requests.seed.sql')], { cwd: repo, stdio: 'inherit', env: { ...process.env, CGO_ENABLED: '0' } })
+  await page.goto('/app/config?tab=software&sub=requests')
+  const row = page.getByRole('listitem').filter({ hasText: 'E2E Notes' }).filter({ hasText: 'e2e-req1' })
+  await expect(row.getByText('ausstehend')).toBeVisible()
+  await expect(row.getByRole('button', { name: 'Freigeben', exact: true })).toBeVisible()
+  await row.getByRole('button', { name: 'Freigeben und installieren' }).click()
+  await expect(page.getByText('Freigegeben, wird installiert')).toBeVisible()
+  await expect(row.getByText('wird installiert')).toBeVisible()
+  await expect(row.getByRole('button', { name: 'Freigeben und installieren' })).toHaveCount(0)
+  const audit = await page.evaluate(async () => (await (await fetch('/api/v1/audit?limit=20')).json()) as { items: { action: string; target: string }[] })
+  expect(audit.items.some((a) => a.action === 'catalog.request.approve+install' && a.target === 'e2e-req1')).toBe(true)
+})
+
 test('files item: template preview for one device', async ({ page }) => {
   const repo = join(import.meta.dirname, '..', '..')
   execFileSync('go', ['run', './scripts/e2eseed', join(import.meta.dirname, 'devices.seed.sql')], { cwd: repo, stdio: 'inherit', env: { ...process.env, CGO_ENABLED: '0' } })

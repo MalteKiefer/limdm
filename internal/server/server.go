@@ -936,7 +936,10 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 	var commands bool
 	var running, state, version string
 	var at *time.Time
-	if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM commands WHERE device_id=$1 AND status='pending'),
+	// an app request decided since the last check in counts too: the
+	// user learns the answer within a poll, not at the next check in
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM commands WHERE device_id=$1 AND status='pending')
+		OR EXISTS (SELECT 1 FROM catalog_requests q WHERE q.device_id=$1 AND q.decided_at > devices.last_seen),
 		agent_version, update_state, update_version, update_at FROM devices WHERE id=$1`, id).Scan(&commands, &running, &state, &version, &at); err != nil {
 		s.failAPI(w, err)
 		return
@@ -1069,6 +1072,10 @@ func (s *Server) checkin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := storeWorkloads(ctx, tx, id, st.Workloads); err != nil { // app_workloads.go
+			s.failAPI(w, err)
+			return
+		}
+		if err := recordInstallStates(ctx, tx, id, st.Inventory.Apps); err != nil { // catalog.go
 			s.failAPI(w, err)
 			return
 		}

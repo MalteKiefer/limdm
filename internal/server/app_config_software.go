@@ -276,11 +276,14 @@ type apiAppRequest struct {
 	DecidedAt *time.Time `json:"decided_at"`
 	Flatpak   string     `json:"flatpak"`
 	Remote    string     `json:"remote"`
+	Install   bool       `json:"install"`       // approved with install by the agent
+	State     string     `json:"install_state"` // installed | install_failed, or empty
+	Error     string     `json:"install_error"`
 }
 
 func (s *Server) apiAppRequests(w http.ResponseWriter, r *http.Request, c apiCaller) {
 	rows, err := s.db.Query(r.Context(), `SELECT q.id, q.device_id, d.hostname, coalesce(q.app, ''), coalesce(a.name, q.app_name), q.username, q.note, q.status,
-		q.decided_by, q.created_at, q.decided_at, q.flatpak, q.remote
+		q.decided_by, q.created_at, q.decided_at, q.flatpak, q.remote, q.install AND q.status='approved', q.install_state, q.install_error
 		FROM catalog_requests q JOIN devices d ON d.id=q.device_id LEFT JOIN catalog_apps a ON a.slug=q.app
 		ORDER BY (q.status='pending') DESC, q.created_at DESC LIMIT 300`)
 	if err != nil {
@@ -303,7 +306,13 @@ func (s *Server) apiAppRequestDecide(w http.ResponseWriter, r *http.Request, c a
 	if !ok {
 		return
 	}
-	err := s.decideAppRequest(r.Context(), c.actor(), id, r.PathValue("op"))
+	var in struct {
+		Install bool `json:"install"` // approve: the agent installs the app at once
+	}
+	if r.ContentLength != 0 && !decodeJSON(w, r, &in) {
+		return
+	}
+	err := s.decideAppRequest(r.Context(), c.actor(), id, r.PathValue("op"), in.Install)
 	if errors.Is(err, pgx.ErrNoRows) {
 		problem(w, http.StatusNotFound, "no pending request with this ID")
 		return

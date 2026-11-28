@@ -252,7 +252,11 @@ function RequestsView() {
   const sw = useSoftware()
   if (reqs.error) return <ErrorState error={reqs.error} onRetry={() => void reqs.refetch()} />
   if (!reqs.data) return <LoadingState rows={5} />
-  const decide = (id: number, op: 'approve' | 'approve-all' | 'deny') => sw.decide.mutate({ id, op }, { onSuccess: () => toast(t(op === 'deny' ? 'config.denied' : 'config.approved')), onError: (e) => toast(errorText(e), 'error') })
+  const decide = (id: number, op: 'approve' | 'approve-all' | 'deny', install = false) =>
+    sw.decide.mutate(
+      { id, op, install },
+      { onSuccess: () => toast(t(op === 'deny' ? 'config.denied' : install ? 'config.approvedInstall' : 'config.approved')), onError: (e) => toast(errorText(e), 'error') },
+    )
   return (
     <Card bodyClass="!px-0 !py-0">
       {!reqs.data.length ? (
@@ -268,7 +272,13 @@ function RequestsView() {
                   {r.app_name || r.app || r.flatpak}
                   <Badge tone={r.status === 'pending' ? 'warn' : r.status === 'approved' ? 'ok' : 'off'}>{t(`config.req.${r.status}` as MessageKey)}</Badge>
                   {r.flatpak && !r.app && <Badge>{t('config.outsideCatalog')}</Badge>}
+                  {r.install && (
+                    <Badge tone={r.install_state === 'installed' ? 'ok' : r.install_state === 'install_failed' ? 'bad' : 'info'}>
+                      {t(`config.inst.${r.install_state || 'pending'}` as MessageKey)}
+                    </Badge>
+                  )}
                 </div>
+                {r.install_error && <p className="text-meta text-bad">{r.install_error}</p>}
                 <div className="text-meta text-muted">
                   {t('config.requestBy', { user: r.user || '·', host: r.hostname })} · {ago(r.created_at)}
                   {r.decided_by && ` · ${t('config.decidedBy', { by: r.decided_by })}`}
@@ -285,6 +295,9 @@ function RequestsView() {
                       {t('config.approveAll')}
                     </button>
                   )}
+                  <button type="button" className="btn" onClick={() => decide(r.id, 'approve', true)}>
+                    {t('config.approveInstall')}
+                  </button>
                   <button type="button" className="btn btn-primary" onClick={() => decide(r.id, 'approve')}>
                     <Check size={14} aria-hidden /> {t('config.approve')}
                   </button>

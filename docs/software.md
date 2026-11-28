@@ -29,7 +29,7 @@ Per app:
 
 | Field | Meaning |
 |---|---|
-| Mode | **available**: users install and remove it; **on request**: users ask, an admin approves under **Requests**, then the device installs it by itself; **required**: installed on every device that gets it |
+| Mode | **available**: users install and remove it; **on request**: users ask, an admin decides under **Requests** (see [Requests and decisions](#requests-and-decisions)); **required**: installed on every device that gets it |
 | Sources | Flatpak ID (from Flathub or another managed remote) and Debian/Ubuntu or Fedora package names; SUSE devices use the Fedora names. **Install from** sets which comes first, the other is the fallback |
 | Vendor package repository | for packages the distribution does not ship: repository URL (Debian: suite and components) and the vendor's ASCII armored signing key, for Debian and for Fedora (also used on SUSE) |
 | Also installed when | further package names that count as installed (`firefox-esr`, `code`) |
@@ -87,14 +87,44 @@ Flathub (through the agent and the server; devices never talk to Flathub for thi
 app and add a note. The request shows under **Requests** in the console with **not in
 catalog**:
 
-* **Approve for this device** creates a catalog entry in mode on request (or reuses the one
-  for this Flatpak) and approves the device; it installs by itself at the next check in.
+* **Approve** creates a catalog entry in mode on request (or reuses the one for this
+  Flatpak) and approves the device; **Approve and install** does the same and installs it.
 * **Approve for everyone** creates the entry in mode available.
 * **Deny** keeps the catalog as it is.
 
 Users see their requests and the decision under **My requests**. Only Flathub and managed
 remotes that are allowed can be requested; the agent allows 20 searches a minute and 20
 unsent requests.
+
+## Requests and decisions
+
+A request goes to the server at once: the desktop app hands it to the agent, which checks
+in right away. An admin decides under **Configuration, Software, Requests** or on the
+**Requests** tab of the device:
+
+* **Approve** (Freigeben): the user may install the app from the desktop app, as any
+  available app. Nothing is installed without the user.
+* **Approve and install** (Freigeben und installieren): the agent installs the app at once
+  on the requesting device. The request then shows **installing**, **installed** or
+  **install failed** with the error; a failed install is tried again after an hour.
+* **Deny**: the user may ask again.
+
+Timing: while a request is open the agent polls the server every 10 seconds instead of every
+minute (only while the server answers, and for at most 24 hours per request). The poll
+reports a decision made since the last check in, the agent checks in and shows the decision
+as a desktop notification in the user's language, so the answer arrives within about 10 to
+20 seconds. An install follows right after that check in; the user gets a notification with
+the result, and the console shows it after the next check in (a few seconds after the
+install ends). No connection stays open.
+
+The API takes the same decision: `POST /api/v1/software/requests/{id}/approve` with the
+optional body `{"install": true}`; without a body it approves only. The audit log records
+`catalog.request.approve` or `catalog.request.approve+install` (also for `approve-all`).
+Agents before 0.25 install every approved request on their own.
+
+To install or remove software on every device of a blueprint without any request, use the
+library items `com.limdm.packages` (install and remove lists of distribution packages) and
+`com.limdm.flatpak` (Flatpak apps), see [declarations](declarations.md).
 
 ## Flatpak remotes
 
@@ -140,5 +170,6 @@ AppImages are not supported on purpose: no signature checks, no updates, no cent
 ## Audit
 
 Saving and deleting apps, settings and every request decision are in the audit log
-(`catalog.*`); requests also record the user and their note. Installs and removals on a
+(`catalog.*`, an approval with install as `catalog.request.approve+install`); requests also
+record the user and their note. Installs and removals on a
 device are device events.
