@@ -1153,3 +1153,6 @@ CREATE TABLE IF NOT EXISTS log_alerts (
     scope_groups   TEXT[] NOT NULL DEFAULT '{}',
     global         BOOLEAN NOT NULL DEFAULT false
 );
+-- cvederiv: the base distribution whose CVE feed matched a derivative
+-- (ubuntu, debian, arch); empty for a direct match or a pending update
+ALTER TABLE device_cves ADD COLUMN IF NOT EXISTS via TEXT NOT NULL DEFAULT '';

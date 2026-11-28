@@ -570,6 +570,7 @@ type deviceCVE struct {
 	Installed string `json:"installed"`
 	Fixed     string `json:"fixed"`
 	Severity  string `json:"severity"`
+	Via       string `json:"via,omitempty"` // base feed a derivative was matched through (ubuntu, debian, arch)
 }
 
 type deviceUpdates struct {
@@ -603,7 +604,7 @@ func (s *Server) apiDeviceUpdates(w http.ResponseWriter, r *http.Request, c apiC
 	}
 	out.Status.Pending = nonNilSlice(out.Status.Pending)
 	out.Status.Runs = nonNilSlice(out.Status.Runs)
-	vulns, err := collect(ctx, s.db, pgx.RowToStructByPos[deviceCVE], `SELECT cve, package, installed, fixed, severity FROM device_cves WHERE device_id=$1 AND remediated_at IS NULL
+	vulns, err := collect(ctx, s.db, pgx.RowToStructByPos[deviceCVE], `SELECT cve, package, installed, fixed, severity, via FROM device_cves WHERE device_id=$1 AND remediated_at IS NULL
 		ORDER BY CASE lower(severity) WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, cve DESC, package LIMIT 2000`, id)
 	if err != nil {
 		s.apiFail(w, err)

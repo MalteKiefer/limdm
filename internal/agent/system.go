@@ -26,6 +26,10 @@ import (
 // host describes the local system. family is debian, fedora, suse, arch or alpine (see familyOf).
 type host struct {
 	ID, Version, Name, family string
+	// Like (ID_LIKE) and BaseCodename (UBUNTU_CODENAME, else
+	// DEBIAN_CODENAME) let the server match derivatives against the CVE
+	// data of their base distribution.
+	Like, BaseCodename string
 
 	// pkgMu runs package manager calls one at a time: catalog installs run
 	// in the background next to the check in's own installs and upgrades
@@ -72,7 +76,8 @@ type pendingCache struct {
 
 func detectHost() (*host, error) {
 	osr := parseOSRelease(readFile("/etc/os-release"))
-	h := &host{ID: osr["ID"], Version: osr["VERSION_ID"], Name: osr["PRETTY_NAME"]}
+	h := &host{ID: osr["ID"], Version: osr["VERSION_ID"], Name: osr["PRETTY_NAME"], Like: osr["ID_LIKE"],
+		BaseCodename: firstNonEmpty(osr["UBUNTU_CODENAME"], osr["DEBIAN_CODENAME"])}
 	h.family = familyOf(osr)
 	if h.family == "" {
 		return nil, fmt.Errorf("unsupported distribution %q", h.ID)
@@ -476,6 +481,7 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 	inv := api.Inventory{
 		Source:    "native",
 		MachineID: readTrim("/etc/machine-id"), OSID: h.ID, OSVersion: h.Version, OSName: h.Name,
+		OSLike: h.Like, OSBaseCodename: h.BaseCodename,
 		Kernel: readTrim("/proc/sys/kernel/osrelease"), Arch: runtime.GOARCH,
 		Vendor: cleanDMI(readTrim("/sys/class/dmi/id/sys_vendor")), Model: cleanDMI(readTrim("/sys/class/dmi/id/product_name")),
 		Serial: cleanDMI(readTrim("/sys/class/dmi/id/product_serial")),

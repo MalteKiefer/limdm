@@ -120,22 +120,48 @@ func (c CVEFeedSettings) validate() string {
 // debianReleases maps Debian's VERSION_ID to the codename the tracker uses.
 var debianReleases = map[string]string{"10": "buster", "11": "bullseye", "12": "bookworm", "13": "trixie", "14": "forky"}
 
+// ubuntuReleases maps an Ubuntu codename to its VERSION_ID, the release
+// key of the Ubuntu feed, for derivatives that name their base in
+// UBUNTU_CODENAME.
+var ubuntuReleases = map[string]string{"jammy": "22.04", "noble": "24.04", "oracular": "24.10", "plucky": "25.04", "questing": "25.10", "resolute": "26.04"}
+
 // cveRelease is the distribution and release key a device's fixes are
-// stored under (Debian: codename, Ubuntu: VERSION_ID such as 24.04).
-func cveRelease(osID, version string) (string, string, bool) {
+// stored under (Debian: codename, Ubuntu: VERSION_ID such as 24.04). A
+// derivative (like: ID_LIKE, baseCodename: UBUNTU_CODENAME, else
+// DEBIAN_CODENAME) is matched against its base, which via names: Ubuntu
+// derivatives by the base codename, Debian derivatives by a known Debian
+// codename, the Arch family always. Kali (rolling on Debian testing) and
+// Raspbian are not matched.
+func cveRelease(osID, version, like, baseCodename string) (distro, release, via string, ok bool) {
 	switch osID {
 	case "debian":
 		major, _, _ := strings.Cut(version, ".")
 		c, ok := debianReleases[major]
-		return "debian", c, ok
+		return "debian", c, "", ok
 	case "ubuntu":
-		return "ubuntu", version, version != ""
+		return "ubuntu", version, "", version != ""
 	case "arch":
-		return "arch", "rolling", true // no releases
+		return "arch", "rolling", "", true // no releases
 	case "alpine":
-		return "alpine", alpineBranch(version), version != ""
+		return "alpine", alpineBranch(version), "", version != ""
+	case "kali", "raspbian":
+		return "", "", "", false
 	}
-	return "", "", false
+	likes := strings.Fields(like)
+	switch {
+	case slices.Contains(likes, "ubuntu"):
+		v, ok := ubuntuReleases[baseCodename]
+		return "ubuntu", v, "ubuntu", ok
+	case slices.Contains(likes, "debian"):
+		for _, c := range debianReleases {
+			if c == baseCodename {
+				return "debian", c, "debian", true
+			}
+		}
+	case slices.Contains(likes, "arch") || slices.Contains(likes, "manjaro"):
+		return "arch", "rolling", "arch", true
+	}
+	return "", "", "", false
 }
 
 // alpineBranch is the secdb branch of an Alpine VERSION_ID: "3.20.3" is
@@ -589,21 +615,21 @@ func (s *Server) importFeedTx(ctx context.Context, distro, u string, limit int64
 // when its package changed or went away, and dropped when the package is
 // unchanged, because then the data was corrected and it never applied.
 func matchDeviceCVEs(ctx context.Context, tx pgx.Tx, id string) error {
-	var osID, version string
+	var osID, version, like, base string
 	var pendingRaw []byte
-	if err := tx.QueryRow(ctx, `SELECT coalesce(inventory->>'os_id', ''), coalesce(inventory->>'os_version', ''),
-		CASE WHEN jsonb_typeof(updates->'pending') = 'array' THEN updates->'pending' ELSE '[]' END FROM devices WHERE id=$1`, id).Scan(&osID, &version, &pendingRaw); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT `+osReleaseCols+`,
+		CASE WHEN jsonb_typeof(updates->'pending') = 'array' THEN updates->'pending' ELSE '[]' END FROM devices WHERE id=$1`, id).Scan(&osID, &version, &like, &base, &pendingRaw); err != nil {
 		return err
 	}
-	var pkgs, cves, inst, fixed, sevs []string
+	var pkgs, cves, inst, fixed, sevs, vias []string
 	seen := map[string]bool{}
-	add := func(pkg, cve, installed, fix, sev string) {
+	add := func(pkg, cve, installed, fix, sev, via string) {
 		if !seen[cve+" "+pkg] {
 			seen[cve+" "+pkg] = true
-			pkgs, cves, inst, fixed, sevs = append(pkgs, pkg), append(cves, cve), append(inst, installed), append(fixed, fix), append(sevs, sev)
+			pkgs, cves, inst, fixed, sevs, vias = append(pkgs, pkg), append(cves, cve), append(inst, installed), append(fixed, fix), append(sevs, sev), append(vias, via)
 		}
 	}
-	if distro, release, ok := cveRelease(osID, version); ok {
+	if distro, release, via, ok := cveRelease(osID, version, like, base); ok {
 		// the trackers list source packages and versions (Debian, Ubuntu,
 		// Alpine origin) or package names and pkgbase (Arch): the source
 		// when the agent sent it, else the package itself. A Debian binary
@@ -620,7 +646,7 @@ func matchDeviceCVEs(ctx context.Context, tx pgx.Tx, id string) error {
 		var name, ver, srcVer, cve, fix, sev string
 		if _, err := pgx.ForEachRow(rows, []any{&name, &ver, &srcVer, &cve, &fix, &sev}, func() error {
 			if cmp(srcVer, fix) < 0 {
-				add(name, cve, ver, fix, sev)
+				add(name, cve, ver, fix, sev, via)
 			}
 			return nil
 		}); err != nil {
@@ -634,7 +660,7 @@ func matchDeviceCVEs(ctx context.Context, tx pgx.Tx, id string) error {
 	for _, p := range pending {
 		for _, c := range p.CVEs {
 			if cveRe.MatchString(c) {
-				add(truncate(p.Name, 200), c, p.Current, p.Candidate, p.Severity)
+				add(truncate(p.Name, 200), c, p.Current, p.Candidate, p.Severity, "")
 			}
 		}
 	}
@@ -650,11 +676,11 @@ func matchDeviceCVEs(ctx context.Context, tx pgx.Tx, id string) error {
 	if len(pkgs) == 0 {
 		return nil
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO device_cves(device_id, package, cve, installed, fixed, severity)
-		SELECT $1, * FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
-		ON CONFLICT (device_id, cve, package) DO UPDATE SET installed = EXCLUDED.installed, fixed = EXCLUDED.fixed, severity = EXCLUDED.severity,
+	_, err := tx.Exec(ctx, `INSERT INTO device_cves(device_id, package, cve, installed, fixed, severity, via)
+		SELECT $1, * FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[])
+		ON CONFLICT (device_id, cve, package) DO UPDATE SET installed = EXCLUDED.installed, fixed = EXCLUDED.fixed, severity = EXCLUDED.severity, via = EXCLUDED.via,
 			last_seen = now(), first_seen = CASE WHEN device_cves.remediated_at IS NULL THEN device_cves.first_seen ELSE now() END, remediated_at = NULL`,
-		id, pkgs, cves, inst, fixed, sevs)
+		id, pkgs, cves, inst, fixed, sevs, vias)
 	return err
 }
 
@@ -676,9 +702,27 @@ func (s *Server) matchAllCVEs(ctx context.Context) error {
 // refresh action share it.
 var cveRunning atomic.Bool
 
-// fleetDistros are the os_id values of the devices in service.
+// osReleaseCols are the inventory fields cveRelease resolves.
+const osReleaseCols = `coalesce(inventory->>'os_id', ''), coalesce(inventory->>'os_version', ''), coalesce(inventory->>'os_like', ''), coalesce(inventory->>'os_base_codename', '')`
+
+// fleetDistros are the os_id values of the devices in service and the
+// feeds cveRelease resolves them to: a feed loads when only derivatives
+// of its base are in service.
 func (s *Server) fleetDistros(ctx context.Context) ([]string, error) {
-	return collect(ctx, s.db, pgx.RowTo[string], `SELECT DISTINCT inventory->>'os_id' FROM devices WHERE NOT retired AND inventory->>'os_id' IS NOT NULL`)
+	type osRelease struct{ ID, Version, Like, Base string }
+	list, err := collect(ctx, s.db, pgx.RowToStructByPos[osRelease], `SELECT DISTINCT `+osReleaseCols+` FROM devices WHERE NOT retired AND inventory->>'os_id' IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, o := range list {
+		out = append(out, o.ID)
+		if d, _, _, ok := cveRelease(o.ID, o.Version, o.Like, o.Base); ok {
+			out = append(out, d)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out), nil
 }
 
 // activeFeeds are the switched on feeds worth a download: a distribution

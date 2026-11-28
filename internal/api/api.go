@@ -775,6 +775,11 @@ type Inventory struct {
 	BIOSVendor   string        `json:"bios_vendor,omitempty"`
 	BIOSVersion  string        `json:"bios_version,omitempty"`
 	BootTime     int64         `json:"boot_time"`
+	// OSLike is ID_LIKE of os-release (space separated); OSBaseCodename is
+	// UBUNTU_CODENAME, else DEBIAN_CODENAME: derivatives are matched
+	// against the CVE data of their base.
+	OSLike         string `json:"os_like,omitempty"`
+	OSBaseCodename string `json:"os_base_codename,omitempty"`
 	// Desktop environment and display manager, empty on servers.
 	Desktop        string              `json:"desktop,omitempty"`
 	DisplayManager string              `json:"display_manager,omitempty"`
