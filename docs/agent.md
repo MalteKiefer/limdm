@@ -24,7 +24,7 @@ there.
 | Debian | Debian 12 and later, Ubuntu 22.04 and later, Mint 21 and later, Pop!_OS 22.04 and later | apt, `.deb` | systemd | full feature set |
 | Fedora | Fedora, CentOS Stream 9 and later, RHEL, Rocky and Alma 9 and later | dnf, `.rpm` | systemd | full feature set |
 | SUSE | openSUSE Leap 16, openSUSE Tumbleweed, SLES and SLED 16 | zypper, `.rpm` | systemd | see [SUSE](#suse) |
-| Arch | Arch, Manjaro, EndeavourOS | pacman, `.pkg.tar.zst` | systemd | no osquery (native inventory); pending updates through `pacman-contrib`; updates are always full upgrades |
+| Arch | Arch, Manjaro, EndeavourOS, CachyOS | pacman, `.pkg.tar.zst` | systemd | no osquery (native inventory); pending updates through `pacman-contrib`; updates are always full upgrades |
 | Alpine | Alpine 3.17 and later | apk, `.apk` | OpenRC | no osquery; host firewall with nftables; SSO login needs linux-pam; no systemd watchdog (supervise-daemon restarts the agent) |
 
 The agent needs OpenSSL 3: the installer verifies the Ed25519 signature of the release with

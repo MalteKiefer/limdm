@@ -236,7 +236,7 @@ Matching:
   of the same package.
 * Releases: Debian by `VERSION_ID` (10 buster to 14 forky), Ubuntu by
   `VERSION_ID`, Alpine by branch, Arch without. Derivatives (Linux Mint,
-  Raspberry Pi OS, Manjaro, postmarketOS) are not matched.
+  Raspberry Pi OS, Manjaro, CachyOS, postmarketOS) are not matched.
 
 ## Compliance
 

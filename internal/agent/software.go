@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -135,11 +136,16 @@ func (a *Agent) removeSoftware(payload string) (string, error) {
 	return "removed " + r.Kind + " " + r.Name, nil
 }
 
+// archKernel matches the kernel packages of Arch and its derivatives:
+// linux, linux-lts, linux-zen, linux-hardened, linux-rt, Manjaro's linux612
+// and CachyOS' linux-cachyos with its variants (not headers or modules).
+var archKernel = regexp.MustCompile(`^linux(\d{2,3}|-lts|-zen|-hardened|-rt|-cachyos(-(lts|bore|eevdf|bmq|rc|rt-bore|server|hardened|deckify))?)?$`)
+
 // protectedPackage: removing these would take down the agent or the system.
 func protectedPackage(name string) bool {
 	switch name {
-	case "limdm-agent", "systemd", "dpkg", "apt", "rpm", "dnf", "bash", "coreutils", "sudo", "openssh-server", "linux-image-generic", "kernel", "kernel-core", "glibc", "libc6", "osquery", "cryptsetup":
+	case "limdm-agent", "systemd", "dpkg", "apt", "rpm", "dnf", "pacman", "bash", "coreutils", "sudo", "openssh-server", "openssh", "linux-image-generic", "kernel", "kernel-core", "glibc", "libc6", "osquery", "cryptsetup":
 		return true
 	}
-	return false
+	return archKernel.MatchString(name)
 }

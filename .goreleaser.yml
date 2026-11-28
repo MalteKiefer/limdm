@@ -71,7 +71,7 @@ nfpms:
     package_name: limdm-agent
     homepage: https://github.com/MalteKiefer/limdm
     maintainer: Malte Kiefer <malte.kiefer@kiefer-networks.de>
-    description: LiMDM device agent, declarative device management for Debian, Ubuntu, Fedora, CentOS, openSUSE, SLES, Arch and Alpine
+    description: LiMDM device agent, declarative device management for Debian, Ubuntu, Fedora, CentOS, openSUSE, SLES, Arch (also Manjaro, EndeavourOS, CachyOS) and Alpine
     license: MIT
     formats: [deb, rpm, archlinux, apk]
     bindir: /usr/bin

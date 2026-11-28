@@ -4,6 +4,14 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.24.0 (2026-11-28)
+
+### Added
+- CachyOS is supported like Manjaro and EndeavourOS (pacman family, `ID_LIKE=arch`); it is not matched against the Arch CVE feed, like other derivatives.
+
+### Changed
+- Software removal refuses `pacman`, `openssh` and the kernel packages of Arch and its derivatives (`linux`, `linux-lts`, `linux-zen`, `linux-hardened`, `linux-rt`, Manjaro's `linuxNNN`, `linux-cachyos` and its variants); headers and module packages stay removable.
+
 ## 0.23.1 (2026-11-27)
 
 ### Fixed

@@ -82,7 +82,7 @@ func detectHost() (*host, error) {
 
 // familyOf maps os-release to the package family: debian (apt), fedora
 // (dnf: Fedora, CentOS Stream, RHEL, Rocky, Alma), suse (zypper: openSUSE
-// Leap, Tumbleweed, SLES), arch (pacman: Arch, Manjaro, EndeavourOS) or
+// Leap, Tumbleweed, SLES), arch (pacman: Arch, Manjaro, EndeavourOS, CachyOS) or
 // alpine (apk, OpenRC).
 func familyOf(osr map[string]string) string {
 	like := " " + osr["ID"] + " " + osr["ID_LIKE"] + " "

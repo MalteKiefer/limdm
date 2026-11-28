@@ -1096,6 +1096,7 @@ func TestDistributionFamilies(t *testing.T) {
 		"ID=arch":                      "arch",
 		"ID=manjaro\nID_LIKE=arch":     "arch",
 		"ID=endeavouros\nID_LIKE=arch": "arch",
+		"ID=cachyos\nID_LIKE=arch":     "arch",
 		"ID=alpine\nVERSION_ID=3.21.0": "alpine",
 		"ID=ubuntu\nID_LIKE=debian":    "debian",
 		"ID=nixos":                     "",
@@ -1172,5 +1173,16 @@ func TestEventRepeatsAreDropped(t *testing.T) {
 	a.event("software stores read only: %v", true)
 	if n := len(a.pendingEvents()); n != 5 {
 		t.Fatalf("a repeat after the window must be sent again, queued %d", n)
+	}
+}
+
+func TestProtectedKernels(t *testing.T) {
+	for name, want := range map[string]bool{
+		"linux": true, "linux-lts": true, "linux612": true, "linux-cachyos": true, "linux-cachyos-bore": true, "pacman": true,
+		"linux-cachyos-headers": false, "linux-cachyos-nvidia": false, "linux-firmware": false, "linux612-headers": false, "linuxx": false,
+	} {
+		if protectedPackage(name) != want {
+			t.Errorf("%s: want %v", name, want)
+		}
 	}
 }
