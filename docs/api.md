@@ -61,7 +61,7 @@ A body above the limit ends the JSON decoding, so it answers `400`, not `413`.
 A device checks in once per check in interval and polls every 30 seconds. The interval comes
 from the agent declaration (`checkin_seconds`, 30 to 86400, default 300 in the seeded
 library item); without one the agent uses five minutes. Up to 10% jitter spreads the
-fleet. After failures the poll doubles its wait up to five minutes, plus up to 10 seconds of
+fleet. After failures the poll doubles its wait three times (up to four minutes), plus up to 10 seconds of
 jitter. After a poll answered `pending` the agent polls every 10 seconds for five minutes, and
 a check in for queued commands skips converging and the inventory (see
 [agent.md](agent.md#command-delivery)). One check in per device runs at a time (row lock).
