@@ -312,8 +312,8 @@ msgstr "Richiesta inviata all'IT"
 msgid "Request %s"
 msgstr "Richiedi %s"
 
-msgid "IT decides on your request. The app installs by itself once approved."
-msgstr "L'IT decide sulla tua richiesta. L'app si installa da sola una volta approvata."
+msgid "IT decides on your request: either you may install the app, or it is installed for you."
+msgstr "L'IT decide sulla tua richiesta: o puoi installare l'app tu stesso, o viene installata per te."
 
 msgid "Why do you need it? (optional)"
 msgstr "Perché ti serve? (facoltativo)"
@@ -342,8 +342,8 @@ msgstr "App che hai chiesto all'IT di aggiungere. Le app approvate compaiono nel
 msgid "Request Another App"
 msgstr "Richiedi un'altra app"
 
-msgid "Search Flathub. IT decides on your request; the app installs by itself once approved."
-msgstr "Cerca su Flathub. L'IT decide sulla tua richiesta; l'app si installa da sola una volta approvata."
+msgid "Search Flathub. IT decides on your request: either you may install the app, or it is installed for you."
+msgstr "Cerca su Flathub. L'IT decide sulla tua richiesta: o puoi installare l'app tu stesso, o viene installata per te."
 
 msgid "e.g. Krita, Obsidian, Zotero"
 msgstr "ad es. Krita, Obsidian, Zotero"

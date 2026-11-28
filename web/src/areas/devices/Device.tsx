@@ -292,7 +292,8 @@ function Overview({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
   const checks = d.check_results as Check[]
   const failing = checks.filter((c) => c.status === 'fail')
   const vols = inv.volumes ?? []
-  const plain = vols.filter((v) => !v.encrypted && !d.encryption_exempt.includes(v.mount))
+  // the ESP and removable media cannot or need not be encrypted
+  const plain = vols.filter((v) => !v.encrypted && v.role !== 'esp' && !v.removable && !d.encryption_exempt.includes(v.mount))
   const root = vols.find((v) => v.mount === '/')
   const [now] = useState(() => Date.now())
   const certDays = Math.round((new Date(d.cert_expires).getTime() - now) / 86_400_000)

@@ -433,6 +433,8 @@ export default {
   'devices.inv.encryption': 'Crittografia',
   'devices.inv.encrypted': 'crittografato',
   'devices.inv.excluded': 'escluso',
+  'devices.inv.notRequired': 'non richiesto',
+  'devices.inv.removable': 'supporto rimovibile',
   'devices.inv.usage': 'Occupazione',
   'devices.inv.usageVal': '{used} di {size} GB',
   'devices.net.noInfo': 'Nessun indirizzo segnalato. Un elemento privacy con network_info false li disattiva.',

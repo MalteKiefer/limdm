@@ -540,7 +540,17 @@ function Disks({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
               mono(v.mount),
               mono(v.device),
               v.fs,
-              v.encrypted ? <Badge tone="ok">{v.encryption || t('devices.inv.encrypted')}</Badge> : d.encryption_exempt.includes(v.mount) ? <Badge>{t('devices.inv.excluded')}</Badge> : <Badge tone="bad">{t('devices.sys.none')}</Badge>,
+              v.encrypted ? (
+                <Badge tone="ok">{v.encryption || t('devices.inv.encrypted')}</Badge>
+              ) : v.role === 'esp' ? (
+                <Badge>{t('devices.inv.notRequired')}</Badge>
+              ) : v.removable ? (
+                <Badge>{t('devices.inv.removable')}</Badge>
+              ) : d.encryption_exempt.includes(v.mount) ? (
+                <Badge>{t('devices.inv.excluded')}</Badge>
+              ) : (
+                <Badge tone="bad">{t('devices.sys.none')}</Badge>
+              ),
               <span className="flex items-center gap-2 whitespace-nowrap">
                 <meter min={0} max={100} low={80} high={90} optimum={0} value={usedPct(v.size_gb, v.free_gb)} aria-label={t('devices.inv.usage')} />
                 <span className="text-meta text-muted">{t('devices.inv.usageVal', { used: fmt(v.size_gb - v.free_gb), size: fmt(v.size_gb) })}</span>

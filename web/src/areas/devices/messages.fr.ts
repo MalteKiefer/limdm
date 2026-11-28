@@ -433,6 +433,8 @@ export default {
   'devices.inv.encryption': 'Chiffrement',
   'devices.inv.encrypted': 'chiffré',
   'devices.inv.excluded': 'exclu',
+  'devices.inv.notRequired': 'non requis',
+  'devices.inv.removable': 'support amovible',
   'devices.inv.usage': 'Utilisation',
   'devices.inv.usageVal': '{used} sur {size} Go',
   'devices.net.noInfo': 'Aucune adresse signalée. Un élément de confidentialité avec network_info à false les désactive.',

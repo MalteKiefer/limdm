@@ -72,7 +72,7 @@ func (a *Agent) applyExtra() {
 	run(api.TypeProxy, a.applyProxy(x.Proxy))
 	run(api.TypeFlatpak, a.applyFlatpak(x.Flatpak))
 	run(api.TypeScripts, a.applyScripts(x.Scripts))
-	run(api.TypeDconf, applyDconf(x.Dconf))
+	run(api.TypeDconf, a.applyDconf(x.Dconf))
 	run(api.TypePolkit, applyPolkit(x.Polkit))
 	run(api.TypeSudo, applySudo(x.Sudo))
 	run(api.TypeBootloader, a.applyBootloader(x.Bootloader))

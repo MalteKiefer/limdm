@@ -347,6 +347,12 @@ func (d *desktopServer) handle(c *net.UnixConn) {
 func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 	info := d.info.Load()
 	if info == nil {
+		// nothing published before the first cycle ends: an empty volume
+		// list would read as "every disk has a key"
+		switch req.Op {
+		case "status", "info", "escrow":
+			return DesktopResponse{Error: "the agent is starting, try again in a minute"}
+		}
 		info = &desktopInfo{}
 	}
 	d.mu.Lock()

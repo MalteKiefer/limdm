@@ -230,7 +230,8 @@ func eventText(lang, text string) (key string, params []string, out string) {
 // checkDetailPrefixes are agent detail texts followed by device data.
 var checkDetailPrefixes = []string{"not encrypted: ", "encrypted: ", "missing: ", "not enforced: ", "empty password: ",
 	"other UID 0 accounts: ", "unapproved admins in ", "no recovery key escrowed for ", "update status unknown: ",
-	"osquery is not packaged for ", "GRUB password set in ", "documented exception (risk accepted)"}
+	"osquery is not packaged for ", "GRUB password set in ", "documented exception (risk accepted)",
+	"neither AppArmor nor SELinux enabled, kernel security modules: "}
 
 // bpSource says where the blueprint of a device comes from, in the order
 // resolveDevice applies: set on the device (by an admin or the enrollment
