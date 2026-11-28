@@ -1014,11 +1014,11 @@ func TestInventoryHelpers(t *testing.T) {
 }
 
 func TestPollWait(t *testing.T) {
-	if w := pollWait(0); w < time.Minute || w > time.Minute+10*time.Second {
+	if w := pollWait(0); w < pollEvery || w > pollEvery+10*time.Second {
 		t.Fatalf("normal: %v", w)
 	}
-	if w := pollWait(10); w < 5*time.Minute || w > 7*time.Minute+40*time.Second {
-		t.Fatalf("backoff capped at five minutes plus half as jitter: %v", w)
+	if w := pollWait(10); w < 4*time.Minute || w > 6*time.Minute+10*time.Second {
+		t.Fatalf("backoff of three doublings plus half as jitter: %v", w)
 	}
 }
 

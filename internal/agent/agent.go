@@ -1159,7 +1159,7 @@ func (a *Agent) pollLoop(ctx context.Context) {
 	}
 }
 
-// pollWait is pollEvery, doubling per failure up to five minutes, plus
+// pollWait is pollEvery, doubling per failure (three times, at most five minutes), plus
 // jitter; after failures up to half of the wait, so the fleet does not
 // return in the same ten seconds when the server is back.
 func pollWait(failures int) time.Duration {
