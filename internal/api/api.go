@@ -742,6 +742,13 @@ type EnrollResponse struct {
 	TPMBound     bool          `json:"tpm_bound,omitempty"` // the server accepted the key as TPM bound
 }
 
+// ProxmoxInfo describes a Proxmox VE node.
+type ProxmoxInfo struct {
+	Version string `json:"version"`           // pve-manager version, 8.4.1
+	Node    string `json:"node"`              // node name (/etc/pve/local)
+	Cluster string `json:"cluster,omitempty"` // corosync cluster_name, empty on a standalone node
+}
+
 type RenewRequest struct {
 	CSR string `json:"csr"`
 	// TPM is set when the new key lives in the TPM; it is certified by the
@@ -780,6 +787,11 @@ type Inventory struct {
 	// against the CVE data of their base.
 	OSLike         string `json:"os_like,omitempty"`
 	OSBaseCodename string `json:"os_base_codename,omitempty"`
+	// OSProduct names a platform built on the distribution, "Proxmox VE
+	// 8.4"; OSID stays debian. Proxmox holds the node facts of a Proxmox VE
+	// host.
+	OSProduct string       `json:"os_product,omitempty"`
+	Proxmox   *ProxmoxInfo `json:"proxmox,omitempty"`
 	// Desktop environment and display manager, empty on servers.
 	Desktop        string              `json:"desktop,omitempty"`
 	DisplayManager string              `json:"display_manager,omitempty"`

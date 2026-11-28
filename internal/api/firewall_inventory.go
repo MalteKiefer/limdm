@@ -80,14 +80,16 @@ const (
 // interfaces that container, virtualization, VPN and intrusion prevention
 // tools own: Docker, Podman (CNI, netavark), libvirt, Kubernetes and its CNI
 // plugins, NetBird (table netbird, chains netbird-*, sets nb-*), Tailscale
-// (chains ts-*, interface tailscale0), wg-quick (table wg-quick-*), fail2ban
-// and CrowdSec. Their rules are shown but never adopted or removed.
+// (chains ts-*, interface tailscale0), wg-quick (table wg-quick-*), fail2ban,
+// CrowdSec and the Proxmox VE firewall (iptables chains PVEFW-*, nftables
+// tables proxmox-firewall*). Their rules are shown but never adopted or removed.
 var systemNames = []string{"docker", "br-", "veth", "podman", "cni", "netavark", "nv_", "libvirt", "virbr", "kube", "cali", "flannel",
-	"cilium", "weave", "f2b-", "fail2ban", "crowdsec", "netbird", "nb-", "tailscale", "ts-", "wg-quick"}
+	"cilium", "weave", "f2b-", "fail2ban", "crowdsec", "netbird", "nb-", "tailscale", "ts-", "wg-quick", "pvefw", "proxmox-firewall"}
 
-// systemIfaces are interface names of VPN agents: NetBird (wt0), ZeroTier
-// (zt plus the network hash).
-var systemIfaces = regexp.MustCompile(`^(wt[0-9]+|zt[0-9a-z]{8,})$`)
+// systemIfaces are interface names of VPN agents, NetBird (wt0) and ZeroTier
+// (zt plus the network hash), and of Proxmox VE guests: tap100i0 and the
+// firewall bridge fwbr100i0, fwln100i0, fwpr100p0.
+var systemIfaces = regexp.MustCompile(`^(wt[0-9]+|zt[0-9a-z]{8,}|tap[0-9]+i[0-9]+|fw(br|ln|pr)[0-9]+[ip][0-9]+)$`)
 
 var nameToken = regexp.MustCompile(`[A-Za-z0-9_.@-]+`)
 

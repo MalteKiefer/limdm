@@ -83,7 +83,7 @@ an unbound volume or a missing TPM 2.0 is reported as `na`; with `require` it fa
 ## Framework mapping
 
 The catalog has a version (`CatalogVersion` in `internal/agent/checks.go`, currently
-`2026.11.2`). The agent reports it with every result. The evidence export and the
+`2026.11.3`). The agent reports it with every result. The evidence export and the
 compliance history carry it, so a result can always be tied to the mapping it was
 made with. The version is raised whenever a check, its level or a reference changes.
 

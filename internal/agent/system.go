@@ -34,8 +34,9 @@ type host struct {
 	// pkgMu runs package manager calls one at a time: catalog installs run
 	// in the background next to the check in's own installs and upgrades
 	pkgMu    sync.Mutex
-	cacheMu  sync.Mutex  // guards pkgs
-	aptStale atomic.Bool // new sources: the next install refreshes the lists (set without pkgMu)
+	cacheMu  sync.Mutex   // guards pkgs
+	aptStale atomic.Bool  // new sources: the next install refreshes the lists (set without pkgMu)
+	aptWarn  atomic.Value // string: apt-get update failed for one repository only (aptEnterpriseOnly)
 
 	aptUpdated time.Time
 	pending    pendingCache
@@ -305,10 +306,15 @@ func (h *host) aptUpdate() error {
 	if !h.aptStale.Swap(false) && time.Since(h.aptUpdated) < time.Hour {
 		return nil
 	}
-	if _, err := run(10*time.Minute, "apt-get", "update", "-qq"); err != nil {
-		h.aptStale.Store(true)
-		return err
+	out, err := run(10*time.Minute, "apt-get", "update", "-qq")
+	warn := ""
+	if err != nil {
+		if warn = aptEnterpriseOnly(out); warn == "" {
+			h.aptStale.Store(true)
+			return err
+		}
 	}
+	h.aptWarn.Store(warn)
 	h.aptUpdated = time.Now()
 	return nil
 }
@@ -330,7 +336,7 @@ func (h *host) installLocked(pkgs ...string) error {
 		if err := h.aptUpdate(); err != nil {
 			return err
 		}
-		_, err := run(30*time.Minute, "apt-get", append([]string{"install", "-y", "-q", "--no-install-recommends", "-o", "DPkg::Lock::Timeout=300",
+		_, err := aptGet(30*time.Minute, append([]string{"install", "-y", "-q", "--no-install-recommends", "-o", "DPkg::Lock::Timeout=300",
 			"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold", "--"}, pkgs...)...)
 		return err
 	}
@@ -355,7 +361,7 @@ func (h *host) remove(pkgs ...string) error {
 	h.pkgMu.Lock()
 	defer h.pkgMu.Unlock()
 	if h.family == "debian" {
-		_, err := run(30*time.Minute, "apt-get", append([]string{"remove", "-y", "-q", "-o", "DPkg::Lock::Timeout=300", "--"}, pkgs...)...)
+		_, err := aptGet(30*time.Minute, append([]string{"remove", "-y", "-q", "-o", "DPkg::Lock::Timeout=300", "--"}, pkgs...)...)
 		return err
 	}
 	var err error
@@ -402,8 +408,8 @@ func (h *host) upgrade(securityOnly bool) (string, error) {
 			return run(2*time.Hour, "unattended-upgrade", "-v")
 		}
 		// wait for dpkg instead of failing while unattended-upgrades or PackageKit holds it
-		return run(2*time.Hour, "apt-get", "upgrade", "-y", "-q", "--with-new-pkgs", "-o", "DPkg::Lock::Timeout=900",
-			"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold")
+		return aptGet(2*time.Hour, append(aptUpgradeVerb(), "-y", "-q", "-o", "DPkg::Lock::Timeout=900",
+			"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold")...)
 	}
 	args := []string{"upgrade", "-y", "-q", "--refresh"}
 	if securityOnly {
@@ -493,6 +499,7 @@ func (h *host) inventory(priv api.Privacy) api.Inventory {
 		inv.Serial = strings.TrimRight(readTrim("/proc/device-tree/serial-number"), "\x00")
 	}
 	inv.Hostname, _ = os.Hostname()
+	inv.OSProduct, inv.Proxmox = proxmoxInventory()
 	sc := bufio.NewScanner(strings.NewReader(readFile("/proc/cpuinfo")))
 	for sc.Scan() { // x86 has "model name"; ARM kernels "Hardware", "Model" or "CPU part"
 		if k, v, ok := strings.Cut(sc.Text(), ":"); ok {

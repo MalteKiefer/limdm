@@ -161,8 +161,11 @@ type UpdateRun struct {
 type UpdateStatus struct {
 	Pending      []PendingUpdate `json:"pending"`
 	PendingError string          `json:"pending_error,omitempty"`
-	Runs         []UpdateRun     `json:"runs,omitempty"`
-	Ring         string          `json:"ring,omitempty"`
+	// PendingWarning: the list is usable but incomplete, e.g. the Proxmox
+	// enterprise repository refused access without a subscription.
+	PendingWarning string      `json:"pending_warning,omitempty"`
+	Runs           []UpdateRun `json:"runs,omitempty"`
+	Ring           string      `json:"ring,omitempty"`
 	// SecuritySince is when security updates were first seen pending
 	// without a break (the check updates.security_age).
 	SecuritySince *time.Time `json:"security_since,omitempty"`
