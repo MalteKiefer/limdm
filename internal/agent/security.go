@@ -157,7 +157,17 @@ const (
 )
 
 func (a *Agent) applyBootloader(b *api.Bootloader) error {
+	editors, err := applyBootEditors(b != nil)
+	if err != nil {
+		return err
+	}
 	if a.host.family == "fedora" {
+		if !exists("/boot/grub2") {
+			if b == nil || editors > 0 {
+				return nil
+			}
+			return errors.New("no supported boot loader found (GRUB, systemd-boot or Limine)")
+		}
 		// grub2-setpassword format: the superuser is always root, BLS entries stay bootable
 		content := ""
 		if b != nil {
@@ -169,10 +179,10 @@ func (a *Agent) applyBootloader(b *api.Bootloader) error {
 		return err
 	}
 	if _, err := os.Stat("/etc/grub.d"); err != nil {
-		if b == nil {
+		if b == nil || editors > 0 {
 			return nil
 		}
-		return errors.New("GRUB not found (/etc/grub.d missing)")
+		return errors.New("no supported boot loader found (GRUB, systemd-boot or Limine)")
 	}
 	content := ""
 	if b != nil {
@@ -218,21 +228,127 @@ func grubConfig(family string) (mkconfig, cfg string) {
 }
 
 func runBootPassword(a *Agent) (string, string) {
-	if a.host.family == "fedora" {
+	if a.host.family == "fedora" && exists("/boot/grub2") {
 		if strings.Contains(readFile(grubFedoraUser), "GRUB2_PASSWORD=grub.pbkdf2.") {
 			return pass, "GRUB password set in " + grubFedoraUser
 		}
 		return fail, "no GRUB password (declare a boot loader item)"
 	}
 	_, path := grubConfig(a.host.family)
-	cfg := readFile(path)
-	if cfg == "" {
-		return na, "GRUB not used"
+	if cfg := readFile(path); cfg != "" && a.host.family != "fedora" {
+		if strings.Contains(cfg, "password_pbkdf2 ") && strings.Contains(cfg, "set superusers=") {
+			return pass, "GRUB superuser with PBKDF2 password"
+		}
+		return fail, "no GRUB password (declare a boot loader item)"
 	}
-	if strings.Contains(cfg, "password_pbkdf2 ") && strings.Contains(cfg, "set superusers=") {
-		return pass, "GRUB superuser with PBKDF2 password"
+	return bootEditorResult(bootEditors())
+}
+
+// ---- systemd-boot and Limine ----
+//
+// Neither has a password. What the GRUB password protects, changing the
+// kernel command line at boot (init=/bin/sh), is closed by turning their
+// editor off; a boot loader item does that, and the check passes when the
+// editor of every loader found is off.
+
+const bootEditorMark = "# LiMDM: editor off (boot loader item)"
+
+var (
+	sdbootConfs = []string{"/boot/loader/loader.conf", "/efi/loader/loader.conf", "/boot/efi/loader/loader.conf"}
+	limineConfs = []string{"/boot/limine.conf", "/boot/limine/limine.conf", "/boot/EFI/limine/limine.conf", "/boot/EFI/BOOT/limine.conf",
+		"/efi/limine.conf", "/efi/limine/limine.conf", "/efi/EFI/limine/limine.conf", "/efi/EFI/BOOT/limine.conf",
+		"/boot/efi/limine.conf", "/boot/efi/EFI/limine/limine.conf", "/boot/efi/EFI/BOOT/limine.conf"}
+	sdbootEditor = regexp.MustCompile(`(?m)^[ \t]*editor[ \t]+(\S+)[ \t]*\n?`)
+	limineEditor = regexp.MustCompile(`(?mi)^[ \t]*editor_enabled[ \t]*[:=][ \t]*(\S+)[ \t]*\n?`)
+)
+
+type bootEditor struct {
+	name, path, off string // off: the line that turns the editor off
+	key             *regexp.Regexp
+}
+
+// bootEditors lists the systemd-boot and Limine configs present (Limine
+// 8 and later: limine.conf).
+func bootEditors() []bootEditor {
+	var list []bootEditor
+	for _, p := range limineConfs {
+		if exists(p) {
+			list = append(list, bootEditor{"Limine", p, "editor_enabled: no", limineEditor})
+		}
 	}
-	return fail, "no GRUB password (declare a boot loader item)"
+	for _, p := range sdbootConfs {
+		if exists(p) {
+			list = append(list, bootEditor{"systemd-boot", p, "editor no", sdbootEditor})
+		}
+	}
+	return list
+}
+
+// editorOff: both loaders enable the editor unless it is set to no.
+func editorOff(e bootEditor, cfg string) bool {
+	m := e.key.FindAllStringSubmatch(cfg, -1)
+	if len(m) == 0 {
+		return false
+	}
+	switch strings.ToLower(m[len(m)-1][1]) {
+	case "no", "false", "0", "off":
+		return true
+	}
+	return false
+}
+
+func bootEditorResult(eds []bootEditor) (string, string) {
+	if len(eds) == 0 {
+		return na, "no GRUB, systemd-boot or Limine found"
+	}
+	var on, off []string
+	for _, e := range eds {
+		if editorOff(e, readFile(e.path)) {
+			off = append(off, e.name+" ("+e.path+")")
+		} else {
+			on = append(on, e.name+" ("+e.path+")")
+		}
+	}
+	if len(on) > 0 {
+		return fail, "boot entries editable in " + strings.Join(on, ", ") + " (declare a boot loader item)"
+	}
+	return pass, "editor off in " + strings.Join(off, ", ") + " (these loaders have no password)"
+}
+
+// applyBootEditors turns the editors off (on: a boot loader item is
+// assigned) or removes the lines it added; it returns how many loaders
+// were found. The line goes first: Limine reads global options only
+// before the first entry.
+func applyBootEditors(on bool) (int, error) {
+	eds := bootEditors()
+	var errs []error
+	for _, e := range eds {
+		info, err := os.Stat(e.path)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		cur := readFile(e.path)
+		if next := editorConf(e, cur, on); next != cur {
+			if err := os.WriteFile(e.path, []byte(next), info.Mode().Perm()); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return len(eds), errors.Join(errs...)
+}
+
+// editorConf is cfg with the editor turned off (on) or without the lines
+// the agent added.
+func editorConf(e bootEditor, cfg string, on bool) string {
+	next := strings.Replace(cfg, bootEditorMark+"\n"+e.off+"\n", "", 1)
+	switch {
+	case on && editorOff(e, next):
+		return cfg // already off, by us or the administrator
+	case on:
+		return bootEditorMark + "\n" + e.off + "\n" + e.key.ReplaceAllString(next, "")
+	}
+	return next
 }
 
 // ---- LUKS recovery key escrow ----

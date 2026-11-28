@@ -1100,6 +1100,11 @@ Console: **Boot loader password**.
   `10_linux`, `grub-mkconfig`, `grub.cfg` set to 0600. SUSE uses `grub2-mkconfig` and
   `/boot/grub2/grub.cfg`. Fedora family: `/boot/grub2/user.cfg` in the format of
   `grub2-setpassword` (superuser `root`, `superuser` is ignored).
+* systemd-boot and Limine (8 and later, `limine.conf`) have no password. The agent turns their
+  editor off instead (`editor no` in `loader.conf`, `editor_enabled: no` at the top of
+  `limine.conf`, marked with a `# LiMDM` comment), so nobody changes the kernel command line at
+  boot. The configs are looked up in `/boot`, `/efi` and `/boot/efi`. Removing the item removes
+  only the lines the agent added. The password fields stay required, for devices with GRUB.
 
 ### `com.limdm.diskencryption`
 

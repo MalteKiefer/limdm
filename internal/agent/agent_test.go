@@ -1213,3 +1213,27 @@ func TestProtectedKernels(t *testing.T) {
 		}
 	}
 }
+
+func TestBootEditors(t *testing.T) {
+	sd := bootEditor{"systemd-boot", "", "editor no", sdbootEditor}
+	li := bootEditor{"Limine", "", "editor_enabled: no", limineEditor}
+	conf := "timeout 3\neditor yes\ndefault arch.conf\n"
+	on := editorConf(sd, conf, true)
+	if !editorOff(sd, on) || strings.Contains(on, "editor yes") || editorConf(sd, on, true) != on || editorConf(sd, on, false) != "timeout 3\ndefault arch.conf\n" {
+		t.Fatalf("systemd-boot: %q", on)
+	}
+	if editorOff(sd, "timeout 3\n") || !editorOff(sd, "editor 0\n") || editorConf(sd, "editor no\n", true) != "editor no\n" {
+		t.Error("systemd-boot defaults")
+	}
+	lc := "timeout: 5\n\n/CachyOS\n    protocol: linux\n"
+	got := editorConf(li, lc, true)
+	if !strings.HasPrefix(got, bootEditorMark+"\neditor_enabled: no\ntimeout: 5") || !editorOff(li, got) || editorConf(li, got, false) != lc {
+		t.Fatalf("limine: %q", got)
+	}
+	if !editorOff(li, "EDITOR_ENABLED=no\n") || editorOff(li, "editor_enabled: yes\n") {
+		t.Error("limine syntax")
+	}
+	if st, _ := bootEditorResult(nil); st != na {
+		t.Error("no loader")
+	}
+}
