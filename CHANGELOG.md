@@ -13,6 +13,7 @@ change behavior they rely on.
 ### Changed
 - The recovery key passphrase dialog opens by itself while a LUKS volume has no escrowed key: half a minute after login and within a minute of the agent reporting the volume. Closing it postpones it by ten minutes; it returns at the next login until the key is escrowed. One dialog per user; the daily notification stays.
 - The separate menu entry **Disk recovery key** is gone, GNOME lists only the LiMDM app; the passphrase is entered in the dialog, the tray entry or the app's page Disk Encryption. `limdm-desktop --now` is removed.
+- Desktop app, software requests: the text says IT either lets the user install the app or installs it for them, instead of promising an automatic install.
 - The check `mac.enabled` names the active kernel security modules when neither AppArmor nor SELinux is enabled. The agent still installs nothing for it and never edits the kernel command line.
 
 ### Fixed

@@ -738,7 +738,7 @@ class Window(Adw.ApplicationWindow):
 
     def _request_dialog(self, app):
         dlg = Adw.MessageDialog(transient_for=self, heading=_("Request %s") % app.get("name", ""),
-                                body=_("IT decides on your request. The app installs by itself once approved."))
+                                body=_("IT decides on your request: either you may install the app, or it is installed for you."))
         entry = Gtk.Entry(placeholder_text=_("Why do you need it? (optional)"))
         dlg.set_extra_child(entry)
         dlg.add_response("cancel", _("Cancel"))
@@ -773,7 +773,7 @@ class Window(Adw.ApplicationWindow):
         view = Adw.ToolbarView()
         view.add_top_bar(Adw.HeaderBar())
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_top=12, margin_bottom=12, margin_start=18, margin_end=18)
-        body.append(Gtk.Label(label=_("Search Flathub. IT decides on your request; the app installs by itself once approved."),
+        body.append(Gtk.Label(label=_("Search Flathub. IT decides on your request: either you may install the app, or it is installed for you."),
                               wrap=True, xalign=0, css_classes=["dim-label"]))
         entry = Gtk.SearchEntry(placeholder_text=_("e.g. Krita, Obsidian, Zotero"), search_delay=600)
         body.append(entry)
