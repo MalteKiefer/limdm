@@ -4,6 +4,23 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.25.0 (2026-11-28)
+
+### Added
+- The agent reports the EFI system partition (`role: esp`) and removable or hotplugged media (`removable`) in the volume inventory; the device page shows **not required** and **removable media** instead of a red "none".
+- Declared settings install the packages they need when they apply: dconf settings install dconf, OpenVPN network profiles the NetworkManager OpenVPN plugin.
+
+### Changed
+- The recovery key passphrase dialog opens by itself while a LUKS volume has no escrowed key: half a minute after login and within a minute of the agent reporting the volume. Closing it postpones it by ten minutes; it returns at the next login until the key is escrowed. One dialog per user; the daily notification stays.
+- The separate menu entry **Disk recovery key** is gone, GNOME lists only the LiMDM app; the passphrase is entered in the dialog, the tray entry or the app's page Disk Encryption. `limdm-desktop --now` is removed.
+- The check `mac.enabled` names the active kernel security modules when neither AppArmor nor SELinux is enabled. The agent still installs nothing for it and never edits the kernel command line.
+
+### Fixed
+- "All Set: every disk has a recovery key" appeared while the agent reported a missing key: the agent started the helper in its first cycle after a start, before the desktop socket had any data, and the helper read the empty answer (and error answers) as nothing to do. The socket now answers that the agent is starting, and the helper treats errors as unknown.
+- Password quality on Arch and its derivatives (CachyOS) and Alpine: remediation adds `pam_pwquality.so` to `/etc/pam.d/system-auth` or `/etc/pam.d/base-password`, and the check reads Alpine's stack.
+- auditd remediation installs `audit` on Arch and Alpine (it asked for Debian's `auditd`).
+- `require_all` disk encryption no longer fails on the ESP or on USB media.
+
 ## 0.24.0 (2026-11-28)
 
 ### Added
