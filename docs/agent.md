@@ -324,9 +324,20 @@ one instance per user.
 |---|---|
 | `limdm-desktop` | tray icon and reminders |
 | `--no-tray` | only the reminders, for sessions without a tray host |
-| `--now` | ask for a missing recovery key right away (menu entry **Disk recovery key**) |
 | `--message TEXT`, `--message-title TITLE` | show a message from IT (started by the agent) |
 | `--reboot-at HH:MM`, `--reboot-defers N`, `--reboot-defer-minutes M` | offer to postpone a planned restart (started by the agent) |
+
+### Recovery key prompt
+
+While `com.limdm.disk-encryption` asks for escrow and a LUKS volume has no escrowed key,
+the helper opens the passphrase dialog by itself, in the user's language: half a minute after
+login and within a minute of the agent reporting the volume. Closing it postpones it by ten
+minutes, and it comes back at the next login, until the key is escrowed. A lock in
+`$XDG_RUNTIME_DIR` keeps it to one dialog per user. The agent adds a notification once a
+day; **Set Up Recovery Key…** in the tray and the page **Disk Encryption** of the app ask
+for the same passphrase. Until the agent finished its first cycle after a start the socket
+answers that it is starting, so the helper never mistakes an unknown volume list for "every
+disk has a key".
 
 ### Tray
 

@@ -335,6 +335,13 @@ func TestPolkitAndSudoRendering(t *testing.T) {
 func TestDesktopServer(t *testing.T) {
 	a := &Agent{kick: make(chan struct{}, 1)}
 	d := &desktopServer{a: a, queued: map[string]bool{"u2": true}, inflight: map[string]bool{}, failures: map[uint32][]time.Time{}}
+	// before the first cycle published anything the volume list is unknown,
+	// not empty: an empty list made the helper report "every disk has a key"
+	for _, op := range []string{"status", "info", "escrow"} {
+		if r := d.serve(1000, DesktopRequest{Op: op}); r.Error == "" || r.OK || len(r.Need) != 0 || r.Status != nil {
+			t.Fatalf("%s before the first cycle: %+v", op, r)
+		}
+	}
 	d.info.Store(&desktopInfo{Company: "ACME", Need: []luksVolume{{"/dev/sda3", "u1"}, {"/dev/sdb1", "u2"}}})
 	st := d.serve(1000, DesktopRequest{Op: "status"})
 	if st.Company != "ACME" || len(st.Need) != 1 || st.Need[0].UUID != "u1" {
