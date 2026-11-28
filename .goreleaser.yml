@@ -158,7 +158,10 @@ nfpms:
         dependencies: [osquery, systemd, util-linux, cryptsetup, kmod, "(openssl >= 3 or openssl-3)"]
         recommends: [iproute, procps-ng, gnupg2, firewalld, audit, dnf-plugins-core, nftables]
         suggests: [zenity, kdialog, libnotify, dconf, flatpak, python3-gobject, gtk4, libadwaita]
-      # osquery is not packaged for Arch and Alpine; the agent uses its native inventory there
+      # osquery is not packaged for Arch and Alpine; the agent uses its native inventory there.
+      # nfpm writes no optdepends for pacman or apk: what remediation and declared
+      # settings need (libpwquality, audit, nftables, ...) the agent installs when needed
+      # (deps.go, installFor)
       archlinux:
         dependencies: [systemd, util-linux, cryptsetup, iproute2, procps-ng, kmod, gnupg, shadow, pacman-contrib, "openssl>=3"]
       apk:

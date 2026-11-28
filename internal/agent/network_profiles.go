@@ -109,6 +109,11 @@ func openvpnPlugin() bool {
 	return false
 }
 
+// openvpnPluginPkg provides NetworkManager's OpenVPN plugin, installed when
+// an OpenVPN profile is declared.
+var openvpnPluginPkg = dependency{debian: "network-manager-openvpn", fedora: "NetworkManager-openvpn",
+	arch: "networkmanager-openvpn", alpine: "networkmanager-openvpn"}
+
 // applyOpenVPN imports .ovpn files with nmcli. The file is kept (0600) in the
 // agent's state directory; a changed file or a missing connection imports it
 // again. The connection id is limdm-<name>.
@@ -119,8 +124,14 @@ func (a *Agent) applyOpenVPN(vpns []api.NetworkProfile) error {
 	}
 	var errs []error
 	if len(vpns) > 0 && !openvpnPlugin() {
-		errs = append(errs, errors.New("the NetworkManager OpenVPN plugin is not installed (network-manager-openvpn or NetworkManager-openvpn)"))
-		vpns = nil
+		err := a.installPkg(openvpnPluginPkg)
+		if err == nil && !openvpnPlugin() {
+			err = errors.New("still missing after the install")
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("NetworkManager OpenVPN plugin: %w", err))
+			vpns = nil
+		}
 	}
 	for _, p := range vpns {
 		id := "limdm-" + p.Name

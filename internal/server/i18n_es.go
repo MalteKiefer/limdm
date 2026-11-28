@@ -1564,4 +1564,7 @@ var esCatalog = map[string]string{
 	"your role cannot change this":                  "su rol no puede cambiar esto",
 	"your role cannot read these logs":              "su rol no puede leer estos registros",
 	"· LiMDM":                                       "· LiMDM",
+
+	// CACHY-A
+	"neither AppArmor nor SELinux enabled, kernel security modules: ": "ni AppArmor ni SELinux activados, módulos de seguridad del kernel: ",
 }

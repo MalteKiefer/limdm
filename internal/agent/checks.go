@@ -881,6 +881,11 @@ func runMACEnabled(a *Agent) (string, string) {
 	if exists("/sys/fs/selinux/enforce") {
 		return pass, "SELinux enabled"
 	}
+	// reported only: the agent neither installs AppArmor nor edits the
+	// kernel command line. The active modules show what lsm= lacks.
+	if lsm := readTrim("/sys/kernel/security/lsm"); lsm != "" {
+		return fail, "neither AppArmor nor SELinux enabled, kernel security modules: " + lsm
+	}
 	return fail, "neither AppArmor nor SELinux enabled"
 }
 
@@ -1009,13 +1014,33 @@ func pwqualityValue(key string) string {
 	return val
 }
 
+// pwqualityStack is the shared password stack the agent edits itself where
+// no tool adds pam_pwquality (Debian: pam-auth-update with the package,
+// Fedora: authselect, SUSE: pam-config).
+var pwqualityStack = map[string]string{"arch": "/etc/pam.d/system-auth", "alpine": "/etc/pam.d/base-password"}
+
 func pamHasPWQuality() bool {
-	for _, f := range []string{"/etc/pam.d/common-password", "/etc/pam.d/system-auth"} {
+	for _, f := range []string{"/etc/pam.d/common-password", "/etc/pam.d/system-auth", "/etc/pam.d/base-password"} {
 		if strings.Contains(readFile(f), "pam_pwquality.so") {
 			return true
 		}
 	}
 	return false
+}
+
+// insertPWQuality puts pam_pwquality before the first password module, so
+// pam_unix (try_first_pass/use_authtok) takes the checked password.
+func insertPWQuality(content string) (string, error) {
+	if strings.Contains(content, "pam_pwquality.so") {
+		return content, nil
+	}
+	lines := strings.Split(content, "\n")
+	for i, l := range lines {
+		if f := strings.Fields(l); len(f) >= 3 && (f[0] == "password" || f[0] == "-password") {
+			return strings.Join(slices.Insert(lines, i, "password   required   pam_pwquality.so retry=3"), "\n"), nil
+		}
+	}
+	return "", errors.New("no password module found")
 }
 
 func runPWQuality(a *Agent) (string, string) {
@@ -1029,8 +1054,11 @@ func runPWQuality(a *Agent) (string, string) {
 	return pass, fmt.Sprintf("minlen=%d", n)
 }
 
+// pwqualityPkg provides pam_pwquality; Fedora ships it with pam.
+var pwqualityPkg = map[string]string{"debian": "libpam-pwquality", "arch": "libpwquality", "alpine": "libpwquality", "suse": "pam_pwquality"}
+
 func fixPWQuality(a *Agent) error {
-	if pkg := map[string]string{"debian": "libpam-pwquality", "arch": "libpwquality", "alpine": "libpwquality", "suse": "pam_pwquality"}[a.host.family]; pkg != "" && !a.host.isInstalled(pkg) {
+	if pkg := pwqualityPkg[a.host.family]; pkg != "" && !a.host.isInstalled(pkg) {
 		if err := a.host.install(pkg); err != nil {
 			return err
 		}
@@ -1038,6 +1066,15 @@ func fixPWQuality(a *Agent) error {
 	if a.host.family == "suse" && !pamHasPWQuality() { // pam-config owns common-password there
 		if out, err := sh("pam-config", "--add", "--pwquality"); err != nil {
 			return fmt.Errorf("pam-config --add --pwquality: %s", lastLines(out, 2))
+		}
+	}
+	if f := pwqualityStack[a.host.family]; f != "" && exists(f) && !pamHasPWQuality() {
+		next, err := insertPWQuality(readFile(f))
+		if err != nil {
+			return fmt.Errorf("%s: %w", f, err)
+		}
+		if _, err := writeIfChanged(f, next, 0o644); err != nil {
+			return err
 		}
 	}
 	_, err := writeIfChanged("/etc/security/pwquality.conf.d/60-limdm.conf",
@@ -1216,9 +1253,9 @@ func runAuditd(a *Agent) (string, string) {
 }
 
 func fixAuditd(a *Agent) error {
-	pkg := "auditd"
-	if a.host.family == "fedora" || a.host.family == "suse" {
-		pkg = "audit"
+	pkg := "audit" // Fedora, SUSE, Arch, Alpine
+	if a.host.family == "debian" {
+		pkg = "auditd"
 	}
 	if !a.host.isInstalled(pkg) {
 		if err := a.host.install(pkg); err != nil {

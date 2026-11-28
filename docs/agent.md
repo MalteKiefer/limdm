@@ -305,6 +305,16 @@ suggested by the packages, so servers never get GTK: on devices with a desktop t
 installs zenity (kdialog on KDE Plasma), libnotify, dconf, Python with GTK 4 and
 libadwaita for the desktop app and, with a wlroots compositor, swayidle, and retries daily if that fails.
 
+A declared setting or a remediation that needs a package installs it right when it applies:
+password quality installs libpwquality (Debian libpam-pwquality, SUSE pam_pwquality) and, on
+Arch and Alpine, adds `pam_pwquality.so` before the first password module of
+`/etc/pam.d/system-auth` or `/etc/pam.d/base-password`; auditd installs audit (Debian
+auditd); dconf settings install dconf; OpenVPN network profiles install the NetworkManager
+OpenVPN plugin; the firewall, time synchronisation, Flatpak and printers did so before.
+Mandatory access control (AppArmor, SELinux) is only reported: the agent installs nothing for
+it and never edits the kernel command line. The check detail lists the active kernel
+security modules, so a missing `apparmor` in `lsm=` shows.
+
 ## Desktop app and tray
 
 `limdm-desktop` runs as the user in every graphical session. It shows a tray icon, opens the

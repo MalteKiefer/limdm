@@ -1564,4 +1564,7 @@ var ruCatalog = map[string]string{
 	"your role cannot change this":                  "ваша роль не позволяет это изменить",
 	"your role cannot read these logs":              "ваша роль не позволяет читать эти журналы",
 	"· LiMDM":                                       "· LiMDM",
+
+	// CACHY-A
+	"neither AppArmor nor SELinux enabled, kernel security modules: ": "ни AppArmor, ни SELinux не включены, модули безопасности ядра: ",
 }
