@@ -93,7 +93,7 @@ func familyOf(osr map[string]string) string {
 		return "suse"
 	case strings.Contains(like, " fedora ") || strings.Contains(like, " rhel ") || strings.Contains(like, " centos "):
 		return "fedora"
-	case strings.Contains(like, " arch "):
+	case strings.Contains(like, " arch ") || strings.Contains(like, " manjaro "): // BigLinux names only Manjaro
 		return "arch"
 	case strings.Contains(like, " alpine "):
 		return "alpine"

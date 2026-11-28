@@ -120,8 +120,11 @@ func (h *host) fetchPending() ([]api.PendingUpdate, error) {
 
 // aptDistroOrigins are the apt origins of the distributions themselves;
 // every other origin is a third party repository. The host's os-release ID
-// counts too (derivatives).
+// counts too (derivatives: pop, zorin, kali, neon, tuxedo), and so do the
+// Launchpad PPAs elementary OS ships its own packages in.
 var aptDistroOrigins = []string{"debian", "debian-security", "debian backports", "ubuntu", "ubuntuesm", "ubuntuesmapps", "raspbian", "raspberry pi foundation", "linuxmint"}
+
+const elementaryPPA = "lp-ppa-elementary-os"
 
 // parseAptPending reads apt-get -s upgrade: "Inst name [current]
 // (candidate Origin:Version/Archive, Origin:… [arch])"; new packages have
@@ -147,7 +150,7 @@ func parseAptPending(out, osID string) []api.PendingUpdate {
 		p.Origin = strings.TrimSpace(origin)
 		p.Security = strings.Contains(strings.ToLower(inner), "-security")
 		o := strings.ToLower(p.Origin)
-		if !slices.Contains(aptDistroOrigins, o) && (osID == "" || !strings.HasPrefix(o, strings.ToLower(osID))) {
+		if !slices.Contains(aptDistroOrigins, o) && !strings.HasPrefix(o, elementaryPPA) && (osID == "" || !strings.HasPrefix(o, strings.ToLower(osID))) {
 			p.Source = api.SourceThirdParty
 		}
 		list = append(list, p)

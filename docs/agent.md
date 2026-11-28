@@ -21,10 +21,10 @@ there.
 
 | Family | Distributions | Packages | Init | Notes |
 |---|---|---|---|---|
-| Debian | Debian 12 and later, Ubuntu 22.04 and later, Mint 21 and later, Pop!_OS 22.04 and later | apt, `.deb` | systemd | full feature set |
-| Fedora | Fedora, CentOS Stream 9 and later, RHEL, Rocky and Alma 9 and later | dnf, `.rpm` | systemd | full feature set |
+| Debian | Debian 12 and later, Ubuntu 22.04 and later and its flavours (Kubuntu ...), Mint 21 and later and LMDE, Pop!_OS 22.04 and later, Zorin, elementary OS, TUXEDO OS, KDE neon, AnduinOS, Kali | apt, `.deb` | systemd | full feature set |
+| Fedora | Fedora, Nobara, CentOS Stream 9 and later, RHEL, Rocky and Alma 9 and later (not the Atomic variants such as Silverblue or Bazzite) | dnf, `.rpm` | systemd | full feature set |
 | SUSE | openSUSE Leap 16, openSUSE Tumbleweed, SLES and SLED 16 | zypper, `.rpm` | systemd | see [SUSE](#suse) |
-| Arch | Arch, Manjaro, EndeavourOS, CachyOS | pacman, `.pkg.tar.zst` | systemd | no osquery (native inventory); pending updates through `pacman-contrib`; updates are always full upgrades |
+| Arch | Arch (also installed with Omarchy), Manjaro, BigLinux, EndeavourOS, Garuda, CachyOS | pacman, `.pkg.tar.zst` | systemd | no osquery (native inventory); pending updates through `pacman-contrib`; updates are always full upgrades |
 | Alpine | Alpine 3.17 and later | apk, `.apk` | OpenRC | no osquery; host firewall with nftables; SSO login needs linux-pam; no systemd watchdog (supervise-daemon restarts the agent) |
 
 The agent needs OpenSSL 3: the installer verifies the Ed25519 signature of the release with

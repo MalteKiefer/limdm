@@ -8,6 +8,10 @@ change behavior they rely on.
 
 ### Added
 - CachyOS is supported like Manjaro and EndeavourOS (pacman family, `ID_LIKE=arch`); it is not matched against the Arch CVE feed, like other derivatives.
+- Derivatives checked and documented: Kubuntu and the other Ubuntu flavours, LMDE, Zorin, elementary OS, TUXEDO OS, KDE neon, AnduinOS, Kali, Nobara, BigLinux, Garuda and Omarchy. Distributions that name only Manjaro in `ID_LIKE` (BigLinux) map to the pacman family.
+
+### Fixed
+- Pending updates from elementary OS' own Launchpad PPAs count as distribution updates, not third party.
 
 ### Changed
 - Software removal refuses `pacman`, `openssh` and the kernel packages of Arch and its derivatives (`linux`, `linux-lts`, `linux-zen`, `linux-hardened`, `linux-rt`, Manjaro's `linuxNNN`, `linux-cachyos` and its variants); headers and module packages stay removable.

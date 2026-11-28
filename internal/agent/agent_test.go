@@ -89,6 +89,21 @@ func TestAptPending(t *testing.T) {
 	}
 }
 
+func TestAptPendingDerivatives(t *testing.T) {
+	out := "Inst pop-shell [1.0] (1.1 pop-os-release:24.04/noble [amd64])\nInst gala [8.1] (8.2 LP-PPA-elementary-os-os-patches:8.0/jammy [amd64])\nInst code [1.9] (1.10 code stable:stable [amd64])\n"
+	for _, c := range []struct {
+		os   string
+		want []string
+	}{{"pop", []string{api.SourceOSAll, api.SourceOSAll, api.SourceThirdParty}}, {"elementary", []string{api.SourceThirdParty, api.SourceOSAll, api.SourceThirdParty}}} {
+		l := parseAptPending(out, c.os)
+		for i, p := range l {
+			if p.Source != c.want[i] {
+				t.Errorf("%s %s: %s", c.os, p.Name, p.Source)
+			}
+		}
+	}
+}
+
 func TestSSHValue(t *testing.T) {
 	if !sshValueOK("4", "<=4") || sshValueOK("6", "<=4") || sshValueOK("0", "<=300") || !sshValueOK("no", "no") {
 		t.Fatal("ssh value comparison wrong")
@@ -1093,13 +1108,25 @@ func TestDistributionFamilies(t *testing.T) {
 	for osr, want := range map[string]string{
 		"ID=centos\nID_LIKE=\"rhel fedora\"\nVERSION_ID=\"9\"": "fedora",
 		"ID=rocky\nID_LIKE=\"rhel centos fedora\"":             "fedora",
-		"ID=arch":                      "arch",
-		"ID=manjaro\nID_LIKE=arch":     "arch",
-		"ID=endeavouros\nID_LIKE=arch": "arch",
-		"ID=cachyos\nID_LIKE=arch":     "arch",
-		"ID=alpine\nVERSION_ID=3.21.0": "alpine",
-		"ID=ubuntu\nID_LIKE=debian":    "debian",
-		"ID=nixos":                     "",
+		"ID=arch":                                      "arch",
+		"ID=manjaro\nID_LIKE=arch":                     "arch",
+		"ID=endeavouros\nID_LIKE=arch":                 "arch",
+		"ID=cachyos\nID_LIKE=arch":                     "arch",
+		"ID=garuda\nID_LIKE=arch":                      "arch",
+		"ID=biglinux\nID_LIKE=manjaro":                 "arch",
+		"ID=linuxmint\nID_LIKE=\"ubuntu debian\"":      "debian",
+		"ID=linuxmint\nID_LIKE=debian":                 "debian", // LMDE
+		"ID=pop\nID_LIKE=\"ubuntu debian\"":            "debian",
+		"ID=zorin\nID_LIKE=ubuntu":                     "debian",
+		"ID=elementary\nID_LIKE=ubuntu":                "debian",
+		"ID=tuxedo\nID_LIKE=\"ubuntu debian\"":         "debian",
+		"ID=neon\nID_LIKE=\"ubuntu debian\"":           "debian",
+		"ID=kali\nID_LIKE=debian":                      "debian",
+		"ID=nobara\nID_LIKE=\"rhel centos fedora\"":    "fedora",
+		"ID=almalinux\nID_LIKE=\"rhel centos fedora\"": "fedora",
+		"ID=alpine\nVERSION_ID=3.21.0":                 "alpine",
+		"ID=ubuntu\nID_LIKE=debian":                    "debian",
+		"ID=nixos":                                     "",
 	} {
 		if got := familyOf(parseOSRelease(osr)); got != want {
 			t.Errorf("%q: %q", osr, got)
