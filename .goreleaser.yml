@@ -110,10 +110,6 @@ nfpms:
         dst: /usr/lib/systemd/user/limdm-desktop.service
         file_info:
           mode: 0o644
-      - src: packaging/limdm-recovery-key.desktop
-        dst: /usr/share/applications/limdm-recovery-key.desktop
-        file_info:
-          mode: 0o644
       - src: packaging/limdm.desktop
         dst: /usr/share/applications/limdm.desktop
         file_info:
