@@ -127,6 +127,9 @@ type apiCatalogRequest struct {
 	DecidedBy *string    `json:"decided_by"`
 	DecidedAt *time.Time `json:"decided_at"`
 	CreatedAt time.Time  `json:"created_at"`
+	Install   bool       `json:"install"`
+	State     string     `json:"install_state"`
+	Error     string     `json:"install_error"`
 }
 
 // apiDeviceDetailDoc is everything the device page shows except the
@@ -338,7 +341,7 @@ func (s *Server) apiDeviceDetail(w http.ResponseWriter, r *http.Request, c apiCa
 		d.AppNotes = append(d.AppNotes, apiAppNote(n))
 	}
 	if d.CatalogRequests, err = collect(ctx, s.db, pgx.RowToStructByPos[apiCatalogRequest], `SELECT id, coalesce(app, flatpak), coalesce(nullif(app_name, ''), app, flatpak),
-		username, note, status, decided_by, decided_at, created_at FROM catalog_requests WHERE device_id=$1 ORDER BY id DESC LIMIT 50`, id); err != nil {
+		username, note, status, decided_by, decided_at, created_at, install AND status='approved', install_state, install_error FROM catalog_requests WHERE device_id=$1 ORDER BY id DESC LIMIT 50`, id); err != nil {
 		s.apiFail(w, err)
 		return
 	}

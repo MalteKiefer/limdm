@@ -1678,6 +1678,48 @@ func TestAgentUpdates(t *testing.T) {
 		t.Fatalf("approve for everyone: %d mode=%q app=%q", rc.Code, mode, linked)
 	}
 
+	// approve and install: the poll reports the decision at once, the
+	// device's catalog asks for the install, the agent's result lands on the request
+	db.Exec(ctx, `UPDATE devices SET last_seen=now() - interval '1 minute' WHERE id='d4'`)
+	db.QueryRow(ctx, `INSERT INTO catalog_requests(device_id, app, username) VALUES ('d4', 'slack', 'eve') RETURNING id`).Scan(&reqID)
+	if pollOf("d4") {
+		t.Fatal("an open request alone is nothing pending")
+	}
+	rc = apiServe(s.apiAppRequestDecide, "POST /api/v1/software/requests/{id}/{op}", fmt.Sprintf("/api/v1/software/requests/%d/approve", reqID), `{"install":true}`, admin)
+	if rc.Code != http.StatusOK || !pollOf("d4") {
+		t.Fatalf("approve and install: %d %s, or the poll misses the decision", rc.Code, rc.Body)
+	}
+	var auditAction string
+	db.QueryRow(ctx, `SELECT action FROM audit_log WHERE target='d4' ORDER BY id DESC LIMIT 1`).Scan(&auditAction)
+	if auditAction != "catalog.request.approve+install" {
+		t.Fatalf("audit action %q", auditAction)
+	}
+	tx6, _ := db.Begin(ctx)
+	cat, _ = s.deviceCatalog(ctx, tx6, "d4", []blueprintRec{{ID: 1}}, nil)
+	var wantsInstall bool
+	for _, a := range cat.Apps {
+		wantsInstall = wantsInstall || (a.ID == "slack" && a.Request == "approved" && a.Install)
+	}
+	if !wantsInstall {
+		t.Fatal("slack not approved with install in the device catalog")
+	}
+	if err := recordInstallStates(ctx, tx6, "d4", []api.AppState{{ID: "slack", Error: "flatpak: no network"}}); err != nil {
+		t.Fatal(err)
+	}
+	tx6.Commit(ctx)
+	var state, installErr string
+	db.QueryRow(ctx, `SELECT install_state, install_error FROM catalog_requests WHERE id=$1`, reqID).Scan(&state, &installErr)
+	if state != "install_failed" || installErr != "flatpak: no network" {
+		t.Fatalf("install failure: %q %q", state, installErr)
+	}
+	tx7, _ := db.Begin(ctx)
+	_ = recordInstallStates(ctx, tx7, "d4", []api.AppState{{ID: "slack", Installed: true}})
+	tx7.Commit(ctx)
+	db.QueryRow(ctx, `SELECT install_state, install_error FROM catalog_requests WHERE id=$1`, reqID).Scan(&state, &installErr)
+	if state != "installed" || installErr != "" {
+		t.Fatalf("install result: %q %q", state, installErr)
+	}
+
 	// an app from a vendor repository keeps its repository through the editor
 	vpn := `{"id":"vendor-vpn","name":"Vendor VPN","mode":"available","enabled":true,"sources":[{"kind":"package","debian":"vendor-vpn",
 		"repos":[{"name":"vendor-vpn","family":"debian","url":"https://repo.example.com/apt","suites":"stable","components":"main",
