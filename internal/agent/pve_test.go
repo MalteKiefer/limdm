@@ -128,6 +128,9 @@ func TestPVEChecks(t *testing.T) {
 	if _, ok := a.groupKV("sysctl")["net.ipv4.ip_forward"]; !ok {
 		t.Fatal("plain host: ip_forward missing")
 	}
+	if ssh := a.groupKV("sshd"); ssh["permitrootlogin"] != "no" || ssh["allowtcpforwarding"] != "no" {
+		t.Fatalf("plain host sshd relaxed: %v", ssh)
+	}
 	fakePVE(t, "", "")
 	if _, ok := a.groupKV("sysctl")["net.ipv4.ip_forward"]; ok {
 		t.Fatal("PVE: ip_forward ends up in the sysctl drop-in")
