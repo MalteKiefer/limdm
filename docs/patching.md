@@ -235,8 +235,28 @@ Matching:
   vulnerabilities** on the device tab, and as CVEs on the pending updates
   of the same package.
 * Releases: Debian by `VERSION_ID` (10 buster to 14 forky), Ubuntu by
-  `VERSION_ID`, Alpine by branch, Arch without. Derivatives (Linux Mint,
-  Raspberry Pi OS, Manjaro, CachyOS, postmarketOS) are not matched.
+  `VERSION_ID`, Alpine by branch, Arch without.
+* Derivatives are matched against the feed of their base, from `ID_LIKE`
+  and the base codename the agent reports (agents before 0.24.0 send
+  neither, so their derivatives stay unmatched):
+  * `ID_LIKE` names ubuntu (Linux Mint, Pop!_OS, Zorin, elementary OS,
+    TUXEDO OS, KDE neon, AnduinOS ...): the Ubuntu feed, release from
+    `UBUNTU_CODENAME` (jammy 22.04, noble 24.04, plucky 25.04, questing
+    25.10, resolute 26.04). An unknown or missing codename is not matched.
+  * `ID_LIKE` names debian but not ubuntu (LMDE): the Debian feed by
+    `DEBIAN_CODENAME`, when it is a known release (buster to forky).
+  * `ID_LIKE` names arch or manjaro (Manjaro, EndeavourOS, Garuda,
+    CachyOS, BigLinux): the Arch feed.
+  * Not matched: Kali (rolling on Debian testing), Raspberry Pi OS with
+    `ID=raspbian`, postmarketOS and every other derivative.
+
+  A feed downloads when only derivatives of its base are in service. Such
+  findings show **via Ubuntu feed** (or Debian, Arch) on the device and in
+  the vulnerability's device list. A derivative that rebuilds packages of
+  its base with its own versions (Pop!_OS, elementary OS, Manjaro's held
+  back or patched packages) can show a CVE as open that its build fixed,
+  or miss one in a package the base does not ship; take these findings as
+  a pointer, not a verdict.
 
 ## Compliance
 
