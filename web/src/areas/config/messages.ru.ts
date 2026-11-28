@@ -191,6 +191,7 @@ export default {
   'config.field.tag': 'Тег',
   'config.field.group': 'Группа каталога',
   'config.field.department': 'Отдел',
+  'config.field.os.product': 'Продукт (например, Proxmox VE)',
   'config.op.eq': 'равно',
   'config.op.ne': 'не равно',
   'config.op.gte': 'не менее',

@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { enrollConf, installCommand } from './enrolltext'
-import { accountActionable, badParamLine, connectionState, filterByName, filterRules, firewallHealth, formatAttrs, mayCommand, orderNotices, parseAttrs, parseTags, pkgValue, statusTone, suggestUsername, updatesHealth, usedPct, userError } from './logic'
+import { accountActionable, badParamLine, connectionState, filterByName, filterRules, firewallHealth, formatAttrs, mayCommand, orderNotices, parseAttrs, parseTags, pkgValue, runningGuests, statusTone, suggestUsername, updatesHealth, usedPct, userError } from './logic'
+
+describe('Proxmox VE guests', () => {
+  it('counts running and paused VMs and containers, not other workloads', () => {
+    const items = [
+      { kind: 'qm', state: 'running' },
+      { kind: 'qm', state: 'stopped' },
+      { kind: 'pct', state: 'running' },
+      { kind: 'qm', state: 'paused' },
+      { kind: 'docker', state: 'running' },
+    ]
+    expect(runningGuests(items)).toBe(3)
+    expect(runningGuests()).toBe(0)
+  })
+})
 
 describe('enrollment texts', () => {
   it('prints the install command and enroll.conf', () => {

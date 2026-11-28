@@ -3,6 +3,11 @@
 // health cards, the notice order and the shapes of the timeline. Mirrors the server rules so the page hides
 // what a role cannot do; the server checks again.
 
+import { isRunning } from '../workloads/logic'
+
+/** Proxmox VE guests a reboot or shutdown of the node stops: running VMs (qm) and containers (pct). */
+export const runningGuests = (items: { kind?: string; state?: string }[] = []) => items.filter((w) => (w.kind === 'qm' || w.kind === 'pct') && isRunning(w.state)).length
+
 /** Commands the helpdesk may send (helpdeskCommands in internal/server/web.go). */
 export const helpdeskCommands = ['sync', 'update', 'reboot', 'shutdown', 'lock', 'unlock', 'message', 'user_password', 'user_lock', 'user_unlock', 'diagnostics']
 

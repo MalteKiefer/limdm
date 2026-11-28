@@ -113,6 +113,7 @@ export default {
   'updates.dev.securityN': { one: 'di cui {count} di sicurezza', other: 'di cui {count} di sicurezza' },
   'updates.dev.since': 'Aggiornamenti di sicurezza in sospeso dal {at}',
   'updates.dev.error': 'Stato aggiornamenti sconosciuto: {error}',
+  'updates.dev.warning': 'Avviso: {warning}',
   'updates.dev.noReport': 'L’agent non segnala ancora lo stato degli aggiornamenti; gli agent più vecchi non lo segnalano.',
   'updates.dev.runs': 'Ultime esecuzioni',
   'updates.dev.runsSub': 'L’ultima esecuzione per origine. Nessun aggiornamento significa: nulla è cambiato.',
