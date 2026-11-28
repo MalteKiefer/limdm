@@ -26,7 +26,13 @@ its cluster intact; nothing has to be configured for them.
   `proxmox-ve` or `pve-manager`. The update run then fails with that reason and changes
   nothing.
 * Security only updates use unattended-upgrades as on Debian; it never installs Proxmox
-  packages (they are not in the Debian security archive).
+  packages (they are not in the Debian security archive). The agent runs
+  `unattended-upgrade` with the host's own configuration and writes none; the `apt-get -s`
+  guard does not cover it. unattended-upgrades itself skips any upgrade that would remove a
+  package, and its `Remove-Unused-Dependencies` only removes automatically installed
+  packages, never the manually installed `proxmox-ve`. Keep it that way: do not list
+  Proxmox repositories in `Unattended-Upgrade::Origins-Pattern`, or add `proxmox-ve` and
+  `pve-manager` to `Unattended-Upgrade::Package-Blacklist` if you do.
 * Without a subscription the enterprise repository answers `apt update` with HTTP 401. When
   that repository is the only one failing, the other lists stay in use, the pending updates
   are listed and the updates tab shows a warning (`pending_warning`). Disable the
