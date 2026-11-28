@@ -11,20 +11,31 @@ change behavior they rely on.
 - Declared settings install the packages they need when they apply: dconf settings install dconf, OpenVPN network profiles the NetworkManager OpenVPN plugin.
 - App requests: **Approve and install** next to **Approve** in the request list and on the device's Requests tab. The agent installs the app at once on the requesting device; the request shows installing, installed or install failed with the error. API: optional body `{"install": true}` on `POST /api/v1/software/requests/{id}/approve` (and `approve-all`); the request list and the device detail return `install`, `install_state` and `install_error`. The audit log records `catalog.request.approve+install`.
 - Users get a desktop notification in their language when IT decides their request, and when an app approved with install is installed or fails.
+- Proxmox VE 8 and 9 nodes are recognised (`/etc/pve`, `pveversion`). The inventory reports `os_product` ("Proxmox VE 8.4") and `proxmox` (version, node, corosync cluster); the console shows them in the device header. See [docs/proxmox.md](docs/proxmox.md).
+- Blueprint rule field `os.product` ("Product"), for example `contains proxmox`.
+- Reboot and shutdown dialogs on a Proxmox VE node show how many VMs and containers are running.
+- The update status carries `pending_warning`: on Proxmox VE a 401 of the enterprise repository (no subscription) no longer hides the pending updates of the other repositories, the updates tab shows a warning instead.
 
 ### Changed
+- **Breaking**: **Approve** alone no longer makes the agent install an app on request; the user installs it from the desktop app. Requests approved before 0.25 keep being installed by the agent, and agents before 0.25 still install every approved request.
 - The recovery key passphrase dialog opens by itself while a LUKS volume has no escrowed key: half a minute after login and within a minute of the agent reporting the volume. Closing it postpones it by ten minutes; it returns at the next login until the key is escrowed. One dialog per user; the daily notification stays.
 - The separate menu entry **Disk recovery key** is gone, GNOME lists only the LiMDM app; the passphrase is entered in the dialog, the tray entry or the app's page Disk Encryption. `limdm-desktop --now` is removed.
 - Desktop app, software requests: the text says IT either lets the user install the app or installs it for them, instead of promising an automatic install.
 - The check `mac.enabled` names the active kernel security modules when neither AppArmor nor SELinux is enabled. The agent still installs nothing for it and never edits the kernel command line.
 - The answer to an app request arrives within about 10 to 20 seconds instead of at the next check in: while a request is open the agent polls every 10 seconds (at most 24 hours per request), and the poll reports a decision made since the last check in.
-- **Breaking**: **Approve** alone no longer makes the agent install an app on request; the user installs it from the desktop app. Requests approved before 0.25 keep being installed by the agent, and agents before 0.25 still install every approved request.
+- Proxmox VE: full upgrades and the pending list use `apt-get dist-upgrade`; every apt transaction of the agent is simulated first and refused when it would remove `proxmox-ve` or `pve-manager`.
+- Proxmox VE: `com.limdm.hostname` refuses a rename and leaves `/etc/hosts` alone; firewall declarations are not enforced (pve-firewall owns the host firewall) and `firewall.active` checks `pve-firewall status`; no automatic reboot after updates.
+- Proxmox VE: `net.forwarding` is not applicable, `ssh.baseline` accepts `PermitRootLogin prohibit-password`, `ssh.strict` does not require `AllowTcpForwarding no`. Catalog version 2026.11.3.
+- Software removal refuses `proxmox-ve`, `pve-manager`, `pve-cluster`, `pve-qemu-kvm`, `lxc-pve`, `zfsutils-linux`, `corosync` and the Proxmox kernels (headers stay removable).
+- Pending updates from the Proxmox repositories count as distribution updates on a Proxmox VE node.
 
 ### Fixed
 - "All Set: every disk has a recovery key" appeared while the agent reported a missing key: the agent started the helper in its first cycle after a start, before the desktop socket had any data, and the helper read the empty answer (and error answers) as nothing to do. The socket now answers that the agent is starting, and the helper treats errors as unknown.
 - Password quality on Arch and its derivatives (CachyOS) and Alpine: remediation adds `pam_pwquality.so` to `/etc/pam.d/system-auth` or `/etc/pam.d/base-password`, and the check reads Alpine's stack.
 - auditd remediation installs `audit` on Arch and Alpine (it asked for Debian's `auditd`).
 - `require_all` disk encryption no longer fails on the ESP or on USB media.
+- Packages named `pve-*` or `proxmox-*` are no longer matched against the Debian Security Tracker (no Debian `linux` findings on the Proxmox kernel).
+- The firewall inventory classifies the pve-firewall chains (`PVEFW-*`), the `proxmox-firewall` tables and the guest interfaces as system rules.
 
 ## 0.24.0 (2026-11-28)
 

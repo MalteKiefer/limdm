@@ -5314,6 +5314,8 @@ export interface components {
             status?: {
                 pending?: components["schemas"]["PendingUpdate"][];
                 pending_error?: string;
+                /** @description the list is usable but incomplete, e.g. the Proxmox enterprise repository refused access */
+                pending_warning?: string;
                 runs?: components["schemas"]["UpdateRun"][];
                 ring?: string;
                 /** Format: date-time */

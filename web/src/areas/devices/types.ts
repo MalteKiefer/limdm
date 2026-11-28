@@ -7,6 +7,8 @@ export type Inventory = Partial<{
   os_name: string
   os_version: string
   os_codename: string
+  os_product: string
+  proxmox: { version: string; node: string; cluster?: string }
   kernel: string
   arch: string
   cpu: string

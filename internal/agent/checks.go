@@ -36,7 +36,7 @@ type check struct {
 // CatalogVersion identifies the check catalog and its framework mapping. It
 // is reported with every result; raise it whenever a check, its level or a
 // reference changes, so evidence can be tied to the mapping it was made with.
-const CatalogVersion = "2026.11.2"
+const CatalogVersion = "2026.11.3"
 
 // cisBenchmark is the benchmark edition the CIS recommendation numbers refer
 // to. The titles are shared by the Debian and RHEL family benchmarks, whose
@@ -239,6 +239,7 @@ var catalog = []check{
 // re-checks so the report reflects the state after remediation.
 func (a *Agent) evaluate() []api.CheckResult {
 	p := a.pol.Compliance
+	pve := onPVE()
 	var out []api.CheckResult
 	for _, c := range catalog {
 		if c.Level > p.Level {
@@ -247,6 +248,12 @@ func (a *Agent) evaluate() []api.CheckResult {
 		r := api.CheckResult{ID: c.ID, Title: c.Title, Level: c.Level, Refs: c.Refs}
 		if slices.Contains(p.Exclude, c.ID) {
 			r.Status, r.Detail = "excepted", "excluded by policy (exception)"
+			out = append(out, r)
+			continue
+		}
+		c, why := pveAdjust(c, pve)
+		if why != "" {
+			r.Status, r.Detail = na, why
 			out = append(out, r)
 			continue
 		}
@@ -264,6 +271,9 @@ func (a *Agent) evaluate() []api.CheckResult {
 		}
 		if r.Status == fail && slices.Contains(p.Advisory, c.ID) {
 			r.Status = "advisory" // reported, not counted against compliance
+		}
+		if note := pveChecks[c.ID].Note; pve && note != "" {
+			r.Detail = strings.TrimPrefix(r.Detail+"; "+note, "; ")
 		}
 		out = append(out, r)
 	}
@@ -297,8 +307,10 @@ func (a *Agent) fixFor(c check) func(*Agent) error {
 // groupKV merges desired values of all active, non excluded checks of a group.
 func (a *Agent) groupKV(group string) map[string]string {
 	kv := map[string]string{}
+	pve := onPVE()
 	for _, c := range catalog {
-		if c.Group == group && c.Level <= a.pol.Compliance.Level && !slices.Contains(a.pol.Compliance.Exclude, c.ID) {
+		c, na := pveAdjust(c, pve) // a check that does not apply on Proxmox VE is never fixed
+		if c.Group == group && na == "" && c.Level <= a.pol.Compliance.Level && !slices.Contains(a.pol.Compliance.Exclude, c.ID) {
 			for k, v := range c.KV {
 				kv[k] = v
 			}
@@ -664,14 +676,16 @@ func sshValueOK(got, want string) bool {
 		w, _ := strconv.Atoi(n)
 		return err1 == nil && g > 0 && g <= w
 	}
-	return got == want
+	return slices.Contains(strings.Split(want, "|"), got) // a|b: either value complies
 }
 
+// sshWanted is the value a fix writes: the bound, or the first of a|b.
 func sshWanted(v string) string {
 	if n, ok := strings.CutPrefix(v, "<="); ok {
 		return n
 	}
-	return v
+	first, _, _ := strings.Cut(v, "|")
+	return first
 }
 
 func fixSSHD(a *Agent) error {
@@ -803,6 +817,12 @@ func runDiskEncryption(a *Agent) (string, string) {
 }
 
 func runFirewall(a *Agent) (string, string) {
+	if onPVE() { // pve-firewall (iptables) or proxmox-firewall (nftables) reads the same switch
+		if out, err := sh("pve-firewall", "status"); err == nil && strings.Contains(out, "Status: enabled/running") {
+			return pass, "pve-firewall enabled and running"
+		}
+		return fail, "pve-firewall is not enabled and running (Datacenter, Firewall, Options in the Proxmox web interface)"
+	}
 	switch {
 	case unitActive("firewalld"):
 		return pass, "firewalld active"
@@ -833,6 +853,9 @@ func fixFirewall(a *Agent) error {
 func (a *Agent) applyFirewall() error {
 	if a.pol.Firewall.Template {
 		return errUnrendered
+	}
+	if onPVE() { // ufw or firewalld next to pve-firewall would cut corosync, migration and the web interface
+		return errPVEFirewall
 	}
 	if a.host.family == "alpine" { // nftables with LiMDM's own table (firewall_nft.go)
 		if !hasCmd("nft") {

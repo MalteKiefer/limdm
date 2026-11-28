@@ -17,7 +17,7 @@ VALUES
    '{"os_name":"Debian 12","desktop":"KDE","memory_mb":8192,"serial":"PF67890"}',
    '{prod}', now() - interval '2 hours', '[{"id":"disk.encryption","title":"Disk encryption","level":1,"status":"fail","detail":"/ is not encrypted"}]', 1, '0.16.0', now() - interval '10 days'),
   ('e2e-srv1', 's3', now() + interval '300 days', 'e2e-srv1',
-   '{"os_name":"Fedora 41","memory_mb":32768}',
+   '{"os_name":"Debian GNU/Linux 12 (bookworm)","os_id":"debian","os_version":"12","os_product":"Proxmox VE 8.4","proxmox":{"version":"8.4.1","node":"e2e-srv1","cluster":"lab"},"memory_mb":32768}',
    '{}', now() - interval '9 days', '[]', 0, '0.17.0', now() - interval '60 days');
 INSERT INTO device_events(device_id, at, detail) VALUES ('e2e-ws1', now() - interval '5 minutes', 'checked in from the e2e seed');
 INSERT INTO compliance_changes(device_id, at, check_id, status) VALUES ('e2e-ws1', now() - interval '4 minutes', 'ssh.root', 'pass');
@@ -33,5 +33,9 @@ INSERT INTO device_packages(device_id, name, version, arch) VALUES ('e2e-ws1', '
 -- containers and VMs (workloads tab)
 INSERT INTO device_workloads(device_id, inventory, hash) VALUES ('e2e-ws1', '{"tools":[{"kind":"docker","version":"27.3.1"},{"kind":"qm","version":"8.2.4"}],
   "items":[{"kind":"docker","id":"3f4e5d6c7b8a99887766554433221100ffeeddccbbaa00998877665544332211","name":"paperless-webserver-1","image":"ghcr.io/paperless-ngx/paperless-ngx:2.13","state":"running","project":"paperless","service":"webserver","ports":["127.0.0.1:8000->8000/tcp"]},
-  {"kind":"qm","id":"200","name":"win11","type":"vm","state":"stopped","cpus":4,"memory_mb":8192}]}', 'e2e');
+  {"kind":"qm","id":"200","name":"win11","type":"vm","state":"stopped","cpus":4,"memory_mb":8192}]}', 'e2e'),
+  -- a Proxmox VE node: two running guests, one stopped
+  ('e2e-srv1', '{"tools":[{"kind":"pct","version":"8.4.1"},{"kind":"qm","version":"8.4.1"}],
+  "items":[{"kind":"pct","id":"101","name":"dns","type":"container","state":"running"},{"kind":"qm","id":"100","name":"web","type":"vm","state":"running"},
+  {"kind":"qm","id":"102","name":"old","type":"vm","state":"stopped"}]}', 'e2e');
 COMMIT;

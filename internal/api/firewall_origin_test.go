@@ -15,6 +15,11 @@ func TestVPNAndLiMDMOrigins(t *testing.T) {
 		{FirewallInvRule{Source: "nftables", Table: "ip wg-quick-wg0", Chain: "preraw", Raw: `meta mark 0x0000ca6c accept`}, OriginSystem},
 		{FirewallInvRule{Source: "nftables", Table: "inet limdm", Chain: "input", Raw: `tcp dport 443 accept`}, OriginManaged},
 		{FirewallInvRule{Source: "firewalld", Zone: "limdm-egress", Raw: `--policy=limdm-egress --add-rich-rule=rule accept`}, OriginManaged},
+		// Proxmox VE: pve-firewall (iptables), proxmox-firewall (nftables), guest interfaces
+		{FirewallInvRule{Source: "iptables", Table: "filter", Chain: "PVEFW-INPUT", Raw: `-A PVEFW-INPUT -p udp --dport 5405:5412 -j ACCEPT`}, OriginSystem},
+		{FirewallInvRule{Source: "nftables", Table: "inet proxmox-firewall", Chain: "input", Raw: `tcp dport 8006 accept`}, OriginSystem},
+		{FirewallInvRule{Source: "iptables", Table: "filter", Chain: "FORWARD", Raw: `-A FORWARD -o fwbr100i0 -j ACCEPT`}, OriginSystem},
+		{FirewallInvRule{Source: "nftables", Table: "inet filter", Chain: "input", Raw: `iifname "vmbr0" tcp dport 22 accept`}, OriginForeign},
 		// names that only look alike stay foreign: a wg0 rule an admin wrote, wt without digits
 		{FirewallInvRule{Source: "nftables", Table: "inet filter", Chain: "input", Raw: `iifname "wg0" udp dport 51820 accept`}, OriginForeign},
 		{FirewallInvRule{Source: "nftables", Table: "inet filter", Chain: "input", Raw: `iifname "wtx" accept`}, OriginForeign},

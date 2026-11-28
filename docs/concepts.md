@@ -52,6 +52,7 @@ Rules test device facts:
 |---|---|
 | `os.id` (the `ID` of `/etc/os-release`, for example `debian`, `ubuntu`, `fedora`, `opensuse-leap`, `sles`, `arch`, `alpine`) | `eq`, `ne` |
 | `os.version` | `eq`, `ne`, `gte`, `lte` (version aware) |
+| `os.product` (a platform on top of the distribution, for example `Proxmox VE 8.4`; empty elsewhere) | `contains`, `eq`, `ne`, `present`, `absent` |
 | `arch` | `eq`, `ne` |
 | `desktop` | `present`, `absent`, `contains` |
 | `vendor`, `model` | `eq`, `contains` |

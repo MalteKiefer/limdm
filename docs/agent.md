@@ -22,6 +22,7 @@ there.
 | Family | Distributions | Packages | Init | Notes |
 |---|---|---|---|---|
 | Debian | Debian 12 and later, Ubuntu 22.04 and later and its flavours (Kubuntu ...), Mint 21 and later and LMDE, Pop!_OS 22.04 and later, Zorin, elementary OS, TUXEDO OS, KDE neon, AnduinOS, Kali | apt, `.deb` | systemd | full feature set |
+| Debian | Proxmox VE 8 and 9 (detected by `/etc/pve` or `pveversion`, reported as `os_product`) | apt, `.deb` | systemd | full upgrades only (`dist-upgrade`), no transaction that removes `proxmox-ve`, no host name change, no firewall enforcement (pve-firewall), no automatic reboot; see [proxmox.md](proxmox.md) |
 | Fedora | Fedora, Nobara, CentOS Stream 9 and later, RHEL, Rocky and Alma 9 and later (not the Atomic variants such as Silverblue or Bazzite) | dnf, `.rpm` | systemd | full feature set |
 | SUSE | openSUSE Leap 16, openSUSE Tumbleweed, SLES and SLED 16 | zypper, `.rpm` | systemd | see [SUSE](#suse) |
 | Arch | Arch (also installed with Omarchy), Manjaro, BigLinux, EndeavourOS, Garuda, CachyOS | pacman, `.pkg.tar.zst` | systemd | no osquery (native inventory); pending updates through `pacman-contrib`; updates are always full upgrades |

@@ -167,6 +167,17 @@ test('device page: containers and VMs, actions off by policy', async ({ page }) 
   await expect(page.getByText('Die Richtlinie des Geräts erlaubt keine Aktionen', { exact: false }).first()).toBeVisible()
 })
 
+test('device page: a Proxmox VE node shows product, cluster and the guests a reboot stops', async ({ page }) => {
+  await page.goto('/app/devices/e2e-srv1')
+  await expect(page.getByText('Proxmox VE 8.4 (Debian GNU/Linux 12 (bookworm))')).toBeVisible()
+  await expect(page.getByText('Knoten e2e-srv1 im Cluster lab')).toBeVisible()
+  await page.getByRole('button', { name: 'Aktionen für e2e-srv1' }).click()
+  await page.getByRole('menuitem', { name: 'Jetzt neu starten' }).click()
+  await expect(page.getByRole('dialog').getByText('Proxmox VE Knoten: 2 laufende Gäste', { exact: false })).toBeVisible()
+  await page.getByRole('dialog').getByRole('button', { name: 'Abbrechen' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
 test('device page: a workload action shows progress until the agent reports, refresh has a cooldown', async ({ page }) => {
   // the agent is stubbed: the action is sent, then done with the new state
   let state = 'running'

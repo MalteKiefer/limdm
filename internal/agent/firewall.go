@@ -243,6 +243,9 @@ func (a *Agent) syncFirewallRules() error {
 	if a.pol.Firewall.Template {
 		return errUnrendered
 	}
+	if onPVE() {
+		return errPVEFirewall
+	}
 	if a.host.family == "alpine" {
 		return a.syncNftables()
 	}

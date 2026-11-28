@@ -97,7 +97,7 @@ function Header({ d, target, menu, open }: { d: DeviceDetail; target: Target; me
           <h1 className="truncate font-mono text-heading font-semibold">{d.hostname}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-body text-muted">
             <StatusPill status={d.status as DeviceStatus} />
-            <span>{inv.os_name || d.os}</span>
+            <span>{inv.os_product ? `${inv.os_product} (${inv.os_name || d.os})` : inv.os_name || d.os}</span>
             <span>{t('devices.seen', { ago: d.last_seen ? ago(d.last_seen) : t('devices.never') })}</span>
           </div>
         </div>
@@ -171,6 +171,11 @@ function Header({ d, target, menu, open }: { d: DeviceDetail; target: Target; me
             : null}
         </Fact>
         <Fact label={t('devices.fact.signedIn')}>{(inv.logged_in_users ?? []).join(', ')}</Fact>
+        {inv.proxmox && (
+          <Fact label={t('devices.fact.pve')}>
+            {inv.proxmox.cluster ? t('devices.pve.cluster', { node: inv.proxmox.node, cluster: inv.proxmox.cluster }) : t('devices.pve.standalone', { node: inv.proxmox.node })}
+          </Fact>
+        )}
       </dl>
     </header>
   )

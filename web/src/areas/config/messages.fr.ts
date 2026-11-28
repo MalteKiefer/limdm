@@ -171,6 +171,7 @@ export default {
   'config.field.tag': 'Tag',
   'config.field.group': 'Groupe d’annuaire',
   'config.field.department': 'Service',
+  'config.field.os.product': 'Produit (p. ex. Proxmox VE)',
   'config.op.eq': 'est',
   'config.op.ne': 'n’est pas',
   'config.op.gte': 'au moins',

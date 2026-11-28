@@ -171,6 +171,7 @@ export default {
   'config.field.tag': 'Tag',
   'config.field.group': 'Gruppo di directory',
   'config.field.department': 'Reparto',
+  'config.field.os.product': 'Prodotto (ad es. Proxmox VE)',
   'config.op.eq': 'è',
   'config.op.ne': 'non è',
   'config.op.gte': 'almeno',

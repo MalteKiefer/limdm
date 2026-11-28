@@ -50,7 +50,8 @@ func (a *Agent) maintenance(now time.Time) {
 		}
 	}
 	// Schedule once: a new shutdown call would replace and postpone the pending one.
-	if inWin && u.Reboot && !a.rebootPending(now) && a.host.rebootRequired() {
+	// never on Proxmox VE: a reboot stops every guest (docs/proxmox.md)
+	if inWin && u.Reboot && !onPVE() && !a.rebootPending(now) && a.host.rebootRequired() {
 		if err := a.scheduleReboot(now, u.RebootDefer); err != nil {
 			a.problem(api.TypeUpdates, "reboot after updates: %v", err)
 		}
@@ -212,7 +213,7 @@ func (h *host) upgradeSelected(sel []api.PendingUpdate) (string, error) {
 		for _, p := range sel {
 			args = append(args, p.Name+"="+p.Candidate)
 		}
-		return run(2*time.Hour, "apt-get", args...)
+		return aptGet(2*time.Hour, args...)
 	case "suse":
 		return h.zypperUpgrade(false, repos)
 	}
@@ -265,6 +266,9 @@ func (a *Agent) updateStatus() *api.UpdateStatus {
 	}
 	if err != nil {
 		st.PendingError = truncate(err.Error(), 300)
+	}
+	if w, _ := a.host.aptWarn.Load().(string); w != "" {
+		st.PendingWarning = w
 	}
 	for _, s := range api.UpdateSources {
 		if r, ok := a.state.UpdateRuns[s]; ok {
@@ -507,7 +511,7 @@ func (h *host) autoremove() (string, error) {
 	defer h.pkgMu.Unlock()
 	switch h.family {
 	case "debian":
-		return run(30*time.Minute, "apt-get", "autoremove", "--purge", "-y", "-q", "-o", "DPkg::Lock::Timeout=300")
+		return aptGet(30*time.Minute, "autoremove", "--purge", "-y", "-q", "-o", "DPkg::Lock::Timeout=300")
 	case "fedora":
 		return run(30*time.Minute, "dnf", "autoremove", "-y", "-q")
 	case "arch":

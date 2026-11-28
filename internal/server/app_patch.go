@@ -305,7 +305,7 @@ func storeUpdateStatus(ctx context.Context, tx pgx.Tx, id string, st *api.Update
 		for i := range st.Runs {
 			st.Runs[i].Detail = truncate(st.Runs[i].Detail, 500)
 		}
-		st.PendingError, st.Ring = truncate(st.PendingError, 300), truncate(st.Ring, 64)
+		st.PendingError, st.PendingWarning, st.Ring = truncate(st.PendingError, 300), truncate(st.PendingWarning, 300), truncate(st.Ring, 64)
 	}
 	_, err := tx.Exec(ctx, `UPDATE devices SET updates=$2 WHERE id=$1`, id, jsonb(st))
 	return err

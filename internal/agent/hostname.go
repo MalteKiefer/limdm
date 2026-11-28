@@ -90,6 +90,11 @@ func (a *Agent) applyHostname(h *api.Hostname) error {
 	info.Target = fqdn
 	now := time.Now()
 	change := cur != short || exists(hostnameFile) && readTrim(hostnameFile) != short
+	pve := onPVE()
+	if pve && change {
+		info.Result, info.Detail = "failed", errPVEHostname.Error()
+		return errPVEHostname
+	}
 	ok, why := st.gate(used == "rdns" || used == "dns", change, fqdn, now)
 	switch {
 	case !ok:
@@ -110,7 +115,7 @@ func (a *Agent) applyHostname(h *api.Hostname) error {
 	if h.Pretty != "" {
 		errs = append(errs, setPretty(h.Pretty))
 	}
-	if h.Hosts {
+	if h.Hosts && !pve { // the node's /etc/hosts line is what pve-cluster resolves the node by
 		errs = append(errs, writeEtc(hostsFile, editHosts(readFile(hostsFile), short, fqdn)))
 	}
 	mta, mtaName := mtaProbe()

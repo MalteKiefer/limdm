@@ -45,7 +45,8 @@ import {
   type DeviceDetail,
   type Params,
 } from './api'
-import { badParamLine, formatAttrs, mayCommand, parseAttrs, parseTags, suggestUsername, userError, type DesktopUser } from './logic'
+import { badParamLine, formatAttrs, mayCommand, parseAttrs, parseTags, runningGuests, suggestUsername, userError, type DesktopUser } from './logic'
+import { useDeviceWorkloads } from '../workloads/api'
 
 export type Dialog =
   | { kind: 'confirm'; type: string; params?: Params; title: MessageKey; body: MessageKey; danger?: boolean }
@@ -216,8 +217,16 @@ function ConfirmDialog({ d, target, onClose }: { d: Extract<Dialog, { kind: 'con
       }
     >
       <p>{t(d.body)}</p>
+      {(d.type === 'reboot' || d.type === 'shutdown') && target.detail?.inventory.proxmox && <PveGuests id={target.id} />}
     </Modal>
   )
+}
+
+/** On a Proxmox VE node: the guests a reboot or shutdown stops (the agent never reboots a node by itself). */
+function PveGuests({ id }: { id: string }) {
+  const t = useT()
+  const q = useDeviceWorkloads(id)
+  return <p className="mt-2 font-medium text-warn">{q.data ? t('devices.pve.guests', { count: runningGuests(q.data.inventory?.items) }) : t('devices.pve.guestsUnknown')}</p>
 }
 
 function LaterDialog({ type, target, onClose }: { type: 'reboot' | 'shutdown'; target: Target; onClose: () => void }) {
@@ -231,6 +240,7 @@ function LaterDialog({ type, target, onClose }: { type: 'reboot' | 'shutdown'; t
       <form id="dlg-later" onSubmit={(e) => (e.preventDefault(), run(type, { minutes: n }, onClose))}>
         <Text label={t('devices.f.minutes')} help={t('devices.f.minutesHelp')} type="number" value={minutes} onChange={setMinutes} required error={bad ? t('devices.f.minutesRange') : undefined} autoFocus />
       </form>
+      {target.detail?.inventory.proxmox && <PveGuests id={target.id} />}
     </Modal>
   )
 }

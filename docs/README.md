@@ -37,6 +37,7 @@ The documents for LiMDM 0.18 and the unreleased changes in the changelog. Start 
 | [disk-encryption.md](disk-encryption.md) | LUKS recovery keys, escrow, rotation, TPM 2.0, lost devices |
 | [remote-shell.md](remote-shell.md) | Audited remote support shell |
 | [workloads.md](workloads.md) | Containers and VMs per device (Docker, Podman, LXC, LXD, Incus, Proxmox, libvirt), start, shut down, restart |
+| [proxmox.md](proxmox.md) | Proxmox VE nodes: detection, full upgrades, protected packages, host name, firewall, reboots, checks, CVEs |
 
 ## Devices
 
