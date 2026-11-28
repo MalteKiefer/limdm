@@ -141,6 +141,10 @@ type Agent struct {
 	reasons    map[string][]string // declaration type -> why it is not active
 	fwNotes    []string            // what the firewall remove list did this cycle (firewall_inventory.go)
 
+	// requestSince is when a user's app request started waiting for IT
+	// (unix seconds, 0 for none): pollLoop then asks every requestPoll
+	requestSince atomic.Int64
+
 	sentStatusHash, sentPkgHash string
 	sentFwHash                  string    // firewall inventory (firewall_inventory.go)
 	failedUpdate                string    // release version whose update already failed, reported once
@@ -768,8 +772,13 @@ func (a *Agent) cycle(ctx context.Context) {
 	fallbackDNS.Store(resp.FallbackDNS && !a.cfg.NoFallbackDNS)
 	if resp.Catalog != nil {
 		a.verifyCatalog(resp.SignedData, resp.Catalog)
+		old := a.state.Catalog
 		a.state.Catalog = resp.Catalog
+		if a.announceDecisions(old, resp.Catalog) { // store.go
+			a.applyCatalog(a.lastFlatpaks) // install now, not at the next check in
+		}
 	}
+	a.trackRequests()
 	if len(resp.RecoveryRotate) > 0 {
 		a.rotateRecovery(resp.RecoveryRotate)
 	}
@@ -1101,7 +1110,11 @@ func (a *Agent) pollLoop(ctx context.Context) {
 		if err == nil && resp.Pending {
 			a.kickCheckin() // buffered: a check in already running picks it up next
 		}
-		wait = a.busy.wait(pollWait(failures))
+		w := pollWait(failures)
+		if failures == 0 && requestPolling(a.requestSince.Load(), time.Now()) {
+			w = requestPoll + pollJitter()/5
+		}
+		wait = a.busy.wait(w)
 	}
 }
 
@@ -1114,6 +1127,19 @@ func pollWait(failures int) time.Duration {
 		d += time.Duration(mrand.Int64N(int64(d / 2))) //nolint:gosec // jitter, not a secret
 	}
 	return d + pollJitter()
+}
+
+// requestPoll is the poll interval while a user's app request waits for
+// IT, so the answer arrives within seconds; requestPollMax bounds it.
+const (
+	requestPoll    = 10 * time.Second
+	requestPollMax = 24 * time.Hour
+)
+
+// requestPolling reports whether a request open since since (unix seconds)
+// still makes the agent poll every requestPoll.
+func requestPolling(since int64, now time.Time) bool {
+	return since > 0 && now.Sub(time.Unix(since, 0)) < requestPollMax
 }
 
 func pollJitter() time.Duration { return time.Duration(mrand.Int64N(int64(10 * time.Second))) } //nolint:gosec // jitter, not a secret
