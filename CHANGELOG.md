@@ -36,6 +36,15 @@ change behavior they rely on.
 - `require_all` disk encryption no longer fails on the ESP or on USB media.
 - Packages named `pve-*` or `proxmox-*` are no longer matched against the Debian Security Tracker (no Debian `linux` findings on the Proxmox kernel).
 - The firewall inventory classifies the pve-firewall chains (`PVEFW-*`), the `proxmox-firewall` tables and the guest interfaces as system rules.
+||||||| 5d23b5d
+
+## 0.24.1 (2026-11-28)
+
+### Added
+- Boot loader check and item for systemd-boot and Limine: `boot.password` passes when their editor is off, and `com.limdm.bootloader` turns it off (`editor no` in `loader.conf`, `editor_enabled: no` in `limine.conf`), since neither loader has a password. extlinux and syslinux (Alpine with BIOS) get `ALLOWOPTIONS 0`. A unified kernel image booted with Secure Boot passes, since its kernel command line is signed. Fedora devices without GRUB report the systemd-boot or Limine result (or not applicable) instead of failing.
+
+### Fixed
+- Dialog buttons wrap on narrow screens instead of running out of the dialog.
 
 ## 0.24.0 (2026-11-28)
 

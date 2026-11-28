@@ -222,7 +222,7 @@ export function Modal({ open, onClose, title, description, children, footer, wid
             </Dialog.Close>
           </div>
           {children && <div className="p-5">{children}</div>}
-          {footer && <div className="flex justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>}
+          {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>}
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
