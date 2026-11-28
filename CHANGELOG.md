@@ -4,6 +4,18 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.25.0 (2026-11-28)
+
+### Added
+- App requests: **Approve and install** next to **Approve** in the request list and on the device's Requests tab. The agent installs the app at once on the requesting device; the request shows installing, installed or install failed with the error. API: optional body `{"install": true}` on `POST /api/v1/software/requests/{id}/approve` (and `approve-all`); the request list and the device detail return `install`, `install_state` and `install_error`. The audit log records `catalog.request.approve+install`.
+- Users get a desktop notification in their language when IT decides their request, and when an app approved with install is installed or fails.
+
+### Changed
+- The answer to an app request arrives within about 10 to 20 seconds instead of at the next check in: while a request is open the agent polls every 10 seconds (at most 24 hours per request), and the poll reports a decision made since the last check in.
+- **Breaking**: **Approve** alone no longer makes the agent install an app on request; the user installs it from the desktop app. Requests approved before 0.25 keep being installed by the agent, and agents before 0.25 still install every approved request.
+
+### Fixed
+
 ## 0.24.0 (2026-11-28)
 
 ### Added
