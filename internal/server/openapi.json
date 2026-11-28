@@ -20538,6 +20538,10 @@
               "pending_error": {
                 "type": "string"
               },
+              "pending_warning": {
+                "type": "string",
+                "description": "the list is usable but incomplete, e.g. the Proxmox enterprise repository refused access"
+              },
               "runs": {
                 "type": "array",
                 "items": {

@@ -53,14 +53,15 @@ type Rule struct {
 
 // Facts are the device attributes rules can test.
 type Facts struct {
-	OSID, OSVersion, Arch, Desktop, Vendor, Model, Hostname, Department string
-	Tags, Groups                                                        []string
+	OSID, OSVersion, OSProduct, Arch, Desktop, Vendor, Model, Hostname, Department string
+	Tags, Groups                                                                   []string
 }
 
 // RuleFields lists the fields and the operators that make sense for them.
 var RuleFields = map[string][]string{
 	"os.id":      {"eq", "ne"},
 	"os.version": {"eq", "ne", "gte", "lte"},
+	"os.product": {"contains", "eq", "ne", "present", "absent"}, // "Proxmox VE 8.4"
 	"arch":       {"eq", "ne"},
 	"desktop":    {"present", "absent", "contains"},
 	"vendor":     {"eq", "contains"},
@@ -126,6 +127,8 @@ func (r Rule) Matches(f Facts) bool {
 		case "ne":
 			return CompareVersions(f.OSVersion, r.Value) != 0
 		}
+	case "os.product":
+		return text(f.OSProduct)
 	case "arch":
 		return text(f.Arch)
 	case "desktop":

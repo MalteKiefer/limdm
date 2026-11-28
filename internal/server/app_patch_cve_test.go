@@ -157,12 +157,14 @@ func TestCVEImportAndMatch(t *testing.T) {
 	if n != 3 {
 		t.Fatalf("failed import changed the data: %d", n)
 	}
-	// d1 Debian 12 with an old libssl3 (source openssl) and a fixed glibc; d2 Ubuntu 24.04 with old openssh
+	// d1 Debian 12 with an old libssl3 (source openssl) and a fixed glibc; d2 Ubuntu 24.04 with old openssh.
+	// proxmox-test claims the source openssl but is a Proxmox package: never matched.
 	if _, err := db.Exec(ctx, `UPDATE devices SET inventory='{"os_id":"debian","os_version":"12"}' WHERE id='d1';
 		UPDATE devices SET inventory='{"os_id":"ubuntu","os_version":"24.04"}' WHERE id='d2';
 		INSERT INTO device_packages(device_id, name, version, arch, source) VALUES
 			('d1', 'libssl3', '3.0.11-1~deb12u2', 'amd64', 'openssl'), ('d1', 'openssl', '3.0.11-1~deb12u2', 'amd64', ''),
-			('d1', 'libc6', '2.36-9+deb12u7', 'amd64', 'glibc'), ('d2', 'openssh-server', '1:9.6p1-3ubuntu13', 'amd64', 'openssh')`); err != nil {
+			('d1', 'libc6', '2.36-9+deb12u7', 'amd64', 'glibc'), ('d1', 'proxmox-test', '3.0.11-1~deb12u2', 'amd64', 'openssl'),
+			('d2', 'openssh-server', '1:9.6p1-3ubuntu13', 'amd64', 'openssh')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.matchAllCVEs(ctx); err != nil {
