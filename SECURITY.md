@@ -2,7 +2,8 @@
 
 ## Reporting a vulnerability
 
-Report vulnerabilities privately through
+Report vulnerabilities privately, by e-mail to
+[security@limdm.com](mailto:security@limdm.com) or through
 [GitHub private vulnerability reporting](https://github.com/MalteKiefer/limdm/security/advisories/new).
 Do not open a public issue, pull request or discussion for it.
 
@@ -13,8 +14,8 @@ impact and steps to reproduce it. You will get an answer within five working day
 
 | Version | Security fixes |
 |---|---|
-| 0.21.x | yes |
-| older than 0.21 | no |
+| 0.25.x | yes |
+| older than 0.25 | no |
 
 Only the latest release line receives security fixes.
 

@@ -112,7 +112,7 @@ An index of all documents is in [docs/README.md](docs/README.md).
 | [Remote shell](docs/remote-shell.md) | Audited support terminal from the console to a device |
 | [Containers and VMs](docs/workloads.md) | Docker, Podman, LXC, LXD, Incus, Proxmox and libvirt per device with versions; start, shut down, restart |
 | [Notifications](docs/notifications.md) | Email, Slack, Discord and webhook channels, events |
-| [Security](docs/security.md) | Architecture, mTLS, signed commands, sessions, four eyes, audit log, privacy |
+| [Security](docs/security.md) | Architecture, mTLS, signed commands, sessions, four eyes, audit log, privacy; report vulnerabilities to security@limdm.com ([SECURITY.md](SECURITY.md)) |
 | [Keys](docs/keys.md) | Key inventory, HSM, rotation runbooks, compromise |
 | [High availability](docs/high-availability.md) | Several server instances on one database |
 | [Agent API](docs/api.md) | Endpoints, problem details, integrity of commands and items |

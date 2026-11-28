@@ -522,4 +522,4 @@ Failed local and OIDC sign ins and rejected enrollments are logged with the clie
 
 ## Reporting vulnerabilities
 
-See [SECURITY.md](../SECURITY.md).
+Report vulnerabilities to [security@limdm.com](mailto:security@limdm.com) or through GitHub private vulnerability reporting; see [SECURITY.md](../SECURITY.md).
