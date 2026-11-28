@@ -764,7 +764,7 @@ func runDiskEncryption(a *Agent) (string, string) {
 		var open, ok []string
 		for _, v := range nativeVolumes() {
 			switch {
-			case de.Excluded(v.Mount):
+			case de.Excluded(v.Mount), !v.EncryptionExpected():
 			case v.Encrypted:
 				ok = append(ok, v.Mount+" ("+v.Encryption+")")
 			default:

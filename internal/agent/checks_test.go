@@ -3,7 +3,32 @@ package agent
 import (
 	"regexp"
 	"testing"
+
+	"github.com/maltekiefer/limdm/internal/api"
 )
+
+func TestVolumeKind(t *testing.T) {
+	for _, c := range []struct {
+		mount, fs, lsblk, role string
+		removable              bool
+	}{
+		{"/boot", "vfat", "0 0 c12a7328-f81f-11d2-ba4b-00a0c93ec93b", "esp", false}, // CachyOS with Limine
+		{"/efi", "vfat", "0 0", "esp", false},                                       // MBR or no type reported
+		{"/data", "vfat", "0 0 C12A7328-F81F-11D2-BA4B-00A0C93EC93B", "esp", false}, // by type wherever mounted
+		{"/run/media/anna/Ventoy", "exfat", "1 1 ", "", true},                       // USB stick
+		{"/mnt/card", "ext4", "0 1 0fc63daf-8483-4772-8e79-3d69d8477de4", "", true}, // hotplugged reader
+		{"/", "btrfs", "0 0 ", "", false},                                           // dm device: no part type
+		{"/home", "ext4", "", "", false},
+	} {
+		role, rm := volumeKind(c.mount, c.fs, c.lsblk)
+		if role != c.role || rm != c.removable {
+			t.Errorf("%s %s %q: role %q removable %v", c.mount, c.fs, c.lsblk, role, rm)
+		}
+		if v := (api.Volume{Role: role, Removable: rm}); v.EncryptionExpected() != (c.role == "" && !c.removable) {
+			t.Errorf("%s: EncryptionExpected %v", c.mount, v.EncryptionExpected())
+		}
+	}
+}
 
 func TestInsertPWQuality(t *testing.T) {
 	// Arch's system-auth (pambase): the line goes before the first password

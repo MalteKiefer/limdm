@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -259,11 +260,34 @@ func nativeVolumes() []api.Volume {
 		}
 		seen[f.Target] = true
 		method := volumeEncryption(dev, f.FSType, f.Target)
-		vols = append(vols, api.Volume{Device: dev, Mount: f.Target, FS: f.FSType, SizeGB: f.Size >> 30, FreeGB: f.Avail >> 30,
-			Encrypted: method != "", Encryption: method})
+		v := api.Volume{Device: dev, Mount: f.Target, FS: f.FSType, SizeGB: f.Size >> 30, FreeGB: f.Avail >> 30,
+			Encrypted: method != "", Encryption: method}
+		if strings.HasPrefix(dev, "/dev/") {
+			out, _ := sh("lsblk", "-ndro", "RM,HOTPLUG,PARTTYPE", dev)
+			v.Role, v.Removable = volumeKind(f.Target, f.FSType, out)
+		}
+		vols = append(vols, v)
 	}
 	sort.Slice(vols, func(i, j int) bool { return vols[i].Mount < vols[j].Mount })
 	return vols
+}
+
+// espType is the GPT partition type of the EFI system partition.
+const espType = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+
+// volumeKind reads lsblk -ndro RM,HOTPLUG,PARTTYPE of a volume's device: the
+// role "esp" for the EFI system partition (by type, or vfat at a boot mount
+// point) and whether the medium is removable or hotplugged (USB).
+func volumeKind(mount, fstype, lsblk string) (role string, removable bool) {
+	f := strings.Fields(lsblk)
+	if len(f) >= 2 {
+		removable = f[0] == "1" || f[1] == "1"
+	}
+	if (len(f) >= 3 && strings.EqualFold(f[2], espType)) ||
+		fstype == "vfat" && slices.Contains([]string{"/boot", "/boot/efi", "/efi"}, mount) {
+		role = "esp"
+	}
+	return role, removable
 }
 
 // volumeEncryption names how a mounted file system is encrypted, "" when it

@@ -433,6 +433,8 @@ export default {
   'devices.inv.encryption': 'Шифрование',
   'devices.inv.encrypted': 'зашифрован',
   'devices.inv.excluded': 'исключён',
+  'devices.inv.notRequired': 'не требуется',
+  'devices.inv.removable': 'съёмный носитель',
   'devices.inv.usage': 'Занято',
   'devices.inv.usageVal': '{used} из {size} ГБ',
   'devices.net.noInfo': 'Адреса не сообщены. Их отключает элемент конфиденциальности с network_info false.',

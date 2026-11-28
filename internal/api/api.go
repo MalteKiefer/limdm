@@ -869,7 +869,16 @@ type Volume struct {
 	// Encryption names the method: LUKS2, LUKS1, LUKS2 hw-opal, plain dm-crypt,
 	// TCRYPT, BITLK, ZFS native, eCryptfs.
 	Encryption string `json:"encryption,omitempty"`
+	// Role "esp": the EFI system partition (or a vfat /boot), which the
+	// firmware reads and which cannot be encrypted.
+	Role string `json:"role,omitempty"`
+	// Removable: removable or hotplugged media such as a USB stick.
+	Removable bool `json:"removable,omitempty"`
 }
+
+// EncryptionExpected reports whether the disk encryption check counts the
+// volume: not the ESP, not removable media.
+func (v Volume) EncryptionExpected() bool { return v.Role != "esp" && !v.Removable }
 
 type NIC struct {
 	Name  string   `json:"name"`
