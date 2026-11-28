@@ -1233,6 +1233,12 @@ func TestBootEditors(t *testing.T) {
 	if !editorOff(li, "EDITOR_ENABLED=no\n") || editorOff(li, "editor_enabled: yes\n") {
 		t.Error("limine syntax")
 	}
+	ex := bootEditor{"extlinux", "", "ALLOWOPTIONS 0", extlinuxOpts}
+	ec := "DEFAULT lts\nPROMPT 1\nALLOWOPTIONS 1\nLABEL lts\n  KERNEL /boot/vmlinuz-lts\n"
+	eg := editorConf(ex, ec, true)
+	if !editorOff(ex, eg) || strings.Contains(eg, "ALLOWOPTIONS 1") || editorConf(ex, eg, false) != "DEFAULT lts\nPROMPT 1\nLABEL lts\n  KERNEL /boot/vmlinuz-lts\n" {
+		t.Fatalf("extlinux: %q", eg)
+	}
 	if st, _ := bootEditorResult(nil); st != na {
 		t.Error("no loader")
 	}

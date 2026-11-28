@@ -46,7 +46,7 @@ agent reports (the console shows them translated).
 | `disk.recovery` | Disk encryption recovery keys are escrowed | 1 | the desktop helper asks the user; `na` without escrow declared |
 | `disk.tpm` | LUKS volumes are bound to the TPM | 1 | bound with the next recovery key rotation or `limdm-agent recovery-key --all` (with a PIN the user runs it) |
 | `agent.tpm_key` | Device key is held in the TPM | 2 | the next certificate renewal creates the key in the TPM; `na` without TPM 2.0 |
-| `boot.password` | Boot loader is password protected | 1 | via `com.limdm.bootloader`; GRUB: superuser with password; systemd-boot and Limine: editor off (they have no password); no supported loader: not applicable |
+| `boot.password` | Boot loader is password protected | 1 | via `com.limdm.bootloader`; GRUB: superuser with password; systemd-boot and Limine: editor off (they have no password); extlinux: `ALLOWOPTIONS 0`; unified kernel image with Secure Boot: passes (signed command line); no supported loader: not applicable |
 | `boot.secureboot` | Secure Boot is enabled | 2 | none |
 | `kernel.aslr` | Full ASLR is enabled | 1 | yes (sysctl) |
 | `kernel.ptrace` | ptrace is restricted | 1 | yes (sysctl; a stricter value is kept) |

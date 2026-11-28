@@ -161,12 +161,15 @@ func (a *Agent) applyBootloader(b *api.Bootloader) error {
 	if err != nil {
 		return err
 	}
+	if ukiSecure() {
+		editors++ // the signed UKI fixes the command line, nothing to set
+	}
 	if a.host.family == "fedora" {
 		if !exists("/boot/grub2") {
 			if b == nil || editors > 0 {
 				return nil
 			}
-			return errors.New("no supported boot loader found (GRUB, systemd-boot or Limine)")
+			return errors.New("no supported boot loader found (GRUB, systemd-boot, Limine, extlinux)")
 		}
 		// grub2-setpassword format: the superuser is always root, BLS entries stay bootable
 		content := ""
@@ -182,7 +185,7 @@ func (a *Agent) applyBootloader(b *api.Bootloader) error {
 		if b == nil || editors > 0 {
 			return nil
 		}
-		return errors.New("no supported boot loader found (GRUB, systemd-boot or Limine)")
+		return errors.New("no supported boot loader found (GRUB, systemd-boot, Limine, extlinux)")
 	}
 	content := ""
 	if b != nil {
@@ -228,6 +231,9 @@ func grubConfig(family string) (mkconfig, cfg string) {
 }
 
 func runBootPassword(a *Agent) (string, string) {
+	if ukiSecure() { // whatever loader started it: systemd-stub ignores a passed command line under Secure Boot
+		return pass, "unified kernel image with Secure Boot: the kernel command line is signed"
+	}
 	if a.host.family == "fedora" && exists("/boot/grub2") {
 		if strings.Contains(readFile(grubFedoraUser), "GRUB2_PASSWORD=grub.pbkdf2.") {
 			return pass, "GRUB password set in " + grubFedoraUser
@@ -251,15 +257,17 @@ func runBootPassword(a *Agent) (string, string) {
 // editor off; a boot loader item does that, and the check passes when the
 // editor of every loader found is off.
 
-const bootEditorMark = "# LiMDM: editor off (boot loader item)"
+const bootEditorMark = "# LiMDM: editing off (boot loader item)"
 
 var (
 	sdbootConfs = []string{"/boot/loader/loader.conf", "/efi/loader/loader.conf", "/boot/efi/loader/loader.conf"}
 	limineConfs = []string{"/boot/limine.conf", "/boot/limine/limine.conf", "/boot/EFI/limine/limine.conf", "/boot/EFI/BOOT/limine.conf",
 		"/efi/limine.conf", "/efi/limine/limine.conf", "/efi/EFI/limine/limine.conf", "/efi/EFI/BOOT/limine.conf",
 		"/boot/efi/limine.conf", "/boot/efi/EFI/limine/limine.conf", "/boot/efi/EFI/BOOT/limine.conf"}
-	sdbootEditor = regexp.MustCompile(`(?m)^[ \t]*editor[ \t]+(\S+)[ \t]*\n?`)
-	limineEditor = regexp.MustCompile(`(?mi)^[ \t]*editor_enabled[ \t]*[:=][ \t]*(\S+)[ \t]*\n?`)
+	extlinuxConfs = []string{"/boot/extlinux.conf", "/boot/extlinux/extlinux.conf", "/boot/syslinux/syslinux.cfg", "/boot/syslinux.cfg"}
+	extlinuxOpts  = regexp.MustCompile(`(?mi)^[ \t]*allowoptions[ \t]+(\S+)[ \t]*\n?`)
+	sdbootEditor  = regexp.MustCompile(`(?m)^[ \t]*editor[ \t]+(\S+)[ \t]*\n?`)
+	limineEditor  = regexp.MustCompile(`(?mi)^[ \t]*editor_enabled[ \t]*[:=][ \t]*(\S+)[ \t]*\n?`)
 )
 
 type bootEditor struct {
@@ -281,10 +289,27 @@ func bootEditors() []bootEditor {
 			list = append(list, bootEditor{"systemd-boot", p, "editor no", sdbootEditor})
 		}
 	}
+	for _, p := range extlinuxConfs { // Alpine with BIOS; update-extlinux rewrites it, the next cycle sets it again
+		if exists(p) {
+			list = append(list, bootEditor{"extlinux", p, "ALLOWOPTIONS 0", extlinuxOpts})
+		}
+	}
 	return list
 }
 
-// editorOff: both loaders enable the editor unless it is set to no.
+// ukiSecure: booted through systemd-stub (a unified kernel image) with
+// Secure Boot on; the stub then uses only the signed .cmdline section.
+func ukiSecure() bool {
+	return exists("/sys/firmware/efi/efivars/StubInfo-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f") && secureBootOn()
+}
+
+func secureBootOn() bool {
+	b, err := os.ReadFile("/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c")
+	return err == nil && len(b) >= 5 && b[4] == 1
+}
+
+// editorOff: the loaders allow editing unless it is set to no (extlinux:
+// ALLOWOPTIONS 0).
 func editorOff(e bootEditor, cfg string) bool {
 	m := e.key.FindAllStringSubmatch(cfg, -1)
 	if len(m) == 0 {
@@ -299,7 +324,7 @@ func editorOff(e bootEditor, cfg string) bool {
 
 func bootEditorResult(eds []bootEditor) (string, string) {
 	if len(eds) == 0 {
-		return na, "no GRUB, systemd-boot or Limine found"
+		return na, "no GRUB, systemd-boot, Limine, extlinux or signed unified kernel image found"
 	}
 	var on, off []string
 	for _, e := range eds {

@@ -7,7 +7,7 @@ change behavior they rely on.
 ## 0.24.1 (2026-11-28)
 
 ### Added
-- Boot loader check and item for systemd-boot and Limine: `boot.password` passes when their editor is off, and `com.limdm.bootloader` turns it off (`editor no` in `loader.conf`, `editor_enabled: no` in `limine.conf`), since neither loader has a password. Fedora devices without GRUB report the systemd-boot or Limine result (or not applicable) instead of failing.
+- Boot loader check and item for systemd-boot and Limine: `boot.password` passes when their editor is off, and `com.limdm.bootloader` turns it off (`editor no` in `loader.conf`, `editor_enabled: no` in `limine.conf`), since neither loader has a password. extlinux and syslinux (Alpine with BIOS) get `ALLOWOPTIONS 0`. A unified kernel image booted with Secure Boot passes, since its kernel command line is signed. Fedora devices without GRUB report the systemd-boot or Limine result (or not applicable) instead of failing.
 
 ### Fixed
 - Dialog buttons wrap on narrow screens instead of running out of the dialog.

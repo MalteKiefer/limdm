@@ -1105,6 +1105,11 @@ Console: **Boot loader password**.
   `limine.conf`, marked with a `# LiMDM` comment), so nobody changes the kernel command line at
   boot. The configs are looked up in `/boot`, `/efi` and `/boot/efi`. Removing the item removes
   only the lines the agent added. The password fields stay required, for devices with GRUB.
+* extlinux and syslinux (Alpine with BIOS): `ALLOWOPTIONS 0` at the top of `extlinux.conf`, so
+  only the configured entries boot, without options. `update-extlinux` rewrites the file on
+  kernel updates; the agent sets the line again in its next cycle.
+* A unified kernel image started through systemd-stub with Secure Boot on needs nothing: the
+  stub uses only the signed command line in the image.
 
 ### `com.limdm.diskencryption`
 
