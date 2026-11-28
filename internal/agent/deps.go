@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -96,6 +97,31 @@ func (a *Agent) ensureDependencies() {
 		return
 	}
 	a.event("installed missing tools %v", pkgs)
+}
+
+// installFor installs the package that provides cmd (an entry of
+// dependencies) when it is missing: a declared setting that needs a tool gets
+// it right away, not only with the daily round.
+func (a *Agent) installFor(cmd string) error {
+	if present(cmd) {
+		return nil
+	}
+	for _, d := range dependencies {
+		if d.cmd == cmd {
+			return a.installPkg(d)
+		}
+	}
+	return fmt.Errorf("%s is not installed", cmd)
+}
+
+// installPkg installs the package of d for this host's family.
+func (a *Agent) installPkg(d dependency) error {
+	p := d.pkg(a.host.family)
+	if err := a.host.install(p); err != nil {
+		return fmt.Errorf("installing %s: %w", p, err)
+	}
+	a.event("installed missing tools %v", []string{p})
+	return nil
 }
 
 // present reports whether a program is on PATH, or a file matching a pattern exists.

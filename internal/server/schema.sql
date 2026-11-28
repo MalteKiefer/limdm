@@ -1156,3 +1156,12 @@ CREATE TABLE IF NOT EXISTS log_alerts (
 -- cvederiv: the base distribution whose CVE feed matched a derivative
 -- (ubuntu, debian, arch); empty for a direct match or a pending update
 ALTER TABLE device_cves ADD COLUMN IF NOT EXISTS via TEXT NOT NULL DEFAULT '';
+-- approval-install: an approval either lets the user install the app or has
+-- the agent install it at once (install); the agent's result lands in
+-- install_state (installed | install_failed) with the error. Rows from
+-- before this column were installed by the agent on approval: they get
+-- true once, new rows default to false.
+ALTER TABLE catalog_requests ADD COLUMN IF NOT EXISTS install BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE catalog_requests ALTER COLUMN install SET DEFAULT false;
+ALTER TABLE catalog_requests ADD COLUMN IF NOT EXISTS install_state TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog_requests ADD COLUMN IF NOT EXISTS install_error TEXT NOT NULL DEFAULT '';

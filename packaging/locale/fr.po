@@ -312,8 +312,8 @@ msgstr "Demande envoyée au service informatique"
 msgid "Request %s"
 msgstr "Demander %s"
 
-msgid "IT decides on your request. The app installs by itself once approved."
-msgstr "Le service informatique statue sur votre demande. L'application s'installe d'elle-même une fois approuvée."
+msgid "IT decides on your request: either you may install the app, or it is installed for you."
+msgstr "Le service informatique statue sur votre demande : soit vous pouvez installer l'application, soit elle est installée pour vous."
 
 msgid "Why do you need it? (optional)"
 msgstr "Pourquoi en avez-vous besoin ? (facultatif)"
@@ -342,8 +342,8 @@ msgstr "Applications que vous avez demandées au service informatique. Les appli
 msgid "Request Another App"
 msgstr "Demander une autre application"
 
-msgid "Search Flathub. IT decides on your request; the app installs by itself once approved."
-msgstr "Recherchez sur Flathub. Le service informatique statue sur votre demande ; l'application s'installe d'elle-même une fois approuvée."
+msgid "Search Flathub. IT decides on your request: either you may install the app, or it is installed for you."
+msgstr "Recherchez sur Flathub. Le service informatique statue sur votre demande : soit vous pouvez installer l'application, soit elle est installée pour vous."
 
 msgid "e.g. Krita, Obsidian, Zotero"
 msgstr "p. ex. Krita, Obsidian, Zotero"

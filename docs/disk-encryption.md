@@ -18,6 +18,12 @@ The compliance check `disk.recovery` fails while a LUKS volume has no escrowed k
 points in `exclude` (an entry covers everything below it); without it only `/` counts. Every
 field with its limits: [declarations.md](declarations.md#comlimdmdiskencryption).
 
+Two kinds of volume never count, with or without `exclude`: the EFI system partition (GPT
+type EFI system, or vfat mounted at `/boot`, `/boot/efi` or `/efi`), which the firmware reads
+and which cannot be encrypted, and removable or hotplugged media such as USB sticks (lsblk
+`RM` or `HOTPLUG`). The agent reports both in the inventory (`role: esp`, `removable`) and
+the device page marks them **not required** and **removable media** instead of a red badge.
+
 ## How the key is created
 
 Adding a key slot needs an existing passphrase, which only the user knows. Therefore:

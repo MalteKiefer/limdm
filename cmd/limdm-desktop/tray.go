@@ -88,11 +88,11 @@ func (t *tray) loop() {
 			}()
 			time.AfterFunc(20*time.Second, t.refresh)
 		case <-t.recovery.ClickedCh:
-			go openApp("disk", t.last, func(last agent.DesktopResponse) {
-				if err := run(true); err != nil {
+			go func(last agent.DesktopResponse) {
+				if _, err := prompt(); err != nil {
 					dialogsFor(last).message(tr("Recovery Key"), err.Error(), true)
 				}
-			})
+			}(t.last)
 		case <-t.sso.ClickedCh:
 			go confirmAccount(t.last)
 		case <-t.logs.ClickedCh:
@@ -248,14 +248,22 @@ func openApp(page string, last agent.DesktopResponse, fallback func(agent.Deskto
 	fallback(last)
 }
 
-// reminders is the daily prompt for what the device needs from the user.
+// reminders asks for what the device needs from the user: shortly after
+// login and within a minute of the agent reporting a volume without a
+// recovery key, the passphrase dialog opens by itself. Closing it only
+// postpones it by repromptAfter, until the key is escrowed.
 func reminders() {
-	time.Sleep(time.Minute) // let the session settle after login
+	time.Sleep(30 * time.Second) // let the session settle after login
 	for {
-		if err := run(false); err != nil {
+		shown, err := prompt()
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "limdm-desktop:", err)
 		}
-		time.Sleep(30 * time.Minute)
+		if shown {
+			time.Sleep(repromptAfter)
+		} else {
+			time.Sleep(time.Minute)
+		}
 	}
 }
 

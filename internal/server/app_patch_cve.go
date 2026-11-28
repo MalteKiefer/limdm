@@ -635,10 +635,12 @@ func matchDeviceCVEs(ctx context.Context, tx pgx.Tx, id string) error {
 		// when the agent sent it, else the package itself. A Debian binary
 		// package can carry its own version (postgresql 17+278 built from
 		// postgresql-common 278), so the source version is compared.
+		// Proxmox VE packages (pve-*, proxmox-*, the kernel included) are
+		// not Debian's and never matched against the Debian tracker.
 		rows, err := tx.Query(ctx, `SELECT p.name, p.version, CASE WHEN p.source_version <> '' THEN p.source_version ELSE p.version END, f.cve, f.fixed, f.severity
 			FROM device_packages p
 			JOIN cve_fixes f ON f.distro=$2 AND f.release=$3 AND (f.package = CASE WHEN p.source <> '' THEN p.source ELSE p.name END OR $2 = 'arch' AND f.package = p.name)
-			WHERE p.device_id=$1`, id, distro, release)
+			WHERE p.device_id=$1 AND NOT ($2 = 'debian' AND (p.name ~ '^(pve|proxmox)-' OR p.source ~ '^(pve|proxmox)-'))`, id, distro, release)
 		if err != nil {
 			return err
 		}

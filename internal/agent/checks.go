@@ -36,7 +36,7 @@ type check struct {
 // CatalogVersion identifies the check catalog and its framework mapping. It
 // is reported with every result; raise it whenever a check, its level or a
 // reference changes, so evidence can be tied to the mapping it was made with.
-const CatalogVersion = "2026.11.2"
+const CatalogVersion = "2026.11.3"
 
 // cisBenchmark is the benchmark edition the CIS recommendation numbers refer
 // to. The titles are shared by the Debian and RHEL family benchmarks, whose
@@ -239,6 +239,7 @@ var catalog = []check{
 // re-checks so the report reflects the state after remediation.
 func (a *Agent) evaluate() []api.CheckResult {
 	p := a.pol.Compliance
+	pve := onPVE()
 	var out []api.CheckResult
 	for _, c := range catalog {
 		if c.Level > p.Level {
@@ -247,6 +248,12 @@ func (a *Agent) evaluate() []api.CheckResult {
 		r := api.CheckResult{ID: c.ID, Title: c.Title, Level: c.Level, Refs: c.Refs}
 		if slices.Contains(p.Exclude, c.ID) {
 			r.Status, r.Detail = "excepted", "excluded by policy (exception)"
+			out = append(out, r)
+			continue
+		}
+		c, why := pveAdjust(c, pve)
+		if why != "" {
+			r.Status, r.Detail = na, why
 			out = append(out, r)
 			continue
 		}
@@ -264,6 +271,9 @@ func (a *Agent) evaluate() []api.CheckResult {
 		}
 		if r.Status == fail && slices.Contains(p.Advisory, c.ID) {
 			r.Status = "advisory" // reported, not counted against compliance
+		}
+		if note := pveChecks[c.ID].Note; pve && note != "" {
+			r.Detail = strings.TrimPrefix(r.Detail+"; "+note, "; ")
 		}
 		out = append(out, r)
 	}
@@ -297,8 +307,10 @@ func (a *Agent) fixFor(c check) func(*Agent) error {
 // groupKV merges desired values of all active, non excluded checks of a group.
 func (a *Agent) groupKV(group string) map[string]string {
 	kv := map[string]string{}
+	pve := onPVE()
 	for _, c := range catalog {
-		if c.Group == group && c.Level <= a.pol.Compliance.Level && !slices.Contains(a.pol.Compliance.Exclude, c.ID) {
+		c, na := pveAdjust(c, pve) // a check that does not apply on Proxmox VE is never fixed
+		if c.Group == group && na == "" && c.Level <= a.pol.Compliance.Level && !slices.Contains(a.pol.Compliance.Exclude, c.ID) {
 			for k, v := range c.KV {
 				kv[k] = v
 			}
@@ -664,14 +676,16 @@ func sshValueOK(got, want string) bool {
 		w, _ := strconv.Atoi(n)
 		return err1 == nil && g > 0 && g <= w
 	}
-	return got == want
+	return slices.Contains(strings.Split(want, "|"), got) // a|b: either value complies
 }
 
+// sshWanted is the value a fix writes: the bound, or the first of a|b.
 func sshWanted(v string) string {
 	if n, ok := strings.CutPrefix(v, "<="); ok {
 		return n
 	}
-	return v
+	first, _, _ := strings.Cut(v, "|")
+	return first
 }
 
 func fixSSHD(a *Agent) error {
@@ -764,7 +778,7 @@ func runDiskEncryption(a *Agent) (string, string) {
 		var open, ok []string
 		for _, v := range nativeVolumes() {
 			switch {
-			case de.Excluded(v.Mount):
+			case de.Excluded(v.Mount), !v.EncryptionExpected():
 			case v.Encrypted:
 				ok = append(ok, v.Mount+" ("+v.Encryption+")")
 			default:
@@ -803,6 +817,12 @@ func runDiskEncryption(a *Agent) (string, string) {
 }
 
 func runFirewall(a *Agent) (string, string) {
+	if onPVE() { // pve-firewall (iptables) or proxmox-firewall (nftables) reads the same switch
+		if out, err := sh("pve-firewall", "status"); err == nil && strings.Contains(out, "Status: enabled/running") {
+			return pass, "pve-firewall enabled and running"
+		}
+		return fail, "pve-firewall is not enabled and running (Datacenter, Firewall, Options in the Proxmox web interface)"
+	}
 	switch {
 	case unitActive("firewalld"):
 		return pass, "firewalld active"
@@ -833,6 +853,9 @@ func fixFirewall(a *Agent) error {
 func (a *Agent) applyFirewall() error {
 	if a.pol.Firewall.Template {
 		return errUnrendered
+	}
+	if onPVE() { // ufw or firewalld next to pve-firewall would cut corosync, migration and the web interface
+		return errPVEFirewall
 	}
 	if a.host.family == "alpine" { // nftables with LiMDM's own table (firewall_nft.go)
 		if !hasCmd("nft") {
@@ -880,6 +903,11 @@ func runMACEnabled(a *Agent) (string, string) {
 	}
 	if exists("/sys/fs/selinux/enforce") {
 		return pass, "SELinux enabled"
+	}
+	// reported only: the agent neither installs AppArmor nor edits the
+	// kernel command line. The active modules show what lsm= lacks.
+	if lsm := readTrim("/sys/kernel/security/lsm"); lsm != "" {
+		return fail, "neither AppArmor nor SELinux enabled, kernel security modules: " + lsm
 	}
 	return fail, "neither AppArmor nor SELinux enabled"
 }
@@ -1009,13 +1037,33 @@ func pwqualityValue(key string) string {
 	return val
 }
 
+// pwqualityStack is the shared password stack the agent edits itself where
+// no tool adds pam_pwquality (Debian: pam-auth-update with the package,
+// Fedora: authselect, SUSE: pam-config).
+var pwqualityStack = map[string]string{"arch": "/etc/pam.d/system-auth", "alpine": "/etc/pam.d/base-password"}
+
 func pamHasPWQuality() bool {
-	for _, f := range []string{"/etc/pam.d/common-password", "/etc/pam.d/system-auth"} {
+	for _, f := range []string{"/etc/pam.d/common-password", "/etc/pam.d/system-auth", "/etc/pam.d/base-password"} {
 		if strings.Contains(readFile(f), "pam_pwquality.so") {
 			return true
 		}
 	}
 	return false
+}
+
+// insertPWQuality puts pam_pwquality before the first password module, so
+// pam_unix (try_first_pass/use_authtok) takes the checked password.
+func insertPWQuality(content string) (string, error) {
+	if strings.Contains(content, "pam_pwquality.so") {
+		return content, nil
+	}
+	lines := strings.Split(content, "\n")
+	for i, l := range lines {
+		if f := strings.Fields(l); len(f) >= 3 && (f[0] == "password" || f[0] == "-password") {
+			return strings.Join(slices.Insert(lines, i, "password   required   pam_pwquality.so retry=3"), "\n"), nil
+		}
+	}
+	return "", errors.New("no password module found")
 }
 
 func runPWQuality(a *Agent) (string, string) {
@@ -1029,8 +1077,11 @@ func runPWQuality(a *Agent) (string, string) {
 	return pass, fmt.Sprintf("minlen=%d", n)
 }
 
+// pwqualityPkg provides pam_pwquality; Fedora ships it with pam.
+var pwqualityPkg = map[string]string{"debian": "libpam-pwquality", "arch": "libpwquality", "alpine": "libpwquality", "suse": "pam_pwquality"}
+
 func fixPWQuality(a *Agent) error {
-	if pkg := map[string]string{"debian": "libpam-pwquality", "arch": "libpwquality", "alpine": "libpwquality", "suse": "pam_pwquality"}[a.host.family]; pkg != "" && !a.host.isInstalled(pkg) {
+	if pkg := pwqualityPkg[a.host.family]; pkg != "" && !a.host.isInstalled(pkg) {
 		if err := a.host.install(pkg); err != nil {
 			return err
 		}
@@ -1038,6 +1089,15 @@ func fixPWQuality(a *Agent) error {
 	if a.host.family == "suse" && !pamHasPWQuality() { // pam-config owns common-password there
 		if out, err := sh("pam-config", "--add", "--pwquality"); err != nil {
 			return fmt.Errorf("pam-config --add --pwquality: %s", lastLines(out, 2))
+		}
+	}
+	if f := pwqualityStack[a.host.family]; f != "" && exists(f) && !pamHasPWQuality() {
+		next, err := insertPWQuality(readFile(f))
+		if err != nil {
+			return fmt.Errorf("%s: %w", f, err)
+		}
+		if _, err := writeIfChanged(f, next, 0o644); err != nil {
+			return err
 		}
 	}
 	_, err := writeIfChanged("/etc/security/pwquality.conf.d/60-limdm.conf",
@@ -1216,9 +1276,9 @@ func runAuditd(a *Agent) (string, string) {
 }
 
 func fixAuditd(a *Agent) error {
-	pkg := "auditd"
-	if a.host.family == "fedora" || a.host.family == "suse" {
-		pkg = "audit"
+	pkg := "audit" // Fedora, SUSE, Arch, Alpine
+	if a.host.family == "debian" {
+		pkg = "auditd"
 	}
 	if !a.host.isInstalled(pkg) {
 		if err := a.host.install(pkg); err != nil {

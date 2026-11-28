@@ -382,7 +382,7 @@ func deviceFacts(ctx context.Context, q pgx.Tx, deviceID string) (api.Facts, *in
 	if err != nil {
 		return api.Facts{}, nil, err
 	}
-	return api.Facts{OSID: i.OSID, OSVersion: i.OSVersion, Arch: i.Arch, Desktop: i.Desktop, Vendor: i.Vendor,
+	return api.Facts{OSID: i.OSID, OSVersion: i.OSVersion, OSProduct: i.OSProduct, Arch: i.Arch, Desktop: i.Desktop, Vendor: i.Vendor,
 		Model: i.Model, Hostname: i.Hostname, Tags: tags, Groups: groups, Department: dept}, bp, nil
 }
 

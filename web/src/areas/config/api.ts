@@ -142,7 +142,9 @@ export function useSoftware() {
     deleteApp: m((id: string) => unwrap(api.DELETE('/api/v1/software/apps/{id}', { params: { path: { id } } }))),
     importFleet: m((flatpaks: string[]) => unwrap(api.POST('/api/v1/software/import', { body: { flatpaks } }))),
     addFlathub: m(({ id, mode }: { id: string; mode: 'available' | 'request' | 'required' }) => check(api.POST('/api/v1/software/flathub', { body: { id, mode } }))),
-    decide: m(({ id, op }: { id: number; op: 'approve' | 'approve-all' | 'deny' }) => unwrap(api.POST('/api/v1/software/requests/{id}/{op}', { params: { path: { id, op } } }))),
+    decide: m(({ id, op, install }: { id: number; op: 'approve' | 'approve-all' | 'deny'; install?: boolean }) =>
+      unwrap(api.POST('/api/v1/software/requests/{id}/{op}', { params: { path: { id, op } }, body: install ? { install } : undefined })),
+    ),
     saveRemote: m((r: Remote) => unwrap(api.PUT('/api/v1/software/remotes/{name}', { params: { path: { name: r.name } }, body: r }))),
     remoteOp: m(({ name, op }: { name: string; op: 'allow' | 'block' | 'filter' | 'unmanage' }) => unwrap(api.POST('/api/v1/software/remotes/{name}/{op}', { params: { path: { name, op } } }))),
     saveSettings: m((s: Schemas['SoftwareSettings']) => unwrap(api.PUT('/api/v1/software/settings', { body: s }))),

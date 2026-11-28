@@ -1748,7 +1748,7 @@ export interface paths {
         put?: never;
         /**
          * Decide an app request
-         * @description approve, approve-all (an app from outside the catalog becomes available for everyone) or deny.
+         * @description approve, approve-all (an app from outside the catalog becomes available for everyone) or deny. An optional body {"install": true} on approve and approve-all has the agent install the app at once; without it the user may install it. The device learns the decision within its next poll (about ten seconds while a request is open).
          */
         post: operations["appRequestDecide"];
         delete?: never;
@@ -4328,6 +4328,15 @@ export interface components {
                 decided_at: string | null;
                 /** Format: date-time */
                 created_at: string;
+                /** @description Approved with install: the agent installs the app at once. */
+                install: boolean;
+                /**
+                 * @description Result of an approval with install, empty until the device reports it.
+                 * @enum {string}
+                 */
+                install_state: "" | "installed" | "install_failed";
+                /** @description Why the install failed (install_failed). */
+                install_error: string;
             }[];
             encryption_exempt: string[];
             metrics: {
@@ -4538,6 +4547,15 @@ export interface components {
             decided_at?: string | null;
             flatpak: string;
             remote: string;
+            /** @description Approved with install: the agent installs the app at once. */
+            install: boolean;
+            /**
+             * @description Result of an approval with install, empty until the device reports it.
+             * @enum {string}
+             */
+            install_state: "" | "installed" | "install_failed";
+            /** @description Why the install failed (install_failed). */
+            install_error: string;
         };
         Remote: {
             name: string;
@@ -5296,6 +5314,8 @@ export interface components {
             status?: {
                 pending?: components["schemas"]["PendingUpdate"][];
                 pending_error?: string;
+                /** @description the list is usable but incomplete, e.g. the Proxmox enterprise repository refused access */
+                pending_warning?: string;
                 runs?: components["schemas"]["UpdateRun"][];
                 ring?: string;
                 /** Format: date-time */
@@ -9084,7 +9104,14 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Approve and install on the requesting device. */
+                    install?: boolean;
+                };
+            };
+        };
         responses: {
             /** @description OK */
             200: {

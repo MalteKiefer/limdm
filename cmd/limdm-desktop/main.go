@@ -3,7 +3,8 @@
 // limdm-desktop runs in the user's desktop session (XDG autostart). It shows
 // a tray icon with the device's state (details, sync, agent log) and asks
 // the user for what only they can provide, currently the disk passphrase to
-// create a recovery key. Dialogs are libadwaita message dialogs from the GTK
+// create a recovery key: that dialog opens by itself and comes back until the
+// key is escrowed. Dialogs are libadwaita message dialogs from the GTK
 // app (limdm-desktop-ui --dialog); zenity (GNOME) or kdialog (KDE) stand in
 // where GTK 4 is missing. The helper needs no GUI libraries and never runs as root.
 package main
@@ -257,43 +258,18 @@ func (d *dialogs) password(heading, body, label, ok string) ([]byte, bool) {
 
 // ---- flow ----
 
-func stateFile() string {
-	dir := os.Getenv("XDG_STATE_HOME")
-	if dir == "" {
-		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".local", "state")
-	}
-	return filepath.Join(dir, "limdm-desktop", "last-prompt")
-}
-
-func lastPrompt() time.Time {
-	b, err := os.ReadFile(stateFile())
-	if err != nil {
-		return time.Time{}
-	}
-	t, _ := time.Parse(time.RFC3339, strings.TrimSpace(string(b)))
-	return t
-}
-
-func setLastPrompt() {
-	f := stateFile()
-	if os.MkdirAll(filepath.Dir(f), 0o700) == nil {
-		_ = os.WriteFile(f, []byte(time.Now().Format(time.RFC3339)), 0o600) // worst case: asked again
-	}
-}
+// repromptAfter is how long a closed passphrase dialog stays away while the
+// key is still missing.
+const repromptAfter = 10 * time.Minute
 
 // escrow walks the user through every volume that needs a key. It returns
 // false when the user postponed.
 func escrow(st agent.DesktopResponse, d *dialogs, company string) bool {
 	for _, v := range st.Need {
-		if !d.ask(tr("Recovery Key Required"),
-			fmt.Sprintf(tr("%s needs a recovery key for the encrypted disk %s, so access can be restored if the passphrase is ever lost. Your passphrase stays unchanged."), company, v.Device),
-			tr("Set Up"), tr("Later")) {
-			return false
-		}
 		for try := 0; ; try++ {
-			pw, ok := d.password(tr("Enter Disk Passphrase"),
-				fmt.Sprintf(tr("The passphrase you type when the computer starts, for %s."), v.Device),
+			pw, ok := d.password(tr("Recovery Key Required"),
+				fmt.Sprintf(tr("%s needs a recovery key for the encrypted disk %s, so access can be restored if the passphrase is ever lost. Your passphrase stays unchanged."), company, v.Device)+
+					"\n\n"+fmt.Sprintf(tr("The passphrase you type when the computer starts, for %s."), v.Device),
 				tr("Passphrase"), tr("Continue"))
 			if !ok {
 				return false
@@ -324,38 +300,37 @@ func escrow(st agent.DesktopResponse, d *dialogs, company string) bool {
 	return true
 }
 
-func run(now bool) error {
+// needStatus asks the agent which volumes need a key. An answer with an
+// error (agent starting, caller not allowed) is an error, never "nothing to do".
+func needStatus() (agent.DesktopResponse, error) {
 	st, err := call(agent.DesktopRequest{Op: "status"})
-	if err != nil {
-		return err
+	if err == nil && st.Error != "" {
+		err = errors.New(st.Error)
 	}
-	company := st.Company
-	if company == "" {
-		company = tr("Your IT department")
+	return st, err
+}
+
+// prompt asks for the disk passphrase while a volume lacks a recovery key.
+// It returns false when nothing was shown: no key needed, or the dialog is
+// already open (the prompt lock keeps it to one per user).
+func prompt() (bool, error) {
+	st, err := needStatus()
+	if err != nil || len(st.Need) == 0 {
+		return false, err
 	}
-	if len(st.Need) == 0 {
-		if now {
-			if d, err := newDialogs(company, st.Logo); err == nil {
-				d.message(tr("All Set"), tr("Every disk has a recovery key."), false)
-			}
-		}
-		return nil
+	lock := takeLock("limdm-desktop-prompt.lock")
+	if lock == nil {
+		return false, nil
 	}
-	if !now && time.Since(lastPrompt()) < 24*time.Hour {
-		return nil
+	if lock != os.Stdin { // no runtime directory: no lock either
+		defer lock.Close()
 	}
-	setLastPrompt()
-	// the GTK 4 app asks on its disk page; simple dialogs where it cannot run
-	openApp("disk", st, func(st agent.DesktopResponse) {
-		if d, err := newDialogs(company, st.Logo); err == nil {
-			escrow(st, d, company)
-		}
-	})
-	return nil
+	d := dialogsFor(st)
+	escrow(st, d, d.title)
+	return true, nil
 }
 
 func main() {
-	now := flag.Bool("now", false, "ask right away (menu entry) instead of the daily reminder")
 	noTray := flag.Bool("no-tray", false, "only the reminders, no tray icon")
 	msg := flag.String("message", "", "show a message from IT (started by the agent)")
 	msgTitle := flag.String("message-title", "", "title of -message")
@@ -371,14 +346,7 @@ func main() {
 		offerRebootDefer(*rebootAt, *rebootDefers, *rebootMinutes)
 		return
 	}
-	if *now {
-		if err := run(true); err != nil {
-			fmt.Fprintln(os.Stderr, "limdm-desktop:", err)
-			os.Exit(1)
-		}
-		return
-	}
-	lock := singleInstance()
+	lock := takeLock("limdm-desktop.lock")
 	if lock == nil {
 		return // systemd user unit, XDG autostart and the agent may all start it
 	}
@@ -390,14 +358,14 @@ func main() {
 	runTray()
 }
 
-// singleInstance takes a lock in the user's runtime directory, held while the
-// returned file stays open; nil means another helper of this user runs.
-func singleInstance() *os.File {
+// takeLock takes a lock in the user's runtime directory, held while the
+// returned file stays open; nil means another process of this user holds it.
+func takeLock(name string) *os.File {
 	dir := os.Getenv("XDG_RUNTIME_DIR")
 	if dir == "" {
 		dir = fmt.Sprintf("/run/user/%d", os.Getuid())
 	}
-	f, err := os.OpenFile(filepath.Join(dir, "limdm-desktop.lock"), os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // the user's own runtime directory, runs as that user
+	f, err := os.OpenFile(filepath.Join(dir, name), os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // the user's own runtime directory, runs as that user
 	if err != nil {
 		return os.Stdin // no runtime dir: better a second icon than none
 	}

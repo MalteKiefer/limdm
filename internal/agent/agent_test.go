@@ -335,6 +335,13 @@ func TestPolkitAndSudoRendering(t *testing.T) {
 func TestDesktopServer(t *testing.T) {
 	a := &Agent{kick: make(chan struct{}, 1)}
 	d := &desktopServer{a: a, queued: map[string]bool{"u2": true}, inflight: map[string]bool{}, failures: map[uint32][]time.Time{}}
+	// before the first cycle published anything the volume list is unknown,
+	// not empty: an empty list made the helper report "every disk has a key"
+	for _, op := range []string{"status", "info", "escrow"} {
+		if r := d.serve(1000, DesktopRequest{Op: op}); r.Error == "" || r.OK || len(r.Need) != 0 || r.Status != nil {
+			t.Fatalf("%s before the first cycle: %+v", op, r)
+		}
+	}
 	d.info.Store(&desktopInfo{Company: "ACME", Need: []luksVolume{{"/dev/sda3", "u1"}, {"/dev/sdb1", "u2"}}})
 	st := d.serve(1000, DesktopRequest{Op: "status"})
 	if st.Company != "ACME" || len(st.Need) != 1 || st.Need[0].UUID != "u1" {
@@ -1207,6 +1214,9 @@ func TestProtectedKernels(t *testing.T) {
 	for name, want := range map[string]bool{
 		"linux": true, "linux-lts": true, "linux612": true, "linux-cachyos": true, "linux-cachyos-bore": true, "pacman": true,
 		"linux-cachyos-headers": false, "linux-cachyos-nvidia": false, "linux-firmware": false, "linux612-headers": false, "linuxx": false,
+		"proxmox-ve": true, "pve-manager": true, "corosync": true, "zfsutils-linux": true, "proxmox-kernel-6.8": true,
+		"proxmox-kernel-6.8.12-4-pve-signed": true, "pve-kernel-5.15.158-2-pve": true,
+		"proxmox-headers-6.8.12-4-pve": false, "pve-headers-5.15": false, "proxmox-backup-client": false,
 	} {
 		if protectedPackage(name) != want {
 			t.Errorf("%s: want %v", name, want)

@@ -32,6 +32,10 @@ type CatalogApp struct {
 	Detect   []string    `json:"detect,omitempty"` // further package names that mean "installed" (firefox-esr, code)
 	IconHash string      `json:"icon_hash,omitempty"`
 	Request  string      `json:"request,omitempty"` // this device's request: pending | approved | denied
+	// Install: IT approved the request and the agent installs the app at
+	// once; without it the user may install it. Agents before 0.25 install
+	// every approved "request" app.
+	Install bool `json:"install,omitempty"`
 	// Signature is the command key's signature over CatalogAppSigned.
 	Signature string `json:"signature,omitempty"`
 	// Seq grows with every signed change (SignedSeq).
@@ -117,8 +121,9 @@ type AppRequest struct {
 type RequestState struct {
 	Flatpak string `json:"flatpak"`
 	Name    string `json:"name"`
-	Status  string `json:"status"`        // pending | approved | denied
-	App     string `json:"app,omitempty"` // catalog app created on approval
+	Status  string `json:"status"`            // pending | approved | denied
+	App     string `json:"app,omitempty"`     // catalog app created on approval
+	Install bool   `json:"install,omitempty"` // approved with install by the agent
 }
 
 // FlatpakHit is a search result for apps outside the catalog.

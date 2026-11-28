@@ -56,18 +56,25 @@ func (s *Server) deleteCatalogApp(ctx context.Context, actor, id string) error {
 }
 
 // decideAppRequest approves (op approve or approve-all) or denies (deny) a
-// pending app request; pgx.ErrNoRows when it is unknown or decided.
-func (s *Server) decideAppRequest(ctx context.Context, actor string, id int64, op string) error {
+// pending app request; pgx.ErrNoRows when it is unknown or decided. With
+// install an approval has the agent install the app at once; without, the
+// user may install it. The audit action names which one.
+func (s *Server) decideAppRequest(ctx context.Context, actor string, id int64, op string, install bool) error {
 	status := map[string]string{"approve": "approved", "approve-all": "approved", "deny": "denied"}[op]
 	if status == "" {
 		return pgx.ErrNoRows
 	}
+	install = install && status == "approved"
+	action := "catalog.request." + op
+	if install {
+		action += "+install"
+	}
 	return s.auditActionFn(ctx, func(tx pgx.Tx) (string, string, string, string, error) {
 		var device, app, flatpak, remote, name string
-		err := tx.QueryRow(ctx, `UPDATE catalog_requests SET status=$2, decided_by=$3, decided_at=now() WHERE id=$1 AND status='pending'
-			RETURNING device_id, coalesce(app, ''), flatpak, remote, app_name`, id, status, actor).Scan(&device, &app, &flatpak, &remote, &name)
+		err := tx.QueryRow(ctx, `UPDATE catalog_requests SET status=$2, decided_by=$3, decided_at=now(), install=$4 WHERE id=$1 AND status='pending'
+			RETURNING device_id, coalesce(app, ''), flatpak, remote, app_name`, id, status, actor, install).Scan(&device, &app, &flatpak, &remote, &name)
 		if err != nil || status != "approved" || flatpak == "" {
-			return actor, "catalog.request." + op, device, app + flatpak, err
+			return actor, action, device, app + flatpak, err
 		}
 		// an app from outside the catalog joins it: "on request" for this
 		// device only, or available for everyone
@@ -107,7 +114,7 @@ func (s *Server) decideAppRequest(ctx context.Context, actor string, id int64, o
 			}
 		}
 		_, err = tx.Exec(ctx, `UPDATE catalog_requests SET app=$2 WHERE id=$1`, id, app)
-		return actor, "catalog.request." + op, device, flatpak + " -> " + app, err
+		return actor, action, device, flatpak + " -> " + app, err
 	})
 }
 

@@ -256,15 +256,16 @@ func (s *Server) deviceCatalog(ctx context.Context, tx pgx.Tx, deviceID string, 
 	if err != nil {
 		return nil, err
 	}
-	reqs := map[string]string{}
-	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (app) app, status FROM catalog_requests WHERE device_id=$1 AND app IS NOT NULL AND flatpak=''
+	reqs := map[string]api.RequestState{} // app -> Status and Install
+	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (app) app, status, install AND status='approved' FROM catalog_requests WHERE device_id=$1 AND app IS NOT NULL AND flatpak=''
 		ORDER BY app, created_at DESC`, deviceID)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		var app, st string
-		if err := rows.Scan(&app, &st); err != nil {
+		var app string
+		var st api.RequestState
+		if err := rows.Scan(&app, &st.Status, &st.Install); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -273,7 +274,7 @@ func (s *Server) deviceCatalog(ctx context.Context, tx pgx.Tx, deviceID string, 
 	rows.Close()
 	c := &api.Catalog{Apps: []api.CatalogApp{}, RestrictFlathub: set.RestrictFlathub, StoresReadOnly: set.StoresReadOnly,
 		Remotes: remotes, OnlyManagedRemotes: set.OnlyManagedRemotes}
-	rows, err = tx.Query(ctx, `SELECT DISTINCT ON (flatpak) flatpak, app_name, status, coalesce(app, '') FROM catalog_requests
+	rows, err = tx.Query(ctx, `SELECT DISTINCT ON (flatpak) flatpak, app_name, status, coalesce(app, ''), install AND status='approved' FROM catalog_requests
 		WHERE device_id=$1 AND flatpak <> '' AND created_at > now() - interval '90 days' ORDER BY flatpak, created_at DESC`, deviceID)
 	if err != nil {
 		return nil, err
@@ -283,7 +284,7 @@ func (s *Server) deviceCatalog(ctx context.Context, tx pgx.Tx, deviceID string, 
 	}
 	for _, r := range c.Requests { // an approved request makes the new app this device's approved app
 		if r.Status == "approved" && r.App != "" {
-			reqs[r.App] = "approved"
+			reqs[r.App] = r
 		}
 	}
 	for _, a := range apps {
@@ -295,7 +296,7 @@ func (s *Server) deviceCatalog(ctx context.Context, tx pgx.Tx, deviceID string, 
 			slog.Error("catalog app signature invalid, app not delivered", "app", app.ID)
 			continue
 		}
-		app.Request = reqs[app.ID]
+		app.Request, app.Install = reqs[app.ID].Status, reqs[app.ID].Install
 		c.Apps = append(c.Apps, app)
 	}
 	b, _ := json.Marshal(c)
@@ -338,6 +339,23 @@ func recordAppRequests(ctx context.Context, tx pgx.Tx, deviceID string, reqs []a
 		}
 	}
 	return nil
+}
+
+// recordInstallStates stores the agent's result of an "approve and install"
+// request from the catalog states of a check in: installed, or
+// install_failed with the error. An installed request stays installed.
+func recordInstallStates(ctx context.Context, tx pgx.Tx, deviceID string, apps []api.AppState) error {
+	if len(apps) == 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `UPDATE catalog_requests q
+		SET install_state = CASE WHEN (s->>'installed')::boolean THEN 'installed' ELSE 'install_failed' END,
+		    install_error = CASE WHEN (s->>'installed')::boolean THEN '' ELSE left(s->>'error', 500) END
+		FROM jsonb_array_elements($2::jsonb) s
+		WHERE q.device_id=$1 AND q.app = s->>'id' AND q.status='approved' AND q.install AND q.install_state <> 'installed'
+		  AND ((s->>'installed')::boolean OR coalesce(s->>'error', '') <> '')
+		  AND q.id = (SELECT max(id) FROM catalog_requests WHERE device_id=$1 AND app=q.app)`, deviceID, jsonb(apps))
+	return err
 }
 
 // ---- icons ----

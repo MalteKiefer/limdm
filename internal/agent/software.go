@@ -144,8 +144,15 @@ var archKernel = regexp.MustCompile(`^linux(\d{2,3}|-lts|-zen|-hardened|-rt|-cac
 // protectedPackage: removing these would take down the agent or the system.
 func protectedPackage(name string) bool {
 	switch name {
-	case "limdm-agent", "systemd", "dpkg", "apt", "rpm", "dnf", "pacman", "bash", "coreutils", "sudo", "openssh-server", "openssh", "linux-image-generic", "kernel", "kernel-core", "glibc", "libc6", "osquery", "cryptsetup":
+	case "limdm-agent", "systemd", "dpkg", "apt", "rpm", "dnf", "pacman", "bash", "coreutils", "sudo", "openssh-server", "openssh", "linux-image-generic", "kernel", "kernel-core", "glibc", "libc6", "osquery", "cryptsetup",
+		// Proxmox VE: the stack, its cluster, storage and guests
+		"proxmox-ve", "pve-manager", "pve-cluster", "pve-qemu-kvm", "lxc-pve", "zfsutils-linux", "corosync":
 		return true
 	}
-	return archKernel.MatchString(name)
+	return archKernel.MatchString(name) || pveKernel.MatchString(name)
 }
+
+// pveKernel matches the Proxmox VE kernels and their meta packages
+// (proxmox-kernel-6.8, proxmox-kernel-6.8.12-4-pve-signed, the older
+// pve-kernel-*), not the headers.
+var pveKernel = regexp.MustCompile(`^(proxmox|pve)-kernel-`)

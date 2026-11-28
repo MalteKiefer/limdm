@@ -1185,4 +1185,7 @@ var deCatalog = map[string]string{
 	"workload %s %s (%s): %s, error=%v":                                       "Workload %s %s (%s): %s, Fehler=%v",
 	"wrote %s":                                                                "%s geschrieben",
 	"your role cannot read these logs":                                        "Ihre Rolle darf diese Logs nicht lesen",
+
+	// CACHY-A
+	"neither AppArmor nor SELinux enabled, kernel security modules: ": "weder AppArmor noch SELinux aktiv, Sicherheitsmodule des Kernels: ",
 }

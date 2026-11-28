@@ -219,8 +219,9 @@ func (a *Agent) removeApp(app api.CatalogApp, flatpaks map[string]string) error 
 	return errors.New("installed outside the catalog sources; ask IT to remove it")
 }
 
-// applyCatalog installs required apps and approved requests, and sets the
-// Flathub filter and the store lock. Failed apps wait appRetry.
+// applyCatalog installs required apps and requests IT approved with
+// install, and sets the Flathub filter and the store lock. Failed apps wait
+// appRetry. An approval without install lets the user install the app.
 func (a *Agent) applyCatalog(flatpaks []api.FlatpakApp) {
 	c := a.state.Catalog
 	if c == nil {
@@ -231,7 +232,7 @@ func (a *Agent) applyCatalog(flatpaks []api.FlatpakApp) {
 	fl := installedFlatpaks(flatpaks)
 	var due []api.CatalogApp
 	for _, app := range c.Apps {
-		wanted := app.Mode == api.AppRequired || (app.Mode == api.AppOnRequest && app.Request == "approved")
+		wanted := app.Mode == api.AppRequired || (app.Request == "approved" && app.Install)
 		if !wanted || a.appState(app, fl).Installed {
 			continue
 		}
@@ -243,12 +244,22 @@ func (a *Agent) applyCatalog(flatpaks []api.FlatpakApp) {
 		}
 	}
 	if len(due) > 0 {
+		company := a.company()
 		go func() { // large installs must not hold up the check in
 			for _, app := range due {
 				err := a.installApp(app)
 				a.store.finish(app.ID, err)
 				if err != nil {
 					a.event("installing %s failed: %v", app.Name, err)
+				}
+				if app.Mode == api.AppRequired {
+					continue
+				}
+				// the user who asked learns the result (the console from the check in)
+				if err != nil {
+					notifyAs(company, normal, "App installation failed", "%s could not be installed: %s", app.Name, truncateString(err.Error(), 200))
+				} else {
+					notifyAs(company, normal, "App installed", "%s is installed.", app.Name)
 				}
 			}
 			a.kickCheckin()
@@ -483,6 +494,7 @@ func (a *Agent) storeAction(op, id, user, note string) DesktopResponse {
 			a.state.AppRequests = append(a.state.AppRequests, api.AppRequest{App: id, User: user, Note: truncateString(note, 500)})
 		}
 		a.evMu.Unlock()
+		a.requestSince.Store(time.Now().Unix())
 		a.kickCheckin()
 		return DesktopResponse{OK: true}
 	case "install":
@@ -629,6 +641,7 @@ func (a *Agent) requestNewApp(r api.AppRequest) DesktopResponse {
 		a.state.AppRequests = append(a.state.AppRequests, r)
 	}
 	a.evMu.Unlock()
+	a.requestSince.Store(time.Now().Unix())
 	a.kickCheckin()
 	return DesktopResponse{OK: true}
 }
@@ -644,4 +657,78 @@ func (a *Agent) withQueued(reqs []api.RequestState) []api.RequestState {
 		}
 	}
 	return out
+}
+
+// requestDecision is IT's answer to a request of this device.
+type requestDecision struct {
+	Name, Status string // approved | denied
+	Install      bool
+}
+
+// requestDecisions lists the requests pending in old and decided in cur.
+func requestDecisions(old, cur *api.Catalog) []requestDecision {
+	if old == nil || cur == nil {
+		return nil
+	}
+	pending := map[string]bool{}
+	for _, app := range old.Apps {
+		if app.Request == "pending" {
+			pending["app:"+app.ID] = true
+		}
+	}
+	for _, r := range old.Requests {
+		if r.Status == "pending" {
+			pending["flatpak:"+r.Flatpak] = true
+		}
+	}
+	var out []requestDecision
+	for _, app := range cur.Apps {
+		if pending["app:"+app.ID] && (app.Request == "approved" || app.Request == "denied") {
+			out = append(out, requestDecision{Name: app.Name, Status: app.Request, Install: app.Install})
+		}
+	}
+	for _, r := range cur.Requests {
+		if pending["flatpak:"+r.Flatpak] && (r.Status == "approved" || r.Status == "denied") {
+			out = append(out, requestDecision{Name: r.Name, Status: r.Status, Install: r.Install})
+		}
+	}
+	return out
+}
+
+// announceDecisions shows desktop users IT's answer to their requests as
+// soon as a catalog brings it; true when an approved app is to be
+// installed now.
+func (a *Agent) announceDecisions(old, cur *api.Catalog) bool {
+	install := false
+	for _, d := range requestDecisions(old, cur) {
+		switch {
+		case d.Status == "denied":
+			a.notifyUsers(normal, "App request declined", "IT declined your request for %s.", d.Name)
+		case d.Install:
+			install = true
+			a.notifyUsers(normal, "App request approved", "IT approved %s and installs it now.", d.Name)
+		default:
+			a.notifyUsers(normal, "App request approved", "IT approved %s. You can install it now in the software catalog.", d.Name)
+		}
+	}
+	return install
+}
+
+// trackRequests notes since when a request waits for IT: pollLoop asks
+// every requestPoll meanwhile, for at most requestPollMax.
+func (a *Agent) trackRequests() {
+	open := false
+	if c := a.state.Catalog; c != nil {
+		open = slices.ContainsFunc(c.Apps, func(x api.CatalogApp) bool { return x.Request == "pending" }) ||
+			slices.ContainsFunc(c.Requests, func(r api.RequestState) bool { return r.Status == "pending" })
+	}
+	a.evMu.Lock()
+	open = open || len(a.state.AppRequests) > 0
+	a.evMu.Unlock()
+	switch {
+	case !open:
+		a.requestSince.Store(0)
+	case a.requestSince.Load() == 0:
+		a.requestSince.Store(time.Now().Unix())
+	}
 }

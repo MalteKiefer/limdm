@@ -6,6 +6,25 @@ import (
 	"testing"
 )
 
+// TestRuleOSProduct: Proxmox VE nodes report os_id debian; the product
+// tells them apart.
+func TestRuleOSProduct(t *testing.T) {
+	pve, plain := Facts{OSID: "debian", OSProduct: "Proxmox VE 8.4"}, Facts{OSID: "debian"}
+	for _, c := range []struct {
+		r          Rule
+		pve, plain bool
+	}{
+		{Rule{Field: "os.product", Op: "contains", Value: "proxmox"}, true, false},
+		{Rule{Field: "os.product", Op: "present"}, true, false},
+		{Rule{Field: "os.product", Op: "absent"}, false, true},
+		{Rule{Field: "os.product", Op: "eq", Value: "Proxmox VE 8.4"}, true, false},
+	} {
+		if c.r.valid() != nil || c.r.Matches(pve) != c.pve || c.r.Matches(plain) != c.plain {
+			t.Errorf("%+v", c.r)
+		}
+	}
+}
+
 func item(id int64, typ, payload string) LibraryItem {
 	return LibraryItem{ID: id, Name: typ, Type: typ, Payload: json.RawMessage(payload)}
 }

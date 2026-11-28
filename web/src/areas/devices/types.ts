@@ -7,6 +7,8 @@ export type Inventory = Partial<{
   os_name: string
   os_version: string
   os_codename: string
+  os_product: string
+  proxmox: { version: string; node: string; cluster?: string }
   kernel: string
   arch: string
   cpu: string
@@ -24,7 +26,7 @@ export type Inventory = Partial<{
   desktop: string
   display_manager: string
   disks: { name: string; model: string; size_gb: number; type: string }[]
-  volumes: { device: string; mount: string; fs: string; size_gb: number; free_gb: number; encrypted: boolean; encryption?: string }[]
+  volumes: { device: string; mount: string; fs: string; size_gb: number; free_gb: number; encrypted: boolean; encryption?: string; role?: string; removable?: boolean }[]
   accounts: { name: string; uid: number; gid?: number; home?: string; gecos?: string; source?: string; system?: boolean; shell?: string; admin: boolean; sso?: boolean; last_sso?: string; pwd_locked?: boolean }[]
   repos: { type: string; name: string; url: string; suites: string; components: string; enabled: boolean; signed: boolean; file: string }[]
   flatpaks: { id: string; name?: string; version?: string; branch?: string; origin?: string; installation: string }[]

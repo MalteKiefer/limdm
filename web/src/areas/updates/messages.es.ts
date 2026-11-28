@@ -129,6 +129,7 @@ export default {
   },
   'updates.dev.since': 'Actualizaciones de seguridad pendientes desde {at}',
   'updates.dev.error': 'Estado de actualización desconocido: {error}',
+  'updates.dev.warning': 'Aviso: {warning}',
   'updates.dev.noReport': 'El agente aún no informa ningún estado de actualización; los agentes antiguos no lo informan.',
   'updates.dev.runs': 'Últimas ejecuciones',
   'updates.dev.runsSub': 'La última ejecución por origen. Sin actualizaciones significa: no ha cambiado nada.',

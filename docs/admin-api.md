@@ -225,7 +225,7 @@ hashed after `detail` as a fifth chain field ([tenants.md](tenants.md#audit-noti
 | `POST /api/v1/software/apps`, `PUT`/`DELETE /api/v1/software/apps/{id}` | admin, global accounts | catalog app with `sources`, `scope`, `icon` (PNG, base64) | `200`, `204`; `202` approval request for a required app with four eyes; audited as `catalog.save`, `catalog.delete` |
 | `POST /api/v1/software/flathub`, `GET /api/v1/software/flathub/search` | admin / audit | `{"id", "mode"}`, `q` | add a Flathub app (`201`, `202`), search Flathub through the server |
 | `POST /api/v1/software/import` | admin | `{"flatpaks"}` | `200` Flatpaks of the fleet taken into the catalog |
-| `POST /api/v1/software/requests/{id}/{op}` | admin | `op` `approve`, `approve-all`, `deny` | `200`; audited as `catalog.request.<op>` |
+| `POST /api/v1/software/requests/{id}/{op}` | admin | `op` `approve`, `approve-all`, `deny`; optional `{"install": true}` for `approve` and `approve-all` (the agent installs the app at once, else the user installs it) | `200`; audited as `catalog.request.<op>`, an approval with install as `catalog.request.approve+install` |
 | `PUT /api/v1/software/remotes/{name}`, `POST /api/v1/software/remotes/{name}/{op}` | admin | remote; `op` `allow`, `block`, `filter`, `unmanage` | `200`; audited as `catalog.remote` |
 | `PUT /api/v1/software/settings` | admin | `{"restrict_flathub", "stores_read_only", "only_managed_remotes"}` | `200`; audited as `catalog.settings` |
 | `GET /api/v1/packages` | audit, not device scoped | | `200` uploads of the tenant with `usage` and `snippet`, limits, quota use |

@@ -312,8 +312,8 @@ msgstr "Запрос отправлен в ИТ-отдел"
 msgid "Request %s"
 msgstr "Запросить %s"
 
-msgid "IT decides on your request. The app installs by itself once approved."
-msgstr "ИТ-отдел рассмотрит ваш запрос. После одобрения приложение установится само."
+msgid "IT decides on your request: either you may install the app, or it is installed for you."
+msgstr "ИТ-отдел рассмотрит ваш запрос: либо вы сможете установить приложение сами, либо его установят за вас."
 
 msgid "Why do you need it? (optional)"
 msgstr "Зачем оно вам нужно? (необязательно)"
@@ -342,8 +342,8 @@ msgstr "Приложения, которые вы запросили у ИТ-о�
 msgid "Request Another App"
 msgstr "Запросить другое приложение"
 
-msgid "Search Flathub. IT decides on your request; the app installs by itself once approved."
-msgstr "Поиск во Flathub. ИТ-отдел рассмотрит ваш запрос; после одобрения приложение установится само."
+msgid "Search Flathub. IT decides on your request: either you may install the app, or it is installed for you."
+msgstr "Поиск во Flathub. ИТ-отдел рассмотрит ваш запрос: либо вы сможете установить приложение сами, либо его установят за вас."
 
 msgid "e.g. Krita, Obsidian, Zotero"
 msgstr "например, Krita, Obsidian, Zotero"

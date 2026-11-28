@@ -94,10 +94,17 @@ func (h *host) fetchPending() ([]api.PendingUpdate, error) {
 			return nil, err
 		}
 		var out string
-		if out, err = run(5*time.Minute, "apt-get", "-s", "-o", "Debug::NoLocking=1", "upgrade", "--with-new-pkgs"); err != nil {
+		if out, err = aptSim(aptUpgradeVerb()...); err != nil {
 			return nil, err
 		}
 		list = parseAptPending(out, h.ID)
+		if onPVE() { // on a Proxmox VE node its own repositories are the distribution's
+			for i := range list {
+				if strings.EqualFold(list[i].Origin, "proxmox") {
+					list[i].Source = api.SourceOSAll
+				}
+			}
+		}
 	default:
 		list, err = h.dnfPending()
 	}

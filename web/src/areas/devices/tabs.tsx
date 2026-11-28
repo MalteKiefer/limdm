@@ -386,8 +386,8 @@ function Requests({ d }: { d: DeviceDetail }) {
   const t = useT()
   const admin = useCan('admin')
   const qc = useQueryClient()
-  const decide = (id: number, op: 'approve' | 'deny') =>
-    unwrap(api.POST('/api/v1/software/requests/{id}/{op}', { params: { path: { id, op } } }))
+  const decide = (id: number, op: 'approve' | 'deny', install = false) =>
+    unwrap(api.POST('/api/v1/software/requests/{id}/{op}', { params: { path: { id, op } }, body: install ? { install } : undefined }))
       .then(() => (toast(t('devices.sw.decided')), void qc.invalidateQueries({ queryKey: ['devices'] })))
       .catch((e: unknown) => toast(errorText(e), 'error'))
   return (
@@ -402,7 +402,14 @@ function Requests({ d }: { d: DeviceDetail }) {
             r.name,
             r.username,
             <span className="text-muted">{r.note}</span>,
-            <Badge tone={r.status === 'approved' ? 'ok' : r.status === 'denied' ? 'bad' : 'warn'}>{t(`devices.req.${r.status}` as MessageKey)}</Badge>,
+            <span className="flex flex-wrap items-center gap-1" title={r.install_error || undefined}>
+              <Badge tone={r.status === 'approved' ? 'ok' : r.status === 'denied' ? 'bad' : 'warn'}>{t(`devices.req.${r.status}` as MessageKey)}</Badge>
+              {r.install && (
+                <Badge tone={r.install_state === 'installed' ? 'ok' : r.install_state === 'install_failed' ? 'bad' : 'info'}>
+                  {t(`devices.inst.${r.install_state || 'pending'}` as MessageKey)}
+                </Badge>
+              )}
+            </span>,
             <span className="whitespace-nowrap">{ago(r.created_at)}</span>,
             ...(admin
               ? [
@@ -410,6 +417,9 @@ function Requests({ d }: { d: DeviceDetail }) {
                     <span className="flex gap-2">
                       <button type="button" className="btn btn-primary !h-7 text-meta" onClick={() => void decide(r.id, 'approve')}>
                         {t('devices.sw.approve')}
+                      </button>
+                      <button type="button" className="btn !h-7 text-meta" onClick={() => void decide(r.id, 'approve', true)}>
+                        {t('devices.sw.approveInstall')}
                       </button>
                       <button type="button" className="btn !h-7 text-meta" onClick={() => void decide(r.id, 'deny')}>
                         {t('devices.sw.deny')}
@@ -540,7 +550,17 @@ function Disks({ d, open }: { d: DeviceDetail; open: (x: Dialog) => void }) {
               mono(v.mount),
               mono(v.device),
               v.fs,
-              v.encrypted ? <Badge tone="ok">{v.encryption || t('devices.inv.encrypted')}</Badge> : d.encryption_exempt.includes(v.mount) ? <Badge>{t('devices.inv.excluded')}</Badge> : <Badge tone="bad">{t('devices.sys.none')}</Badge>,
+              v.encrypted ? (
+                <Badge tone="ok">{v.encryption || t('devices.inv.encrypted')}</Badge>
+              ) : v.role === 'esp' ? (
+                <Badge>{t('devices.inv.notRequired')}</Badge>
+              ) : v.removable ? (
+                <Badge>{t('devices.inv.removable')}</Badge>
+              ) : d.encryption_exempt.includes(v.mount) ? (
+                <Badge>{t('devices.inv.excluded')}</Badge>
+              ) : (
+                <Badge tone="bad">{t('devices.sys.none')}</Badge>
+              ),
               <span className="flex items-center gap-2 whitespace-nowrap">
                 <meter min={0} max={100} low={80} high={90} optimum={0} value={usedPct(v.size_gb, v.free_gb)} aria-label={t('devices.inv.usage')} />
                 <span className="text-meta text-muted">{t('devices.inv.usageVal', { used: fmt(v.size_gb - v.free_gb), size: fmt(v.size_gb) })}</span>

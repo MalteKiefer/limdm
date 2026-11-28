@@ -581,22 +581,17 @@ func runRecoveryEscrow(a *Agent) (string, string) {
 	return pass, strconv.Itoa(len(vols)) + " LUKS volume(s) with escrowed recovery key"
 }
 
-// notifyEscrow asks logged in desktop users, at most once a day, to create a
-// recovery key: only the user knows a current passphrase.
+// notifyEscrow reminds logged in desktop users, at most once a day, to create
+// a recovery key: only the user knows a current passphrase. The dialog that
+// asks for it comes from the desktop helper (ensureHelpers keeps it running
+// in every graphical session), which polls the socket and opens it by itself.
 func (a *Agent) notifyEscrow() {
 	if de := a.pol.Extra.DiskEncryption; de == nil || !de.Escrow || len(a.missingEscrow()) == 0 ||
 		time.Since(a.state.EscrowNotified) < 24*time.Hour {
 		return
 	}
 	sent := a.notifyUsers(urgent, "Disk recovery key required",
-		"%s needs a recovery key for your disk encryption. A dialog asks for your disk password; it is also in the applications menu as \"Disk recovery key\".", a.company())
-	// open the dialog right away: compositors like sway do not run the
-	// helper's XDG autostart entry
-	for _, s := range graphicalSessions() {
-		if launchInSession(s.user, s.env, "/usr/bin/limdm-desktop", "--now") == nil {
-			sent = true
-		}
-	}
+		"%s needs a recovery key for your disk encryption. A dialog asks for your disk passphrase; the LiMDM app has it on the page Disk Encryption too.", a.company())
 	if sent {
 		a.state.EscrowNotified = time.Now().Round(0)
 	}

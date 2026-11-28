@@ -69,6 +69,7 @@ export function UpdatesTab({ d }: { d: DeviceDetail }) {
                 </li>
               )}
               {status?.pending_error && <li className="text-bad">{t('updates.dev.error', { error: status.pending_error })}</li>}
+              {status?.pending_warning && <li className="text-warn">{t('updates.dev.warning', { warning: status.pending_warning })}</li>}
             </ul>
           ) : (
             <p className="text-muted">{t('updates.dev.noReport')}</p>
