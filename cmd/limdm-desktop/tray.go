@@ -60,7 +60,7 @@ func runTray() {
 }
 
 func (t *tray) loop() {
-	tick := time.NewTicker(time.Minute)
+	tick := time.NewTicker(refreshEvery)
 	defer tick.Stop()
 	t.refresh()
 	for {
@@ -101,6 +101,10 @@ func (t *tray) loop() {
 	}
 }
 
+// refreshEvery: a lock or unlock by IT shows within seconds; the agent
+// answers from memory, so asking often costs nothing.
+const refreshEvery = 15 * time.Second
+
 func (t *tray) refresh() {
 	resp, err := call(agent.DesktopRequest{Op: "info"})
 	if err != nil || resp.Status == nil {
@@ -119,6 +123,8 @@ func (t *tray) refresh() {
 	t.about.SetTitle(fmt.Sprintf(tr("LiMDM agent %s"), st.Version))
 	icon, mark, line := iconOK, "✓ ", tr("Device is compliant")
 	switch {
+	case st.Wiped:
+		icon, mark, line = iconBad, "✕ ", tr("This device was wiped by IT and restarts now")
 	case st.RemoteShell != "":
 		icon, mark, line = iconWarn, "! ", tr("IT remote support session running")
 	case st.Locked:

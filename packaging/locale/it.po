@@ -135,6 +135,12 @@ msgstr "Dispositivo bloccato"
 msgid "IT locked this device."
 msgstr "L'IT ha bloccato questo dispositivo."
 
+msgid "Device Wiped"
+msgstr "Dispositivo cancellato"
+
+msgid "This device was wiped by IT and restarts now."
+msgstr "Questo dispositivo è stato cancellato dall'IT e si riavvia ora."
+
 msgid "No Connection to the Server"
 msgstr "Nessuna connessione al server"
 

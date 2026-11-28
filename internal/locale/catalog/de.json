@@ -275,6 +275,7 @@
  "The terminal opened by %s has ended.": "Das von %s geöffnete Terminal wurde beendet.",
  "This device is locked because it could not reach the LiMDM server for too long.\nConnect it to the network; it unlocks automatically once the server is reachable.\n": "Dieses Gerät ist gesperrt, weil es den LiMDM Server zu lange nicht erreicht hat.\nVerbinden Sie es mit dem Netzwerk; es wird automatisch entsperrt, sobald der Server erreichbar ist.\n",
  "This device is locked by IT (LiMDM). Contact your administrator.\n": "Dieses Gerät wurde von der IT gesperrt (LiMDM). Wenden Sie sich an Ihren Administrator.\n",
+ "This device was wiped by IT and restarts now": "Dieses Gerät wurde von der IT gelöscht und startet jetzt neu",
  "Time synchronisation is active": "Zeitsynchronisation ist aktiv",
  "Too Many Attempts": "Zu viele Versuche",
  "too many attempts, try again later": "zu viele Versuche, versuchen Sie es später erneut",

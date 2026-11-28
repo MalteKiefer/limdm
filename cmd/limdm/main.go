@@ -239,6 +239,8 @@ func info(args []string) error {
 			fmt.Fprintf(w, "%s\t%s\n", tr("Offline lock"), trn(st.OfflineLockH, "after %d hour without the server", "after %d hours without the server"))
 		}
 		switch {
+		case st.Wiped:
+			fmt.Fprintf(w, "%s\t%s\n", tr("Device lock"), tr("This device was wiped by IT and restarts now"))
 		case st.LostMode:
 			fmt.Fprintf(w, "%s\t%s\n", tr("Device lock"), tr("lost mode"))
 		case st.OfflineLocked:

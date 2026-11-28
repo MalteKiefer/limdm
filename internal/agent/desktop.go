@@ -68,6 +68,7 @@ type DesktopStatus struct {
 	CheckList   []DesktopCheck `json:"check_list,omitempty"`
 	Escrowed    int            `json:"escrowed"`
 	Locked      bool           `json:"locked,omitempty"`
+	Wiped       bool           `json:"wiped,omitempty"` // IT erased the disk; the device restarts
 
 	// for limdm info
 	System        DesktopSystem `json:"system"`
@@ -239,9 +240,7 @@ func (a *Agent) publishDesktop() {
 		}
 		info.Status.CheckList = append(info.Status.CheckList, DesktopCheck{ID: c.ID, Level: c.Level, Title: c.Title, Status: c.Status, Detail: c.Detail})
 	}
-	if _, err := os.Stat("/etc/nologin"); err == nil {
-		info.Status.Locked = true
-	}
+	info.Status.Locked, info.Status.Wiped = exists(nologinFile), exists(wipedFile)
 	st := &info.Status
 	st.System, st.LostMode, st.OfflineLocked = a.lastSystem, inLostMode(), a.state.OfflineLocked
 	st.CheckinEvery, st.OfflineLockH = a.pol.CheckinSeconds, a.pol.OfflineLockHours
@@ -355,10 +354,11 @@ func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 		}
 		info = &desktopInfo{}
 	}
+	wiped := exists(wipedFile) // the key slots are erased on purpose: no escrow prompt
 	d.mu.Lock()
 	var need []DesktopVolume
 	for _, v := range info.Need {
-		if !d.queued[v.UUID] {
+		if !d.queued[v.UUID] && !wiped {
 			need = append(need, DesktopVolume{Device: v.Path, UUID: v.UUID})
 		}
 	}
@@ -369,6 +369,7 @@ func (d *desktopServer) serve(uid uint32, req DesktopRequest) DesktopResponse {
 	case "info":
 		st := info.Status
 		st.RemoteShell = d.a.shellInfo() // live, not from the last cycle
+		st.Locked, st.LostMode, st.Wiped = exists(nologinFile), inLostMode(), wiped
 		resp := DesktopResponse{Company: info.Company, Logo: info.Logo, Need: need, Status: &st, Profiles: info.Profiles, Certs: info.Certs}
 		if !req.remote { // the journal names users, hosts and errors: only at the device itself
 			resp.Log, resp.LogLines = agentLog(), agentJournal(200)

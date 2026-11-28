@@ -136,6 +136,7 @@ type Agent struct {
 	lastSeen   map[string]time.Time // event text -> last time it was queued (repeats are dropped, see event)
 	store      store
 	kick       chan struct{}
+	quick      chan struct{} // commands wait: a check in without converging first (pollLoop)
 	declStatus []api.DeclarationStatus
 	users      []api.User
 	reasons    map[string][]string // declaration type -> why it is not active
@@ -160,6 +161,7 @@ type Agent struct {
 	lastCheckin  *time.Time
 	lastError    string
 	lastChecks   []api.CheckResult
+	lastStatus   *api.Status      // of the last full cycle, reused by a quick check in
 	lastFlatpaks []api.FlatpakApp // from the last inventory, for the desktop catalog
 	lastSystem   DesktopSystem    // from the last inventory, for limdm info
 	shell        atomic.Pointer[runningShell]
@@ -469,10 +471,7 @@ func New(log *slog.Logger) (*Agent, error) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, err
 	}
-	a := &Agent{cfg: cfg, client: newClient(tc), host: h, log: log}
-	if exists(wipedFile) { // wiped, but the restart did not happen yet
-		go wipeReboot()
-	}
+	a := &Agent{cfg: cfg, client: newClient(tc), host: h, log: log, kick: make(chan struct{}, 1), quick: make(chan struct{}, 1)}
 	if b, err := os.ReadFile(stateFile); err == nil {
 		if err := json.Unmarshal(b, &a.state); err != nil {
 			log.Warn("state file unreadable, starting from defaults", "err", err)
@@ -495,6 +494,9 @@ func New(log *slog.Logger) (*Agent, error) {
 	}
 	fallbackDNS.Store(a.state.FallbackDNS && !cfg.NoFallbackDNS)
 	a.compose()
+	if exists(wipedFile) { // wiped, but the restart did not happen yet
+		go a.wipeReboot()
+	}
 	return a, nil
 }
 
@@ -600,15 +602,20 @@ func (a *Agent) Run(ctx context.Context) error {
 	wake := make(chan os.Signal, 1)
 	signal.Notify(wake, syscall.SIGUSR1) // "recovery-key" asks for an immediate check in
 	defer signal.Stop(wake)
-	a.kick = make(chan struct{}, 1)
 	a.desktop = &desktopServer{a: a, queued: map[string]bool{}, inflight: map[string]bool{}, failures: map[uint32][]time.Time{}}
 	a.store.jobs = map[string]*appJob{}
 	go a.serveDesktop(ctx)
 	go a.pollLoop(ctx)
 	go a.logLoop(ctx)       // logs.go, idle without com.limdm.logging
 	a.enforceOffline(false) // before anything else: the device may have been off for a long time
+	quick := false
 	for {
-		a.cycle(ctx)
+		a.cycle(ctx, quick)
+		// a quick check in that ran commands reports their results at once
+		if quick && a.checkinFailures == 0 && len(a.state.Results) > 0 {
+			continue
+		}
+		quick = false
 		interval := time.Duration(a.pol.CheckinSeconds) * time.Second
 		if interval <= 0 {
 			interval = 5 * time.Minute
@@ -627,6 +634,8 @@ func (a *Agent) Run(ctx context.Context) error {
 		case <-time.After(wait):
 		case <-wake:
 		case <-a.kick:
+		case <-a.quick:
+			quick = true
 		}
 	}
 }
@@ -673,9 +682,8 @@ func (a *Agent) declarationStatus() []api.DeclarationStatus {
 	return out
 }
 
-func (a *Agent) cycle(ctx context.Context) {
-	defer a.saveState()
-	defer a.publishDesktop()
+// collectStatus converges and reads the inventory for a full check in.
+func (a *Agent) collectStatus(ctx context.Context) api.Status {
 	a.renewIdentity(ctx)
 	a.ensureNetworkCert(ctx)
 	a.takeEscrowRequests()
@@ -695,8 +703,25 @@ func (a *Agent) cycle(ctx context.Context) {
 	a.lastFlatpaks = inv.Flatpaks
 	a.lastSystem = DesktopSystem{OS: strings.TrimSpace(inv.OSName + " " + inv.OSVersion), Kernel: inv.Kernel, Arch: inv.Arch,
 		Inventory: inv.Source, Vendor: inv.Vendor, Model: inv.Model, Serial: inv.Serial}
-	status := api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus(), CatalogVersion: CatalogVersion, Updates: a.updateStatus(),
+	return api.Status{Inventory: inv, Checks: checks, Declarations: a.declarationStatus(), CatalogVersion: CatalogVersion, Updates: a.updateStatus(),
 		Workloads: a.workloads()}
+}
+
+// cycle converges, collects the inventory and checks in. A quick cycle
+// (commands wait, see pollLoop) skips converging and the inventory and sends
+// the hashes of the last full cycle: the commands arrive in one round trip
+// instead of after minutes of package and inventory queries.
+func (a *Agent) cycle(ctx context.Context, quick bool) {
+	defer a.saveState()
+	defer a.publishDesktop()
+	quick = quick && a.lastStatus != nil
+	var status api.Status
+	if quick {
+		status = *a.lastStatus
+	} else {
+		status = a.collectStatus(ctx)
+		a.lastStatus = &status
+	}
 	statusHash := statusHashOf(status)
 	req := api.CheckinRequest{AgentVersion: Version, Arch: runtime.GOARCH, DeclarationsToken: a.state.DeclToken,
 		StatusHash: statusHash, Results: a.state.Results, Events: a.pendingEvents(), Metrics: metrics(), BrandingHash: a.state.BrandingHash,
@@ -720,18 +745,25 @@ func (a *Agent) cycle(ctx context.Context) {
 	if statusHash != a.sentStatusHash {
 		req.Status = &status
 	}
-	pkgs, pkgHash, err := a.host.installedPackages()
-	if err != nil {
-		a.log.Error("packages", "err", err)
-	}
-	req.PackagesHash = pkgHash
-	if pkgHash != a.sentPkgHash {
-		req.Packages = pkgs
-	}
-	fw := a.collectFirewall()
-	req.FirewallHash = firewallHash(fw)
-	if req.FirewallHash != a.sentFwHash {
-		req.Firewall = &fw
+	pkgHash := a.sentPkgHash
+	if quick {
+		req.PackagesHash, req.FirewallHash = a.sentPkgHash, a.sentFwHash
+	} else {
+		var pkgs []api.Package
+		var err error
+		pkgs, pkgHash, err = a.host.installedPackages()
+		if err != nil {
+			a.log.Error("packages", "err", err)
+		}
+		req.PackagesHash = pkgHash
+		if pkgHash != a.sentPkgHash {
+			req.Packages = pkgs
+		}
+		fw := a.collectFirewall()
+		req.FirewallHash = firewallHash(fw)
+		if req.FirewallHash != a.sentFwHash {
+			req.Firewall = &fw
+		}
 	}
 
 	var resp api.CheckinResponse
@@ -746,6 +778,7 @@ func (a *Agent) cycle(ctx context.Context) {
 	a.checkinFailures = 0
 	a.lastCheckin, a.lastError = &now, ""
 	a.enforceOffline(true)
+	a.publishDesktop() // contact and offline lock state, before commands and updates run
 	// drop only what was sent: entries added meanwhile (unlock events, desktop) stay
 	a.state.Results = a.state.Results[len(req.Results):]
 	a.state.ScriptResults = a.state.ScriptResults[len(req.ScriptResults):]
@@ -1082,13 +1115,17 @@ func (a *Agent) post(ctx context.Context, path string, in, out any) error {
 }
 
 // pollLoop asks the server every minute whether commands wait, so a reboot,
-// lock or wipe does not wait for the next full check in. It runs on its own
-// clock: desktop upkeep runs in maintainLoop and can never delay it. A
-// random offset spreads devices; after failures it waits longer (up to 5
-// minutes) and returns to one minute with the first answer.
+// lock or wipe does not wait for the next full check in: a pending answer
+// starts a quick check in (cycle) that fetches the commands without
+// converging first. For fastPollFor after such an answer it asks every
+// requestPoll, so follow ups (an unlock after a lock) arrive within seconds.
+// It runs on its own clock: desktop upkeep runs in maintainLoop and can
+// never delay it. A random offset spreads devices; after failures it waits
+// longer (up to 5 minutes) and returns to one minute with the first answer.
 func (a *Agent) pollLoop(ctx context.Context) {
 	go a.maintainLoop(ctx)
 	wait, failures := pollJitter(), 0
+	var fastUntil time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -1108,26 +1145,37 @@ func (a *Agent) pollLoop(ctx context.Context) {
 			failures = 0
 		}
 		if err == nil && resp.Pending {
-			a.kickCheckin() // buffered: a check in already running picks it up next
+			fastUntil = time.Now().Add(fastPollFor)
+			select { // buffered: a cycle already running is followed by a quick one
+			case a.quick <- struct{}{}:
+			default:
+			}
 		}
 		w := pollWait(failures)
-		if failures == 0 && requestPolling(a.requestSince.Load(), time.Now()) {
+		if failures == 0 && (time.Now().Before(fastUntil) || requestPolling(a.requestSince.Load(), time.Now())) {
 			w = requestPoll + pollJitter()/5
 		}
 		wait = a.busy.wait(w)
 	}
 }
 
-// pollWait is one minute, doubling per failure up to five, plus jitter;
-// after failures up to half of the wait, so the fleet does not return in
-// the same ten seconds when the server is back.
+// pollWait is pollEvery, doubling per failure up to five minutes, plus
+// jitter; after failures up to half of the wait, so the fleet does not
+// return in the same ten seconds when the server is back.
 func pollWait(failures int) time.Duration {
-	d := min(time.Minute<<min(failures, 3), 5*time.Minute)
+	d := min(pollEvery<<min(failures, 3), 5*time.Minute)
 	if failures > 0 {
 		d += time.Duration(mrand.Int64N(int64(d / 2))) //nolint:gosec // jitter, not a secret
 	}
 	return d + pollJitter()
 }
+
+// pollEvery is the normal poll interval; fastPollFor how long the agent
+// polls every requestPoll after the server reported waiting commands.
+var (
+	pollEvery   = time.Minute
+	fastPollFor = 5 * time.Minute
+)
 
 // requestPoll is the poll interval while a user's app request waits for
 // IT, so the answer arrives within seconds; requestPollMax bounds it.
@@ -1142,7 +1190,7 @@ func requestPolling(since int64, now time.Time) bool {
 	return since > 0 && now.Sub(time.Unix(since, 0)) < requestPollMax
 }
 
-func pollJitter() time.Duration { return time.Duration(mrand.Int64N(int64(10 * time.Second))) } //nolint:gosec // jitter, not a secret
+var pollJitter = func() time.Duration { return time.Duration(mrand.Int64N(int64(10 * time.Second))) } //nolint:gosec // jitter, not a secret
 
 // maintainLoop keeps desktop helpers, idle locks and a device lock in place
 // every minute, independent of the server.
@@ -1354,6 +1402,7 @@ func (a *Agent) runCommands(cmds []api.Command) {
 		}
 		a.state.Results = append(a.state.Results, a.execute(c))
 		a.syncNow = true
+		a.publishDesktop() // lock, unlock, lost, message: the tray shows it now, not at the end of the cycle
 		if c.Type == "workload_action" {
 			// the console waits for the new state: report the result and
 			// the inventory now, not after the jitter of syncNow

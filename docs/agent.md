@@ -599,7 +599,17 @@ version the rollout policy releases for it). Agent updates can carry security fi
 do not wait for the next regular check in. A version being installed or one that already
 failed on the device does not trigger check ins. After failed polls the agent waits longer,
 up to 5 minutes plus up to half of that as random delay, and returns to one minute with the
-first answer. Failed check ins back off the same way: the interval doubles per failure up to
+first answer. For queued commands this check in is a quick one: it skips
+converging and the inventory and sends the hashes of the last full cycle, so a lock, unlock,
+wipe or message reaches the device within one poll (at most about 70 seconds, usually much
+less) plus one round trip, not after minutes of package and inventory queries. Its results
+are reported by a second quick check in right away; the full cycle follows within a minute.
+For five minutes after a poll that found something the agent polls every 10 seconds, so
+follow ups (an unlock after a lock) arrive within seconds.
+
+The desktop tray and the LiMDM app ask the agent every 15 seconds; the agent refreshes what
+it tells them after every command and every check in, and reports the lock, lost mode and
+wipe state live. Failed check ins back off the same way: the interval doubles per failure up to
 15 minutes, with up to 50 % random delay, so a fleet does not return in the same seconds
 after a server outage. When the server answers 503 or 429 (overloaded, too many parallel
 package downloads) the agent honors `Retry-After` (at most 30 minutes, plus jitter) for check

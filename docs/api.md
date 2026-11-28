@@ -62,7 +62,9 @@ A device checks in once per check in interval and polls every minute. The interv
 from the agent declaration (`checkin_seconds`, 30 to 86400, default 300 in the seeded
 library item); without one the agent uses five minutes. Up to 10% jitter spreads the
 fleet. After failures the poll doubles its wait up to five minutes, plus up to 10 seconds of
-jitter. One check in per device runs at a time (row lock).
+jitter. After a poll answered `pending` the agent polls every 10 seconds for five minutes, and
+a check in for queued commands skips converging and the inventory (see
+[agent.md](agent.md#command-delivery)). One check in per device runs at a time (row lock).
 
 ## Check in
 

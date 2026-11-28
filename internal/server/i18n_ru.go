@@ -1567,4 +1567,10 @@ var ruCatalog = map[string]string{
 
 	// CACHY-A
 	"neither AppArmor nor SELinux enabled, kernel security modules: ": "ни AppArmor, ни SELinux не включены, модули безопасности ядра: ",
+
+	// INSTANT-A
+	"wipe restart scheduled at %s":                                   "перезагрузка после стирания запланирована на %s",
+	"wipe restart failed: %s: %v":                                    "перезагрузка после стирания не удалась: %s: %v",
+	"wipe restart: %s accepted, waiting %s":                          "перезагрузка после стирания: %s принято, ожидание %s",
+	"wipe restart failed: the device is still running, power it off": "перезагрузка после стирания не удалась: устройство всё ещё работает, выключите его",
 }

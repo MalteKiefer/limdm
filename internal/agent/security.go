@@ -552,8 +552,13 @@ func hasPending(ks []pendingKey, uuid string) bool {
 	return false
 }
 
-// missingEscrow lists LUKS volumes without an escrowed or pending key.
+// missingEscrow lists LUKS volumes without an escrowed or pending key. A
+// wiped device has none to ask for: its key slots are erased on purpose, and
+// asking the user would offer to escrow a disk that no longer opens.
 func (a *Agent) missingEscrow() []luksVolume {
+	if exists(wipedFile) {
+		return nil
+	}
 	var out []luksVolume
 	for _, v := range luksVolumes() {
 		if _, ok := a.state.Escrowed[v.UUID]; !ok && !hasPending(a.state.PendingKeys, v.UUID) {
@@ -566,6 +571,9 @@ func (a *Agent) missingEscrow() []luksVolume {
 func runRecoveryEscrow(a *Agent) (string, string) {
 	if de := a.pol.Extra.DiskEncryption; de == nil || !de.Escrow {
 		return na, "recovery key escrow not declared"
+	}
+	if exists(wipedFile) {
+		return na, "device wiped by IT, it restarts"
 	}
 	vols := luksVolumes()
 	if len(vols) == 0 {
@@ -601,6 +609,9 @@ func (a *Agent) notifyEscrow() {
 // passphrase of every LUKS volume without an escrowed key, adds a generated
 // recovery key and hands it to the agent for escrow.
 func CreateRecoveryKeys(readPass func(prompt string) (string, error), all bool) error {
+	if exists(wipedFile) {
+		return errors.New("this device was wiped by IT and restarts now")
+	}
 	var st State
 	if b, err := os.ReadFile(stateFile); err == nil {
 		if err := json.Unmarshal(b, &st); err != nil {

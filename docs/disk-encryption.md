@@ -162,9 +162,14 @@ with the recovery key at boot and set a new passphrase, for example with
 **Wipe** erases the LUKS headers of all volumes (`cryptsetup luksErase`), which makes the data
 unrecoverable, and restarts the device two minutes later, after reporting the result. The
 restart is forced: sleep is blocked until then, a device that slept through the two minutes
-restarts as soon as it wakes up, inhibitors are ignored and, if systemd refuses, the agent
-reboots through the kernel (`/proc/sysrq-trigger`). After the restart the disk cannot be
-unlocked any more. Devices
+restarts as soon as it wakes up, inhibitors are ignored, and the agent tries one way after
+the other: `systemctl reboot --force` (30 seconds), `systemctl reboot --force --force` (15
+seconds), `reboot -f` (15 seconds), then the kernel directly through `/proc/sysrq-trigger`
+(sync, remount read only, reboot). The command result names the planned restart time; every
+attempt and its error is an agent event in the device's activity and in the journal. While
+`/var/lib/limdm/wiped` exists the agent asks nobody for a recovery key (the key slots are gone
+on purpose) and the tray and the LiMDM app show that IT wiped the device and it restarts.
+After the restart the disk cannot be unlocked any more. Devices
 without LUKS are refused, because there is no fast way to guarantee deletion; use lost mode.
 
 ## Limits

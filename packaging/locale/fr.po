@@ -135,6 +135,12 @@ msgstr "Appareil verrouillé"
 msgid "IT locked this device."
 msgstr "Le service informatique a verrouillé cet appareil."
 
+msgid "Device Wiped"
+msgstr "Appareil effacé"
+
+msgid "This device was wiped by IT and restarts now."
+msgstr "Cet appareil a été effacé par le service informatique et redémarre maintenant."
+
 msgid "No Connection to the Server"
 msgstr "Aucune connexion au serveur"
 

@@ -1567,4 +1567,10 @@ var itCatalog = map[string]string{
 
 	// CACHY-A
 	"neither AppArmor nor SELinux enabled, kernel security modules: ": "né AppArmor né SELinux sono attivi, moduli di sicurezza del kernel: ",
+
+	// INSTANT-A
+	"wipe restart scheduled at %s":                                   "riavvio dopo la cancellazione pianificato alle %s",
+	"wipe restart failed: %s: %v":                                    "riavvio dopo la cancellazione non riuscito: %s: %v",
+	"wipe restart: %s accepted, waiting %s":                          "riavvio dopo la cancellazione: %s accettato, attesa di %s",
+	"wipe restart failed: the device is still running, power it off": "riavvio dopo la cancellazione non riuscito: il dispositivo è ancora acceso, spegnerlo",
 }
