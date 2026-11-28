@@ -177,43 +177,90 @@ func (a *Agent) wipe() (string, error) {
 	a.event("device wiped")
 	// restart after the result was reported with the next check in
 	if len(report) > 0 {
-		_ = os.WriteFile(wipedFile, []byte(time.Now().UTC().Format(time.RFC3339)), 0o600)
-		go wipeReboot()
+		now := wipeNow().UTC()
+		if err := os.WriteFile(wipedFile, []byte(now.Format(time.RFC3339)), 0o600); err != nil {
+			a.event("wipe restart failed: %s: %v", "recording the wipe time", err) // the restart still follows, from now
+		}
+		report = append(report, "restart scheduled at "+now.Add(wipeRebootAfter).Format("15:04:05 MST"))
+		go a.wipeReboot()
 	}
 	a.syncNow = true
 	return strings.Join(report, "\n"), errors.Join(errs...)
 }
 
 // wipedFile records when a wipe erased the disk; while it exists the agent
-// forces a restart (also when it starts again before the restart happened).
-const wipedFile = stateDir + "/wiped"
+// forces a restart (also when it starts again before the restart happened)
+// and asks nobody for a recovery key. A variable for tests.
+var wipedFile = stateDir + "/wiped"
 
 // wipeRebootAfter leaves time to report the result.
 const wipeRebootAfter = 2 * time.Minute
+
+// What wipeReboot uses; tests replace them.
+var (
+	wipeRun   = run
+	wipeWrite = func(path, data string) error { return os.WriteFile(path, []byte(data), 0o200) }
+	wipeNow   = time.Now
+	wipeSleep = time.Sleep
+)
+
+// wipeSteps are the ways to restart, gentlest first, each with the time it
+// gets before the next one is tried. Each runs in its own process: should
+// systemd kill the agent while it hangs in shutdown, the kernel steps never
+// run, so the waits are short.
+var wipeSteps = []struct {
+	args []string
+	wait time.Duration
+}{
+	{[]string{"systemctl", "reboot", "--force"}, 30 * time.Second},
+	{[]string{"systemctl", "reboot", "--force", "--force"}, 15 * time.Second},
+	{[]string{"reboot", "-f"}, 15 * time.Second},
+}
 
 // wipeReboot restarts the device wipeRebootAfter after the wipe, whatever
 // blocks it: sleep is masked so the device cannot suspend meanwhile, the
 // deadline is checked against the wall clock (a device that slept through it
 // restarts right after waking up), inhibitors are ignored and, should systemd
-// refuse, the kernel is told to reboot directly. The disk is unreadable after
-// luksErase, so nothing worth a clean shutdown is lost.
-func wipeReboot() {
-	_, _ = sh("systemctl", "mask", "--runtime", "sleep.target", "suspend.target", "hibernate.target", "hybrid-sleep.target", "suspend-then-hibernate.target")
-	at := time.Now()
+// and reboot refuse, the kernel is told to sync, remount read only and
+// reboot through sysrq. The disk is unreadable after luksErase, so nothing
+// worth a clean shutdown is lost. Every attempt and its error goes to the
+// journal and, as an event, to the console.
+func (a *Agent) wipeReboot() {
+	// bounded: a hanging daemon reload must not hold back the restart
+	if _, err := wipeRun(20*time.Second, "systemctl", "mask", "--runtime", "sleep.target", "suspend.target", "hibernate.target", "hybrid-sleep.target", "suspend-then-hibernate.target"); err != nil {
+		a.event("wipe restart failed: %s: %v", "masking sleep", err)
+	}
+	at := wipeNow()
 	if b, err := os.ReadFile(wipedFile); err == nil {
 		if t, err := time.Parse(time.RFC3339, strings.TrimSpace(string(b))); err == nil {
 			at = t
 		}
 	}
 	deadline := at.Add(wipeRebootAfter)
+	a.event("wipe restart scheduled at %s", deadline.UTC().Format(time.RFC3339))
 	// Round(0) drops the monotonic reading, which stands still during suspend
-	for time.Now().Round(0).Before(deadline) {
-		time.Sleep(5 * time.Second)
+	for wipeNow().Round(0).Before(deadline) {
+		wipeSleep(5 * time.Second)
 	}
-	for _, args := range [][]string{{"systemctl", "reboot", "--force"}, {"systemctl", "reboot", "--force", "--force"}} {
-		if _, err := sh(args[0], args[1:]...); err == nil {
-			time.Sleep(30 * time.Second) // still running: the next way
+	for _, st := range wipeSteps {
+		cmd := strings.Join(st.args, " ")
+		if _, err := wipeRun(time.Minute, st.args[0], st.args[1:]...); err != nil {
+			a.event("wipe restart failed: %s: %v", cmd, err)
+			a.kickCheckin() // the console learns of it if the device stays up
+			continue
 		}
+		a.event("wipe restart: %s accepted, waiting %s", cmd, st.wait)
+		wipeSleep(st.wait) // still running afterwards: the next way
+		a.event("wipe restart failed: %s: %v", cmd, fmt.Errorf("still running after %s", st.wait))
+		a.kickCheckin()
 	}
-	_ = os.WriteFile("/proc/sysrq-trigger", []byte("b"), 0o200)
+	// sync, remount read only, reboot: straight to the kernel
+	for _, c := range []string{"s", "u", "b"} {
+		if err := wipeWrite("/proc/sysrq-trigger", c); err != nil {
+			a.event("wipe restart failed: %s: %v", "sysrq "+c, err)
+		}
+		wipeSleep(2 * time.Second)
+	}
+	a.event("wipe restart failed: the device is still running, power it off")
+	a.kickCheckin()
 }

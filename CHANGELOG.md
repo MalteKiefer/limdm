@@ -4,6 +4,26 @@ All notable changes, newest first. Versions follow [Semantic Versioning](https:/
 Dates are release tag dates. **Breaking** marks changes that need action from operators or
 change behavior they rely on.
 
+## 0.25.1 (2026-11-28)
+
+### Added
+- Software requests of users appear in the console's inbox (the bell and the navigation badge count them, a new group **Software requests** links each one to its decision) within seconds while the console is open. The event stream's `inbox` event carries `requests` for global readers with audit rights.
+- Wipe: the command result names the planned restart time; every restart attempt and its error is an agent event in the device's activity and in the journal.
+- While a wiped device waits for its restart, the tray, the LiMDM app and `limdm status` show "This device was wiped by IT and restarts now" (six languages).
+- The device message field has six lines, can be resized and counts its characters (1000 at most).
+
+### Changed
+- Device commands (lock, unlock, wipe, lost mode, message, restart, shell and every other) reach the agent within one poll: a pending poll starts a quick check in that skips converging and the inventory, and a second one reports the results at once. For five minutes after a poll found something the agent polls every 10 seconds. The normal poll interval is 30 seconds instead of one minute, so the first command arrives within about 40 seconds.
+- The tray and the LiMDM app ask the agent every 15 seconds; the agent refreshes their data after every command and check in and reports the lock, lost mode and wipe state live.
+- Host name confirmations (wipe, lost mode, delete) show the host name to type as code.
+- Wipe restart: after `systemctl reboot --force` and `--force --force` the agent tries `reboot -f`, then sysrq sync, remount read only and reboot; masking sleep is bounded to 20 seconds.
+
+### Fixed
+- A lock or other command reached the device only minutes after the poll found it: the check in that fetched it first converged every declaration and read the full inventory.
+- After an unlock the tray and the app kept showing the device as locked until the end of the next cycle.
+- After a wipe the desktop asked again to escrow the recovery key (the erased key slots looked unescrowed); the agent no longer asks while the device waits for its restart.
+- Multi line fields in dialogs showed a single line: next to other fields the field grid stretched them, and the compact density gave them the height of a one line input.
+
 ## 0.25.0 (2026-11-28)
 
 ### Added
@@ -36,8 +56,6 @@ change behavior they rely on.
 - `require_all` disk encryption no longer fails on the ESP or on USB media.
 - Packages named `pve-*` or `proxmox-*` are no longer matched against the Debian Security Tracker (no Debian `linux` findings on the Proxmox kernel).
 - The firewall inventory classifies the pve-firewall chains (`PVEFW-*`), the `proxmox-firewall` tables and the guest interfaces as system rules.
-||||||| 5d23b5d
-
 ## 0.24.1 (2026-11-28)
 
 ### Added

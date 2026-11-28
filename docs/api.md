@@ -58,11 +58,13 @@ A body above the limit ends the JSON decoding, so it answers `400`, not `413`.
 | `GET /api/v1/catalog/flathub-icon?u=` | device | | Flathub icon proxy, only `dl.flathub.org` and PNG; 300 per 10 minutes and device, cached |
 | `POST /api/v1/shell/{session}` | device | stream | remote shell relay, only for the device of the session. See [Remote shell relay](#remote-shell-relay). |
 
-A device checks in once per check in interval and polls every minute. The interval comes
+A device checks in once per check in interval and polls every 30 seconds. The interval comes
 from the agent declaration (`checkin_seconds`, 30 to 86400, default 300 in the seeded
 library item); without one the agent uses five minutes. Up to 10% jitter spreads the
-fleet. After failures the poll doubles its wait up to five minutes, plus up to 10 seconds of
-jitter. One check in per device runs at a time (row lock).
+fleet. After failures the poll doubles its wait three times (up to four minutes), plus up to 10 seconds of
+jitter. After a poll answered `pending` the agent polls every 10 seconds for five minutes, and
+a check in for queued commands skips converging and the inventory (see
+[agent.md](agent.md#command-delivery)). One check in per device runs at a time (row lock).
 
 ## Check in
 

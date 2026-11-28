@@ -15,6 +15,15 @@ export const useFailedCommands = () =>
     queryFn: () => unwrap(api.GET('/api/v1/commands', { params: { query: { status: 'failed', days: 7, limit: 200 } } })).then((p) => p.items),
   })
 
+/** Open software requests; only global readers without a device scope may list them (enabled). */
+export const useOpenRequests = (enabled: boolean) =>
+  useQuery({
+    queryKey: ['config', 'software', 'requests'],
+    enabled,
+    queryFn: () => unwrap(api.GET('/api/v1/software/requests')).then((p) => p.items),
+    select: (items) => items.filter((r) => r.status === 'pending'),
+  })
+
 export const useAttention = () => useQuery({ queryKey: ['stats', 'attention'], queryFn: () => unwrap(api.GET('/api/v1/stats/attention')) })
 
 /** The audit chain state; only for admins and auditors (enabled). */

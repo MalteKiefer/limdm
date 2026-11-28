@@ -2,7 +2,7 @@
 // list by risk, the detail beside it with everything a decision needs.
 // Approving or rejecting (with a reason) moves the selection to the next item.
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import { BellOff, Bell, CheckCircle2, CircleAlert, Copy, DatabaseBackup, ShieldAlert, ShieldX, TerminalSquare, TriangleAlert, WifiOff, type LucideIcon } from 'lucide-react'
+import { BellOff, Bell, CheckCircle2, CircleAlert, Copy, DatabaseBackup, PackagePlus, ShieldAlert, ShieldX, TerminalSquare, TriangleAlert, WifiOff, type LucideIcon } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { useMe, useCan } from '../../api/me'
 import type { Schemas } from '../../api/client'
@@ -15,10 +15,10 @@ import { Badge, Modal, PageHeader } from '../../components/ui'
 import { useT, type MessageKey } from '../../i18n'
 import { ago, dateTime } from '../../i18n/format'
 import { cx } from '../../lib/cx'
-import { useApprovals, useAttention, useAuditStatus, useDecide, useFailedCommands, useLibraryItem } from './api'
+import { useApprovals, useAttention, useAuditStatus, useDecide, useFailedCommands, useLibraryItem, useOpenRequests } from './api'
 import { actionLabel, byRisk, commandType, isMuted, mute, nextAfter, risk, type Approval, type Risk } from './risk'
 
-type Group = 'all' | 'approvals' | 'warnings' | 'commands'
+type Group = 'all' | 'approvals' | 'requests' | 'warnings' | 'commands'
 type Search = { group?: Group; item?: string; hist?: string; muted?: string }
 
 type Row = {
@@ -32,6 +32,7 @@ type Row = {
   meta: string
   approval?: Approval
   command?: Schemas['FleetCommand']
+  request?: Schemas['AppRequest']
   warning?: { text: string; to: string; search?: Record<string, string>; link: string }
 }
 
@@ -49,6 +50,8 @@ export function InboxPage() {
   const commands = useFailedCommands()
   const attention = useAttention()
   const audit = useAuditStatus(canAudit)
+  // software requests are fleet wide: global readers without a device scope (as the server checks)
+  const requests = useOpenRequests(canAudit && (me.super || !me.tenant) && !me.scope_tags.length && !me.scope_groups.length)
   const [, setTick] = useState(0) // re-render after muting
   // new credentials of an approved request, shown once; the request leaves the list
   const [creds, setCreds] = useState('')
@@ -69,6 +72,10 @@ export function InboxPage() {
         approval: a,
       })
     }
+    for (const r of requests.data ?? []) {
+      const app = r.app_name || r.app || r.flatpak
+      out.push({ id: `r${r.id}`, group: 'requests', risk: 1, at: r.created_at, icon: PackagePlus, title: t('inbox.reqTitle', { app, host: r.hostname }), meta: `${r.user} · ${ago(r.created_at)}`, request: r })
+    }
     for (const c of commands.data ?? []) {
       out.push({ id: `c${c.id}`, group: 'commands', risk: c.type === 'wipe' || c.type === 'lock' || c.type === 'lost' ? 2 : 1, at: c.updated_at, icon: TriangleAlert, title: t('inbox.cmdFailed', { type: c.type, host: c.hostname }), meta: `${c.created_by} · ${ago(c.updated_at)}`, command: c })
     }
@@ -83,7 +90,7 @@ export function InboxPage() {
     if (a?.exceptions_expiring_7d) warn('w-exc', 2, CircleAlert, t('inbox.w.exceptions', { count: a.exceptions_expiring_7d }), t('inbox.w.exceptionsText'), '/compliance', t('inbox.toCompliance'))
     if (a?.stale) warn('w-stale', 1, WifiOff, t('inbox.w.stale', { count: a.stale }), t('inbox.w.staleText', { hours: me.stale_hours }), '/devices', t('inbox.toDevices'), { q: 'status:stale' })
     return out.sort(byRisk)
-  }, [approvals.data, commands.data, attention.data, audit.data, t, me.stale_hours])
+  }, [approvals.data, requests.data, commands.data, attention.data, audit.data, t, me.stale_hours])
 
   const showMuted = search.muted === '1'
   const visible = rows.filter((r) => (group === 'all' || r.group === group) && (showMuted || !r.warning || !isMuted(r.id)))
@@ -104,6 +111,7 @@ export function InboxPage() {
           tabs={[
             { value: 'all', label: t('inbox.all') },
             { value: 'approvals', label: t('inbox.approvals'), count: count('approvals') },
+            { value: 'requests', label: t('inbox.requests'), count: count('requests') },
             { value: 'warnings', label: t('inbox.warnings'), count: count('warnings') },
             { value: 'commands', label: t('inbox.commands'), count: count('commands') },
           ]}
@@ -167,6 +175,8 @@ export function InboxPage() {
         />
       ) : sel.command ? (
         <CommandDetail c={sel.command} />
+      ) : sel.request ? (
+        <RequestDetail r={sel.request} />
       ) : (
         sel.warning && (
           <div className="flex flex-col gap-4">
@@ -402,6 +412,28 @@ function CommandDetail({ c }: { c: Schemas['FleetCommand'] }) {
       </section>
       <Link to="/activity" search={{ target: c.device_id }} className="btn self-start">
         {t('inbox.deviceActivity')}
+      </Link>
+    </div>
+  )
+}
+
+function RequestDetail({ r }: { r: Schemas['AppRequest'] }) {
+  const t = useT()
+  return (
+    <div className="flex flex-col gap-4">
+      <dl className="divide-y divide-line">
+        <Prop label={t('inbox.device')}>
+          <Link to="/devices/$id" params={{ id: r.device_id }} className="text-accent hover:underline">
+            {r.hostname}
+          </Link>
+        </Prop>
+        <Prop label={t('inbox.requestedBy')}>
+          {r.user} · {dateTime(r.created_at)}
+        </Prop>
+        <Prop label={t('inbox.reason')}>{r.note || <span className="text-muted">{t('inbox.noReason')}</span>}</Prop>
+      </dl>
+      <Link to="/config" search={{ tab: 'software', sub: 'requests' }} className="btn btn-primary self-start">
+        {t('inbox.toRequests')}
       </Link>
     </div>
   )

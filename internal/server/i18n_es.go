@@ -1567,4 +1567,10 @@ var esCatalog = map[string]string{
 
 	// CACHY-A
 	"neither AppArmor nor SELinux enabled, kernel security modules: ": "ni AppArmor ni SELinux activados, módulos de seguridad del kernel: ",
+
+	// INSTANT-A
+	"wipe restart scheduled at %s":                                   "reinicio tras el borrado programado para %s",
+	"wipe restart failed: %s: %v":                                    "falló el reinicio tras el borrado: %s: %v",
+	"wipe restart: %s accepted, waiting %s":                          "reinicio tras el borrado: %s aceptado, esperando %s",
+	"wipe restart failed: the device is still running, power it off": "falló el reinicio tras el borrado: el dispositivo sigue encendido, apáguelo",
 }

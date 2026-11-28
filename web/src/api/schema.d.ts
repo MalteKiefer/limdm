@@ -539,7 +539,7 @@ export interface paths {
         };
         /**
          * Live updates (server sent events)
-         * @description Events device (id, hostname, status, last_seen), activity (new audit entries: id, at, actor, action, target; admin and auditor) and inbox (pending approvals: pending), limited to the caller's tenant and scope. The stream ends after four minutes; EventSource reconnects. At most five open streams per caller.
+         * @description Events device (id, hostname, status, last_seen), activity (new audit entries: id, at, actor, action, target; admin and auditor) and inbox (pending approvals: pending; open software requests: requests, for global readers with audit rights), limited to the caller's tenant and scope. The stream ends after four minutes; EventSource reconnects. At most five open streams per caller.
          */
         get: operations["eventStream"];
         put?: never;

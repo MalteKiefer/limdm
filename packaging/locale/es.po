@@ -135,6 +135,12 @@ msgstr "Dispositivo bloqueado"
 msgid "IT locked this device."
 msgstr "TI bloqueó este dispositivo."
 
+msgid "Device Wiped"
+msgstr "Dispositivo borrado"
+
+msgid "This device was wiped by IT and restarts now."
+msgstr "Este dispositivo fue borrado por TI y se reinicia ahora."
+
 msgid "No Connection to the Server"
 msgstr "Sin conexión con el servidor"
 

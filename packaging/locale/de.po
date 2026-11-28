@@ -135,6 +135,12 @@ msgstr "Gerät gesperrt"
 msgid "IT locked this device."
 msgstr "Die IT hat dieses Gerät gesperrt."
 
+msgid "Device Wiped"
+msgstr "Gerät gelöscht"
+
+msgid "This device was wiped by IT and restarts now."
+msgstr "Dieses Gerät wurde von der IT gelöscht und startet jetzt neu."
+
 msgid "No Connection to the Server"
 msgstr "Keine Verbindung zum Server"
 

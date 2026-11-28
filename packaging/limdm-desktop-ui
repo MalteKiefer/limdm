@@ -284,7 +284,7 @@ class Window(Adw.ApplicationWindow):
         self.shown = None  # the info the current page was built from
         self.logo_path = False
         self.refresh()
-        GLib.timeout_add_seconds(60, self._tick)
+        GLib.timeout_add_seconds(15, self._tick)  # a lock or unlock by IT shows within seconds
 
     def _tick(self):
         self.refresh()
@@ -357,11 +357,17 @@ class Window(Adw.ApplicationWindow):
                               description=_("The LiMDM agent on this device does not respond. IT has been informed when it comes back.") + "\n" + self.info.get("error", ""))
         return page
 
+    def _wiped(self):
+        return Adw.StatusPage(icon_name="system-reboot-symbolic", title=_("Device Wiped"),
+                              description=_("This device was wiped by IT and restarts now."))
+
     def page_overview(self):
         st = self.info.get("status")
         if not st:
             return self._unreachable()
         failing = st.get("failing") or []
+        if st.get("wiped"):
+            return self._wiped()
         if st.get("locked"):
             icon, title, desc, css = "system-lock-screen-symbolic", _("Device Locked"), \
                 _("IT locked this device."), "error"
@@ -440,6 +446,8 @@ class Window(Adw.ApplicationWindow):
         st = self.info.get("status")
         if not st:
             return self._unreachable()
+        if st.get("wiped"):
+            return self._wiped()
         page = Adw.PreferencesPage()
         need = self.info.get("need") or []
         if not need:

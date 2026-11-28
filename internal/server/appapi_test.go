@@ -317,6 +317,17 @@ func TestAppAPI(t *testing.T) {
 	if out := poll(apiCaller{Role: "auditor", Name: "a", ID: 8, ReadOnly: true, Scopes: []string{"audit"}}); !strings.Contains(out, "secret.change") {
 		t.Fatalf("audit scoped token: %s", out)
 	}
+	// an open software request reaches the inbox of global readers only
+	if _, err := db.Exec(ctx, `INSERT INTO catalog_requests(device_id, flatpak, remote, app_name, username, note) VALUES ('d1', 'org.example.App', 'flathub', 'App', 'ann', '')`); err != nil {
+		t.Fatal(err)
+	}
+	globalAuditor := session{Email: "g@firma.de", Role: "auditor"}
+	if out := poll(apiCaller{Role: "auditor", Sess: &globalAuditor}); !strings.Contains(out, `"requests":1`) {
+		t.Fatalf("global auditor misses the request: %s", out)
+	}
+	if out := poll(apiCaller{Role: "auditor", Tenant: 1, Sess: &tenantAuditor}); !strings.Contains(out, `"requests":0`) {
+		t.Fatalf("tenant auditor sees fleet requests: %s", out)
+	}
 	scopedTok := apiCaller{Role: "auditor", ReadOnly: true, Scopes: []string{"read"}}
 	if scopedTok.can("audit") || !(apiCaller{Role: "auditor"}).can("audit") || (apiCaller{Role: "admin", Scopes: []string{"read"}}).can("admin") {
 		t.Fatal("can ignores role or scopes")

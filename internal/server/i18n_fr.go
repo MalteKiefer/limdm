@@ -1567,4 +1567,10 @@ var frCatalog = map[string]string{
 
 	// CACHY-A
 	"neither AppArmor nor SELinux enabled, kernel security modules: ": "ni AppArmor ni SELinux n'est activé, modules de sécurité du noyau : ",
+
+	// INSTANT-A
+	"wipe restart scheduled at %s":                                   "redémarrage après effacement prévu à %s",
+	"wipe restart failed: %s: %v":                                    "échec du redémarrage après effacement : %s : %v",
+	"wipe restart: %s accepted, waiting %s":                          "redémarrage après effacement : %s accepté, attente de %s",
+	"wipe restart failed: the device is still running, power it off": "échec du redémarrage après effacement : l'appareil fonctionne encore, éteignez-le",
 }

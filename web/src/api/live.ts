@@ -35,7 +35,7 @@ const subscribe = (l: () => void) => {
 export const useLiveState = () => useSyncExternalStore(subscribe, () => state)
 /** The latest audit entries received live, newest first (admin and auditor). */
 export const useLiveActivity = () => useSyncExternalStore(subscribe, () => recent)
-/** Pending approvals as the stream last reported them, null before the first event. */
+/** Pending approvals and open software requests as the stream last reported them, null before the first event. */
 export const useInboxCount = () => useSyncExternalStore(subscribe, () => pending)
 
 function parse<T>(e: Event): T | null {
@@ -76,12 +76,13 @@ export function startLive(qc: QueryClient = queryClient) {
     void qc.invalidateQueries({ queryKey: ['activity'] })
   })
   es.addEventListener('inbox', (e) => {
-    const v = parse<{ pending: number }>(e)
+    const v = parse<{ pending: number; requests?: number }>(e)
     if (!v) return
-    pending = v.pending
+    pending = v.pending + (v.requests ?? 0)
     emit()
     void qc.invalidateQueries({ queryKey: ['approvals'] })
     void qc.invalidateQueries({ queryKey: ['stats', 'attention'] })
+    void qc.invalidateQueries({ queryKey: ['config', 'software'] })
   })
   return () => {
     clearTimeout(timer)

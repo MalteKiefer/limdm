@@ -19,7 +19,7 @@ German, British, US) follows the account across devices.
 | Area | Address | What it holds |
 |---|---|---|
 | Home | `/app/` | fleet state, what needs attention, first steps |
-| Inbox | `/app/inbox` | approvals, warnings, open commands |
+| Inbox | `/app/inbox` | approvals, software requests of users, warnings, open commands; the bell counts pending approvals and requests, live |
 | Devices | `/app/devices` | device list with filters, saved views, exports and bulk actions; device page with every command, the remote shell, recovery keys, diagnostics and the **Firewall** tab (rules of the host firewall to adopt, keep or discard, see [Firewall inventory](declarations.md#firewall-inventory)); **Add device** (`/app/devices/enroll`) with the enrollment tokens |
 | Compliance | `/app/compliance` | checks, heatmap, history, policies, risk exceptions |
 | Configuration | `/app/config` | blueprints, library items, software catalog, uploaded packages, with version history, preview and rollback |

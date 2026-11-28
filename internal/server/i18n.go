@@ -1188,4 +1188,10 @@ var deCatalog = map[string]string{
 
 	// CACHY-A
 	"neither AppArmor nor SELinux enabled, kernel security modules: ": "weder AppArmor noch SELinux aktiv, Sicherheitsmodule des Kernels: ",
+
+	// INSTANT-A
+	"wipe restart scheduled at %s":                                   "Neustart nach Löschung geplant für %s",
+	"wipe restart failed: %s: %v":                                    "Neustart nach Löschung fehlgeschlagen: %s: %v",
+	"wipe restart: %s accepted, waiting %s":                          "Neustart nach Löschung: %s angenommen, warte %s",
+	"wipe restart failed: the device is still running, power it off": "Neustart nach Löschung fehlgeschlagen: das Gerät läuft noch, bitte ausschalten",
 }

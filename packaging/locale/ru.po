@@ -135,6 +135,12 @@ msgstr "Устройство заблокировано"
 msgid "IT locked this device."
 msgstr "ИТ-отдел заблокировал это устройство."
 
+msgid "Device Wiped"
+msgstr "Устройство стёрто"
+
+msgid "This device was wiped by IT and restarts now."
+msgstr "Это устройство стёрто ИТ-отделом и сейчас перезагрузится."
+
 msgid "No Connection to the Server"
 msgstr "Нет связи с сервером"
 

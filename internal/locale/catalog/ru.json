@@ -285,6 +285,7 @@
  "The terminal opened by %s has ended.": "Терминал, открытый %s, закрыт.",
  "This device is locked because it could not reach the LiMDM server for too long.\nConnect it to the network; it unlocks automatically once the server is reachable.\n": "Это устройство заблокировано, так как слишком долго не могло связаться с сервером LiMDM.\nПодключите его к сети; оно разблокируется автоматически, как только сервер станет доступен.\n",
  "This device is locked by IT (LiMDM). Contact your administrator.\n": "Это устройство заблокировано ИТ-отделом (LiMDM). Обратитесь к администратору.\n",
+ "This device was wiped by IT and restarts now": "Это устройство стёрто ИТ-отделом и сейчас перезагрузится",
  "Time synchronisation is active": "Синхронизация времени активна",
  "Too Many Attempts": "Слишком много попыток",
  "too many attempts, try again later": "слишком много попыток, повторите позже",
